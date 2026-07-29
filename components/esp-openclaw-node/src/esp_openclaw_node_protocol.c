@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "esp_check.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 
@@ -27,6 +28,139 @@ static bool websocket_send_json(esp_openclaw_node_handle_t node, cJSON *root)
         pdMS_TO_TICKS(5000));
     free(json);
     return written >= 0;
+}
+
+static void invoke_gateway_callback(
+    esp_openclaw_node_handle_t node,
+    esp_openclaw_node_gateway_request_cb_t callback,
+    void *user_ctx,
+    bool ok,
+    const char *payload_json,
+    const char *error_code,
+    const char *error_message)
+{
+    if (callback == NULL) {
+        return;
+    }
+    const esp_openclaw_node_gateway_result_t result = {
+        .ok = ok,
+        .payload_json = payload_json,
+        .error_code = error_code,
+        .error_message = error_message,
+    };
+    callback(node, &result, user_ctx);
+}
+
+void esp_openclaw_node_send_gateway_request(
+    esp_openclaw_node_handle_t node,
+    const char *method,
+    const char *params_json,
+    esp_openclaw_node_gateway_request_cb_t callback,
+    void *user_ctx)
+{
+    size_t slot_index = ESP_OPENCLAW_NODE_MAX_PENDING_REQUESTS;
+    char request_id[40] = {0};
+
+    esp_openclaw_node_lock_state(node);
+    if (node->state == ESP_OPENCLAW_NODE_INTERNAL_READY && node->ws != NULL) {
+        for (size_t i = 0; i < ESP_OPENCLAW_NODE_MAX_PENDING_REQUESTS; ++i) {
+            if (!node->pending_requests[i].in_use) {
+                slot_index = i;
+                break;
+            }
+        }
+        if (slot_index < ESP_OPENCLAW_NODE_MAX_PENDING_REQUESTS) {
+            snprintf(
+                request_id,
+                sizeof(request_id),
+                "rpc-%" PRIu64,
+                ++node->next_request_id);
+            esp_openclaw_node_pending_request_t *pending =
+                &node->pending_requests[slot_index];
+            pending->in_use = true;
+            snprintf(pending->request_id, sizeof(pending->request_id), "%s", request_id);
+            pending->callback = callback;
+            pending->user_ctx = user_ctx;
+        }
+    }
+    esp_openclaw_node_unlock_state(node);
+
+    if (slot_index >= ESP_OPENCLAW_NODE_MAX_PENDING_REQUESTS) {
+        invoke_gateway_callback(
+            node,
+            callback,
+            user_ctx,
+            false,
+            NULL,
+            "UNAVAILABLE",
+            "Gateway session is not ready or request capacity is full");
+        return;
+    }
+
+    cJSON *params = cJSON_Parse(params_json != NULL ? params_json : "{}");
+    cJSON *root = cJSON_CreateObject();
+    if (!cJSON_IsObject(params) || root == NULL) {
+        cJSON_Delete(params);
+        cJSON_Delete(root);
+        esp_openclaw_node_lock_state(node);
+        memset(&node->pending_requests[slot_index], 0, sizeof(node->pending_requests[slot_index]));
+        esp_openclaw_node_unlock_state(node);
+        invoke_gateway_callback(
+            node,
+            callback,
+            user_ctx,
+            false,
+            NULL,
+            "INVALID_REQUEST",
+            "Gateway request parameters must be a JSON object");
+        return;
+    }
+
+    cJSON_AddStringToObject(root, "type", "req");
+    cJSON_AddStringToObject(root, "id", request_id);
+    cJSON_AddStringToObject(root, "method", method);
+    cJSON_AddItemToObject(root, "params", params);
+    if (!websocket_send_json(node, root)) {
+        esp_openclaw_node_lock_state(node);
+        memset(&node->pending_requests[slot_index], 0, sizeof(node->pending_requests[slot_index]));
+        esp_openclaw_node_unlock_state(node);
+        invoke_gateway_callback(
+            node,
+            callback,
+            user_ctx,
+            false,
+            NULL,
+            "TRANSPORT_ERROR",
+            "Failed to send Gateway request");
+    }
+    cJSON_Delete(root);
+}
+
+void esp_openclaw_node_fail_pending_requests(
+    esp_openclaw_node_handle_t node,
+    const char *code,
+    const char *message)
+{
+    for (;;) {
+        esp_openclaw_node_gateway_request_cb_t callback = NULL;
+        void *user_ctx = NULL;
+
+        esp_openclaw_node_lock_state(node);
+        for (size_t i = 0; i < ESP_OPENCLAW_NODE_MAX_PENDING_REQUESTS; ++i) {
+            if (node->pending_requests[i].in_use) {
+                callback = node->pending_requests[i].callback;
+                user_ctx = node->pending_requests[i].user_ctx;
+                memset(&node->pending_requests[i], 0, sizeof(node->pending_requests[i]));
+                break;
+            }
+        }
+        esp_openclaw_node_unlock_state(node);
+
+        if (callback == NULL) {
+            return;
+        }
+        invoke_gateway_callback(node, callback, user_ctx, false, NULL, code, message);
+    }
 }
 
 static bool send_connect_request(
@@ -115,7 +249,11 @@ static bool send_connect_request(
     cJSON_AddItemToObject(params, "client", client);
 
     cJSON_AddStringToObject(params, "role", node->config.role);
-    cJSON_AddItemToObject(params, "scopes", cJSON_CreateArray());
+    esp_openclaw_node_add_registered_string_array(
+        params,
+        "scopes",
+        node->scopes,
+        node->scope_count);
     esp_openclaw_node_add_registered_string_array(
         params,
         "caps",
@@ -141,6 +279,7 @@ static bool send_connect_request(
                 "password",
                 material.auth_value);
             break;
+        case ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_DEVICE_TOKEN:
         case ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_SAVED_SESSION:
             cJSON_AddStringToObject(
                 auth_json,
@@ -290,6 +429,64 @@ static esp_err_t build_connect_response_session_update(
     return ESP_OK;
 }
 
+static esp_err_t persist_handoff_device_tokens(
+    esp_openclaw_node_handle_t node,
+    cJSON *auth)
+{
+    cJSON *device_tokens = cJSON_IsObject(auth)
+        ? cJSON_GetObjectItemCaseSensitive(auth, "deviceTokens")
+        : NULL;
+    if (!cJSON_IsArray(device_tokens)) {
+        return ESP_OK;
+    }
+
+    cJSON *entry = NULL;
+    cJSON_ArrayForEach(entry, device_tokens) {
+        cJSON *role = cJSON_GetObjectItemCaseSensitive(entry, "role");
+        cJSON *device_token = cJSON_GetObjectItemCaseSensitive(entry, "deviceToken");
+        const char *role_text = cJSON_IsString(role)
+            ? esp_openclaw_node_trimmed_or_null(role->valuestring)
+            : NULL;
+        const char *token_text = cJSON_IsString(device_token)
+            ? esp_openclaw_node_trimmed_or_null(device_token->valuestring)
+            : NULL;
+        if (role_text == NULL || token_text == NULL ||
+            strcmp(role_text, node->config.role) == 0) {
+            continue;
+        }
+        if (strcmp(role_text, "node") != 0 && strcmp(role_text, "operator") != 0) {
+            continue;
+        }
+
+        esp_openclaw_node_persisted_session_t stored = {0};
+        ESP_RETURN_ON_ERROR(
+            esp_openclaw_node_persisted_session_load(role_text, &stored),
+            ESP_OPENCLAW_NODE_TAG,
+            "load handed-off role session");
+        esp_openclaw_node_persisted_session_t update = {
+            .version = 1,
+            .gateway_uri = esp_openclaw_node_duplicate_string(
+                esp_openclaw_node_trimmed_or_null(node->transport_gateway_uri)),
+            .device_token = esp_openclaw_node_duplicate_string(token_text),
+        };
+        if (update.gateway_uri == NULL || update.device_token == NULL) {
+            esp_openclaw_node_persisted_session_free(&stored);
+            esp_openclaw_node_persisted_session_free(&update);
+            return ESP_ERR_NO_MEM;
+        }
+        esp_err_t err = esp_openclaw_node_persisted_session_store(
+            role_text,
+            &stored,
+            &update);
+        esp_openclaw_node_persisted_session_free(&stored);
+        esp_openclaw_node_persisted_session_free(&update);
+        if (err != ESP_OK) {
+            return err;
+        }
+    }
+    return ESP_OK;
+}
+
 static connect_response_finalize_result_t finalize_connect_response_success(
     esp_openclaw_node_handle_t node,
     const esp_openclaw_node_persisted_session_t *update)
@@ -309,6 +506,7 @@ static connect_response_finalize_result_t finalize_connect_response_success(
     }
 
     result.err = esp_openclaw_node_persisted_session_store(
+        node->config.role,
         &node->persisted_session,
         update);
     if (result.err != ESP_OK) {
@@ -384,6 +582,17 @@ static void handle_connect_response(
                 node,
                 ESP_OPENCLAW_NODE_CONNECT_FAILURE_SESSION_FINALIZATION_FAILED,
                 ESP_FAIL,
+                NULL,
+                true);
+            return;
+        }
+
+        esp_err_t handoff_err = persist_handoff_device_tokens(node, auth);
+        if (handoff_err != ESP_OK) {
+            esp_openclaw_node_complete_connect_failed(
+                node,
+                ESP_OPENCLAW_NODE_CONNECT_FAILURE_SESSION_FINALIZATION_FAILED,
+                handoff_err,
                 NULL,
                 true);
             return;
@@ -547,6 +756,75 @@ static void handle_invoke_request(
     free(result_json);
 }
 
+static bool handle_gateway_response(
+    esp_openclaw_node_handle_t node,
+    const char *request_id,
+    cJSON *root)
+{
+    esp_openclaw_node_gateway_request_cb_t callback = NULL;
+    void *user_ctx = NULL;
+
+    esp_openclaw_node_lock_state(node);
+    for (size_t i = 0; i < ESP_OPENCLAW_NODE_MAX_PENDING_REQUESTS; ++i) {
+        esp_openclaw_node_pending_request_t *pending = &node->pending_requests[i];
+        if (pending->in_use && strcmp(pending->request_id, request_id) == 0) {
+            callback = pending->callback;
+            user_ctx = pending->user_ctx;
+            memset(pending, 0, sizeof(*pending));
+            break;
+        }
+    }
+    esp_openclaw_node_unlock_state(node);
+    if (callback == NULL) {
+        return false;
+    }
+
+    cJSON *ok = cJSON_GetObjectItemCaseSensitive(root, "ok");
+    cJSON *payload = cJSON_GetObjectItemCaseSensitive(root, "payload");
+    cJSON *error = cJSON_GetObjectItemCaseSensitive(root, "error");
+    cJSON *error_code = cJSON_IsObject(error)
+        ? cJSON_GetObjectItemCaseSensitive(error, "code")
+        : NULL;
+    cJSON *error_message = cJSON_IsObject(error)
+        ? cJSON_GetObjectItemCaseSensitive(error, "message")
+        : NULL;
+    char *payload_json = payload != NULL ? cJSON_PrintUnformatted(payload) : NULL;
+    invoke_gateway_callback(
+        node,
+        callback,
+        user_ctx,
+        cJSON_IsTrue(ok),
+        payload_json,
+        cJSON_IsString(error_code) ? error_code->valuestring : NULL,
+        cJSON_IsString(error_message) ? error_message->valuestring : NULL);
+    free(payload_json);
+    return true;
+}
+
+static void emit_gateway_event(
+    esp_openclaw_node_handle_t node,
+    const char *event,
+    cJSON *payload)
+{
+    esp_openclaw_node_gateway_event_cb_t callback = NULL;
+    void *user_ctx = NULL;
+    esp_openclaw_node_lock_state(node);
+    bool ready = node->state == ESP_OPENCLAW_NODE_INTERNAL_READY;
+    callback = node->config.gateway_event_cb;
+    user_ctx = node->config.gateway_event_user_ctx;
+    esp_openclaw_node_unlock_state(node);
+    if (!ready || callback == NULL) {
+        return;
+    }
+
+    char *payload_json = payload != NULL ? cJSON_PrintUnformatted(payload) : strdup("null");
+    if (payload_json == NULL) {
+        return;
+    }
+    callback(node, event, payload_json, user_ctx);
+    free(payload_json);
+}
+
 void esp_openclaw_node_process_gateway_message(
     esp_openclaw_node_handle_t node,
     const char *text)
@@ -594,6 +872,8 @@ void esp_openclaw_node_process_gateway_message(
                         ESP_OPENCLAW_NODE_TAG,
                         "received gateway event during connect: %s",
                         event->valuestring);
+                } else {
+                    emit_gateway_event(node, event->valuestring, payload);
                 }
             }
         }
@@ -611,6 +891,8 @@ void esp_openclaw_node_process_gateway_message(
         }
         if (is_pending_connect_response) {
             handle_connect_response(node, root);
+        } else if (cJSON_IsString(id) && id->valuestring != NULL) {
+            (void)handle_gateway_response(node, id->valuestring, root);
         }
     }
 

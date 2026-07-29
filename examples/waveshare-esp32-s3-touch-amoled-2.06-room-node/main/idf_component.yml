@@ -1,0 +1,19 @@
+dependencies:
+  waveshare/esp32_s3_touch_amoled_2_06: "^2.0.0"
+  espressif/esp-sr: "^2.4.7"
+  esp_webrtc:
+    override_path: ../../../third_party/esp-webrtc-solution/components/esp_webrtc
+  esp_peer:
+    override_path: ../../../third_party/esp-webrtc-solution/components/esp_peer
+  av_render:
+    override_path: ../../../third_party/esp-webrtc-solution/components/av_render
+  media_lib_utils:
+    override_path: ../../../third_party/esp-webrtc-solution/components/media_lib_utils
+  webrtc_utils:
+    override_path: ../../../third_party/esp-webrtc-solution/components/webrtc_utils
+  espressif/esp_websocket_client:
+    override_path: ../../../third_party/esp-protocols/components/esp_websocket_client
+  esp-openclaw-node:
+    override_path: ../../../components/esp-openclaw-node
+  esp-openclaw-talk:
+    override_path: ../../../components/esp-openclaw-talk

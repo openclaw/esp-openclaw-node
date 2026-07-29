@@ -1,0 +1,6 @@
+[submodule "third_party/esp-webrtc-solution"]
+	path = third_party/esp-webrtc-solution
+	url = https://github.com/espressif/esp-webrtc-solution.git
+[submodule "third_party/esp-protocols"]
+	path = third_party/esp-protocols
+	url = https://github.com/espressif/esp-protocols.git

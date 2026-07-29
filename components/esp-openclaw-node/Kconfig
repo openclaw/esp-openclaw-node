@@ -11,6 +11,22 @@ menu "ESP OpenClaw Node"
                 instance can register while idle before the component rejects
                 additional capability registrations with ESP_ERR_NO_MEM.
 
+        config ESP_OPENCLAW_NODE_MAX_SCOPES
+            int "Maximum registered scopes"
+            range 1 32
+            default 8
+            help
+                Maximum number of operator scope strings that one client
+                instance can advertise before connecting.
+
+        config ESP_OPENCLAW_NODE_MAX_PENDING_REQUESTS
+            int "Maximum pending Gateway requests"
+            range 1 32
+            default 8
+            help
+                Maximum number of asynchronous Gateway RPC requests that may
+                wait for responses at once.
+
         config ESP_OPENCLAW_NODE_MAX_COMMANDS
             int "Maximum registered commands"
             range 1 256

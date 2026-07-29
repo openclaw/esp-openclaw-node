@@ -98,6 +98,7 @@ esp_err_t esp_openclaw_node_start_transport_for_active_source(
             esp_openclaw_node_trimmed_or_null(node->persisted_session.gateway_uri);
         break;
     case ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_BOOTSTRAP_TOKEN:
+    case ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_DEVICE_TOKEN:
     case ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_SHARED_TOKEN:
     case ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_PASSWORD:
     case ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_NO_AUTH:
@@ -132,7 +133,6 @@ esp_err_t esp_openclaw_node_start_transport_for_active_source(
     esp_websocket_client_config_t ws_config = {
         .uri = gateway_uri_copy,
         .disable_auto_reconnect = true,
-        .enable_close_reconnect = false,
         .network_timeout_ms = 10000,
         .ping_interval_sec = ESP_OPENCLAW_NODE_WS_PING_INTERVAL_SEC,
         .pingpong_timeout_sec = ESP_OPENCLAW_NODE_WS_PINGPONG_TIMEOUT_SEC,

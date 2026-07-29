@@ -43,6 +43,10 @@ void esp_openclaw_node_complete_disconnected(
     node->state = ESP_OPENCLAW_NODE_INTERNAL_IDLE;
     esp_openclaw_node_clear_pending_control_locked(node);
     esp_openclaw_node_unlock_state(node);
+    esp_openclaw_node_fail_pending_requests(
+        node,
+        "DISCONNECTED",
+        "Gateway connection closed");
     esp_openclaw_node_emit_disconnected(node, reason, local_err);
 }
 
@@ -171,6 +175,18 @@ static void handle_request_disconnect(esp_openclaw_node_handle_t node)
         has_transport);
 }
 
+static void handle_request_gateway(
+    esp_openclaw_node_handle_t node,
+    const esp_openclaw_node_work_message_t *message)
+{
+    esp_openclaw_node_send_gateway_request(
+        node,
+        message->method,
+        message->params_json,
+        message->request_cb,
+        message->request_ctx);
+}
+
 static void handle_ws_connected(
     esp_openclaw_node_handle_t node,
     const esp_openclaw_node_work_message_t *message)
@@ -278,6 +294,10 @@ static void handle_shutdown_request(esp_openclaw_node_handle_t node)
     esp_openclaw_node_clear_pending_control_locked(node);
     node->state = ESP_OPENCLAW_NODE_INTERNAL_CLOSED;
     esp_openclaw_node_unlock_state(node);
+    esp_openclaw_node_fail_pending_requests(
+        node,
+        "CANCELED",
+        "OpenClaw node was destroyed");
 }
 
 static void exit_node_task(esp_openclaw_node_handle_t node)
@@ -305,6 +325,9 @@ static bool process_work_message(
         break;
     case ESP_OPENCLAW_NODE_WORK_MSG_REQUEST_DISCONNECT:
         handle_request_disconnect(node);
+        break;
+    case ESP_OPENCLAW_NODE_WORK_MSG_REQUEST_GATEWAY:
+        handle_request_gateway(node, message);
         break;
     case ESP_OPENCLAW_NODE_WORK_MSG_WS_CONNECTED:
         handle_ws_connected(node, message);
@@ -457,4 +480,34 @@ esp_err_t esp_openclaw_node_submit_disconnect_request(esp_openclaw_node_handle_t
         return err;
     }
     return ESP_OK;
+}
+
+esp_err_t esp_openclaw_node_submit_gateway_request(
+    esp_openclaw_node_handle_t node,
+    const char *method,
+    const char *params_json,
+    esp_openclaw_node_gateway_request_cb_t callback,
+    void *user_ctx)
+{
+    esp_openclaw_node_lock_state(node);
+    bool ready = node->state == ESP_OPENCLAW_NODE_INTERNAL_READY &&
+                 node->pending_control == ESP_OPENCLAW_NODE_PENDING_CONTROL_REQUEST_NONE;
+    esp_openclaw_node_unlock_state(node);
+    if (!ready) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    esp_openclaw_node_work_message_t message = {
+        .type = ESP_OPENCLAW_NODE_WORK_MSG_REQUEST_GATEWAY,
+        .method = esp_openclaw_node_duplicate_string(method),
+        .params_json = esp_openclaw_node_duplicate_string(
+            params_json != NULL ? params_json : "{}"),
+        .request_cb = callback,
+        .request_ctx = user_ctx,
+    };
+    if (message.method == NULL || message.params_json == NULL) {
+        esp_openclaw_node_free_work_message_payload(&message);
+        return ESP_ERR_NO_MEM;
+    }
+    return esp_openclaw_node_enqueue_work_message(node, &message);
 }

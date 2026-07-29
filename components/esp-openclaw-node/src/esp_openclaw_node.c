@@ -208,6 +208,8 @@ esp_err_t esp_openclaw_node_copy_config(
     dst->skip_cert_common_name_check = src->skip_cert_common_name_check;
     dst->event_cb = src->event_cb;
     dst->event_user_ctx = src->event_user_ctx;
+    dst->gateway_event_cb = src->gateway_event_cb;
+    dst->gateway_event_user_ctx = src->gateway_event_user_ctx;
     return ESP_OK;
 }
 
@@ -275,6 +277,10 @@ void esp_openclaw_node_free_work_message_payload(esp_openclaw_node_work_message_
     }
     free(message->text);
     message->text = NULL;
+    free(message->method);
+    message->method = NULL;
+    free(message->params_json);
+    message->params_json = NULL;
     esp_openclaw_node_clear_connect_source_struct(&message->connect_source);
 }
 
@@ -416,7 +422,9 @@ esp_err_t esp_openclaw_node_create(
         return err;
     }
 
-    err = esp_openclaw_node_persisted_session_load(&node->persisted_session);
+    err = esp_openclaw_node_persisted_session_load(
+        node->config.role,
+        &node->persisted_session);
     if (err != ESP_OK) {
         esp_openclaw_node_identity_free(&node->identity);
         esp_openclaw_node_free_config_strings(&node->config);
@@ -525,6 +533,13 @@ esp_err_t esp_openclaw_node_register_capability(
     return esp_openclaw_node_register_capability_internal(node, capability);
 }
 
+esp_err_t esp_openclaw_node_register_scope(
+    esp_openclaw_node_handle_t node,
+    const char *scope)
+{
+    return esp_openclaw_node_register_scope_internal(node, scope);
+}
+
 esp_err_t esp_openclaw_node_register_command(
     esp_openclaw_node_handle_t node,
     const esp_openclaw_node_command_t *command)
@@ -564,6 +579,30 @@ esp_err_t esp_openclaw_node_request_disconnect(esp_openclaw_node_handle_t node)
     }
 
     return esp_openclaw_node_submit_disconnect_request(node);
+}
+
+esp_err_t esp_openclaw_node_gateway_request(
+    esp_openclaw_node_handle_t node,
+    const char *method,
+    const char *params_json,
+    esp_openclaw_node_gateway_request_cb_t callback,
+    void *user_ctx)
+{
+    if (node == NULL || method == NULL || method[0] == '\0' || callback == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    cJSON *params = cJSON_Parse(params_json != NULL ? params_json : "{}");
+    bool params_valid = cJSON_IsObject(params);
+    cJSON_Delete(params);
+    if (!params_valid) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return esp_openclaw_node_submit_gateway_request(
+        node,
+        method,
+        params_json,
+        callback,
+        user_ctx);
 }
 
 const char *esp_openclaw_node_get_device_id(esp_openclaw_node_handle_t node)

@@ -26,6 +26,12 @@ void esp_openclaw_node_cleanup_registry(esp_openclaw_node_handle_t node)
     }
     node->capability_count = 0;
 
+    for (size_t i = 0; i < node->scope_count; ++i) {
+        free(node->scopes[i]);
+        node->scopes[i] = NULL;
+    }
+    node->scope_count = 0;
+
     for (size_t i = 0; i < node->command_count; ++i) {
         free(node->commands[i].name);
         node->commands[i].name = NULL;
@@ -126,13 +132,13 @@ esp_err_t esp_openclaw_node_register_capability_internal(
     if (require_idle_registration_state(node) != ESP_OK) {
         return ESP_ERR_INVALID_STATE;
     }
-    if (node->capability_count >= ESP_OPENCLAW_NODE_MAX_CAPABILITIES) {
-        return ESP_ERR_NO_MEM;
-    }
     for (size_t i = 0; i < node->capability_count; ++i) {
         if (strcmp(node->capabilities[i], capability) == 0) {
             return ESP_OK;
         }
+    }
+    if (node->capability_count >= ESP_OPENCLAW_NODE_MAX_CAPABILITIES) {
+        return ESP_ERR_NO_MEM;
     }
 
     char *copy = esp_openclaw_node_duplicate_string(capability);
@@ -140,6 +146,33 @@ esp_err_t esp_openclaw_node_register_capability_internal(
         return ESP_ERR_NO_MEM;
     }
     node->capabilities[node->capability_count++] = copy;
+    return ESP_OK;
+}
+
+esp_err_t esp_openclaw_node_register_scope_internal(
+    esp_openclaw_node_handle_t node,
+    const char *scope)
+{
+    if (node == NULL || scope == NULL || scope[0] == '\0') {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (require_idle_registration_state(node) != ESP_OK) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    for (size_t i = 0; i < node->scope_count; ++i) {
+        if (strcmp(node->scopes[i], scope) == 0) {
+            return ESP_OK;
+        }
+    }
+    if (node->scope_count >= ESP_OPENCLAW_NODE_MAX_SCOPES) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    char *copy = esp_openclaw_node_duplicate_string(scope);
+    if (copy == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+    node->scopes[node->scope_count++] = copy;
     return ESP_OK;
 }
 
@@ -154,11 +187,11 @@ esp_err_t esp_openclaw_node_register_command_internal(
     if (require_idle_registration_state(node) != ESP_OK) {
         return ESP_ERR_INVALID_STATE;
     }
-    if (node->command_count >= ESP_OPENCLAW_NODE_MAX_COMMANDS) {
-        return ESP_ERR_NO_MEM;
-    }
     if (esp_openclaw_node_find_command(node, command->name) != NULL) {
         return ESP_OK;
+    }
+    if (node->command_count >= ESP_OPENCLAW_NODE_MAX_COMMANDS) {
+        return ESP_ERR_NO_MEM;
     }
 
     esp_openclaw_node_registered_command_t *slot = &node->commands[node->command_count];

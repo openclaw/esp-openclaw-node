@@ -12,6 +12,7 @@ This repository contains the `esp-openclaw-node` ESP-IDF component, example appl
 
 - `components/esp-openclaw-node/`: The `esp-openclaw-node` ESP-IDF component that handles OpenClaw transport, pairing, reconnect, and command dispatch.  
 See the [Component README](./components/esp-openclaw-node/README.md) for more details on component internals.
+- `components/esp-openclaw-talk/`: Provider-neutral OpenClaw Talk signaling for Espressif's WebRTC stack.
 - `examples/`: Example applications for supported boards.
 - `docs/`: Getting-started and troubleshooting guides.
 

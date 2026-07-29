@@ -33,6 +33,8 @@
     CONFIG_ESP_OPENCLAW_NODE_TRANSPORT_TASK_STACK_SIZE
 #define ESP_OPENCLAW_NODE_TRANSPORT_BUFFER_SIZE       \
     CONFIG_ESP_OPENCLAW_NODE_TRANSPORT_BUFFER_SIZE
+#define ESP_OPENCLAW_NODE_MAX_PENDING_REQUESTS        \
+    CONFIG_ESP_OPENCLAW_NODE_MAX_PENDING_REQUESTS
 
 typedef enum {
     ESP_OPENCLAW_NODE_INTERNAL_IDLE = 0,
@@ -52,6 +54,7 @@ typedef enum {
     ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_NONE = 0,
     ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_SAVED_SESSION,
     ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_BOOTSTRAP_TOKEN,
+    ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_DEVICE_TOKEN,
     ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_SHARED_TOKEN,
     ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_PASSWORD,
     ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_NO_AUTH,
@@ -72,6 +75,7 @@ typedef struct {
 typedef enum {
     ESP_OPENCLAW_NODE_WORK_MSG_REQUEST_CONNECT = 0,
     ESP_OPENCLAW_NODE_WORK_MSG_REQUEST_DISCONNECT,
+    ESP_OPENCLAW_NODE_WORK_MSG_REQUEST_GATEWAY,
     ESP_OPENCLAW_NODE_WORK_MSG_WS_CONNECTED,
     ESP_OPENCLAW_NODE_WORK_MSG_WS_DISCONNECTED,
     ESP_OPENCLAW_NODE_WORK_MSG_WS_ERROR,
@@ -84,8 +88,19 @@ typedef struct {
     uint32_t transport_id; /* Tags the websocket instance that produced this message. */
     esp_err_t local_err;
     char *text;
+    char *method;
+    char *params_json;
+    esp_openclaw_node_gateway_request_cb_t request_cb;
+    void *request_ctx;
     esp_openclaw_node_connect_request_source_t connect_source;
 } esp_openclaw_node_work_message_t;
+
+typedef struct {
+    bool in_use;
+    char request_id[40];
+    esp_openclaw_node_gateway_request_cb_t callback;
+    void *user_ctx;
+} esp_openclaw_node_pending_request_t;
 
 typedef struct {
     char *name;
@@ -158,8 +173,12 @@ struct esp_openclaw_node {
     esp_openclaw_node_connect_request_source_t active_connect_source;
     size_t capability_count;
     char *capabilities[ESP_OPENCLAW_NODE_MAX_CAPABILITIES];
+    size_t scope_count;
+    char *scopes[ESP_OPENCLAW_NODE_MAX_SCOPES];
     size_t command_count;
     esp_openclaw_node_registered_command_t commands[ESP_OPENCLAW_NODE_MAX_COMMANDS];
+    uint64_t next_request_id;
+    esp_openclaw_node_pending_request_t pending_requests[ESP_OPENCLAW_NODE_MAX_PENDING_REQUESTS];
 };
 
 extern const esp_openclaw_node_websocket_client_ops_t esp_openclaw_node_default_websocket_client_ops;
@@ -246,6 +265,9 @@ void esp_openclaw_node_add_registered_command_array(
 esp_err_t esp_openclaw_node_register_capability_internal(
     esp_openclaw_node_handle_t node,
     const char *capability);
+esp_err_t esp_openclaw_node_register_scope_internal(
+    esp_openclaw_node_handle_t node,
+    const char *scope);
 esp_err_t esp_openclaw_node_register_command_internal(
     esp_openclaw_node_handle_t node,
     const esp_openclaw_node_command_t *command);
@@ -266,6 +288,16 @@ void esp_openclaw_node_send_challenge_kick_ping(esp_openclaw_node_handle_t node)
 void esp_openclaw_node_process_gateway_message(
     esp_openclaw_node_handle_t node,
     const char *text);
+void esp_openclaw_node_send_gateway_request(
+    esp_openclaw_node_handle_t node,
+    const char *method,
+    const char *params_json,
+    esp_openclaw_node_gateway_request_cb_t callback,
+    void *user_ctx);
+void esp_openclaw_node_fail_pending_requests(
+    esp_openclaw_node_handle_t node,
+    const char *code,
+    const char *message);
 
 void esp_openclaw_node_complete_connect_failed(
     esp_openclaw_node_handle_t node,
@@ -291,3 +323,9 @@ esp_err_t esp_openclaw_node_submit_connect_request(
     esp_openclaw_node_connect_request_source_t *connect_source);
 esp_err_t esp_openclaw_node_submit_disconnect_request(
     esp_openclaw_node_handle_t node);
+esp_err_t esp_openclaw_node_submit_gateway_request(
+    esp_openclaw_node_handle_t node,
+    const char *method,
+    const char *params_json,
+    esp_openclaw_node_gateway_request_cb_t callback,
+    void *user_ctx);

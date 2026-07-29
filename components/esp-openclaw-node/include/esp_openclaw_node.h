@@ -20,6 +20,8 @@ extern "C" {
 
 /** @brief Maximum number of capabilities a node can advertise. */
 #define ESP_OPENCLAW_NODE_MAX_CAPABILITIES CONFIG_ESP_OPENCLAW_NODE_MAX_CAPABILITIES
+/** @brief Maximum number of scopes a client can advertise. */
+#define ESP_OPENCLAW_NODE_MAX_SCOPES CONFIG_ESP_OPENCLAW_NODE_MAX_SCOPES
 /** @brief Maximum number of commands a node can register. */
 #define ESP_OPENCLAW_NODE_MAX_COMMANDS CONFIG_ESP_OPENCLAW_NODE_MAX_COMMANDS
 
@@ -27,6 +29,27 @@ extern "C" {
 
 /** @brief Opaque handle for an OpenClaw Node instance. */
 typedef struct esp_openclaw_node *esp_openclaw_node_handle_t;
+
+/** @brief Generic Gateway event delivered after the authenticated session is ready. */
+typedef void (*esp_openclaw_node_gateway_event_cb_t)(
+    esp_openclaw_node_handle_t node,
+    const char *event,
+    const char *payload_json,
+    void *user_ctx);
+
+/** @brief Result of one asynchronous Gateway RPC request. */
+typedef struct {
+    bool ok;
+    const char *payload_json;
+    const char *error_code;
+    const char *error_message;
+} esp_openclaw_node_gateway_result_t;
+
+/** @brief Completion callback for @ref esp_openclaw_node_gateway_request. */
+typedef void (*esp_openclaw_node_gateway_request_cb_t)(
+    esp_openclaw_node_handle_t node,
+    const esp_openclaw_node_gateway_result_t *result,
+    void *user_ctx);
 
 /* Event Types */
 
@@ -124,6 +147,8 @@ typedef struct {
     bool skip_cert_common_name_check; /**< Skip common-name validation for TLS server certificates. */
     esp_openclaw_node_event_cb_t event_cb; /**< Optional event callback invoked on the component's internal node task. */
     void *event_user_ctx;          /**< Opaque caller context passed back to @p event_cb. */
+    esp_openclaw_node_gateway_event_cb_t gateway_event_cb; /**< Optional post-connect Gateway event callback. */
+    void *gateway_event_user_ctx;  /**< Opaque context passed to @p gateway_event_cb. */
 } esp_openclaw_node_config_t;
 
 /* Command Types */
@@ -176,6 +201,7 @@ typedef struct {
 typedef enum {
     ESP_OPENCLAW_NODE_CONNECT_SOURCE_SAVED_SESSION = 0, /**< Reconnect with the persisted `{ gateway_uri, device_token }` session. */
     ESP_OPENCLAW_NODE_CONNECT_SOURCE_SETUP_CODE,        /**< Decode and use a setup code that contains the gateway URI and exactly one auth secret. */
+    ESP_OPENCLAW_NODE_CONNECT_SOURCE_DEVICE_TOKEN,      /**< Connect with an explicit role-scoped device token. */
     ESP_OPENCLAW_NODE_CONNECT_SOURCE_GATEWAY_TOKEN,     /**< Connect with an explicit shared gateway token. */
     ESP_OPENCLAW_NODE_CONNECT_SOURCE_GATEWAY_PASSWORD,  /**< Connect with an explicit shared gateway password. */
     ESP_OPENCLAW_NODE_CONNECT_SOURCE_NO_AUTH,           /**< Connect to a gateway that intentionally allows unauthenticated node access. */
@@ -187,6 +213,7 @@ typedef enum {
  * Field requirements by source:
  * - `SAVED_SESSION`:    `gateway_uri = NULL`,                 `value = NULL`
  * - `SETUP_CODE`:       `gateway_uri = NULL`,                 `value = <setup code>`
+ * - `DEVICE_TOKEN`:     `gateway_uri = <ws://...|wss://...>`, `value = <device token>`
  * - `GATEWAY_TOKEN`:    `gateway_uri = <ws://...|wss://...>`, `value = <token>`
  * - `GATEWAY_PASSWORD`: `gateway_uri = <ws://...|wss://...>`, `value = <password>`
  * - `NO_AUTH`:          `gateway_uri = <ws://...|wss://...>`, `value = NULL`
@@ -263,6 +290,11 @@ esp_err_t esp_openclaw_node_register_capability(
     esp_openclaw_node_handle_t node,
     const char *capability);
 
+/** @brief Advertise an operator scope before connecting this client instance. */
+esp_err_t esp_openclaw_node_register_scope(
+    esp_openclaw_node_handle_t node,
+    const char *scope);
+
 /**
  * @brief Register a handler for one OpenClaw command.
  *
@@ -323,6 +355,20 @@ esp_err_t esp_openclaw_node_request_connect(
  *      - `ESP_FAIL` on an unexpected local submission failure
  */
 esp_err_t esp_openclaw_node_request_disconnect(esp_openclaw_node_handle_t node);
+
+/**
+ * @brief Send one asynchronous RPC over a ready Gateway session.
+ *
+ * The callback runs on the component task and must remain short and
+ * non-blocking. `params_json` must contain a JSON object or may be `NULL` to
+ * send an empty object. Result strings are valid only during the callback.
+ */
+esp_err_t esp_openclaw_node_gateway_request(
+    esp_openclaw_node_handle_t node,
+    const char *method,
+    const char *params_json,
+    esp_openclaw_node_gateway_request_cb_t callback,
+    void *user_ctx);
 
 /* Inspection APIs */
 

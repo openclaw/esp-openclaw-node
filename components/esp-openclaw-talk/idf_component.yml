@@ -1,0 +1,11 @@
+description: Provider-neutral OpenClaw Talk signaling for ESP WebRTC
+version: 0.1.0
+dependencies:
+  idf:
+    version: ">=5.3"
+  esp_webrtc:
+    override_path: ../../third_party/esp-webrtc-solution/components/esp_webrtc
+  webrtc_utils:
+    override_path: ../../third_party/esp-webrtc-solution/components/webrtc_utils
+  espressif/esp_websocket_client:
+    override_path: ../../third_party/esp-protocols/components/esp_websocket_client

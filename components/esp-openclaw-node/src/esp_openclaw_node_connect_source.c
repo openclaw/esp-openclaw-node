@@ -15,6 +15,7 @@
 static bool connect_source_requires_secret(esp_openclaw_node_connect_source_kind_t kind)
 {
     return kind == ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_BOOTSTRAP_TOKEN ||
+           kind == ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_DEVICE_TOKEN ||
            kind == ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_SHARED_TOKEN ||
            kind == ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_PASSWORD;
 }
@@ -45,6 +46,7 @@ static esp_err_t validate_connect_source(
         }
         return ESP_OK;
     case ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_BOOTSTRAP_TOKEN:
+    case ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_DEVICE_TOKEN:
     case ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_SHARED_TOKEN:
     case ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_PASSWORD:
     case ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_NO_AUTH:
@@ -250,6 +252,12 @@ esp_err_t esp_openclaw_node_build_connect_source_from_request(
             return ESP_ERR_INVALID_ARG;
         }
         return parse_setup_code(request->value, out_source);
+    case ESP_OPENCLAW_NODE_CONNECT_SOURCE_DEVICE_TOKEN:
+        return duplicate_explicit_connect_source(
+            ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_DEVICE_TOKEN,
+            request->gateway_uri,
+            request->value,
+            out_source);
     case ESP_OPENCLAW_NODE_CONNECT_SOURCE_GATEWAY_TOKEN:
         return duplicate_explicit_connect_source(
             ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_SHARED_TOKEN,
@@ -286,8 +294,10 @@ const char *esp_openclaw_node_connect_source_kind_name(
         return "password";
     case ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_BOOTSTRAP_TOKEN:
         return "bootstrap-token";
-    case ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_SAVED_SESSION:
+    case ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_DEVICE_TOKEN:
         return "device-token";
+    case ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_SAVED_SESSION:
+        return "saved-device-token";
     case ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_NO_AUTH:
         return "none";
     case ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_NONE:
@@ -341,6 +351,7 @@ esp_err_t esp_openclaw_node_resolve_active_connect_material_locked(
 
     switch (node->active_connect_source.kind) {
     case ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_BOOTSTRAP_TOKEN:
+    case ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_DEVICE_TOKEN:
     case ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_SHARED_TOKEN:
     case ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_NO_AUTH:
         if (node->active_connect_source.secret != NULL) {

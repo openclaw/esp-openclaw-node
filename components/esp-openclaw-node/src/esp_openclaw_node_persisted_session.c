@@ -20,9 +20,46 @@ static const char *NVS_NAMESPACE = "openclaw";
 static const char *NVS_KEY_VERSION = "session_v";
 static const char *NVS_KEY_URI = "session_uri";
 static const char *NVS_KEY_DEVICE_TOKEN = "session_dev_tok";
+static const char *NVS_KEY_OPERATOR_VERSION = "op_v";
+static const char *NVS_KEY_OPERATOR_URI = "op_uri";
+static const char *NVS_KEY_OPERATOR_DEVICE_TOKEN = "op_dev_tok";
 static const uint8_t PERSISTED_SESSION_VERSION = 1;
 
-static esp_err_t write_persisted_session_to_storage(const esp_openclaw_node_persisted_session_t *update);
+typedef struct {
+    const char *version;
+    const char *uri;
+    const char *device_token;
+} persisted_session_keys_t;
+
+static esp_err_t resolve_session_keys(
+    const char *role,
+    persisted_session_keys_t *keys)
+{
+    if (role == NULL || keys == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (strcmp(role, "node") == 0) {
+        *keys = (persisted_session_keys_t){
+            .version = NVS_KEY_VERSION,
+            .uri = NVS_KEY_URI,
+            .device_token = NVS_KEY_DEVICE_TOKEN,
+        };
+        return ESP_OK;
+    }
+    if (strcmp(role, "operator") == 0) {
+        *keys = (persisted_session_keys_t){
+            .version = NVS_KEY_OPERATOR_VERSION,
+            .uri = NVS_KEY_OPERATOR_URI,
+            .device_token = NVS_KEY_OPERATOR_DEVICE_TOKEN,
+        };
+        return ESP_OK;
+    }
+    return ESP_ERR_INVALID_ARG;
+}
+
+static esp_err_t write_persisted_session_to_storage(
+    const persisted_session_keys_t *keys,
+    const esp_openclaw_node_persisted_session_t *update);
 
 static char *duplicate_string(const char *value)
 {
@@ -118,17 +155,19 @@ static esp_err_t persist_optional_string(
     return nvs_set_str(nvs, key, value);
 }
 
-static esp_err_t clear_session_keys(nvs_handle_t nvs)
+static esp_err_t clear_session_keys(
+    nvs_handle_t nvs,
+    const persisted_session_keys_t *keys)
 {
-    esp_err_t err = nvs_erase_key(nvs, NVS_KEY_VERSION);
+    esp_err_t err = nvs_erase_key(nvs, keys->version);
     if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
         return err;
     }
-    err = nvs_erase_key(nvs, NVS_KEY_URI);
+    err = nvs_erase_key(nvs, keys->uri);
     if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
         return err;
     }
-    err = nvs_erase_key(nvs, NVS_KEY_DEVICE_TOKEN);
+    err = nvs_erase_key(nvs, keys->device_token);
     if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
         return err;
     }
@@ -137,13 +176,14 @@ static esp_err_t clear_session_keys(nvs_handle_t nvs)
 
 static esp_err_t clear_invalid_loaded_session(
     nvs_handle_t nvs,
+    const persisted_session_keys_t *keys,
     esp_openclaw_node_persisted_session_t *session,
     const char *reason)
 {
     ESP_LOGW(TAG, "discarding malformed persisted session: %s", reason);
     clear_persisted_session_struct(session);
 
-    esp_err_t clear_err = clear_session_keys(nvs);
+    esp_err_t clear_err = clear_session_keys(nvs, keys);
     if (clear_err != ESP_OK) {
         ESP_LOGW(
             TAG,
@@ -169,7 +209,9 @@ static esp_err_t copy_persisted_session(
     return ESP_OK;
 }
 
-static esp_err_t write_persisted_session_to_storage(const esp_openclaw_node_persisted_session_t *update)
+static esp_err_t write_persisted_session_to_storage(
+    const persisted_session_keys_t *keys,
+    const esp_openclaw_node_persisted_session_t *update)
 {
     nvs_handle_t nvs = 0;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs);
@@ -178,17 +220,17 @@ static esp_err_t write_persisted_session_to_storage(const esp_openclaw_node_pers
     }
 
     if (!esp_openclaw_node_persisted_session_is_present(update)) {
-        err = clear_session_keys(nvs);
+        err = clear_session_keys(nvs, keys);
         nvs_close(nvs);
         return err;
     }
 
-    err = nvs_set_u8(nvs, NVS_KEY_VERSION, PERSISTED_SESSION_VERSION);
+    err = nvs_set_u8(nvs, keys->version, PERSISTED_SESSION_VERSION);
     if (err == ESP_OK) {
-        err = persist_optional_string(nvs, NVS_KEY_URI, update->gateway_uri);
+        err = persist_optional_string(nvs, keys->uri, update->gateway_uri);
     }
     if (err == ESP_OK) {
-        err = persist_optional_string(nvs, NVS_KEY_DEVICE_TOKEN, update->device_token);
+        err = persist_optional_string(nvs, keys->device_token, update->device_token);
     }
     if (err == ESP_OK) {
         err = nvs_commit(nvs);
@@ -206,13 +248,17 @@ bool esp_openclaw_node_persisted_session_is_present(const esp_openclaw_node_pers
            session->device_token[0] != '\0';
 }
 
-esp_err_t esp_openclaw_node_persisted_session_load(esp_openclaw_node_persisted_session_t *session)
+esp_err_t esp_openclaw_node_persisted_session_load(
+    const char *role,
+    esp_openclaw_node_persisted_session_t *session)
 {
     if (session == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
 
     memset(session, 0, sizeof(*session));
+    persisted_session_keys_t keys = {0};
+    ESP_RETURN_ON_ERROR(resolve_session_keys(role, &keys), TAG, "invalid role");
 
     nvs_handle_t nvs = 0;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs);
@@ -221,7 +267,7 @@ esp_err_t esp_openclaw_node_persisted_session_load(esp_openclaw_node_persisted_s
     }
 
     uint8_t version = 0;
-    err = nvs_get_u8(nvs, NVS_KEY_VERSION, &version);
+    err = nvs_get_u8(nvs, keys.version, &version);
     if (err == ESP_ERR_NVS_NOT_FOUND) {
         nvs_close(nvs);
         return ESP_OK;
@@ -235,7 +281,7 @@ esp_err_t esp_openclaw_node_persisted_session_load(esp_openclaw_node_persisted_s
             TAG,
             "ignoring unsupported persisted session version %u",
             (unsigned)version);
-        esp_err_t clear_err = clear_session_keys(nvs);
+        esp_err_t clear_err = clear_session_keys(nvs, &keys);
         nvs_close(nvs);
         if (clear_err != ESP_OK) {
             ESP_LOGW(
@@ -247,14 +293,18 @@ esp_err_t esp_openclaw_node_persisted_session_load(esp_openclaw_node_persisted_s
     }
 
     session->version = version;
-    err = load_optional_string(nvs, NVS_KEY_URI, &session->gateway_uri);
+    err = load_optional_string(nvs, keys.uri, &session->gateway_uri);
     if (err == ESP_OK) {
-        err = load_optional_string(nvs, NVS_KEY_DEVICE_TOKEN, &session->device_token);
+        err = load_optional_string(nvs, keys.device_token, &session->device_token);
     }
     if (err == ESP_OK) {
         err = validate_persisted_session(session);
         if (err == ESP_ERR_INVALID_ARG) {
-            err = clear_invalid_loaded_session(nvs, session, "incomplete or invalid fields");
+            err = clear_invalid_loaded_session(
+                nvs,
+                &keys,
+                session,
+                "incomplete or invalid fields");
         }
     }
     nvs_close(nvs);
@@ -274,12 +324,15 @@ void esp_openclaw_node_persisted_session_free(esp_openclaw_node_persisted_sessio
 }
 
 esp_err_t esp_openclaw_node_persisted_session_store(
+    const char *role,
     esp_openclaw_node_persisted_session_t *session,
     const esp_openclaw_node_persisted_session_t *update)
 {
-    if (session == NULL || update == NULL) {
+    if (role == NULL || session == NULL || update == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
+    persisted_session_keys_t keys = {0};
+    ESP_RETURN_ON_ERROR(resolve_session_keys(role, &keys), TAG, "invalid role");
     ESP_RETURN_ON_ERROR(validate_persisted_session(update), TAG, "invalid persisted session");
 
     esp_openclaw_node_persisted_session_t copy = {0};
@@ -287,7 +340,7 @@ esp_err_t esp_openclaw_node_persisted_session_store(
         ESP_RETURN_ON_ERROR(copy_persisted_session(&copy, update), TAG, "copy session");
     }
 
-    esp_err_t err = write_persisted_session_to_storage(update);
+    esp_err_t err = write_persisted_session_to_storage(&keys, update);
     if (err != ESP_OK) {
         esp_openclaw_node_persisted_session_free(&copy);
         return err;

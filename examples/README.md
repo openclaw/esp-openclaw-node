@@ -6,12 +6,14 @@ This directory contains the example applications in this repository and the shar
 
 - [ESP32 Wi-Fi Node Example](./esp32-node/README.md) A general-purpose ESP32 node with `device.*`, `wifi.status`, `gpio.*`, and `adc.read`.
 - [ESP-BOX-3 Display Example](./esp-box-3-display/README.md) An ESP-BOX-3 node with the shared device and Wi-Fi commands plus `display.show` and `display.status`.
+- [Waveshare AMOLED Room Node](./waveshare-esp32-s3-touch-amoled-2.06-room-node/README.md) An always-on room client with WakeNet, device AEC, WebRTC Talk, separate node/operator sessions, and an AMOLED-off idle state.
 
 ## Directory Structure
 
 - `common/` Shared source used by more than one example. This is not a standalone example.
 - `esp32-node/` The generic ESP32 example.
 - `esp-box-3-display/` The ESP-BOX-3 example.
+- `waveshare-esp32-s3-touch-amoled-2.06-room-node/` The ambient voice-room example.
 
 ## Naming Convention
 

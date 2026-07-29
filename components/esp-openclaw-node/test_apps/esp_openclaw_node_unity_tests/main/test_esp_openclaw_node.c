@@ -65,9 +65,20 @@ typedef struct {
     volatile uint32_t remaining_notify_count;
 } destroy_task_ctx_t;
 
+typedef struct {
+    volatile bool event_seen;
+    volatile bool request_seen;
+    volatile bool request_ok;
+    char event[64];
+    char event_payload[128];
+    char request_payload[128];
+    char request_error[64];
+} gateway_recorder_t;
+
 static test_event_recorder_t s_event_recorder;
 static test_transport_state_t s_transport_state;
 static int s_fake_transport_client;
+static gateway_recorder_t s_gateway_recorder;
 
 static esp_websocket_client_handle_t test_transport_client_init(const esp_websocket_client_config_t *config)
 {
@@ -348,6 +359,52 @@ static bool wait_for_int_value(volatile int *value, int expected_minimum, TickTy
     return false;
 }
 
+static bool wait_for_bool(volatile bool *value, TickType_t timeout_ticks)
+{
+    TickType_t start = xTaskGetTickCount();
+    while ((xTaskGetTickCount() - start) < timeout_ticks) {
+        if (*value) {
+            return true;
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    return false;
+}
+
+static void test_gateway_event_cb(
+    esp_openclaw_node_handle_t node,
+    const char *event,
+    const char *payload_json,
+    void *user_ctx)
+{
+    (void)node;
+    gateway_recorder_t *recorder = user_ctx;
+    snprintf(recorder->event, sizeof(recorder->event), "%s", event);
+    snprintf(recorder->event_payload, sizeof(recorder->event_payload), "%s", payload_json);
+    recorder->event_seen = true;
+}
+
+static void test_gateway_request_cb(
+    esp_openclaw_node_handle_t node,
+    const esp_openclaw_node_gateway_result_t *result,
+    void *user_ctx)
+{
+    (void)node;
+    gateway_recorder_t *recorder = user_ctx;
+    recorder->request_ok = result->ok;
+    snprintf(
+        recorder->request_payload,
+        sizeof(recorder->request_payload),
+        "%s",
+        result->payload_json != NULL ? result->payload_json : "");
+    snprintf(
+        recorder->request_error,
+        sizeof(recorder->request_error),
+        "%s",
+        result->error_code != NULL ? result->error_code : "");
+    recorder->request_seen = true;
+}
+
 static void emit_ws_event(int32_t event_id, const char *text, esp_err_t local_err)
 {
     TEST_ASSERT_NOT_NULL(s_transport_state.event_handler);
@@ -433,23 +490,23 @@ TEST_CASE("persisted session stores loads and can be cleared by storing empty st
         .device_token = device_token,
     };
 
-    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_persisted_session_store(&session, &update));
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_persisted_session_store("node", &session, &update));
     TEST_ASSERT_TRUE(esp_openclaw_node_persisted_session_is_present(&session));
     TEST_ASSERT_EQUAL_STRING("wss://gateway.example/ws", session.gateway_uri);
     TEST_ASSERT_EQUAL_STRING("device-token-123", session.device_token);
 
     esp_openclaw_node_persisted_session_t loaded = {0};
-    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_persisted_session_load(&loaded));
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_persisted_session_load("node", &loaded));
     TEST_ASSERT_TRUE(esp_openclaw_node_persisted_session_is_present(&loaded));
     TEST_ASSERT_EQUAL_STRING("wss://gateway.example/ws", loaded.gateway_uri);
     TEST_ASSERT_EQUAL_STRING("device-token-123", loaded.device_token);
 
     esp_openclaw_node_persisted_session_t cleared = {0};
-    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_persisted_session_store(&session, &cleared));
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_persisted_session_store("node", &session, &cleared));
     assert_persisted_session_empty(&session);
 
     esp_openclaw_node_persisted_session_free(&loaded);
-    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_persisted_session_load(&loaded));
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_persisted_session_load("node", &loaded));
     assert_persisted_session_empty(&loaded);
 
     esp_openclaw_node_persisted_session_free(&loaded);
@@ -469,7 +526,7 @@ TEST_CASE("persisted session load ignores unsupported stored versions", "[esp_op
     nvs_close(nvs);
 
     esp_openclaw_node_persisted_session_t loaded = {0};
-    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_persisted_session_load(&loaded));
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_persisted_session_load("node", &loaded));
     assert_persisted_session_empty(&loaded);
 
     uint8_t version = 0;
@@ -499,7 +556,7 @@ TEST_CASE("persisted session load clears malformed stored state and node still b
     nvs_close(nvs);
 
     esp_openclaw_node_persisted_session_t loaded = {0};
-    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_persisted_session_load(&loaded));
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_persisted_session_load("node", &loaded));
     assert_persisted_session_empty(&loaded);
 
     uint8_t version = 0;
@@ -562,16 +619,16 @@ TEST_CASE("persisted session rejects partial state", "[esp_openclaw_node][sessio
         .gateway_uri = gateway_uri,
         .device_token = NULL,
     };
-    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, esp_openclaw_node_persisted_session_store(&session, &invalid));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, esp_openclaw_node_persisted_session_store("node", &session, &invalid));
     assert_persisted_session_empty(&session);
 
     invalid.gateway_uri = NULL;
     invalid.device_token = device_token;
-    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, esp_openclaw_node_persisted_session_store(&session, &invalid));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, esp_openclaw_node_persisted_session_store("node", &session, &invalid));
     assert_persisted_session_empty(&session);
 
     esp_openclaw_node_persisted_session_t loaded = {0};
-    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_persisted_session_load(&loaded));
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_persisted_session_load("node", &loaded));
     assert_persisted_session_empty(&loaded);
     esp_openclaw_node_persisted_session_free(&loaded);
 }
@@ -588,7 +645,7 @@ TEST_CASE("persisted session store validates inputs before mutating state", "[es
         .gateway_uri = initial_gateway_uri,
         .device_token = initial_device_token,
     };
-    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_persisted_session_store(&session, &initial));
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_persisted_session_store("node", &session, &initial));
 
     char replacement_gateway_uri[] = "wss://replacement.example/ws";
     char replacement_device_token[] = "device-token-456";
@@ -598,21 +655,21 @@ TEST_CASE("persisted session store validates inputs before mutating state", "[es
         .device_token = replacement_device_token,
     };
 
-    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, esp_openclaw_node_persisted_session_store(NULL, &replacement));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, esp_openclaw_node_persisted_session_store("node", NULL, &replacement));
     TEST_ASSERT_EQUAL_STRING("wss://gateway.example/ws", session.gateway_uri);
     TEST_ASSERT_EQUAL_STRING("device-token-123", session.device_token);
 
     esp_openclaw_node_persisted_session_t loaded = {0};
-    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_persisted_session_load(&loaded));
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_persisted_session_load("node", &loaded));
     TEST_ASSERT_EQUAL_STRING("wss://gateway.example/ws", loaded.gateway_uri);
     TEST_ASSERT_EQUAL_STRING("device-token-123", loaded.device_token);
     esp_openclaw_node_persisted_session_free(&loaded);
 
-    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, esp_openclaw_node_persisted_session_store(&session, NULL));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, esp_openclaw_node_persisted_session_store("node", &session, NULL));
     TEST_ASSERT_EQUAL_STRING("wss://gateway.example/ws", session.gateway_uri);
     TEST_ASSERT_EQUAL_STRING("device-token-123", session.device_token);
 
-    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_persisted_session_load(&loaded));
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_persisted_session_load("node", &loaded));
     TEST_ASSERT_EQUAL_STRING("wss://gateway.example/ws", loaded.gateway_uri);
     TEST_ASSERT_EQUAL_STRING("device-token-123", loaded.device_token);
 
@@ -692,7 +749,7 @@ TEST_CASE("identity load recovers from malformed seed and clears saved session",
     TEST_ASSERT_NOT_EQUAL('\0', identity.public_key_b64url[0]);
 
     esp_openclaw_node_persisted_session_t loaded_session = {0};
-    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_persisted_session_load(&loaded_session));
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_persisted_session_load("node", &loaded_session));
     assert_persisted_session_empty(&loaded_session);
     esp_openclaw_node_persisted_session_free(&loaded_session);
 
@@ -1236,6 +1293,159 @@ TEST_CASE("clean websocket close keeps local err clear", "[esp_openclaw_node][tr
     TEST_ASSERT_TRUE(wait_for_event(ESP_OPENCLAW_NODE_EVENT_DISCONNECTED, pdMS_TO_TICKS(1000)));
     TEST_ASSERT_EQUAL(ESP_OK, s_event_recorder.local_err);
     TEST_ASSERT_EQUAL(ESP_OPENCLAW_NODE_DISCONNECTED_REASON_CONNECTION_LOST, s_event_recorder.disconnected_reason);
+
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_destroy(node));
+}
+
+TEST_CASE("device token source signs auth material", "[esp_openclaw_node][auth]")
+{
+    reset_openclaw_storage();
+    reset_transport_state();
+
+    esp_openclaw_node_config_t config = {0};
+    esp_openclaw_node_config_init_default(&config);
+    esp_openclaw_node_handle_t node = NULL;
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_create(&config, &node));
+
+    const esp_openclaw_node_connect_request_t request = {
+        .source = ESP_OPENCLAW_NODE_CONNECT_SOURCE_DEVICE_TOKEN,
+        .gateway_uri = "wss://gateway.example/ws",
+        .value = "role-token",
+    };
+    esp_openclaw_node_connect_request_source_t source = {0};
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        esp_openclaw_node_build_connect_source_from_request(&request, &source));
+    TEST_ASSERT_EQUAL(ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_DEVICE_TOKEN, source.kind);
+
+    esp_openclaw_node_connect_material_t material = {0};
+    esp_openclaw_node_lock_state(node);
+    node->active_connect_source = source;
+    memset(&source, 0, sizeof(source));
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        esp_openclaw_node_resolve_active_connect_material_locked(node, &material));
+    esp_openclaw_node_unlock_state(node);
+    TEST_ASSERT_EQUAL_STRING("role-token", material.auth_value);
+    TEST_ASSERT_EQUAL_PTR(material.auth_value, material.signature_token);
+
+    esp_openclaw_node_free_connect_material(&material);
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_destroy(node));
+}
+
+TEST_CASE("scope registration stays idempotent at capacity", "[esp_openclaw_node][registry]")
+{
+    reset_openclaw_storage();
+    reset_transport_state();
+
+    esp_openclaw_node_config_t config = {0};
+    esp_openclaw_node_config_init_default(&config);
+    esp_openclaw_node_handle_t node = NULL;
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_create(&config, &node));
+
+    char scope[32] = {0};
+    for (size_t i = 0; i < ESP_OPENCLAW_NODE_MAX_SCOPES; ++i) {
+        snprintf(scope, sizeof(scope), "operator.test.%u", (unsigned)i);
+        TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_register_scope(node, scope));
+    }
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_register_scope(node, "operator.test.0"));
+    TEST_ASSERT_EQUAL(
+        ESP_ERR_NO_MEM,
+        esp_openclaw_node_register_scope(node, "operator.test.overflow"));
+
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_destroy(node));
+}
+
+TEST_CASE("voice bootstrap persists roles and correlates gateway traffic", "[esp_openclaw_node][voice]")
+{
+    reset_openclaw_storage();
+    reset_transport_state();
+    memset(&s_gateway_recorder, 0, sizeof(s_gateway_recorder));
+
+    esp_openclaw_node_config_t config = {0};
+    esp_openclaw_node_config_init_default(&config);
+    config.event_cb = test_node_event_cb;
+    config.gateway_event_cb = test_gateway_event_cb;
+    config.gateway_event_user_ctx = &s_gateway_recorder;
+    esp_openclaw_node_handle_t node = NULL;
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_create(&config, &node));
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_register_scope(node, "operator.read"));
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_register_scope(node, "operator.talk"));
+
+    reset_event_recorder();
+    TEST_ASSERT_EQUAL(ESP_OK, request_connect_no_auth(node, "ws://gateway.example/ws"));
+    TEST_ASSERT_TRUE(wait_for_int_value(&s_transport_state.start_calls, 1, pdMS_TO_TICKS(1000)));
+    emit_ws_event(WEBSOCKET_EVENT_CONNECTED, NULL, ESP_OK);
+    emit_ws_event(
+        WEBSOCKET_EVENT_DATA,
+        "{\"type\":\"event\",\"event\":\"connect.challenge\",\"payload\":{\"nonce\":\"voice-nonce\",\"ts\":123}}",
+        ESP_OK);
+    TEST_ASSERT_TRUE(wait_for_int_value(&s_transport_state.send_text_calls, 1, pdMS_TO_TICKS(1000)));
+    TEST_ASSERT_NOT_NULL(strstr(s_transport_state.last_sent_text, "\"operator.read\""));
+    TEST_ASSERT_NOT_NULL(strstr(s_transport_state.last_sent_text, "\"operator.talk\""));
+
+    char *connect_id = extract_first_json_id(s_transport_state.last_sent_text);
+    char connect_response[768] = {0};
+    snprintf(
+        connect_response,
+        sizeof(connect_response),
+        "{\"type\":\"res\",\"id\":\"%s\",\"ok\":true,\"payload\":{\"type\":\"hello-ok\",\"auth\":{\"deviceToken\":\"node-token\",\"deviceTokens\":[{\"role\":\"operator\",\"deviceToken\":\"operator-token\",\"scopes\":[\"operator.read\",\"operator.talk\"]}]}}}",
+        connect_id);
+    free(connect_id);
+    emit_ws_event(WEBSOCKET_EVENT_DATA, connect_response, ESP_OK);
+    TEST_ASSERT_TRUE(wait_for_event(ESP_OPENCLAW_NODE_EVENT_CONNECTED, pdMS_TO_TICKS(1000)));
+
+    esp_openclaw_node_persisted_session_t operator_session = {0};
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        esp_openclaw_node_persisted_session_load("operator", &operator_session));
+    TEST_ASSERT_EQUAL_STRING("ws://gateway.example/ws", operator_session.gateway_uri);
+    TEST_ASSERT_EQUAL_STRING("operator-token", operator_session.device_token);
+    esp_openclaw_node_persisted_session_free(&operator_session);
+
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        esp_openclaw_node_gateway_request(
+            node,
+            "talk.catalog",
+            "{}",
+            test_gateway_request_cb,
+            &s_gateway_recorder));
+    TEST_ASSERT_TRUE(wait_for_int_value(&s_transport_state.send_text_calls, 2, pdMS_TO_TICKS(1000)));
+    char *request_id = extract_first_json_id(s_transport_state.last_sent_text);
+    char response[256] = {0};
+    snprintf(
+        response,
+        sizeof(response),
+        "{\"type\":\"res\",\"id\":\"%s\",\"ok\":true,\"payload\":{\"providers\":[\"openai\"]}}",
+        request_id);
+    free(request_id);
+    emit_ws_event(WEBSOCKET_EVENT_DATA, response, ESP_OK);
+    TEST_ASSERT_TRUE(wait_for_bool(&s_gateway_recorder.request_seen, pdMS_TO_TICKS(1000)));
+    TEST_ASSERT_TRUE(s_gateway_recorder.request_ok);
+    TEST_ASSERT_NOT_NULL(strstr(s_gateway_recorder.request_payload, "openai"));
+
+    emit_ws_event(
+        WEBSOCKET_EVENT_DATA,
+        "{\"type\":\"event\",\"event\":\"voicewake.changed\",\"payload\":{\"triggers\":[\"Hi ESP\"]}}",
+        ESP_OK);
+    TEST_ASSERT_TRUE(wait_for_bool(&s_gateway_recorder.event_seen, pdMS_TO_TICKS(1000)));
+    TEST_ASSERT_EQUAL_STRING("voicewake.changed", s_gateway_recorder.event);
+
+    s_gateway_recorder.request_seen = false;
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        esp_openclaw_node_gateway_request(
+            node,
+            "talk.catalog",
+            "{}",
+            test_gateway_request_cb,
+            &s_gateway_recorder));
+    TEST_ASSERT_TRUE(wait_for_int_value(&s_transport_state.send_text_calls, 3, pdMS_TO_TICKS(1000)));
+    emit_ws_event(WEBSOCKET_EVENT_DISCONNECTED, NULL, ESP_FAIL);
+    TEST_ASSERT_TRUE(wait_for_bool(&s_gateway_recorder.request_seen, pdMS_TO_TICKS(1000)));
+    TEST_ASSERT_FALSE(s_gateway_recorder.request_ok);
+    TEST_ASSERT_EQUAL_STRING("DISCONNECTED", s_gateway_recorder.request_error);
 
     TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_destroy(node));
 }

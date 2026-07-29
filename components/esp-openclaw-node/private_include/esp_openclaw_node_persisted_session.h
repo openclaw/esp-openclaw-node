@@ -17,11 +17,14 @@ typedef struct {
     char *device_token;
 } esp_openclaw_node_persisted_session_t;
 
-esp_err_t esp_openclaw_node_persisted_session_load(esp_openclaw_node_persisted_session_t *session);
+esp_err_t esp_openclaw_node_persisted_session_load(
+    const char *role,
+    esp_openclaw_node_persisted_session_t *session);
 
 void esp_openclaw_node_persisted_session_free(esp_openclaw_node_persisted_session_t *session);
 
 esp_err_t esp_openclaw_node_persisted_session_store(
+    const char *role,
     esp_openclaw_node_persisted_session_t *session,
     const esp_openclaw_node_persisted_session_t *update);
 

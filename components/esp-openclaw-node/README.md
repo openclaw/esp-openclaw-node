@@ -11,7 +11,9 @@ The component provides:
 - Device identity generation and persistence
 - OpenClaw `connect.challenge` signing and `connect` request construction
 - setup-code, shared-token, password, no-auth, and saved-session connect paths
+- explicit role-scoped device-token connections and role-keyed node/operator sessions
 - capability and command advertisement
+- generic post-connect Gateway events and bounded asynchronous Gateway RPCs
 - Handling `node.invoke.request` commands and sending `node.invoke.result` replies
 
 ## Contents
@@ -86,12 +88,14 @@ successful `hello-ok`
 ### Registration
 
 - `esp_openclaw_node_register_capability()`
+- `esp_openclaw_node_register_scope()`
 - `esp_openclaw_node_register_command()`
 
 ### Async Control
 
 - `esp_openclaw_node_request_connect()`
 - `esp_openclaw_node_request_disconnect()`
+- `esp_openclaw_node_gateway_request()`
 
 ### Inspection
 

@@ -1,6 +1,7 @@
 idf_component_register(
     SRCS
         "main.c"
+        "room_aec_src.c"
         "room_canvas.c"
         "room_canvas_node_cmd.c"
         "room_media.c"

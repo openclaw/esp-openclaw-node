@@ -9,13 +9,13 @@
 #include "esp_audio_dec_default.h"
 #include "esp_audio_enc_default.h"
 #include "esp_capture.h"
-#include "esp_capture_defaults.h"
 #include "esp_capture_sink.h"
 #include "esp_check.h"
 #include "esp_codec_dev.h"
 #include "esp_codec_dev_defaults.h"
 #include "esp_log.h"
 #include "media_lib_err.h"
+#include "room_aec_src.h"
 
 #define TAG "room_media"
 
@@ -27,6 +27,14 @@ static void *wake_callback_ctx;
 static i2s_chan_handle_t audio_tx;
 static i2s_chan_handle_t audio_rx;
 static const audio_codec_data_if_t *audio_data;
+
+static void room_afe_wake(void *ctx)
+{
+    (void)ctx;
+    if (wake_callback != NULL) {
+        wake_callback("hiesp", wake_callback_ctx);
+    }
+}
 
 static esp_err_t room_audio_codecs_init(
     esp_codec_dev_handle_t *record,
@@ -149,14 +157,15 @@ esp_err_t room_media_init(room_wake_callback_t callback, void *ctx)
         return ESP_FAIL;
     }
 
-    esp_capture_audio_aec_src_cfg_t source_cfg = {
+    room_capture_audio_aec_src_cfg_t source_cfg = {
         .mic_layout = "MR",
         .record_handle = record,
         .channel = 2,
         // ES7210 packs the two enabled analog inputs into the two standard-I2S slots.
         .channel_mask = 0x3,
+        .wake_cb = room_afe_wake,
     };
-    esp_capture_audio_src_if_t *audio_source = esp_capture_new_audio_aec_src(&source_cfg);
+    esp_capture_audio_src_if_t *audio_source = room_capture_new_audio_aec_src(&source_cfg);
     if (audio_source == NULL) {
         return ESP_ERR_NO_MEM;
     }
@@ -210,17 +219,7 @@ esp_err_t room_media_init(room_wake_callback_t callback, void *ctx)
         return ESP_FAIL;
     }
 
-    /*
-     * The AEC capture source above already owns the board's single WakeNet
-     * instance inside its AFE pipeline; creating a second esp-sr instance on
-     * this model aborts inside the closed library on hardware. The AFE does
-     * not surface its wake detections through esp_capture yet, so ambient
-     * wake stays off until that seam exists; the console `wake` command and
-     * gateway-triggered Talk remain fully functional.
-     */
-    ESP_LOGW(
-        TAG,
-        "ambient wake-word detection is disabled on this build; use the console `wake` command to start Talk");
+    ESP_LOGI(TAG, "ambient WakeNet detections are wired from the AFE");
     ESP_LOGI(TAG, "24 kHz dual-channel capture and device AEC are active");
     return ESP_OK;
 }

@@ -185,6 +185,16 @@ static esp_err_t http_event(esp_http_client_event_t *event)
     if (response == NULL) {
         return ESP_FAIL;
     }
+    /* timeout_ms bounds one socket operation; the wall-clock deadline also
+     * bounds connect, header, and data progress across the whole request. */
+    bool check_deadline = event->event_id == HTTP_EVENT_ON_CONNECTED ||
+        event->event_id == HTTP_EVENT_ON_HEADER ||
+        (event->event_id == HTTP_EVENT_ON_DATA && event->data_len > 0);
+    if (check_deadline && response->deadline_us != 0 &&
+        esp_timer_get_time() > response->deadline_us) {
+        response->timed_out = true;
+        return ESP_ERR_TIMEOUT;
+    }
     if (event->event_id == HTTP_EVENT_REDIRECT) {
         response->data_len = 0;
         free(response->content_type);
@@ -200,12 +210,6 @@ static esp_err_t http_event(esp_http_client_event_t *event)
         free(response->content_type);
         response->content_type = copy;
     } else if (event->event_id == HTTP_EVENT_ON_DATA && event->data_len > 0) {
-        /* timeout_ms bounds one socket operation; a trickling server would
-         * otherwise hold this synchronous command open indefinitely. */
-        if (response->deadline_us != 0 && esp_timer_get_time() > response->deadline_us) {
-            response->timed_out = true;
-            return ESP_ERR_TIMEOUT;
-        }
         size_t required = response->data_len + (size_t)event->data_len;
         if (!response_reserve(response, required)) {
             return response->too_large ? ESP_ERR_INVALID_SIZE : ESP_ERR_NO_MEM;
@@ -984,12 +988,15 @@ static lv_flex_align_t cross_alignment(const char *alignment)
     return LV_FLEX_ALIGN_START;
 }
 
-static room_canvas_image_t *find_image(const char *component_id)
+static room_canvas_image_t *find_image(
+    room_canvas_image_t *retained_images,
+    size_t retained_image_count,
+    const char *component_id)
 {
-    for (size_t i = 0; i < image_count; ++i) {
-        if (images[i].component_id != NULL &&
-            strcmp(images[i].component_id, component_id) == 0) {
-            return &images[i];
+    for (size_t i = 0; i < retained_image_count; ++i) {
+        if (retained_images[i].component_id != NULL &&
+            strcmp(retained_images[i].component_id, component_id) == 0) {
+            return &retained_images[i];
         }
     }
     return NULL;
@@ -1008,6 +1015,8 @@ static void button_event(lv_event_t *event)
 static lv_obj_t *render_component(
     const char *id,
     lv_obj_t *parent,
+    room_canvas_image_t *render_images,
+    size_t render_image_count,
     size_t depth,
     bool root,
     bool parent_row,
@@ -1027,6 +1036,8 @@ static void apply_weight(lv_obj_t *object, const room_canvas_component_t *entry)
 static void render_children(
     cJSON *props,
     lv_obj_t *parent,
+    room_canvas_image_t *render_images,
+    size_t render_image_count,
     size_t depth,
     bool parent_row,
     size_t *node_budget,
@@ -1042,6 +1053,8 @@ static void render_children(
             render_component(
                 child->valuestring,
                 parent,
+                render_images,
+                render_image_count,
                 depth + 1,
                 false,
                 parent_row,
@@ -1058,6 +1071,8 @@ static lv_obj_t *render_container(
     const room_canvas_component_t *entry,
     cJSON *props,
     lv_obj_t *parent,
+    room_canvas_image_t *render_images,
+    size_t render_image_count,
     size_t depth,
     bool root,
     bool row,
@@ -1083,7 +1098,15 @@ static lv_obj_t *render_container(
         LV_PCT(100),
         root ? LV_PCT(100) : LV_SIZE_CONTENT);
     apply_weight(object, entry);
-    render_children(props, object, depth, row, node_budget, out_error);
+    render_children(
+        props,
+        object,
+        render_images,
+        render_image_count,
+        depth,
+        row,
+        node_budget,
+        out_error);
     if (alignment_text != NULL && strcmp(alignment_text, "stretch") == 0) {
         uint32_t child_count = lv_obj_get_child_count(object);
         for (uint32_t i = 0; i < child_count; ++i) {
@@ -1101,6 +1124,8 @@ static lv_obj_t *render_container(
 static lv_obj_t *render_component(
     const char *id,
     lv_obj_t *parent,
+    room_canvas_image_t *render_images,
+    size_t render_image_count,
     size_t depth,
     bool root,
     bool parent_row,
@@ -1144,6 +1169,8 @@ static lv_obj_t *render_component(
             entry,
             props,
             parent,
+            render_images,
+            render_image_count,
             depth,
             root,
             false,
@@ -1155,6 +1182,8 @@ static lv_obj_t *render_component(
             entry,
             props,
             parent,
+            render_images,
+            render_image_count,
             depth,
             root,
             true,
@@ -1177,7 +1206,10 @@ static lv_obj_t *render_component(
         return label;
     }
     if (strcmp(name, "Image") == 0) {
-        room_canvas_image_t *image = find_image(id);
+        room_canvas_image_t *image = find_image(
+            render_images,
+            render_image_count,
+            id);
         if (image == NULL) {
             lv_obj_t *missing = lv_label_create(parent);
             lv_label_set_text(missing, "[Image]");
@@ -1225,6 +1257,8 @@ static lv_obj_t *render_component(
             render_component(
                 child->valuestring,
                 card,
+                render_images,
+                render_image_count,
                 depth + 1,
                 false,
                 false,
@@ -1346,37 +1380,77 @@ static esp_err_t prefetch_a2ui_images(esp_openclaw_node_error_t *out_error)
         }
     }
 
-    lv_obj_clean(canvas_screen);
-    clear_images_locked();
-    for (size_t i = 0; i < fetched_count; ++i) {
-        images[i] = fetched[i];
-        memset(&fetched[i], 0, sizeof(fetched[i]));
-        ++image_count;
+    lv_obj_t *container = lv_obj_create(canvas_screen);
+    if (container == NULL) {
+        for (size_t i = 0; i < fetched_count; ++i) {
+            release_image(&fetched[i]);
+        }
+        bsp_display_unlock();
+        return set_error(
+            out_error,
+            "INTERNAL",
+            "not enough memory to stage the A2UI surface",
+            ESP_ERR_NO_MEM);
     }
-    style_canvas_screen();
-    if (root_component_id != NULL) {
-        esp_openclaw_node_error_t render_error = {0};
-        size_t node_budget = ROOM_CANVAS_MAX_RENDER_NODES;
-        render_component(
-            root_component_id,
-            canvas_screen,
-            1,
-            true,
-            false,
-            &node_budget,
-            &render_error);
+    /* This hidden transaction root has exactly the canvas content geometry,
+     * so an LV_PCT(100) root renders as it did directly on canvas_screen. */
+    lv_obj_add_flag(container, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_style_all(container);
+    lv_obj_set_style_bg_opa(container, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_pad_all(container, 0, 0);
+    lv_obj_set_style_border_width(container, 0, 0);
+    lv_obj_set_layout(container, LV_LAYOUT_NONE);
+    lv_obj_set_pos(container, 0, 0);
+    lv_obj_set_size(container, LV_PCT(100), LV_PCT(100));
+    lv_obj_remove_flag(container, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(container, LV_SCROLLBAR_MODE_OFF);
+
+    esp_openclaw_node_error_t render_error = {0};
+    size_t node_budget = ROOM_CANVAS_MAX_RENDER_NODES;
+    lv_obj_t *root = render_component(
+        root_component_id,
+        container,
+        fetched,
+        fetched_count,
+        1,
+        true,
+        false,
+        &node_budget,
+        &render_error);
+    if (root == NULL || render_error.code != NULL) {
+        lv_obj_delete(container);
+        for (size_t i = 0; i < fetched_count; ++i) {
+            release_image(&fetched[i]);
+        }
         if (render_error.code != NULL) {
             *out_error = render_error;
-            show_placeholder_locked();
-            activate_canvas_locked();
-            bsp_display_unlock();
-            bsp_display_brightness_set(ROOM_CANVAS_BRIGHTNESS);
-            room_ui_refresh();
-            return ESP_ERR_INVALID_SIZE;
+        } else {
+            set_error(
+                out_error,
+                "INTERNAL",
+                "not enough memory to render the A2UI surface",
+                ESP_ERR_NO_MEM);
         }
-    } else {
-        show_placeholder_locked();
+        bsp_display_unlock();
+        return render_error.code != NULL ? ESP_ERR_INVALID_SIZE : ESP_ERR_NO_MEM;
     }
+
+    uint32_t child_count = lv_obj_get_child_count(canvas_screen);
+    for (uint32_t i = child_count; i > 0; --i) {
+        lv_obj_t *child = lv_obj_get_child(canvas_screen, (int32_t)i - 1);
+        if (child != container) {
+            lv_obj_delete(child);
+        }
+    }
+    clear_images_locked();
+    for (size_t i = 0; i < fetched_count; ++i) {
+        /* LVGL retains the heap draw-buffer pointer, so moving its owning
+         * record to stable storage does not invalidate the staged widget. */
+        images[i] = fetched[i];
+        memset(&fetched[i], 0, sizeof(fetched[i]));
+    }
+    image_count = fetched_count;
+    lv_obj_remove_flag(container, LV_OBJ_FLAG_HIDDEN);
     activate_canvas_locked();
     bsp_display_unlock();
     bsp_display_brightness_set(ROOM_CANVAS_BRIGHTNESS);

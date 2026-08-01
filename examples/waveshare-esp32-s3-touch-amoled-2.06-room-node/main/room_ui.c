@@ -3,13 +3,9 @@
 #include <string.h>
 
 #include "bsp/esp-bsp.h"
-#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "lvgl.h"
 #include "room_canvas.h"
-
-/* 32 rows * 410 px * RGB565 ~= 26 KiB of internal DMA memory per flush chunk. */
-#define ROOM_UI_DRAW_ROWS 32
 
 static const char *TAG = "room_ui";
 static lv_obj_t *status_label;
@@ -22,36 +18,13 @@ static char current_detail[48];
 
 void room_ui_init(void)
 {
-    lv_display_t *display = bsp_display_start();
-    if (display == NULL) {
+    if (bsp_display_start() == NULL) {
         ESP_LOGE(TAG, "failed to start display");
         return;
     }
     if (!bsp_display_lock(0)) {
         ESP_LOGE(TAG, "failed to lock display during initialization");
         return;
-    }
-    /*
-     * The BSP's own draw buffer ends up in PSRAM, which is not DMA-capable:
-     * the SPI driver then bounce-buffers every flush through scarce internal
-     * DMA heap and starts failing under Wi-Fi/TLS load. Rebind rendering to a
-     * bounded internal DMA buffer — under the display lock, because the LVGL
-     * port task is already rendering the original buffers.
-     */
-    size_t draw_bytes = (size_t)BSP_LCD_H_RES * ROOM_UI_DRAW_ROWS * 2;
-    void *draw_buffer = heap_caps_aligned_alloc(
-        4,
-        draw_bytes,
-        MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-    if (draw_buffer != NULL) {
-        lv_display_set_buffers(
-            display,
-            draw_buffer,
-            NULL,
-            (uint32_t)draw_bytes,
-            LV_DISPLAY_RENDER_MODE_PARTIAL);
-    } else {
-        ESP_LOGW(TAG, "no internal DMA memory for the draw buffer; keeping the BSP default");
     }
     lv_obj_set_style_bg_color(lv_screen_active(), lv_color_black(), 0);
     status_label = lv_label_create(lv_screen_active());

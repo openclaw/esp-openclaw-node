@@ -1,29 +1,35 @@
 #include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
 
+#include "cJSON.h"
+#include "esp_console.h"
 #include "esp_event.h"
 #include "esp_check.h"
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_openclaw_node.h"
+#include "esp_openclaw_node_example_repl.h"
+#include "esp_openclaw_node_wifi.h"
 #include "esp_openclaw_talk.h"
 #include "esp_peer.h"
 #include "esp_peer_default.h"
-#include "esp_wifi.h"
 #include "esp_webrtc.h"
 #include "esp_capture.h"
-#include "freertos/event_groups.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/timers.h"
+#include "mbedtls/base64.h"
+#include "nvs.h"
 #include "nvs_flash.h"
 #include "media_lib_adapter.h"
 #include "media_lib_os.h"
+#include "room_canvas.h"
+#include "room_canvas_node_cmd.h"
 #include "room_media.h"
 #include "room_ui.h"
 
 static const char *TAG = "openclaw_room";
-static const EventBits_t WIFI_READY_BIT = BIT0;
-static EventGroupHandle_t wifi_events;
 static esp_openclaw_node_handle_t node_client;
 static esp_openclaw_node_handle_t operator_client;
 static esp_webrtc_handle_t webrtc;
@@ -31,6 +37,7 @@ static SemaphoreHandle_t state_lock;
 static QueueHandle_t talk_teardown_queue;
 static TimerHandle_t talk_timeout_timer;
 static bool operator_ready;
+static bool media_ready;
 static bool talk_starting;
 static bool talk_closing;
 static bool operator_start_scheduled;
@@ -42,6 +49,110 @@ typedef struct {
 } talk_teardown_request_t;
 
 static void start_operator_task(void *arg);
+
+static char *gateway_http_base_from_uri(const char *gateway_uri)
+{
+    if (gateway_uri == NULL) {
+        return NULL;
+    }
+    const char *authority = NULL;
+    const char *http_scheme = NULL;
+    if (strncmp(gateway_uri, "ws://", 5) == 0) {
+        authority = gateway_uri + 5;
+        http_scheme = "http://";
+    } else if (strncmp(gateway_uri, "wss://", 6) == 0) {
+        authority = gateway_uri + 6;
+        http_scheme = "https://";
+    } else {
+        return NULL;
+    }
+    const char *path = strchr(authority, '/');
+    size_t authority_len = path != NULL ? (size_t)(path - authority) : strlen(authority);
+    size_t required = strlen(http_scheme) + authority_len + 1;
+    char *base = malloc(required);
+    if (base != NULL) {
+        snprintf(base, required, "%s%.*s", http_scheme, (int)authority_len, authority);
+    }
+    return base;
+}
+
+static char *load_saved_gateway_uri(void)
+{
+    nvs_handle_t nvs = 0;
+    if (nvs_open("openclaw", NVS_READONLY, &nvs) != ESP_OK) {
+        return NULL;
+    }
+    size_t required = 0;
+    esp_err_t err = nvs_get_str(nvs, "session_uri", NULL, &required);
+    char *uri = err == ESP_OK && required > 1 ? malloc(required) : NULL;
+    if (uri != NULL && nvs_get_str(nvs, "session_uri", uri, &required) != ESP_OK) {
+        free(uri);
+        uri = NULL;
+    }
+    nvs_close(nvs);
+    return uri;
+}
+
+static char *decode_setup_gateway_uri(void)
+{
+    const char *setup_code = CONFIG_OPENCLAW_ROOM_SETUP_CODE;
+    size_t encoded_len = strlen(setup_code);
+    if (encoded_len == 0) {
+        return NULL;
+    }
+    size_t padded_len = ((encoded_len + 3) / 4) * 4;
+    char *padded = calloc(padded_len + 1, 1);
+    if (padded == NULL) {
+        return NULL;
+    }
+    for (size_t i = 0; i < encoded_len; ++i) {
+        padded[i] = setup_code[i] == '-' ? '+' : setup_code[i] == '_' ? '/' : setup_code[i];
+    }
+    for (size_t i = encoded_len; i < padded_len; ++i) {
+        padded[i] = '=';
+    }
+    size_t decoded_capacity = (padded_len / 4) * 3 + 1;
+    unsigned char *decoded = calloc(decoded_capacity, 1);
+    size_t decoded_len = 0;
+    int rc = decoded != NULL
+        ? mbedtls_base64_decode(
+            decoded,
+            decoded_capacity - 1,
+            &decoded_len,
+            (const unsigned char *)padded,
+            padded_len)
+        : -1;
+    free(padded);
+    if (rc != 0) {
+        free(decoded);
+        return NULL;
+    }
+    decoded[decoded_len] = '\0';
+    cJSON *root = cJSON_Parse((const char *)decoded);
+    free(decoded);
+    cJSON *url = cJSON_IsObject(root)
+        ? cJSON_GetObjectItemCaseSensitive(root, "url")
+        : NULL;
+    char *uri = cJSON_IsString(url) && url->valuestring != NULL
+        ? strdup(url->valuestring)
+        : NULL;
+    cJSON_Delete(root);
+    return uri;
+}
+
+static char *derive_gateway_http_base(void)
+{
+    if (CONFIG_OPENCLAW_ROOM_GATEWAY_HTTP_BASE_URL[0] != '\0') {
+        return strdup(CONFIG_OPENCLAW_ROOM_GATEWAY_HTTP_BASE_URL);
+    }
+    char *gateway_uri = load_saved_gateway_uri();
+    if (gateway_uri == NULL) {
+        gateway_uri = decode_setup_gateway_uri();
+    }
+    char *base = gateway_http_base_from_uri(gateway_uri);
+    free(gateway_uri);
+    return base;
+}
 
 static bool schedule_operator_start(uint32_t delay_ms)
 {
@@ -112,62 +223,27 @@ static void capture_thread_scheduler(
     capture_config->stack_in_ext = true;
 }
 
-static void wifi_event(
-    void *ctx,
-    esp_event_base_t base,
-    int32_t event_id,
-    void *event_data)
+/*
+ * Kconfig Wi-Fi credentials seed the shared NVS-backed station helper only
+ * while it is unconfigured, so `wifi set` from the USB console always wins
+ * across reboots and re-provisioning never needs a rebuild.
+ */
+static void seed_wifi_credentials_from_kconfig(void)
 {
-    (void)ctx;
-    (void)event_data;
-    if (base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
-        esp_wifi_connect();
-    } else if (base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-        xEventGroupClearBits(wifi_events, WIFI_READY_BIT);
-        esp_wifi_connect();
-    } else if (base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
-        xEventGroupSetBits(wifi_events, WIFI_READY_BIT);
+    if (CONFIG_OPENCLAW_ROOM_WIFI_SSID[0] == '\0') {
+        return;
     }
-}
-
-static esp_err_t connect_wifi(void)
-{
-    size_t ssid_len = strlen(CONFIG_OPENCLAW_ROOM_WIFI_SSID);
-    size_t password_len = strlen(CONFIG_OPENCLAW_ROOM_WIFI_PASSWORD);
-    wifi_config_t config = {0};
-    if (ssid_len == 0 || ssid_len > sizeof(config.sta.ssid) ||
-        password_len > sizeof(config.sta.password)) {
-        return ESP_ERR_INVALID_ARG;
+    esp_openclaw_node_wifi_status_t status = {0};
+    esp_openclaw_node_wifi_get_status(&status);
+    if (status.configured) {
+        return;
     }
-    wifi_events = xEventGroupCreate();
-    if (wifi_events == NULL) {
-        return ESP_ERR_NO_MEM;
+    esp_err_t err = esp_openclaw_node_wifi_set_credentials(
+        CONFIG_OPENCLAW_ROOM_WIFI_SSID,
+        CONFIG_OPENCLAW_ROOM_WIFI_PASSWORD);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "seeding Wi-Fi credentials failed: %s", esp_err_to_name(err));
     }
-    esp_netif_create_default_wifi_sta();
-    wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_RETURN_ON_ERROR(esp_wifi_init(&init), TAG, "Wi-Fi init");
-    ESP_RETURN_ON_ERROR(
-        esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event, NULL),
-        TAG,
-        "Wi-Fi event handler");
-    ESP_RETURN_ON_ERROR(
-        esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event, NULL),
-        TAG,
-        "IP event handler");
-    memcpy(config.sta.ssid, CONFIG_OPENCLAW_ROOM_WIFI_SSID, ssid_len);
-    memcpy(config.sta.password, CONFIG_OPENCLAW_ROOM_WIFI_PASSWORD, password_len);
-    config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
-    config.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
-    ESP_RETURN_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_STA), TAG, "Wi-Fi mode");
-    ESP_RETURN_ON_ERROR(esp_wifi_set_config(WIFI_IF_STA, &config), TAG, "Wi-Fi config");
-    ESP_RETURN_ON_ERROR(esp_wifi_start(), TAG, "Wi-Fi start");
-    EventBits_t ready = xEventGroupWaitBits(
-        wifi_events,
-        WIFI_READY_BIT,
-        pdFALSE,
-        pdTRUE,
-        pdMS_TO_TICKS(30000));
-    return (ready & WIFI_READY_BIT) != 0 ? ESP_OK : ESP_ERR_TIMEOUT;
 }
 
 static void request_talk_teardown(esp_webrtc_handle_t session, bool failed)
@@ -392,6 +468,9 @@ static esp_err_t start_operator_client(void)
     esp_openclaw_node_handle_t existing = operator_client;
     xSemaphoreGive(state_lock);
     if (existing != NULL) {
+        if (!esp_openclaw_node_has_saved_session(existing)) {
+            return ESP_ERR_NOT_FOUND;
+        }
         const esp_openclaw_node_connect_request_t reconnect = {
             .source = ESP_OPENCLAW_NODE_CONNECT_SOURCE_SAVED_SESSION,
         };
@@ -465,6 +544,13 @@ static void node_reconnect_task(void *arg)
     node_reconnect_scheduled = false;
     xSemaphoreGive(state_lock);
     esp_err_t err = request_node_connection();
+    if (err == ESP_ERR_NOT_FOUND) {
+        /* No saved session and no baked setup code: provisioning is a console
+         * action, so retrying here would loop forever with no new input. */
+        room_ui_set(ROOM_UI_SETUP, "USB console:\ngateway setup-code");
+        vTaskDelete(NULL);
+        return;
+    }
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
         xSemaphoreTake(state_lock, portMAX_DELAY);
         bool schedule = !node_reconnect_scheduled;
@@ -518,6 +604,14 @@ static void node_event(
     (void)data;
     (void)ctx;
     if (event == ESP_OPENCLAW_NODE_EVENT_CONNECTED) {
+        /*
+         * The session URI lands in NVS only after the first hello-ok, so the
+         * boot-time base derivation is stale after console provisioning or a
+         * re-pair to a different gateway. Refresh it on every connect.
+         */
+        char *gateway_http_base = derive_gateway_http_base();
+        room_canvas_set_gateway_http_base(gateway_http_base);
+        free(gateway_http_base);
         if (!schedule_operator_start(0)) {
             room_ui_set(ROOM_UI_ERROR, "Operator token");
         }
@@ -534,20 +628,53 @@ static esp_err_t start_node_client(void)
     config.display_name = "OpenClaw AMOLED Room Node";
     config.event_cb = node_event;
     ESP_RETURN_ON_ERROR(esp_openclaw_node_create(&config, &node_client), TAG, "node create");
+    /* Advertising audio surfaces the microphone path cannot serve would route
+     * Talk to a node that silently fails; Canvas still works without them. */
+    if (media_ready) {
+        ESP_RETURN_ON_ERROR(
+            esp_openclaw_node_register_capability(node_client, "talk"),
+            TAG,
+            "talk capability");
+        ESP_RETURN_ON_ERROR(
+            esp_openclaw_node_register_capability(node_client, "voiceWake"),
+            TAG,
+            "wake capability");
+    } else {
+        ESP_LOGW(TAG, "media init failed; advertising canvas only (no talk/voiceWake)");
+    }
     ESP_RETURN_ON_ERROR(
-        esp_openclaw_node_register_capability(node_client, "talk"),
+        esp_openclaw_node_register_capability(node_client, "canvas"),
         TAG,
-        "talk capability");
+        "canvas capability");
     ESP_RETURN_ON_ERROR(
-        esp_openclaw_node_register_capability(node_client, "voiceWake"),
+        room_canvas_register_node_commands(node_client),
         TAG,
-        "wake capability");
-    ESP_RETURN_ON_ERROR(
-        esp_openclaw_node_register_capability(node_client, "display"),
-        TAG,
-        "display capability");
+        "canvas commands");
+    room_canvas_set_node(node_client);
+    return ESP_OK;
+}
 
-    return request_node_connection();
+static int wake_console_command(int argc, char **argv)
+{
+    (void)argc;
+    (void)argv;
+    if (!media_ready) {
+        printf("talk is unavailable: the microphone path failed at boot\n");
+        return 1;
+    }
+    printf("simulating wake word; watch the display for Talk state\n");
+    on_wake("console", NULL);
+    return 0;
+}
+
+static esp_err_t register_wake_console_command(void)
+{
+    const esp_console_cmd_t command = {
+        .command = "wake",
+        .help = "Simulate the wake word and start one Talk session",
+        .func = wake_console_command,
+    };
+    return esp_console_cmd_register(&command);
 }
 
 void app_main(void)
@@ -590,9 +717,45 @@ void app_main(void)
     ESP_ERROR_CHECK(teardown_task == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
 
     room_ui_init();
+    ESP_ERROR_CHECK(room_canvas_init());
+    char *gateway_http_base = derive_gateway_http_base();
+    room_canvas_set_gateway_http_base(gateway_http_base);
+    free(gateway_http_base);
     room_ui_set(ROOM_UI_CONNECTING, "Wi-Fi");
-    ESP_ERROR_CHECK(connect_wifi());
-    ESP_ERROR_CHECK(room_media_init(on_wake, NULL));
+    ESP_ERROR_CHECK(esp_openclaw_node_wifi_start());
+    seed_wifi_credentials_from_kconfig();
+    esp_openclaw_node_wifi_status_t wifi_status = {0};
+    esp_openclaw_node_wifi_get_status(&wifi_status);
+    if (wifi_status.configured &&
+        !esp_openclaw_node_wifi_wait_for_connection(pdMS_TO_TICKS(30000))) {
+        ESP_LOGW(TAG, "Wi-Fi did not connect within 30 s; fix credentials over the USB console");
+    }
+
+    esp_err_t media_err = room_media_init(on_wake, NULL);
+    if (media_err != ESP_OK) {
+        /* Canvas must stay usable when the unvalidated audio path fails; wake
+         * and Talk stay off until the microphone path works. */
+        ESP_LOGE(
+            TAG,
+            "room media init failed: %s; Talk wake is disabled",
+            esp_err_to_name(media_err));
+    } else {
+        media_ready = true;
+    }
+
     ESP_ERROR_CHECK(start_node_client());
-    ESP_LOGI(TAG, "room hardware ready; provision with `openclaw qr --voice-node`");
+    ESP_ERROR_CHECK(esp_openclaw_node_example_repl_start(node_client));
+    ESP_ERROR_CHECK(register_wake_console_command());
+
+    esp_err_t connect_err = request_node_connection();
+    if (connect_err == ESP_ERR_NOT_FOUND) {
+        room_ui_set(ROOM_UI_SETUP, "USB console:\nwifi set + setup-code");
+        ESP_LOGI(
+            TAG,
+            "no saved session; provision over the USB console: wifi set <ssid> <passphrase>, then gateway setup-code <code>");
+    } else if (connect_err != ESP_OK) {
+        ESP_LOGE(TAG, "node connect request failed: %s", esp_err_to_name(connect_err));
+        room_ui_set(ROOM_UI_ERROR, "Node connect");
+    }
+    ESP_LOGI(TAG, "room node ready; canvas commands become available after pairing");
 }

@@ -390,6 +390,19 @@ const char *esp_openclaw_node_get_device_id(esp_openclaw_node_handle_t node);
  */
 bool esp_openclaw_node_has_saved_session(esp_openclaw_node_handle_t node);
 
+/**
+ * @brief Return a copy of a plugin surface URL received in `hello-ok`.
+ *
+ * @param[in] node Node handle.
+ * @param[in] surface Surface name, for example `"canvas"`.
+ *
+ * @return A `malloc()`-allocated URL string, or `NULL` when the surface was not
+ *         advertised or the arguments are invalid. The caller must free it.
+ */
+char *esp_openclaw_node_dup_plugin_surface_url(
+    esp_openclaw_node_handle_t node,
+    const char *surface);
+
 #ifdef __cplusplus
 }
 #endif

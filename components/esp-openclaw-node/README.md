@@ -101,6 +101,15 @@ successful `hello-ok`
 
 - `esp_openclaw_node_get_device_id()`
 - `esp_openclaw_node_has_saved_session()`
+- `esp_openclaw_node_dup_plugin_surface_url()`
+
+`hello-ok` may include `payload.pluginSurfaceUrls`, an object that maps plugin
+surface names to authenticated absolute URLs. The component retains that map
+for the current node instance. Call
+`esp_openclaw_node_dup_plugin_surface_url(node, "canvas")` to receive a
+`malloc()`-allocated copy of the active connection's Canvas surface URL, or
+`NULL` when the Gateway did not advertise one or the node is disconnected. The
+caller must free the returned string.
 
 The component is driven through registration, one explicit connect request at a
 time, and terminal events.
@@ -469,7 +478,7 @@ Example `connect` from the node:
   "method": "connect",
   "params": {
     "minProtocol": 3,
-    "maxProtocol": 3,
+    "maxProtocol": 4,
     "client": {
       "id": "node-host",
       "displayName": "OpenClaw ESP32",
@@ -535,6 +544,9 @@ Successful `hello-ok` response:
     "server": {
       "version": "2026.4.9",
       "connId": "<gateway-connection-id>"
+    },
+    "pluginSurfaceUrls": {
+      "canvas": "http://192.168.1.10:19100/__openclaw__/cap/<token>"
     },
     "auth": {
       "deviceToken": "<node-device-token>",

@@ -519,6 +519,7 @@ esp_err_t esp_openclaw_node_destroy(esp_openclaw_node_handle_t node)
 
     esp_openclaw_node_cleanup_registry(node);
     esp_openclaw_node_clear_connect_source_struct(&node->active_connect_source);
+    free(node->plugin_surface_urls_json);
     esp_openclaw_node_persisted_session_free(&node->persisted_session);
     esp_openclaw_node_identity_free(&node->identity);
     esp_openclaw_node_free_config_strings(&node->config);
@@ -619,4 +620,29 @@ bool esp_openclaw_node_has_saved_session(esp_openclaw_node_handle_t node)
     bool present = esp_openclaw_node_saved_session_is_present_locked(node);
     esp_openclaw_node_unlock_state(node);
     return present;
+}
+
+char *esp_openclaw_node_dup_plugin_surface_url(
+    esp_openclaw_node_handle_t node,
+    const char *surface)
+{
+    if (node == NULL || surface == NULL || surface[0] == '\0') {
+        return NULL;
+    }
+
+    char *copy = NULL;
+    esp_openclaw_node_lock_state(node);
+    cJSON *urls = node->plugin_surface_urls_json != NULL
+        ? cJSON_Parse(node->plugin_surface_urls_json)
+        : NULL;
+    cJSON *url = cJSON_IsObject(urls)
+        ? cJSON_GetObjectItemCaseSensitive(urls, surface)
+        : NULL;
+    if (cJSON_IsString(url) && url->valuestring != NULL &&
+        url->valuestring[0] != '\0') {
+        copy = esp_openclaw_node_duplicate_string(url->valuestring);
+    }
+    cJSON_Delete(urls);
+    esp_openclaw_node_unlock_state(node);
+    return copy;
 }

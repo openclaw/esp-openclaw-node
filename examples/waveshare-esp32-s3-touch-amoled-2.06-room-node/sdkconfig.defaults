@@ -15,6 +15,14 @@ CONFIG_LV_FONT_MONTSERRAT_16=y
 CONFIG_LV_FONT_MONTSERRAT_20=y
 CONFIG_LV_FONT_MONTSERRAT_24=y
 CONFIG_LV_USE_CLIB_MALLOC=y
+# The BSP's default 100-row LVGL buffer (410x100x2 = 82 KiB) is allocated from
+# the default heap, which lands in PSRAM. The QSPI panel cannot DMA from PSRAM,
+# so esp_lcd bounces every flush through an equally large internal allocation.
+# Once Wi-Fi/TLS and audio are up that allocation fails and flushes are dropped,
+# leaving the panel garbled or dark. Keep the flush chunk small (16 rows is
+# ~13 KiB) and reserve enough internal memory that the bounce always succeeds.
+CONFIG_BSP_DISPLAY_LVGL_BUF_HEIGHT=16
+CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=131072
 CONFIG_LV_USE_LODEPNG=y
 CONFIG_LV_USE_SNAPSHOT=y
 CONFIG_ESP_OPENCLAW_NODE_TASK_STACK_SIZE=12288

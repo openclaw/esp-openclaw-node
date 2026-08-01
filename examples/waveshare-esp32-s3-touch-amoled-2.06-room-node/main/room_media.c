@@ -21,6 +21,7 @@
 
 static esp_capture_handle_t capture;
 static esp_capture_sink_handle_t talk_sink;
+static esp_capture_sink_handle_t wake_sink;
 static av_render_handle_t player;
 static room_wake_callback_t wake_callback;
 static void *wake_callback_ctx;
@@ -142,6 +143,26 @@ static esp_err_t room_audio_codecs_init(
     return *record != NULL && *playback != NULL ? ESP_OK : ESP_ERR_NO_MEM;
 }
 
+/*
+ * The AFE only runs its WakeNet pass inside fetch(), and fetch() is driven by a
+ * consumer reading the sink. Nothing else reads this path while no Talk call is
+ * active, so drain it here: the frames are discarded, but draining keeps the
+ * pipeline turning (and its feed ringbuffer from overflowing) so ambient wake
+ * detections keep arriving through the AFE callback.
+ */
+static void wake_drain_task(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        esp_capture_stream_frame_t frame = {.stream_type = ESP_CAPTURE_STREAM_TYPE_AUDIO};
+        if (esp_capture_sink_acquire_frame(wake_sink, &frame, false) != ESP_CAPTURE_ERR_OK) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+            continue;
+        }
+        esp_capture_sink_release_frame(wake_sink, &frame);
+    }
+}
+
 esp_err_t room_media_init(room_wake_callback_t callback, void *ctx)
 {
     wake_callback = callback;
@@ -187,8 +208,24 @@ esp_err_t room_media_init(room_wake_callback_t callback, void *ctx)
             .bits_per_sample = 16,
         },
     };
+    /*
+     * Sink 1 exists only to keep the AEC/AFE pipeline running whenever no Talk
+     * call is active: WakeNet lives inside that pipeline, so without an
+     * always-on path the AFE never fetches and ambient wake never fires.
+     * Nothing consumes its frames; the wake callback comes from the AFE.
+     */
+    esp_capture_sink_cfg_t wake_cfg = {
+        .audio_info = {
+            .format_id = ESP_CAPTURE_FMT_ID_PCM,
+            .sample_rate = 16000,
+            .channel = 1,
+            .bits_per_sample = 16,
+        },
+    };
     // esp_webrtc owns sink 0 and retrieves this exact pre-created path after capture starts.
     if (esp_capture_sink_setup(capture, 0, &talk_cfg, &talk_sink) != ESP_CAPTURE_ERR_OK ||
+        esp_capture_sink_setup(capture, 1, &wake_cfg, &wake_sink) != ESP_CAPTURE_ERR_OK ||
+        esp_capture_sink_enable(wake_sink, ESP_CAPTURE_RUN_MODE_ALWAYS) != ESP_CAPTURE_ERR_OK ||
         esp_capture_start(capture) != ESP_CAPTURE_ERR_OK) {
         return ESP_FAIL;
     }
@@ -219,6 +256,9 @@ esp_err_t room_media_init(room_wake_callback_t callback, void *ctx)
         return ESP_FAIL;
     }
 
+    if (xTaskCreate(wake_drain_task, "wake_drain", 3072, NULL, 5, NULL) != pdPASS) {
+        return ESP_ERR_NO_MEM;
+    }
     ESP_LOGI(TAG, "ambient WakeNet detections are wired from the AFE");
     ESP_LOGI(TAG, "24 kHz dual-channel capture and device AEC are active");
     return ESP_OK;

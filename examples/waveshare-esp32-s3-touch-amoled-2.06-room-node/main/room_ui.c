@@ -3,9 +3,13 @@
 #include <string.h>
 
 #include "bsp/esp-bsp.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "lvgl.h"
 #include "room_canvas.h"
+
+/* 16 rows x 410 px x RGB565 = ~13 KiB, matching CONFIG_BSP_DISPLAY_LVGL_BUF_HEIGHT. */
+#define ROOM_UI_DRAW_ROWS 16
 
 static const char *TAG = "room_ui";
 static lv_obj_t *status_label;
@@ -18,10 +22,42 @@ static char current_detail[48];
 
 void room_ui_init(void)
 {
-    if (bsp_display_start() == NULL) {
+    lv_display_t *display = bsp_display_start();
+    if (display == NULL) {
         ESP_LOGE(TAG, "failed to start display");
         return;
     }
+    /*
+     * The BSP's draw buffer is allocated from the default heap and lands in
+     * PSRAM, which this QSPI panel cannot DMA from. esp_lcd then bounce-buffers
+     * every flush through a fresh internal allocation, and once Wi-Fi/TLS and
+     * the always-on audio pipeline claim internal RAM those allocations start
+     * failing, silently dropping flushes (stale/overlapping pixels on screen).
+     * Own the draw buffer instead: internal DMA-capable memory taken once here,
+     * before the network and audio stacks start, so no per-flush allocation is
+     * ever needed. Must run under the display lock; the LVGL port task is
+     * already rendering into the buffers this replaces.
+     */
+    if (!bsp_display_lock(0)) {
+        ESP_LOGE(TAG, "failed to lock display for draw buffer setup");
+        return;
+    }
+    size_t draw_bytes = (size_t)BSP_LCD_H_RES * ROOM_UI_DRAW_ROWS * 2;
+    void *draw_buffer = heap_caps_aligned_alloc(
+        CONFIG_LV_DRAW_BUF_ALIGN,
+        draw_bytes,
+        MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    if (draw_buffer != NULL) {
+        lv_display_set_buffers(
+            display,
+            draw_buffer,
+            NULL,
+            (uint32_t)draw_bytes,
+            LV_DISPLAY_RENDER_MODE_PARTIAL);
+    } else {
+        ESP_LOGW(TAG, "no internal DMA memory for the draw buffer; flushes will bounce");
+    }
+    bsp_display_unlock();
     if (!bsp_display_lock(0)) {
         ESP_LOGE(TAG, "failed to lock display during initialization");
         return;

@@ -182,19 +182,48 @@ static bool send_connect_request(
         return false;
     }
 
+    /*
+     * The gateway rebuilds this payload from the DECLARED connect scopes, so
+     * the signed CSV must match params.scopes exactly (same entries, same
+     * registration order). An empty CSV only verifies for scope-less roles,
+     * which is why node connects passed while operator connects failed.
+     */
+    char *scopes_csv = NULL;
+    esp_openclaw_node_lock_state(node);
+    size_t scopes_csv_len = 1;
+    for (size_t i = 0; i < node->scope_count; ++i) {
+        scopes_csv_len += strlen(node->scopes[i]) + 1;
+    }
+    scopes_csv = calloc(1, scopes_csv_len);
+    if (scopes_csv != NULL) {
+        for (size_t i = 0; i < node->scope_count; ++i) {
+            if (i > 0) {
+                strlcat(scopes_csv, ",", scopes_csv_len);
+            }
+            strlcat(scopes_csv, node->scopes[i], scopes_csv_len);
+        }
+    }
+    esp_openclaw_node_unlock_state(node);
+    if (scopes_csv == NULL) {
+        esp_openclaw_node_free_connect_material(&material);
+        ESP_LOGE(ESP_OPENCLAW_NODE_TAG, "failed building scopes payload");
+        return false;
+    }
+
     char *payload = NULL;
     esp_err_t err = esp_openclaw_node_identity_build_auth_payload_v3(
         &node->identity,
         node->config.client_id,
         node->config.client_mode,
         node->config.role,
-        "",
+        scopes_csv,
         signed_at_ms,
         material.signature_token,
         nonce,
         node->config.platform,
         node->config.device_family,
         &payload);
+    free(scopes_csv);
     if (err != ESP_OK || payload == NULL) {
         esp_openclaw_node_free_connect_material(&material);
         ESP_LOGE(ESP_OPENCLAW_NODE_TAG, "failed building auth payload");
@@ -226,8 +255,15 @@ static bool send_connect_request(
     cJSON_AddStringToObject(root, "method", "connect");
 
     cJSON *params = cJSON_CreateObject();
+    /*
+     * maxProtocol 4 keeps the session on the current node protocol: legacy
+     * (v3-only) sessions have plugin-owned caps like `canvas` stripped by the
+     * gateway and never receive `pluginSurfaceUrls`. The node surface this
+     * component uses (connect.challenge, hello-ok, node.invoke.*) is identical
+     * across 3 and 4.
+     */
     cJSON_AddNumberToObject(params, "minProtocol", 3);
-    cJSON_AddNumberToObject(params, "maxProtocol", 3);
+    cJSON_AddNumberToObject(params, "maxProtocol", 4);
 
     cJSON *client = cJSON_CreateObject();
     cJSON_AddStringToObject(client, "id", node->config.client_id);
@@ -489,7 +525,8 @@ static esp_err_t persist_handoff_device_tokens(
 
 static connect_response_finalize_result_t finalize_connect_response_success(
     esp_openclaw_node_handle_t node,
-    const esp_openclaw_node_persisted_session_t *update)
+    const esp_openclaw_node_persisted_session_t *update,
+    char *plugin_surface_urls_json)
 {
     connect_response_finalize_result_t result = {
         .outcome = CONNECT_RESPONSE_OUTCOME_IGNORE,
@@ -512,6 +549,8 @@ static connect_response_finalize_result_t finalize_connect_response_success(
     if (result.err != ESP_OK) {
         result.outcome = CONNECT_RESPONSE_OUTCOME_CONNECT_FAILED;
     } else {
+        free(node->plugin_surface_urls_json);
+        node->plugin_surface_urls_json = plugin_surface_urls_json;
         node->state = ESP_OPENCLAW_NODE_INTERNAL_READY;
         esp_openclaw_node_clear_pending_control_locked(node);
         esp_openclaw_node_clear_session_wait_state_locked(node);
@@ -571,6 +610,20 @@ static void handle_connect_response(
         }
 
         cJSON *auth = cJSON_GetObjectItemCaseSensitive(payload, "auth");
+        cJSON *plugin_surface_urls =
+            cJSON_GetObjectItemCaseSensitive(payload, "pluginSurfaceUrls");
+        char *plugin_surface_urls_json = cJSON_IsObject(plugin_surface_urls)
+            ? cJSON_PrintUnformatted(plugin_surface_urls)
+            : NULL;
+        if (cJSON_IsObject(plugin_surface_urls) && plugin_surface_urls_json == NULL) {
+            esp_openclaw_node_complete_connect_failed(
+                node,
+                ESP_OPENCLAW_NODE_CONNECT_FAILURE_SESSION_FINALIZATION_FAILED,
+                ESP_ERR_NO_MEM,
+                NULL,
+                true);
+            return;
+        }
         cJSON *device_token = auth
             ? cJSON_GetObjectItemCaseSensitive(auth, "deviceToken")
             : NULL;
@@ -578,6 +631,7 @@ static void handle_connect_response(
             ? esp_openclaw_node_trimmed_or_null(device_token->valuestring)
             : NULL;
         if (device_token_text == NULL) {
+            free(plugin_surface_urls_json);
             esp_openclaw_node_complete_connect_failed(
                 node,
                 ESP_OPENCLAW_NODE_CONNECT_FAILURE_SESSION_FINALIZATION_FAILED,
@@ -589,6 +643,7 @@ static void handle_connect_response(
 
         esp_err_t handoff_err = persist_handoff_device_tokens(node, auth);
         if (handoff_err != ESP_OK) {
+            free(plugin_surface_urls_json);
             esp_openclaw_node_complete_connect_failed(
                 node,
                 ESP_OPENCLAW_NODE_CONNECT_FAILURE_SESSION_FINALIZATION_FAILED,
@@ -604,6 +659,7 @@ static void handle_connect_response(
             device_token_text,
             &update);
         if (err != ESP_OK) {
+            free(plugin_surface_urls_json);
             esp_openclaw_node_complete_connect_failed(
                 node,
                 ESP_OPENCLAW_NODE_CONNECT_FAILURE_SESSION_FINALIZATION_FAILED,
@@ -614,7 +670,13 @@ static void handle_connect_response(
         }
 
         connect_response_finalize_result_t result =
-            finalize_connect_response_success(node, &update);
+            finalize_connect_response_success(
+                node,
+                &update,
+                plugin_surface_urls_json);
+        if (result.outcome != CONNECT_RESPONSE_OUTCOME_CONNECTED) {
+            free(plugin_surface_urls_json);
+        }
         esp_openclaw_node_persisted_session_free(&update);
         complete_connect_response_outcome(node, &result);
         return;

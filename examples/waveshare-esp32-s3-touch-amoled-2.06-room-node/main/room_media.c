@@ -15,23 +15,15 @@
 #include "esp_codec_dev.h"
 #include "esp_codec_dev_defaults.h"
 #include "esp_log.h"
-#include "esp_wn_iface.h"
-#include "esp_wn_models.h"
 #include "media_lib_err.h"
-#include "model_path.h"
 
 #define TAG "room_media"
 
 static esp_capture_handle_t capture;
 static esp_capture_sink_handle_t talk_sink;
-static esp_capture_sink_handle_t wake_sink;
 static av_render_handle_t player;
-static esp_wn_iface_t *wakenet;
-static model_iface_data_t *wakenet_data;
-static srmodel_list_t *models;
 static room_wake_callback_t wake_callback;
 static void *wake_callback_ctx;
-static size_t wake_chunk_samples;
 static i2s_chan_handle_t audio_tx;
 static i2s_chan_handle_t audio_rx;
 static const audio_codec_data_if_t *audio_data;
@@ -142,44 +134,6 @@ static esp_err_t room_audio_codecs_init(
     return *record != NULL && *playback != NULL ? ESP_OK : ESP_ERR_NO_MEM;
 }
 
-static void wake_task(void *arg)
-{
-    (void)arg;
-    int16_t *chunk = malloc(wake_chunk_samples * sizeof(*chunk));
-    if (chunk == NULL) {
-        ESP_LOGE(TAG, "failed to allocate WakeNet input chunk");
-        vTaskDelete(NULL);
-        return;
-    }
-    size_t filled = 0;
-    for (;;) {
-        esp_capture_stream_frame_t frame = {.stream_type = ESP_CAPTURE_STREAM_TYPE_AUDIO};
-        if (esp_capture_sink_acquire_frame(wake_sink, &frame, false) != ESP_CAPTURE_ERR_OK) {
-            vTaskDelay(pdMS_TO_TICKS(10));
-            continue;
-        }
-        const int16_t *input = (const int16_t *)frame.data;
-        size_t available = frame.size / sizeof(*input);
-        while (available > 0) {
-            size_t needed = wake_chunk_samples - filled;
-            size_t copy = available < needed ? available : needed;
-            memcpy(chunk + filled, input, copy * sizeof(*input));
-            filled += copy;
-            input += copy;
-            available -= copy;
-            if (filled != wake_chunk_samples) {
-                continue;
-            }
-            int detected = wakenet->detect(wakenet_data, chunk);
-            filled = 0;
-            if (detected > 0 && wake_callback != NULL) {
-                wake_callback(wakenet->get_word_name(wakenet_data, detected), wake_callback_ctx);
-            }
-        }
-        esp_capture_sink_release_frame(wake_sink, &frame);
-    }
-}
-
 esp_err_t room_media_init(room_wake_callback_t callback, void *ctx)
 {
     wake_callback = callback;
@@ -224,18 +178,8 @@ esp_err_t room_media_init(room_wake_callback_t callback, void *ctx)
             .bits_per_sample = 16,
         },
     };
-    esp_capture_sink_cfg_t wake_cfg = {
-        .audio_info = {
-            .format_id = ESP_CAPTURE_FMT_ID_PCM,
-            .sample_rate = 16000,
-            .channel = 1,
-            .bits_per_sample = 16,
-        },
-    };
     // esp_webrtc owns sink 0 and retrieves this exact pre-created path after capture starts.
     if (esp_capture_sink_setup(capture, 0, &talk_cfg, &talk_sink) != ESP_CAPTURE_ERR_OK ||
-        esp_capture_sink_setup(capture, 1, &wake_cfg, &wake_sink) != ESP_CAPTURE_ERR_OK ||
-        esp_capture_sink_enable(wake_sink, ESP_CAPTURE_RUN_MODE_ALWAYS) != ESP_CAPTURE_ERR_OK ||
         esp_capture_start(capture) != ESP_CAPTURE_ERR_OK) {
         return ESP_FAIL;
     }
@@ -266,21 +210,18 @@ esp_err_t room_media_init(room_wake_callback_t callback, void *ctx)
         return ESP_FAIL;
     }
 
-    models = esp_srmodel_init("model");
-    char *model_name = models != NULL ? esp_srmodel_filter(models, ESP_WN_PREFIX, NULL) : NULL;
-    wakenet = model_name != NULL ? (esp_wn_iface_t *)esp_wn_handle_from_name(model_name) : NULL;
-    wakenet_data = wakenet != NULL ? wakenet->create(model_name, DET_MODE_95) : NULL;
-    if (wakenet_data == NULL) {
-        return ESP_ERR_NOT_FOUND;
-    }
-    wake_chunk_samples = (size_t)wakenet->get_samp_chunksize(wakenet_data);
-    if (wake_chunk_samples == 0) {
-        return ESP_FAIL;
-    }
-    if (xTaskCreate(wake_task, "ambient_wake", 8192, NULL, 8, NULL) != pdPASS) {
-        return ESP_ERR_NO_MEM;
-    }
-    ESP_LOGI(TAG, "24 kHz dual-channel capture, device AEC, and WakeNet are active");
+    /*
+     * The AEC capture source above already owns the board's single WakeNet
+     * instance inside its AFE pipeline; creating a second esp-sr instance on
+     * this model aborts inside the closed library on hardware. The AFE does
+     * not surface its wake detections through esp_capture yet, so ambient
+     * wake stays off until that seam exists; the console `wake` command and
+     * gateway-triggered Talk remain fully functional.
+     */
+    ESP_LOGW(
+        TAG,
+        "ambient wake-word detection is disabled on this build; use the console `wake` command to start Talk");
+    ESP_LOGI(TAG, "24 kHz dual-channel capture and device AEC are active");
     return ESP_OK;
 }
 

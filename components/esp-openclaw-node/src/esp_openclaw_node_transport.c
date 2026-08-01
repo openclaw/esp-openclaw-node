@@ -61,15 +61,18 @@ void esp_openclaw_node_cleanup_transport_instance(
     esp_websocket_client_handle_t ws = NULL;
     esp_openclaw_node_transport_event_ctx_t *transport_ctx = NULL;
     char *gateway_uri = NULL;
+    char *plugin_surface_urls_json = NULL;
     bool client_started = false;
 
     esp_openclaw_node_lock_state(node);
     ws = node->ws;
     transport_ctx = node->transport_ctx;
     gateway_uri = node->transport_gateway_uri;
+    plugin_surface_urls_json = node->plugin_surface_urls_json;
     client_started = node->client_started;
     node->transport_ctx = NULL;
     node->transport_gateway_uri = NULL;
+    node->plugin_surface_urls_json = NULL;
     clear_active_transport_fields_locked(node);
     esp_openclaw_node_unlock_state(node);
 
@@ -82,6 +85,7 @@ void esp_openclaw_node_cleanup_transport_instance(
 
     free(transport_ctx);
     free(gateway_uri);
+    free(plugin_surface_urls_json);
 
     esp_openclaw_node_lock_state(node);
     esp_openclaw_node_clear_data_buffer_locked(node);

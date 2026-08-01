@@ -168,6 +168,7 @@ struct esp_openclaw_node {
     char pending_connect_id[32];
     int64_t connect_started_ms;
     char *transport_gateway_uri;
+    char *plugin_surface_urls_json;
     char *rx_buffer;
     size_t rx_buffer_len;
     esp_openclaw_node_connect_request_source_t active_connect_source;

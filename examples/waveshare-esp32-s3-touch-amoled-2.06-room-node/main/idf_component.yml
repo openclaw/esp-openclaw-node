@@ -1,6 +1,7 @@
 dependencies:
   waveshare/esp32_s3_touch_amoled_2_06: "^2.0.0"
   espressif/esp-sr: "^2.4.7"
+  espressif/esp_new_jpeg: "^0.6.1"
   esp_webrtc:
     override_path: ../../../third_party/esp-webrtc-solution/components/esp_webrtc
   esp_peer:

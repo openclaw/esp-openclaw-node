@@ -114,7 +114,7 @@ The node registers these commands. Canvas: `placement` is accepted by `canvas.pr
 | `talk.start` | `{}` | `{"started":true}` |
 | `talk.stop` | `{}` | `{"stopped":true}` |
 
-`canvas.present`, `canvas.navigate`, and A2UI `Image` components accept HTTP(S) URLs. A URL beginning with `/` is resolved through the Gateway's authenticated `canvas` plugin surface URL and the connected Gateway HTTP origin. The device follows redirects, uses the ESP certificate bundle for HTTPS, and accepts only content whose bytes begin with PNG or JPEG magic. Each fetch has a 10-second timeout.
+`canvas.present`, `canvas.navigate`, and A2UI `Image` components accept HTTP(S) URLs. A URL beginning with `/` is resolved through the Gateway's authenticated `canvas` plugin surface URL and the connected Gateway HTTP origin. The device follows redirects, uses the ESP certificate bundle for HTTPS, and accepts only content whose bytes begin with PNG or JPEG magic. Each fetch has a 10-second timeout. The capability-scoped surface URL the Gateway mints has an idle expiry, so the firmware keeps it warm with a periodic `plugin.surface.refresh` RPC — a present after hours of quiet works exactly like the first one.
 
 Prefer JPEG for photos: the hardware-tuned decoder finishes a full-screen image in ~50 ms and decodes straight into the display buffer, while PNG goes through pure-C lodepng at roughly a tenth of that speed (~500 ms for the same frame). PNG remains the right choice for sharp-edged synthetic content.
 

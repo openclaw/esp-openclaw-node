@@ -9,6 +9,8 @@
 
 esp_err_t room_canvas_init(void);
 void room_canvas_set_node(esp_openclaw_node_handle_t node);
+/** Operator-role client used for plugin.surface.refresh (operator scope). */
+void room_canvas_set_refresh_client(esp_openclaw_node_handle_t operator_node);
 void room_canvas_set_gateway_http_base(const char *base_url);
 bool room_canvas_is_active(void);
 /** Cycle status <-> canvas for the on-device debug controls. */

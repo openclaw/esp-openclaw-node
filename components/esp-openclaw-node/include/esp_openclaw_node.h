@@ -403,6 +403,21 @@ char *esp_openclaw_node_dup_plugin_surface_url(
     esp_openclaw_node_handle_t node,
     const char *surface);
 
+/**
+ * @brief Store a refreshed plugin surface URL for @p surface.
+ *
+ * Gateways mint capability-scoped surface URLs with an idle expiry; a
+ * `plugin.surface.refresh` RPC returns a replacement. Storing it here keeps
+ * `esp_openclaw_node_dup_plugin_surface_url()` the single read path. The next
+ * `hello-ok` overwrites the whole set again.
+ *
+ * @return `ESP_OK`, `ESP_ERR_INVALID_ARG`, or `ESP_ERR_NO_MEM`.
+ */
+esp_err_t esp_openclaw_node_store_plugin_surface_url(
+    esp_openclaw_node_handle_t node,
+    const char *surface,
+    const char *url);
+
 #ifdef __cplusplus
 }
 #endif

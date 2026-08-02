@@ -447,7 +447,7 @@ esp_err_t esp_openclaw_node_create(
         "esp_openclaw_node",
         ESP_OPENCLAW_NODE_TASK_STACK_SIZE,
         node,
-        5,
+        ESP_OPENCLAW_NODE_TASK_PRIORITY,
         &node->task_handle);
     if (task_ok != pdPASS) {
         esp_openclaw_node_persisted_session_free(&node->persisted_session);

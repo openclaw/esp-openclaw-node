@@ -144,7 +144,7 @@ esp_err_t esp_openclaw_node_start_transport_for_active_source(
         .keep_alive_idle = 5,
         .keep_alive_interval = 5,
         .keep_alive_count = 3,
-        .task_prio = 5,
+        .task_prio = ESP_OPENCLAW_NODE_TRANSPORT_TASK_PRIORITY,
         .task_stack = ESP_OPENCLAW_NODE_TRANSPORT_TASK_STACK_SIZE,
         .buffer_size = ESP_OPENCLAW_NODE_TRANSPORT_BUFFER_SIZE,
         .user_context = transport_ctx,

@@ -39,11 +39,50 @@ Canvas mode uses a separate 410x502 LVGL screen at 80% brightness. Hiding it ret
 
 **On-device controls.** Tapping the screen or pressing the BOOT button cycles status, a safe-area test card, and a solid fill. The test card draws a border exactly on the safe-area inset with markers at its corners; the solid fill has no content variation, so together they separate panel/transfer artifacts from rendering artifacts without a serial console. The PWR button is hardware power management and is not GPIO-visible.
 
+**Task priorities.** The node worker and websocket tasks run at priority 11
+(`ESP_OPENCLAW_NODE_TASK_PRIORITY`, `ESP_OPENCLAW_NODE_TRANSPORT_TASK_PRIORITY`),
+above the bulk audio encoder workers. At the component default of 5 they starve
+for the entire duration of a call and every `node.invoke` — including
+`talk.stop` — times out until the call ends.
+
 **Display buffers.** LVGL renders into two internal DMA-capable chunk buffers owned by this example rather than the BSP default. The BSP buffer comes from the default heap and lands in PSRAM, which this QSPI panel cannot DMA from; esp_lcd then bounce-buffers every flush through a fresh internal allocation that fails once Wi-Fi/TLS and audio claim internal RAM, silently dropping flushes. Two buffers also keep the renderer off memory the panel is still transmitting.
+
+## Agent face
+
+Talk states render as a procedural face instead of text: two expressive eyes
+(blink, micro-saccades, mood styling) and a mouth whose height follows the
+mean amplitude of the audio the model is actually playing, tapped from the
+audio render path. Connecting shows a thinking gaze; listening widens the eyes
+with a slow bob; errors and setup fall back to text. The face uses more AMOLED
+brightness (40 vs 18) so expressions read across a room, and `canvas.snapshot`
+captures it like any other screen.
+
+`face.set` styles the face: `{"mood":"neutral|happy|excited|thinking|sleepy|sad","holdMs":0..600000}`.
+During a call — even while canvas covers it — the mood rides the active face
+(`holdMs` 0 keeps it until the call ends, and call end resets to neutral).
+Outside a call the face pops up on its own for `holdMs` (default 8 s), each
+call re-arming the full duration, then the idle-dark policy reclaims the
+panel; state changes always win over a held mood. The payload's `visible`
+reports whether the face is actually on screen after the command.
+
+## Bidirectional talk
+
+Both directions run the same client-owned WebRTC flow. The wake word starts a
+session from the room; `talk.start` lets the agent call the room (the device
+dials the provider and the agent greets first), and `talk.stop` ends any
+active session regardless of who started it — including one still dialing,
+which is abandoned before the microphone path goes live. `talk.start` returns
+`{"started":false,"alreadyActive":true}` instead of failing when a session is
+already up.
+
+New commands land in a pending surface the gateway must approve once:
+`openclaw nodes pending`, then `openclaw nodes approve <requestId>`. Commands
+outside the built-in platform allowlist (`face.set`, `talk.start`,
+`talk.stop`) also need `gateway.nodes.commands.allow` in the gateway config.
 
 ## Canvas commands
 
-The node registers these seven commands. `placement` is accepted by `canvas.present` for protocol compatibility and ignored because this node always presents images fullscreen.
+The node registers these commands. Canvas: `placement` is accepted by `canvas.present` for protocol compatibility and ignored because this node always presents images fullscreen.
 
 | Command | Parameters | Success payload |
 | --- | --- | --- |
@@ -54,6 +93,9 @@ The node registers these seven commands. `placement` is accepted by `canvas.pres
 | `canvas.a2ui.pushJSONL` | `{"jsonl":"{...}\n{...}"}` | `{"shown":true,"kind":"a2ui","components":3}` |
 | `canvas.a2ui.push` | `{"messages":[{...},{...}]}` or `{"jsonl":"..."}`; `messages` wins when both are present | A2UI payload above |
 | `canvas.a2ui.reset` | `{}` | `{"reset":true}` |
+| `face.set` | `{"mood":"happy","holdMs":8000}` | `{"mood":"happy","holdMs":8000,"visible":true}` |
+| `talk.start` | `{}` | `{"started":true}` |
+| `talk.stop` | `{}` | `{"stopped":true}` |
 
 `canvas.present`, `canvas.navigate`, and A2UI `Image` components accept HTTP(S) URLs. A URL beginning with `/` is resolved through the Gateway's authenticated `canvas` plugin surface URL and the connected Gateway HTTP origin. The device follows redirects, uses the ESP certificate bundle for HTTPS, and accepts only content whose bytes begin with PNG or JPEG magic. Each fetch has a 10-second timeout.
 

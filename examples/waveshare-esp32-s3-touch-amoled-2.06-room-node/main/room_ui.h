@@ -1,5 +1,8 @@
 #pragma once
 
+#include <stdbool.h>
+#include <stdint.h>
+
 typedef enum {
     ROOM_UI_IDLE = 0,
     ROOM_UI_LISTENING,
@@ -15,3 +18,7 @@ void room_ui_set(room_ui_state_t state, const char *detail);
 void room_ui_refresh(void);
 /** Show a visible status hint after a user-initiated exit from canvas. */
 void room_ui_show_awake_hint(void);
+/** Show the idle face for `show_ms` (agent face.set outside a call). */
+void room_ui_show_face_hint(uint32_t show_ms);
+/** True while the current Talk state renders as the face. */
+bool room_ui_talk_face_active(void);

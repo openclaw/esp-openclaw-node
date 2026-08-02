@@ -8,8 +8,34 @@
 #include "lvgl.h"
 #include "room_canvas.h"
 
-/* 16 rows x 410 px x RGB565 = ~13 KiB, matching CONFIG_BSP_DISPLAY_LVGL_BUF_HEIGHT. */
+/* 16 rows x 410 px x RGB565 = ~13 KiB, matching CONFIG_BSP_DISPLAY_LVGL_BUF_HEIGHT.
+ * Must stay EVEN: flush chunks advance by this many rows and the SH8601
+ * latches windows on 2-pixel boundaries. */
 #define ROOM_UI_DRAW_ROWS 16
+
+/*
+ * The SH8601 requires even-aligned flush windows; odd-aligned partial flushes
+ * leave single-row seams. Full-width stripes also keep the chunk cadence even
+ * for narrow dirty regions (chunk rows = buffer px / area width).
+ */
+static void room_ui_align_flush_area(lv_event_t *event)
+{
+    lv_area_t *area = lv_event_get_param(event);
+    if (area == NULL) {
+        return;
+    }
+    area->x1 = 0;
+    area->x2 = BSP_LCD_H_RES - 1;
+    area->y1 &= ~1;
+    area->y2 |= 1;
+}
+
+/* Tap on the status screen jumps to the canvas view. */
+static void room_ui_status_clicked(lv_event_t *event)
+{
+    (void)event;
+    room_canvas_debug_toggle();
+}
 
 static const char *TAG = "room_ui";
 static lv_obj_t *status_label;
@@ -58,6 +84,10 @@ void room_ui_init(void)
         ESP_LOGW(TAG, "no internal DMA memory for the draw buffer; flushes will bounce");
     }
     bsp_display_unlock();
+    lv_display_add_event_cb(display, room_ui_align_flush_area, LV_EVENT_INVALIDATE_AREA, NULL);
+    /* esp_lvgl_port feeds its rounder from both events; some dirty areas are
+     * (re)injected at refresh time and bypass INVALIDATE_AREA alone. */
+    lv_display_add_event_cb(display, room_ui_align_flush_area, LV_EVENT_REFR_REQUEST, NULL);
     if (!bsp_display_lock(0)) {
         ESP_LOGE(TAG, "failed to lock display during initialization");
         return;
@@ -72,6 +102,11 @@ void room_ui_init(void)
 #endif
     lv_obj_center(status_label);
     lv_label_set_text(status_label, "OpenClaw");
+    lv_obj_add_event_cb(
+        lv_screen_active(),
+        room_ui_status_clicked,
+        LV_EVENT_CLICKED,
+        NULL);
     bsp_display_unlock();
     bsp_display_brightness_set(0);
 }
@@ -105,7 +140,8 @@ static bool room_ui_render_locked(void)
                 lv_obj_center(talk_pill_label);
             }
             lv_label_set_text(talk_pill_label, labels[current_state]);
-            lv_obj_align(talk_pill, LV_ALIGN_TOP_RIGHT, -8, 8);
+            /* The rounded glass clips the corners; top-center stays visible. */
+            lv_obj_align(talk_pill, LV_ALIGN_TOP_MID, 0, 14);
         }
         return false;
     }

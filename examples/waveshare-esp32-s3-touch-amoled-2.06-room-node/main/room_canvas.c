@@ -548,12 +548,19 @@ static bool validate_image_locked(room_canvas_image_t *image)
     return true;
 }
 
-static void style_canvas_screen(void)
+/*
+ * The physical glass has large rounded corners, so laid-out content needs a
+ * safe-area inset (Apple's "safe area") to stay visible. Full-bleed image
+ * presentation intentionally keeps zero padding, like wallpaper.
+ */
+#define ROOM_CANVAS_SAFE_PAD 32
+
+static void style_canvas_screen(int32_t pad)
 {
     lv_obj_set_style_bg_color(canvas_screen, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(canvas_screen, LV_OPA_COVER, 0);
     lv_obj_set_style_text_color(canvas_screen, lv_color_white(), 0);
-    lv_obj_set_style_pad_all(canvas_screen, 12, 0);
+    lv_obj_set_style_pad_all(canvas_screen, pad, 0);
     lv_obj_remove_flag(canvas_screen, LV_OBJ_FLAG_SCROLLABLE);
 }
 
@@ -561,7 +568,7 @@ static void show_placeholder_locked(void)
 {
     lv_obj_clean(canvas_screen);
     clear_images_locked();
-    style_canvas_screen();
+    style_canvas_screen(ROOM_CANVAS_SAFE_PAD);
     lv_obj_t *label = lv_label_create(canvas_screen);
     lv_obj_set_style_text_color(label, lv_color_white(), 0);
 #if LV_FONT_MONTSERRAT_20
@@ -633,7 +640,7 @@ static esp_err_t show_present_image(
 
     lv_obj_clean(canvas_screen);
     clear_images_locked();
-    style_canvas_screen();
+    style_canvas_screen(0);
     images[0] = *image;
     memset(image, 0, sizeof(*image));
     image_count = 1;
@@ -1404,6 +1411,9 @@ static esp_err_t prefetch_a2ui_images(esp_openclaw_node_error_t *out_error)
     lv_obj_set_size(container, LV_PCT(100), LV_PCT(100));
     lv_obj_remove_flag(container, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scrollbar_mode(container, LV_SCROLLBAR_MODE_OFF);
+    /* Background taps must reach the screen's tap-to-hide handler; A2UI
+     * buttons stay individually clickable. */
+    lv_obj_remove_flag(container, LV_OBJ_FLAG_CLICKABLE);
 
     esp_openclaw_node_error_t render_error = {0};
     size_t node_budget = ROOM_CANVAS_MAX_RENDER_NODES;
@@ -1450,6 +1460,10 @@ static esp_err_t prefetch_a2ui_images(esp_openclaw_node_error_t *out_error)
         memset(&fetched[i], 0, sizeof(fetched[i]));
     }
     image_count = fetched_count;
+    /* The image path runs full-bleed (pad 0); restore the safe-area inset for
+     * laid-out content. Only on success, so a failed render leaves the screen
+     * exactly as it was. */
+    style_canvas_screen(ROOM_CANVAS_SAFE_PAD);
     lv_obj_remove_flag(container, LV_OBJ_FLAG_HIDDEN);
     activate_canvas_locked();
     bsp_display_unlock();
@@ -1876,6 +1890,35 @@ static esp_err_t apply_a2ui_array(
     return ESP_OK;
 }
 
+/* Tap on empty canvas background returns to the status screen. */
+static void canvas_screen_clicked(lv_event_t *event)
+{
+    (void)event;
+    char *payload = NULL;
+    esp_openclaw_node_error_t error = {0};
+    if (room_canvas_hide(&payload, &error) == ESP_OK) {
+        free(payload);
+    }
+}
+
+/*
+ * Debug view cycling for the on-device buttons/touch: status -> canvas
+ * (existing A2UI content or the placeholder) -> status. Safe from LVGL event
+ * callbacks too: the display lock is a recursive mutex and neither branch
+ * deletes the object dispatching the event.
+ */
+void room_canvas_debug_toggle(void)
+{
+    char *payload = NULL;
+    esp_openclaw_node_error_t error = {0};
+    esp_err_t err = canvas_active
+        ? room_canvas_hide(&payload, &error)
+        : room_canvas_present(NULL, &payload, &error);
+    if (err == ESP_OK) {
+        free(payload);
+    }
+}
+
 esp_err_t room_canvas_init(void)
 {
     if (!bsp_display_lock(ROOM_CANVAS_DISPLAY_LOCK_MS)) {
@@ -1889,7 +1932,8 @@ esp_err_t room_canvas_init(void)
         ESP_LOGE(TAG, "failed to create canvas screen");
         return ESP_ERR_NO_MEM;
     }
-    style_canvas_screen();
+    style_canvas_screen(ROOM_CANVAS_SAFE_PAD);
+    lv_obj_add_event_cb(canvas_screen, canvas_screen_clicked, LV_EVENT_CLICKED, NULL);
     bsp_display_unlock();
     return ESP_OK;
 }

@@ -11,6 +11,8 @@ esp_err_t room_canvas_init(void);
 void room_canvas_set_node(esp_openclaw_node_handle_t node);
 void room_canvas_set_gateway_http_base(const char *base_url);
 bool room_canvas_is_active(void);
+/** Cycle status <-> canvas for the on-device debug controls. */
+void room_canvas_debug_toggle(void);
 
 esp_err_t room_canvas_present(
     const char *url,

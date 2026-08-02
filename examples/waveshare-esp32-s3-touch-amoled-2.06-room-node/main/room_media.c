@@ -14,6 +14,7 @@
 #include "esp_codec_dev.h"
 #include "esp_codec_dev_defaults.h"
 #include "esp_log.h"
+#include "freertos/idf_additions.h"
 #include "media_lib_err.h"
 #include "room_aec_src.h"
 
@@ -256,12 +257,38 @@ esp_err_t room_media_init(room_wake_callback_t callback, void *ctx)
         return ESP_FAIL;
     }
 
-    if (xTaskCreate(wake_drain_task, "wake_drain", 3072, NULL, 5, NULL) != pdPASS) {
+    if (xTaskCreateWithCaps(
+            wake_drain_task,
+            "wake_drain",
+            3072,
+            NULL,
+            5,
+            NULL,
+            MALLOC_CAP_SPIRAM) != pdPASS) {
         return ESP_ERR_NO_MEM;
     }
     ESP_LOGI(TAG, "ambient WakeNet detections are wired from the AFE");
     ESP_LOGI(TAG, "24 kHz dual-channel capture and device AEC are active");
     return ESP_OK;
+}
+
+esp_err_t room_media_set_ambient_wake(bool enabled)
+{
+    if (wake_sink == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    /*
+     * While a Talk call runs, WebRTC consumes the same AEC/AFE pipeline and
+     * keeps wake detection alive on its own. Leaving this scan path enabled as
+     * well only adds a second consumer that the Opus encoder starves, which
+     * overflows the AFE feed ringbuffer. Disable it for the duration.
+     */
+    esp_capture_run_mode_t mode = enabled
+        ? ESP_CAPTURE_RUN_MODE_ALWAYS
+        : ESP_CAPTURE_RUN_MODE_DISABLE;
+    return esp_capture_sink_enable(wake_sink, mode) == ESP_CAPTURE_ERR_OK
+        ? ESP_OK
+        : ESP_FAIL;
 }
 
 esp_err_t room_media_get_webrtc_provider(esp_webrtc_media_provider_t *provider)

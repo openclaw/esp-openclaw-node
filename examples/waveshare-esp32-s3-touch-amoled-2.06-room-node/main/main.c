@@ -575,6 +575,8 @@ static esp_err_t request_node_connection(void)
     return esp_openclaw_node_request_connect(node_client, &request);
 }
 
+static void schedule_node_reconnect(uint32_t delay_ms);
+
 static void node_reconnect_task(void *arg)
 {
     uint32_t delay_ms = (uint32_t)(uintptr_t)arg;
@@ -591,22 +593,7 @@ static void node_reconnect_task(void *arg)
         return;
     }
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
-        xSemaphoreTake(state_lock, portMAX_DELAY);
-        bool schedule = !node_reconnect_scheduled;
-        node_reconnect_scheduled = true;
-        xSemaphoreGive(state_lock);
-        if (schedule &&
-            xTaskCreate(
-                node_reconnect_task,
-                "node_reconnect",
-                4096,
-                (void *)(uintptr_t)5000,
-                5,
-                NULL) != pdPASS) {
-            xSemaphoreTake(state_lock, portMAX_DELAY);
-            node_reconnect_scheduled = false;
-            xSemaphoreGive(state_lock);
-        }
+        schedule_node_reconnect(5000);
     }
     vTaskDelete(NULL);
 }

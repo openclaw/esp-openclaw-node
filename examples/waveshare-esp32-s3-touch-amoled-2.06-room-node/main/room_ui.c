@@ -107,6 +107,9 @@ void room_ui_init(void)
     lv_obj_set_style_bg_color(lv_screen_active(), lv_color_black(), 0);
     status_label = lv_label_create(lv_screen_active());
     lv_obj_set_style_text_color(status_label, lv_color_white(), 0);
+    /* Multi-line status text centers on the round glass no matter which path
+     * painted it; previously alignment depended on whether the awake hint ran. */
+    lv_obj_set_style_text_align(status_label, LV_TEXT_ALIGN_CENTER, 0);
 #if LV_FONT_MONTSERRAT_28
     lv_obj_set_style_text_font(status_label, &lv_font_montserrat_28, 0);
 #else
@@ -170,6 +173,19 @@ static bool room_ui_render_locked(void)
     return true;
 }
 
+/* Precondition: display lock held. Renders, releases the lock, then applies
+ * the brightness for the state that was actually painted. */
+static void room_ui_paint_and_unlock(void)
+{
+    bool apply_brightness = room_ui_render_locked();
+    room_ui_state_t painted_state = current_state;
+    bsp_display_unlock();
+    if (apply_brightness) {
+        /* AMOLED is fully dark while idle; active states use a deliberately low brightness. */
+        bsp_display_brightness_set(painted_state == ROOM_UI_IDLE ? 0 : 18);
+    }
+}
+
 void room_ui_set(room_ui_state_t state, const char *detail)
 {
     if (status_label == NULL) {
@@ -185,13 +201,7 @@ void room_ui_set(room_ui_state_t state, const char *detail)
     if (detail != NULL) {
         strlcpy(current_detail, detail, sizeof(current_detail));
     }
-    bool apply_brightness = room_ui_render_locked();
-    room_ui_state_t painted_state = current_state;
-    bsp_display_unlock();
-    if (apply_brightness) {
-        /* AMOLED is fully dark while idle; active states use a deliberately low brightness. */
-        bsp_display_brightness_set(painted_state == ROOM_UI_IDLE ? 0 : 18);
-    }
+    room_ui_paint_and_unlock();
 }
 
 void room_ui_show_awake_hint(void)
@@ -203,7 +213,6 @@ void room_ui_show_awake_hint(void)
         return;
     }
     lv_label_set_text(status_label, "OpenClaw\ntap or BOOT for canvas");
-    lv_obj_set_style_text_align(status_label, LV_TEXT_ALIGN_CENTER, 0);
     bsp_display_unlock();
     /* A user-initiated exit must not look like a dead panel, so override the
      * idle-dark policy until the next state change repaints. */
@@ -222,10 +231,5 @@ void room_ui_refresh(void)
     /* Repaint the stored state under one lock hold; a concurrent Talk
      * transition either lands before this render or repaints right after it,
      * so no snapshot of the state can overwrite a newer one. */
-    bool apply_brightness = room_ui_render_locked();
-    room_ui_state_t painted_state = current_state;
-    bsp_display_unlock();
-    if (apply_brightness) {
-        bsp_display_brightness_set(painted_state == ROOM_UI_IDLE ? 0 : 18);
-    }
+    room_ui_paint_and_unlock();
 }

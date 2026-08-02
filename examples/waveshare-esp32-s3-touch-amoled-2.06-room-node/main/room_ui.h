@@ -13,3 +13,5 @@ void room_ui_init(void);
 void room_ui_set(room_ui_state_t state, const char *detail);
 /** Repaint the most recently set state, e.g. after leaving canvas mode. */
 void room_ui_refresh(void);
+/** Show a visible status hint after a user-initiated exit from canvas. */
+void room_ui_show_awake_hint(void);

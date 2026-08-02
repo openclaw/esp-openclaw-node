@@ -69,18 +69,31 @@ void room_ui_init(void)
         return;
     }
     size_t draw_bytes = (size_t)BSP_LCD_H_RES * ROOM_UI_DRAW_ROWS * 2;
-    void *draw_buffer = heap_caps_aligned_alloc(
+    /* Two buffers: the panel DMAs one chunk while LVGL renders the next. With a
+     * single buffer the renderer and the in-flight transfer share memory, which
+     * shows up as streaks of the wrong row on the glass. */
+    void *draw_a = heap_caps_aligned_alloc(
         CONFIG_LV_DRAW_BUF_ALIGN,
         draw_bytes,
         MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-    if (draw_buffer != NULL) {
+    void *draw_b = heap_caps_aligned_alloc(
+        CONFIG_LV_DRAW_BUF_ALIGN,
+        draw_bytes,
+        MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    if (draw_a != NULL) {
         lv_display_set_buffers(
             display,
-            draw_buffer,
-            NULL,
+            draw_a,
+            draw_b,
             (uint32_t)draw_bytes,
             LV_DISPLAY_RENDER_MODE_PARTIAL);
+        ESP_LOGI(
+            TAG,
+            "draw buffers: %u bytes x%d internal DMA",
+            (unsigned)draw_bytes,
+            draw_b != NULL ? 2 : 1);
     } else {
+        heap_caps_free(draw_b);
         ESP_LOGW(TAG, "no internal DMA memory for the draw buffer; flushes will bounce");
     }
     bsp_display_unlock();
@@ -180,6 +193,22 @@ void room_ui_set(room_ui_state_t state, const char *detail)
         /* AMOLED is fully dark while idle; active states use a deliberately low brightness. */
         bsp_display_brightness_set(painted_state == ROOM_UI_IDLE ? 0 : 18);
     }
+}
+
+void room_ui_show_awake_hint(void)
+{
+    if (status_label == NULL) {
+        return;
+    }
+    if (!bsp_display_lock(100)) {
+        return;
+    }
+    lv_label_set_text(status_label, "OpenClaw\ntap or BOOT for canvas");
+    lv_obj_set_style_text_align(status_label, LV_TEXT_ALIGN_CENTER, 0);
+    bsp_display_unlock();
+    /* A user-initiated exit must not look like a dead panel, so override the
+     * idle-dark policy until the next state change repaints. */
+    bsp_display_brightness_set(18);
 }
 
 void room_ui_refresh(void)

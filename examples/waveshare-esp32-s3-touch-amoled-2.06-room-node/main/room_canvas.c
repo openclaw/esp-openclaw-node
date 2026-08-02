@@ -564,6 +564,86 @@ static void style_canvas_screen(int32_t pad)
     lv_obj_remove_flag(canvas_screen, LV_OBJ_FLAG_SCROLLABLE);
 }
 
+static const lv_font_t *font_for_usage(const char *usage);
+
+/*
+ * Diagnostic placeholder: a full-bleed field with a border drawn exactly on the
+ * safe-area inset and dots at each safe-area corner. Solid coverage makes panel
+ * flush artifacts obvious, and the markers show at a glance how much of the
+ * rectangle the rounded glass actually clips.
+ */
+static void show_test_card_locked(void)
+{
+    lv_obj_clean(canvas_screen);
+    clear_images_locked();
+    style_canvas_screen(0);
+
+    lv_obj_t *field = lv_obj_create(canvas_screen);
+    lv_obj_remove_style_all(field);
+    lv_obj_set_size(field, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(field, lv_color_hex(0x202830), 0);
+    lv_obj_set_style_bg_opa(field, LV_OPA_COVER, 0);
+    lv_obj_remove_flag(field, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(field, LV_OBJ_FLAG_CLICKABLE);
+
+    lv_obj_t *safe = lv_obj_create(field);
+    lv_obj_remove_style_all(safe);
+    lv_obj_set_pos(safe, ROOM_CANVAS_SAFE_PAD, ROOM_CANVAS_SAFE_PAD);
+    lv_obj_set_size(
+        safe,
+        ROOM_CANVAS_WIDTH - 2 * ROOM_CANVAS_SAFE_PAD,
+        ROOM_CANVAS_HEIGHT - 2 * ROOM_CANVAS_SAFE_PAD);
+    lv_obj_set_style_border_width(safe, 2, 0);
+    lv_obj_set_style_border_color(safe, lv_color_hex(0x36d399), 0);
+    lv_obj_set_style_radius(safe, 8, 0);
+    lv_obj_set_style_bg_opa(safe, LV_OPA_TRANSP, 0);
+    lv_obj_remove_flag(safe, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(safe, LV_OBJ_FLAG_CLICKABLE);
+
+    static const lv_align_t corners[] = {
+        LV_ALIGN_TOP_LEFT,
+        LV_ALIGN_TOP_RIGHT,
+        LV_ALIGN_BOTTOM_LEFT,
+        LV_ALIGN_BOTTOM_RIGHT,
+    };
+    for (size_t i = 0; i < sizeof(corners) / sizeof(corners[0]); ++i) {
+        lv_obj_t *dot = lv_obj_create(safe);
+        lv_obj_remove_style_all(dot);
+        lv_obj_set_size(dot, 14, 14);
+        lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_bg_color(dot, lv_color_hex(0xf87272), 0);
+        lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
+        lv_obj_align(dot, corners[i], 0, 0);
+        lv_obj_remove_flag(dot, LV_OBJ_FLAG_CLICKABLE);
+    }
+
+    lv_obj_t *caption = lv_label_create(safe);
+    lv_obj_set_style_text_color(caption, lv_color_white(), 0);
+    lv_obj_set_style_text_font(caption, font_for_usage("body"), 0);
+    lv_label_set_text(caption, "safe area\ntap to exit");
+    lv_obj_set_style_text_align(caption, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_center(caption);
+}
+
+/*
+ * Uniform fill with zero content variation. If the panel still shows streaks
+ * here, the artifact is in the transfer path; if this is clean while the test
+ * card streaks, it is in rendering.
+ */
+static void show_solid_fill_locked(void)
+{
+    lv_obj_clean(canvas_screen);
+    clear_images_locked();
+    style_canvas_screen(0);
+    lv_obj_t *field = lv_obj_create(canvas_screen);
+    lv_obj_remove_style_all(field);
+    lv_obj_set_size(field, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(field, lv_color_hex(0x1040c0), 0);
+    lv_obj_set_style_bg_opa(field, LV_OPA_COVER, 0);
+    lv_obj_remove_flag(field, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(field, LV_OBJ_FLAG_CLICKABLE);
+}
+
 static void show_placeholder_locked(void)
 {
     lv_obj_clean(canvas_screen);
@@ -1911,12 +1991,35 @@ void room_canvas_debug_toggle(void)
 {
     char *payload = NULL;
     esp_openclaw_node_error_t error = {0};
-    esp_err_t err = canvas_active
-        ? room_canvas_hide(&payload, &error)
-        : room_canvas_present(NULL, &payload, &error);
-    if (err == ESP_OK) {
-        free(payload);
+    if (canvas_active) {
+        if (room_canvas_hide(&payload, &error) == ESP_OK) {
+            free(payload);
+        }
+        room_ui_show_awake_hint();
+        return;
     }
+    if (root_component_id != NULL) {
+        if (room_canvas_present(NULL, &payload, &error) == ESP_OK) {
+            free(payload);
+        }
+        return;
+    }
+    /* Nothing pushed yet: cycle the two diagnostic views so the panel itself
+     * can be judged (solid fill isolates the transfer path from rendering). */
+    if (!bsp_display_lock(ROOM_CANVAS_DISPLAY_LOCK_MS)) {
+        return;
+    }
+    static bool show_solid;
+    if (show_solid) {
+        show_solid_fill_locked();
+    } else {
+        show_test_card_locked();
+    }
+    show_solid = !show_solid;
+    activate_canvas_locked();
+    bsp_display_unlock();
+    bsp_display_brightness_set(ROOM_CANVAS_BRIGHTNESS);
+    room_ui_refresh();
 }
 
 esp_err_t room_canvas_init(void)

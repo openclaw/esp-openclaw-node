@@ -57,6 +57,8 @@ The node registers these seven commands. `placement` is accepted by `canvas.pres
 
 `canvas.present`, `canvas.navigate`, and A2UI `Image` components accept HTTP(S) URLs. A URL beginning with `/` is resolved through the Gateway's authenticated `canvas` plugin surface URL and the connected Gateway HTTP origin. The device follows redirects, uses the ESP certificate bundle for HTTPS, and accepts only content whose bytes begin with PNG or JPEG magic. Each fetch has a 10-second timeout.
 
+Prefer JPEG for photos: the hardware-tuned decoder finishes a full-screen image in ~50 ms and decodes straight into the display buffer, while PNG goes through pure-C lodepng at roughly a tenth of that speed (~500 ms for the same frame). PNG remains the right choice for sharp-edged synthetic content.
+
 Snapshots always return JPEG because the firmware carries one encoder; a requested `png` format is accepted but the payload truthfully reports `"format":"jpeg"`. `maxWidth` applies nearest-neighbor downscaling, and `quality` maps from 0..1 to JPEG quality 1..100 with a default of 0.80.
 
 HTML responses fail with: `this canvas renders images and A2UI only; render HTML to a PNG/JPEG (e.g. browser screenshot) and present that URL, or use canvas.a2ui.pushJSONL`

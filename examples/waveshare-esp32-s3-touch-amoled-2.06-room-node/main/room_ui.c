@@ -44,9 +44,38 @@ static lv_obj_t *status_label;
 static lv_obj_t *talk_pill;
 static lv_obj_t *talk_pill_label;
 /* Last state/detail survive canvas mode so leaving it restores the live Talk
- * state instead of forcing idle while a call is still active. */
+ * state instead of forcing idle while a call is still active. Guarded by
+ * their own spinlock so a display-lock timeout can never DROP a transition:
+ * losing the operator-ready IDLE update once left the face stuck in the
+ * connecting look forever. Painting may fail and retry; the fact may not.  */
+static portMUX_TYPE state_mux = portMUX_INITIALIZER_UNLOCKED;
 static room_ui_state_t current_state = ROOM_UI_IDLE;
 static char current_detail[48];
+
+static void repaint_retry_expired(void *arg);
+
+/* One-shot retry: a failed display-lock paint self-heals shortly after. */
+static void arm_repaint_retry(void)
+{
+    static esp_timer_handle_t retry_timer;
+    if (retry_timer == NULL) {
+        const esp_timer_create_args_t args = {
+            .callback = repaint_retry_expired,
+            .name = "ui_repaint",
+        };
+        if (esp_timer_create(&args, &retry_timer) != ESP_OK) {
+            return;
+        }
+    }
+    esp_timer_stop(retry_timer);
+    esp_timer_start_once(retry_timer, 40000);
+}
+
+static void repaint_retry_expired(void *arg)
+{
+    (void)arg;
+    room_ui_refresh();
+}
 
 void room_ui_init(void)
 {
@@ -143,9 +172,15 @@ static bool room_ui_state_uses_face(room_ui_state_t state)
 static bool room_ui_render_locked(void)
 {
     static const char *labels[] = {"OpenClaw", "Listening", "Connecting", "Speaking", "Error", "Setup"};
+    /* Snapshot the fact under its own lock; the writer may not hold ours. */
+    taskENTER_CRITICAL(&state_mux);
+    room_ui_state_t state = current_state;
+    char detail[sizeof(current_detail)];
+    memcpy(detail, current_detail, sizeof(detail));
+    taskEXIT_CRITICAL(&state_mux);
     if (room_canvas_is_active()) {
         room_face_hide();
-        if (current_state == ROOM_UI_IDLE) {
+        if (state == ROOM_UI_IDLE) {
             /* A call that ended behind canvas must not leak its mood into the
              * next call. */
             room_face_reset_mood();
@@ -170,7 +205,7 @@ static bool room_ui_render_locked(void)
                 lv_obj_set_style_text_font(talk_pill_label, &lv_font_montserrat_14, 0);
                 lv_obj_center(talk_pill_label);
             }
-            lv_label_set_text(talk_pill_label, labels[current_state]);
+            lv_label_set_text(talk_pill_label, labels[state]);
             /* The rounded glass clips the corners; top-center stays visible. */
             lv_obj_align(talk_pill, LV_ALIGN_TOP_MID, 0, 14);
         }
@@ -181,10 +216,10 @@ static bool room_ui_render_locked(void)
         talk_pill = NULL;
         talk_pill_label = NULL;
     }
-    if (room_ui_state_uses_face(current_state)) {
+    if (room_ui_state_uses_face(state)) {
         room_face_show(
-            current_state == ROOM_UI_SPEAKING ? ROOM_FACE_SPEAKING
-            : current_state == ROOM_UI_CONNECTING ? ROOM_FACE_THINKING
+            state == ROOM_UI_SPEAKING ? ROOM_FACE_SPEAKING
+            : state == ROOM_UI_CONNECTING ? ROOM_FACE_THINKING
                                                   : ROOM_FACE_LISTENING);
         /* If face creation failed at boot, fall through to the text states. */
         if (room_face_is_visible()) {
@@ -200,9 +235,9 @@ static bool room_ui_render_locked(void)
     lv_obj_clear_flag(status_label, LV_OBJ_FLAG_HIDDEN);
     lv_label_set_text_fmt(
         status_label,
-        current_detail[0] != '\0' ? "%s\n%s" : "%s",
-        labels[current_state],
-        current_detail);
+        detail[0] != '\0' ? "%s\n%s" : "%s",
+        labels[state],
+        detail);
     return true;
 }
 
@@ -216,7 +251,9 @@ bool room_ui_talk_face_active(void)
 static void room_ui_paint_and_unlock(void)
 {
     bool apply_brightness = room_ui_render_locked();
+    taskENTER_CRITICAL(&state_mux);
     room_ui_state_t painted_state = current_state;
+    taskEXIT_CRITICAL(&state_mux);
     bsp_display_unlock();
     if (apply_brightness) {
         /* AMOLED is fully dark while idle; the face gets more headroom than
@@ -234,14 +271,18 @@ void room_ui_set(room_ui_state_t state, const char *detail)
         ESP_LOGE(TAG, "status display is not initialized");
         return;
     }
-    if (!bsp_display_lock(100)) {
-        ESP_LOGE(TAG, "failed to lock display for status update");
-        return;
-    }
+    /* Record the fact unconditionally; rendering is best-effort below. */
+    taskENTER_CRITICAL(&state_mux);
     current_state = state;
     current_detail[0] = '\0';
     if (detail != NULL) {
         strlcpy(current_detail, detail, sizeof(current_detail));
+    }
+    taskEXIT_CRITICAL(&state_mux);
+    if (!bsp_display_lock(100)) {
+        ESP_LOGW(TAG, "display busy; state stored, repaint retries");
+        arm_repaint_retry();
+        return;
     }
     room_ui_paint_and_unlock();
 }
@@ -293,7 +334,7 @@ void room_ui_refresh(void)
         return;
     }
     if (!bsp_display_lock(100)) {
-        ESP_LOGE(TAG, "failed to lock display for status refresh");
+        arm_repaint_retry();
         return;
     }
     /* Repaint the stored state under one lock hold; a concurrent Talk

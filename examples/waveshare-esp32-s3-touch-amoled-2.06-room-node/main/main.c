@@ -500,6 +500,8 @@ static void on_wake(const char *wake_word, void *ctx)
         return;
     }
     room_ui_set(ROOM_UI_CONNECTING, wake_word);
+    /* The magic beat: eyes snap wide the instant the wake word lands. */
+    room_face_play_gesture(ROOM_FACE_GESTURE_SURPRISE);
     xTaskNotifyGive(talk_start_worker);
 }
 
@@ -771,6 +773,7 @@ static esp_err_t handle_talk_start(
         *out_payload_json = strdup("{\"started\":false,\"alreadyActive\":true}");
     } else {
         room_ui_set(ROOM_UI_CONNECTING, "agent");
+        room_face_play_gesture(ROOM_FACE_GESTURE_SURPRISE);
         xTaskNotifyGive(talk_start_worker);
         *out_payload_json = strdup("{\"started\":true}");
     }

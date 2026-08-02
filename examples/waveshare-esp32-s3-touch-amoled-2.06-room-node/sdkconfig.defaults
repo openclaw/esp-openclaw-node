@@ -51,3 +51,6 @@ CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
 # command handling is microsecond-scale JSON work.
 CONFIG_ESP_OPENCLAW_NODE_TASK_PRIORITY=11
 CONFIG_ESP_OPENCLAW_NODE_TRANSPORT_TASK_PRIORITY=11
+# 60 Hz refresh for the animated face: measured face redraw cost is a few
+# MB/s against a ~25 MB/s panel budget. Fast saccades visibly smooth out.
+CONFIG_LV_DEF_REFR_PERIOD=16

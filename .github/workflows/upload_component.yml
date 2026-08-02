@@ -7,6 +7,8 @@ on:
 
 jobs:
   upload_components:
+    permissions:
+      id-token: write
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -18,4 +20,3 @@ jobs:
         with:
           components: "esp-openclaw-node:components/esp-openclaw-node"
           namespace: "espressif"
-          api_token: ${{ secrets.IDF_COMPONENT_API_TOKEN }}

@@ -182,6 +182,17 @@ static void discard_response(room_canvas_http_response_t *response)
     free(response->content_type);
 }
 
+/*
+ * esp_http_client discards event-handler return values (http_on_body ignores
+ * the dispatch result), so refusing a download must close the transport;
+ * perform() then errors out instead of pulling the rest of the body.
+ */
+static esp_err_t abort_http_fetch(esp_http_client_event_t *event, esp_err_t err)
+{
+    esp_http_client_close(event->client);
+    return err;
+}
+
 static esp_err_t http_event(esp_http_client_event_t *event)
 {
     room_canvas_http_response_t *response = event->user_data;
@@ -196,7 +207,7 @@ static esp_err_t http_event(esp_http_client_event_t *event)
     if (check_deadline && response->deadline_us != 0 &&
         esp_timer_get_time() > response->deadline_us) {
         response->timed_out = true;
-        return ESP_ERR_TIMEOUT;
+        return abort_http_fetch(event, ESP_ERR_TIMEOUT);
     }
     if (event->event_id == HTTP_EVENT_REDIRECT) {
         response->data_len = 0;
@@ -208,14 +219,32 @@ static esp_err_t http_event(esp_http_client_event_t *event)
         char *copy = strdup(event->header_value);
         if (copy == NULL) {
             response->no_memory = true;
-            return ESP_ERR_NO_MEM;
+            return abort_http_fetch(event, ESP_ERR_NO_MEM);
         }
         free(response->content_type);
         response->content_type = copy;
     } else if (event->event_id == HTTP_EVENT_ON_DATA && event->data_len > 0) {
+        if (response->capacity == 0) {
+            /* Pre-size from Content-Length: skips the doubling-and-copy growth
+             * and rejects an oversized download before pulling all its bytes.
+             * Compare in 64-bit; size_t is 32-bit here. */
+            int64_t content_length = esp_http_client_get_content_length(event->client);
+            if (content_length > (int64_t)ROOM_CANVAS_MAX_IMAGE_BYTES) {
+                response->too_large = true;
+                return abort_http_fetch(event, ESP_ERR_INVALID_SIZE);
+            }
+            if (content_length > 0 &&
+                !response_reserve(response, (size_t)content_length)) {
+                return abort_http_fetch(
+                    event,
+                    response->too_large ? ESP_ERR_INVALID_SIZE : ESP_ERR_NO_MEM);
+            }
+        }
         size_t required = response->data_len + (size_t)event->data_len;
         if (!response_reserve(response, required)) {
-            return response->too_large ? ESP_ERR_INVALID_SIZE : ESP_ERR_NO_MEM;
+            return abort_http_fetch(
+                event,
+                response->too_large ? ESP_ERR_INVALID_SIZE : ESP_ERR_NO_MEM);
         }
         memcpy(response->data + response->data_len, event->data, (size_t)event->data_len);
         response->data_len = required;
@@ -325,8 +354,9 @@ static esp_err_t fetch_image(
             : ESP_FAIL;
     }
 
+    int64_t fetch_start_us = esp_timer_get_time();
     room_canvas_http_response_t response = {
-        .deadline_us = esp_timer_get_time() + (int64_t)ROOM_CANVAS_HTTP_TIMEOUT_MS * 1000,
+        .deadline_us = fetch_start_us + (int64_t)ROOM_CANVAS_HTTP_TIMEOUT_MS * 1000,
     };
     esp_http_client_config_t config = {
         .url = resolved,
@@ -411,6 +441,11 @@ static esp_err_t fetch_image(
     }
 
     free(response.content_type);
+    ESP_LOGI(
+        TAG,
+        "fetched %u bytes in %d ms",
+        (unsigned)response.data_len,
+        (int)((esp_timer_get_time() - fetch_start_us) / 1000));
     image->data = response.data;
     image->data_len = response.data_len;
     image->kind = kind;
@@ -446,7 +481,7 @@ static void clear_images_locked(void)
     image_count = 0;
 }
 
-static bool materialize_jpeg_locked(room_canvas_image_t *image)
+static bool materialize_jpeg(room_canvas_image_t *image)
 {
     jpeg_dec_config_t config = DEFAULT_JPEG_DEC_CONFIG();
     config.output_type = JPEG_PIXEL_FORMAT_RGB565_LE;
@@ -471,52 +506,50 @@ static bool materialize_jpeg_locked(room_canvas_image_t *image)
             output_len == (int)((size_t)header.width * (size_t)header.height * 2);
     }
 
-    uint8_t *pixels = valid ? large_aligned_alloc(16, (size_t)output_len) : NULL;
-    if (pixels == NULL) {
-        valid = false;
-    }
-    if (valid) {
-        io.outbuf = pixels;
-        valid = jpeg_dec_process(decoder, &io) == JPEG_ERR_OK && io.out_size == output_len;
-    }
-    jpeg_dec_close(decoder);
-
+    /* Decode straight into the LVGL buffer: no temp frame, no full-frame copy,
+     * half the peak PSRAM. Requires tightly packed rows
+     * (LV_DRAW_BUF_STRIDE_ALIGN=1) and the 16-byte output alignment
+     * esp_new_jpeg demands (LV_DRAW_BUF_ALIGN=16). Both are build invariants;
+     * a violation fails loudly instead of falling back to a slow copy path. */
     lv_draw_buf_t *decoded = valid
         ? lv_draw_buf_create(header.width, header.height, LV_COLOR_FORMAT_RGB565, LV_STRIDE_AUTO)
         : NULL;
+    if (decoded != NULL &&
+        (decoded->header.stride != (uint32_t)header.width * 2 ||
+         ((uintptr_t)decoded->data & 0xf) != 0)) {
+        ESP_LOGE(
+            TAG,
+            "draw buffer not decode-compatible (stride=%u data=%p); check LV_DRAW_BUF_ALIGN=16 and LV_DRAW_BUF_STRIDE_ALIGN=1",
+            (unsigned)decoded->header.stride,
+            decoded->data);
+        lv_draw_buf_destroy(decoded);
+        decoded = NULL;
+    }
     if (decoded == NULL) {
         valid = false;
     }
     if (valid) {
-        size_t row_size = (size_t)header.width * 2;
-        for (uint32_t y = 0; y < header.height; ++y) {
-            memcpy(
-                decoded->data + ((size_t)y * decoded->header.stride),
-                pixels + ((size_t)y * row_size),
-                row_size);
+        io.outbuf = decoded->data;
+        valid = jpeg_dec_process(decoder, &io) == JPEG_ERR_OK && io.out_size == output_len;
+    }
+    jpeg_dec_close(decoder);
+    if (!valid) {
+        if (decoded != NULL) {
+            lv_draw_buf_destroy(decoded);
         }
-        heap_caps_free(image->data);
-        image->data = NULL;
-        image->data_len = 0;
-        image->decoded = decoded;
-        image->width = header.width;
-        image->height = header.height;
-    } else if (decoded != NULL) {
-        lv_draw_buf_destroy(decoded);
-    }
-    heap_caps_free(pixels);
-    return valid;
-}
-
-static bool validate_image_locked(room_canvas_image_t *image)
-{
-    if (image->kind == ROOM_CANVAS_IMAGE_JPEG) {
-        return materialize_jpeg_locked(image);
-    }
-    if (image->kind != ROOM_CANVAS_IMAGE_PNG) {
         return false;
     }
+    heap_caps_free(image->data);
+    image->data = NULL;
+    image->data_len = 0;
+    image->decoded = decoded;
+    image->width = header.width;
+    image->height = header.height;
+    return true;
+}
 
+static bool materialize_png(room_canvas_image_t *image)
+{
     lv_image_header_t header = {0};
     if (lv_image_decoder_get_info(&image->descriptor, &header) != LV_RESULT_OK ||
         header.w == 0 || header.h == 0) {
@@ -550,6 +583,33 @@ static bool validate_image_locked(room_canvas_image_t *image)
     image->width = header.w;
     image->height = header.h;
     return true;
+}
+
+/*
+ * Runs on the command task WITHOUT the display lock: the LVGL image cache is
+ * disabled (LV_CACHE_DEF_SIZE=0), the decoder list is init-time stable, and
+ * lv_malloc is thread-safe clib malloc, so decoding touches no state the LVGL
+ * task can see. Rendering and touch stay live through a long decode.
+ */
+static bool validate_image(room_canvas_image_t *image)
+{
+    int64_t start_us = esp_timer_get_time();
+    size_t compressed_len = image->data_len;
+    bool jpeg = image->kind == ROOM_CANVAS_IMAGE_JPEG;
+    bool valid = image->kind == ROOM_CANVAS_IMAGE_PNG
+        ? materialize_png(image)
+        : (jpeg && materialize_jpeg(image));
+    if (valid) {
+        ESP_LOGI(
+            TAG,
+            "decoded %s %ub -> %ux%u in %d ms",
+            jpeg ? "jpeg" : "png",
+            (unsigned)compressed_len,
+            (unsigned)image->width,
+            (unsigned)image->height,
+            (int)((esp_timer_get_time() - start_us) / 1000));
+    }
+    return valid;
 }
 
 /*
@@ -703,6 +763,15 @@ static esp_err_t show_present_image(
     char **out_payload_json,
     esp_openclaw_node_error_t *out_error)
 {
+    if (!validate_image(image)) {
+        release_image(image);
+        return set_error(
+            out_error,
+            "DECODE_FAILED",
+            "LVGL could not decode the PNG or JPEG; images are bounded to 2048 px per side and 1 megapixel",
+            ESP_ERR_INVALID_RESPONSE);
+    }
+
     if (!bsp_display_lock(ROOM_CANVAS_DISPLAY_LOCK_MS)) {
         release_image(image);
         return set_error(
@@ -710,16 +779,6 @@ static esp_err_t show_present_image(
             "UNAVAILABLE",
             "the display is busy; retry canvas.present",
             ESP_ERR_TIMEOUT);
-    }
-
-    if (!validate_image_locked(image)) {
-        release_image(image);
-        bsp_display_unlock();
-        return set_error(
-            out_error,
-            "DECODE_FAILED",
-            "LVGL could not decode the PNG or JPEG; images are bounded to 2048 px per side and 1 megapixel",
-            ESP_ERR_INVALID_RESPONSE);
     }
 
     lv_obj_clean(canvas_screen);
@@ -1441,6 +1500,17 @@ static esp_err_t prefetch_a2ui_images(esp_openclaw_node_error_t *out_error)
         ++fetched_count;
     }
 
+    for (size_t i = 0; i < fetched_count; ++i) {
+        if (!validate_image(&fetched[i])) {
+            release_image_array(fetched, ROOM_CANVAS_MAX_IMAGES);
+            return set_error(
+                out_error,
+                "DECODE_FAILED",
+                "LVGL could not decode an A2UI Image; images are bounded to 2048 px per side and 1 megapixel",
+                ESP_ERR_INVALID_RESPONSE);
+        }
+    }
+
     if (!bsp_display_lock(ROOM_CANVAS_DISPLAY_LOCK_MS)) {
         release_image_array(fetched, ROOM_CANVAS_MAX_IMAGES);
         return set_error(
@@ -1448,17 +1518,6 @@ static esp_err_t prefetch_a2ui_images(esp_openclaw_node_error_t *out_error)
             "UNAVAILABLE",
             "the display is busy; retry the A2UI command",
             ESP_ERR_TIMEOUT);
-    }
-    for (size_t i = 0; i < fetched_count; ++i) {
-        if (!validate_image_locked(&fetched[i])) {
-            release_image_array(fetched, ROOM_CANVAS_MAX_IMAGES);
-            bsp_display_unlock();
-            return set_error(
-                out_error,
-                "DECODE_FAILED",
-                "LVGL could not decode an A2UI Image; images are bounded to 2048 px per side and 1 megapixel",
-                ESP_ERR_INVALID_RESPONSE);
-        }
     }
 
     lv_obj_t *container = lv_obj_create(canvas_screen);

@@ -4,6 +4,7 @@ idf_component_register(
         "room_aec_src.c"
         "room_canvas.c"
         "room_canvas_node_cmd.c"
+        "room_face.c"
         "room_media.c"
         "room_ui.c"
         "../../common/esp_openclaw_node_example_repl.c"

@@ -44,3 +44,10 @@ CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
 CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=256
 CONFIG_MBEDTLS_EXTERNAL_MEM_ALLOC=y
+# During a call the audio pipeline runs at priority 10-20 on both cores and a
+# priority-5 node/websocket task starves entirely: node.invoke (face.set,
+# talk.stop) times out for the whole call. 11 sits above the bulk encoder
+# workers but below the latency-critical capture (15) and peer (18) tasks;
+# command handling is microsecond-scale JSON work.
+CONFIG_ESP_OPENCLAW_NODE_TASK_PRIORITY=11
+CONFIG_ESP_OPENCLAW_NODE_TRANSPORT_TASK_PRIORITY=11

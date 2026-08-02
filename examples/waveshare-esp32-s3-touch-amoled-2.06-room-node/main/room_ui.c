@@ -5,8 +5,10 @@
 #include "bsp/esp-bsp.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "lvgl.h"
 #include "room_canvas.h"
+#include "room_face.h"
 
 /* 16 rows x 410 px x RGB565 = ~13 KiB, matching CONFIG_BSP_DISPLAY_LVGL_BUF_HEIGHT.
  * Must stay EVEN: flush chunks advance by this many rows and the SH8601
@@ -122,8 +124,18 @@ void room_ui_init(void)
         room_ui_status_clicked,
         LV_EVENT_CLICKED,
         NULL);
+    if (room_face_create(lv_screen_active()) != ESP_OK) {
+        ESP_LOGW(TAG, "face unavailable; talk states fall back to text");
+    }
     bsp_display_unlock();
     bsp_display_brightness_set(0);
+}
+
+/* Talk-driven states render as the animated face; text is for setup/errors. */
+static bool room_ui_state_uses_face(room_ui_state_t state)
+{
+    return state == ROOM_UI_LISTENING || state == ROOM_UI_CONNECTING ||
+        state == ROOM_UI_SPEAKING;
 }
 
 /* Paints `current_state`/`current_detail` with the display lock held. Returns
@@ -132,7 +144,11 @@ static bool room_ui_render_locked(void)
 {
     static const char *labels[] = {"OpenClaw", "Listening", "Connecting", "Speaking", "Error", "Setup"};
     if (room_canvas_is_active()) {
+        room_face_hide();
         if (current_state == ROOM_UI_IDLE) {
+            /* A call that ended behind canvas must not leak its mood into the
+             * next call. */
+            room_face_reset_mood();
             if (talk_pill != NULL) {
                 lv_obj_delete(talk_pill);
                 talk_pill = NULL;
@@ -165,12 +181,34 @@ static bool room_ui_render_locked(void)
         talk_pill = NULL;
         talk_pill_label = NULL;
     }
+    if (room_ui_state_uses_face(current_state)) {
+        room_face_show(
+            current_state == ROOM_UI_SPEAKING ? ROOM_FACE_SPEAKING
+            : current_state == ROOM_UI_CONNECTING ? ROOM_FACE_THINKING
+                                                  : ROOM_FACE_LISTENING);
+        /* If face creation failed at boot, fall through to the text states. */
+        if (room_face_is_visible()) {
+            lv_obj_add_flag(status_label, LV_OBJ_FLAG_HIDDEN);
+            return true;
+        }
+    }
+    room_face_hide();
+    /* A talk session (or an expired hint) is over; a call-scoped mood must not
+     * leak into the next call. The canvas branch above deliberately keeps the
+     * mood because canvas can cover a still-active call. */
+    room_face_reset_mood();
+    lv_obj_clear_flag(status_label, LV_OBJ_FLAG_HIDDEN);
     lv_label_set_text_fmt(
         status_label,
         current_detail[0] != '\0' ? "%s\n%s" : "%s",
         labels[current_state],
         current_detail);
     return true;
+}
+
+bool room_ui_talk_face_active(void)
+{
+    return room_ui_state_uses_face(current_state);
 }
 
 /* Precondition: display lock held. Renders, releases the lock, then applies
@@ -181,8 +219,12 @@ static void room_ui_paint_and_unlock(void)
     room_ui_state_t painted_state = current_state;
     bsp_display_unlock();
     if (apply_brightness) {
-        /* AMOLED is fully dark while idle; active states use a deliberately low brightness. */
-        bsp_display_brightness_set(painted_state == ROOM_UI_IDLE ? 0 : 18);
+        /* AMOLED is fully dark while idle; the face gets more headroom than
+         * the plain text states so expressions read across the room. */
+        int brightness = painted_state == ROOM_UI_IDLE ? 0
+            : room_ui_state_uses_face(painted_state)   ? 40
+                                                       : 18;
+        bsp_display_brightness_set(brightness);
     }
 }
 
@@ -212,11 +254,37 @@ void room_ui_show_awake_hint(void)
     if (!bsp_display_lock(100)) {
         return;
     }
+    room_face_hide();
+    lv_obj_clear_flag(status_label, LV_OBJ_FLAG_HIDDEN);
     lv_label_set_text(status_label, "OpenClaw\ntap or BOOT for canvas");
     bsp_display_unlock();
     /* A user-initiated exit must not look like a dead panel, so override the
      * idle-dark policy until the next state change repaints. */
     bsp_display_brightness_set(18);
+}
+
+void room_ui_show_face_hint(uint32_t show_ms)
+{
+    if (status_label == NULL) {
+        return;
+    }
+    if (!bsp_display_lock(100)) {
+        return;
+    }
+    /* The face tick owns the hint lifetime (expiry triggers a refresh), so
+     * there is no second timer to race against; re-arming just moves the
+     * deadline the tick reads under the same LVGL lock. */
+    room_face_show_hint(esp_timer_get_time() + (int64_t)show_ms * 1000);
+    /* If face creation failed at boot the show is a no-op; keep the text
+     * status instead of leaving a blank lit panel for the hold duration. */
+    bool shown = room_face_is_visible();
+    if (shown) {
+        lv_obj_add_flag(status_label, LV_OBJ_FLAG_HIDDEN);
+    }
+    bsp_display_unlock();
+    if (shown) {
+        bsp_display_brightness_set(40);
+    }
 }
 
 void room_ui_refresh(void)

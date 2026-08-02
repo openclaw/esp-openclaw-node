@@ -29,6 +29,7 @@
 #include "media_lib_os.h"
 #include "room_canvas.h"
 #include "room_canvas_node_cmd.h"
+#include "room_face.h"
 #include "room_media.h"
 #include "room_ui.h"
 
@@ -43,6 +44,9 @@ static bool operator_ready;
 static bool media_ready;
 static bool talk_starting;
 static bool talk_closing;
+/* Set by talk.stop while the worker is still dialing; the worker must abandon
+ * the session before the microphone path goes live. */
+static bool talk_cancel_requested;
 static bool operator_start_scheduled;
 static bool node_reconnect_scheduled;
 
@@ -53,6 +57,7 @@ typedef struct {
 
 static void start_operator_task(void *arg);
 static void start_talk_once(void);
+static esp_err_t register_talk_node_commands(esp_openclaw_node_handle_t node);
 static TaskHandle_t talk_start_worker;
 
 /*
@@ -352,10 +357,17 @@ static int webrtc_event(esp_webrtc_event_t *event, void *ctx)
     if (event->type == ESP_WEBRTC_EVENT_CONNECTED) {
         xSemaphoreTake(state_lock, portMAX_DELAY);
         bool current = webrtc == session;
+        bool cancelled = current && talk_cancel_requested;
         if (current) {
             talk_starting = false;
+            talk_cancel_requested = false;
         }
         xSemaphoreGive(state_lock);
+        if (cancelled) {
+            /* A stop arrived while the connection was still coming up. */
+            request_talk_teardown(session, false);
+            return 0;
+        }
         if (current) {
             room_ui_set(ROOM_UI_SPEAKING, NULL);
         }
@@ -370,6 +382,17 @@ static int webrtc_event(esp_webrtc_event_t *event, void *ctx)
 
 static void start_talk_once(void)
 {
+    xSemaphoreTake(state_lock, portMAX_DELAY);
+    bool cancelled_early = talk_cancel_requested;
+    if (cancelled_early) {
+        talk_starting = false;
+        talk_cancel_requested = false;
+    }
+    xSemaphoreGive(state_lock);
+    if (cancelled_early) {
+        room_ui_set(ROOM_UI_IDLE, NULL);
+        return;
+    }
     esp_peer_default_cfg_t peer = {
         .agent_recv_timeout = 500,
         .ice_use_lite_mode = true,
@@ -423,13 +446,21 @@ static void start_talk_once(void)
     }
 
     xSemaphoreTake(state_lock, portMAX_DELAY);
-    bool publish = talk_starting && !talk_closing && webrtc == NULL;
+    bool cancelled = talk_cancel_requested;
+    bool publish = !cancelled && talk_starting && !talk_closing && webrtc == NULL;
     if (publish) {
         webrtc = session;
+    }
+    if (cancelled) {
+        talk_starting = false;
+        talk_cancel_requested = false;
     }
     xSemaphoreGive(state_lock);
     if (!publish) {
         esp_webrtc_close(session);
+        if (cancelled) {
+            room_ui_set(ROOM_UI_IDLE, NULL);
+        }
         return;
     }
     /* Talk owns the capture pipeline for the call; ambient scanning resumes at teardown. */
@@ -440,6 +471,17 @@ static void start_talk_once(void)
     }
     if (xTimerStart(talk_timeout_timer, 0) != pdPASS) {
         request_talk_teardown(session, true);
+        return;
+    }
+    /* A stop that landed while esp_webrtc_start was in flight was recorded as
+     * a cancel instead of a teardown so close never races start; honor it now
+     * that start has returned. */
+    xSemaphoreTake(state_lock, portMAX_DELAY);
+    bool cancel_after_start = talk_cancel_requested;
+    talk_cancel_requested = false;
+    xSemaphoreGive(state_lock);
+    if (cancel_after_start) {
+        request_talk_teardown(session, false);
     }
 }
 
@@ -451,6 +493,7 @@ static void on_wake(const char *wake_word, void *ctx)
     bool start = operator_ready && !talk_starting && !talk_closing && webrtc == NULL;
     if (start) {
         talk_starting = true;
+        talk_cancel_requested = false;
     }
     xSemaphoreGive(state_lock);
     if (!start) {
@@ -665,6 +708,10 @@ static esp_err_t start_node_client(void)
             esp_openclaw_node_register_capability(node_client, "voiceWake"),
             TAG,
             "wake capability");
+        ESP_RETURN_ON_ERROR(
+            register_talk_node_commands(node_client),
+            TAG,
+            "talk commands");
     } else {
         ESP_LOGW(TAG, "media init failed; advertising canvas only (no talk/voiceWake)");
     }
@@ -676,7 +723,115 @@ static esp_err_t start_node_client(void)
         room_canvas_register_node_commands(node_client),
         TAG,
         "canvas commands");
+    ESP_RETURN_ON_ERROR(
+        room_face_register_node_commands(node_client),
+        TAG,
+        "face commands");
     room_canvas_set_node(node_client);
+    return ESP_OK;
+}
+
+/*
+ * Bidirectional talk: the wake word starts a session from the room, and these
+ * node commands let the agent start or end one remotely. Both directions run
+ * the same client-owned WebRTC flow; the agent side simply plays the caller.
+ */
+static esp_err_t handle_talk_start(
+    esp_openclaw_node_handle_t node,
+    void *context,
+    const char *params_json,
+    size_t params_len,
+    char **out_payload_json,
+    esp_openclaw_node_error_t *out_error)
+{
+    (void)node;
+    (void)context;
+    (void)params_json;
+    (void)params_len;
+    if (!media_ready) {
+        out_error->code = "UNAVAILABLE";
+        out_error->message = "the microphone path failed at boot; talk is disabled on this node";
+        return ESP_ERR_INVALID_STATE;
+    }
+    xSemaphoreTake(state_lock, portMAX_DELAY);
+    bool already_active = webrtc != NULL || talk_starting || talk_closing;
+    bool start = operator_ready && !already_active;
+    if (start) {
+        talk_starting = true;
+        talk_cancel_requested = false;
+    }
+    bool operator_offline = !operator_ready;
+    xSemaphoreGive(state_lock);
+    if (operator_offline) {
+        out_error->code = "UNAVAILABLE";
+        out_error->message = "the operator session is offline; the node reconnects automatically";
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!start) {
+        *out_payload_json = strdup("{\"started\":false,\"alreadyActive\":true}");
+    } else {
+        room_ui_set(ROOM_UI_CONNECTING, "agent");
+        xTaskNotifyGive(talk_start_worker);
+        *out_payload_json = strdup("{\"started\":true}");
+    }
+    if (*out_payload_json == NULL) {
+        out_error->code = "INTERNAL";
+        out_error->message = "not enough memory for the command result";
+        return ESP_ERR_NO_MEM;
+    }
+    return ESP_OK;
+}
+
+static esp_err_t handle_talk_stop(
+    esp_openclaw_node_handle_t node,
+    void *context,
+    const char *params_json,
+    size_t params_len,
+    char **out_payload_json,
+    esp_openclaw_node_error_t *out_error)
+{
+    (void)node;
+    (void)context;
+    (void)params_json;
+    (void)params_len;
+    xSemaphoreTake(state_lock, portMAX_DELAY);
+    esp_webrtc_handle_t session = webrtc;
+    /* While talk_starting is set, esp_webrtc_start may still be executing on
+     * the worker; closing now would race it. Record a cancel instead — the
+     * worker (or the CONNECTED event) performs the teardown once start has
+     * returned, so close is always serialized behind start. */
+    bool cancelling = talk_starting && !talk_closing;
+    bool active = !cancelling && session != NULL && !talk_closing;
+    if (cancelling) {
+        talk_cancel_requested = true;
+    }
+    xSemaphoreGive(state_lock);
+    if (active) {
+        request_talk_teardown(session, false);
+    }
+    *out_payload_json = strdup(
+        active || cancelling ? "{\"stopped\":true}" : "{\"stopped\":false}");
+    if (*out_payload_json == NULL) {
+        out_error->code = "INTERNAL";
+        out_error->message = "not enough memory for the command result";
+        return ESP_ERR_NO_MEM;
+    }
+    return ESP_OK;
+}
+
+static esp_err_t register_talk_node_commands(esp_openclaw_node_handle_t node)
+{
+    static const esp_openclaw_node_command_t COMMANDS[] = {
+        {.name = "talk.start", .handler = handle_talk_start},
+        {.name = "talk.stop", .handler = handle_talk_stop},
+    };
+    for (size_t i = 0; i < sizeof(COMMANDS) / sizeof(COMMANDS[0]); ++i) {
+        ESP_RETURN_ON_ERROR(
+            esp_openclaw_node_register_command(node, &COMMANDS[i]),
+            TAG,
+            "register %s",
+            COMMANDS[i].name);
+    }
     return ESP_OK;
 }
 

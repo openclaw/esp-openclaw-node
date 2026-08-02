@@ -57,6 +57,15 @@ menu "ESP OpenClaw Node"
                 Stack size, in bytes, allocated to the component's internal
                 worker task created by esp_openclaw_node_create().
 
+        config ESP_OPENCLAW_NODE_TASK_PRIORITY
+            int "Worker task priority"
+            range 1 24
+            default 5
+            help
+                FreeRTOS priority of the component's internal worker task.
+                Raise it above bulk media workloads when node commands must
+                stay responsive during audio/video sessions.
+
     endmenu
 
     menu "WebSocket Transport"
@@ -68,6 +77,15 @@ menu "ESP OpenClaw Node"
             help
                 Stack size, in bytes, requested for the esp_websocket_client
                 task used by the OpenClaw transport.
+
+        config ESP_OPENCLAW_NODE_TRANSPORT_TASK_PRIORITY
+            int "WebSocket client task priority"
+            range 1 24
+            default 5
+            help
+                FreeRTOS priority of the esp_websocket_client task used by
+                the OpenClaw transport. Raise it above bulk media workloads
+                when gateway traffic must stay responsive during calls.
 
         config ESP_OPENCLAW_NODE_TRANSPORT_BUFFER_SIZE
             int "WebSocket transport buffer size"

@@ -17,6 +17,7 @@
 #include "freertos/idf_additions.h"
 #include "media_lib_err.h"
 #include "room_aec_src.h"
+#include "room_face.h"
 
 #define TAG "room_media"
 
@@ -36,6 +37,94 @@ static void room_afe_wake(void *ctx)
     if (wake_callback != NULL) {
         wake_callback("hiesp", wake_callback_ctx);
     }
+}
+
+/*
+ * Audio render tap: forwards every playback frame to the real I2S render and
+ * feeds its mean amplitude to the face, so the mouth follows the model's
+ * actual speech rather than a canned animation. The tap wraps the allocated
+ * i2s render handle through the public audio_render_* dispatch API, so it
+ * needs no knowledge of the render's internals.
+ */
+static audio_render_handle_t render_tap_target;
+
+static audio_render_handle_t render_tap_init(void *cfg, int cfg_size)
+{
+    (void)cfg;
+    (void)cfg_size;
+    return render_tap_target;
+}
+
+static int render_tap_open(audio_render_handle_t render, av_render_audio_frame_info_t *info)
+{
+    return audio_render_open(render, info);
+}
+
+static int render_tap_write(audio_render_handle_t render, av_render_audio_frame_t *frame)
+{
+    if (frame != NULL && frame->data != NULL && frame->size >= 2) {
+        const int16_t *samples = (const int16_t *)frame->data;
+        size_t count = (size_t)frame->size / 2;
+        /* Stride so any frame costs at most ~128 reads on the render task. */
+        size_t step = count / 128 + 1;
+        uint32_t sum = 0;
+        size_t taken = 0;
+        for (size_t i = 0; i < count; i += step) {
+            int32_t value = samples[i];
+            sum += (uint32_t)(value < 0 ? -value : value);
+            ++taken;
+        }
+        uint32_t mean = taken > 0 ? sum / taken : 0;
+        /* Speech mean-abs rarely exceeds ~4000 at our volume; clamp to full open. */
+        uint32_t level = mean >= 4000 ? 255 : (mean * 255) / 4000;
+        room_face_set_speech_level((uint8_t)level);
+    }
+    return audio_render_write(render, frame);
+}
+
+static int render_tap_get_latency(audio_render_handle_t render, uint32_t *latency)
+{
+    return audio_render_get_latency(render, latency);
+}
+
+static int render_tap_get_frame_info(audio_render_handle_t render, av_render_audio_frame_info_t *info)
+{
+    return audio_render_get_frame_info(render, info);
+}
+
+static int render_tap_set_speed(audio_render_handle_t render, float speed)
+{
+    return audio_render_set_speed(render, speed);
+}
+
+static int render_tap_close(audio_render_handle_t render)
+{
+    return audio_render_close(render);
+}
+
+static void render_tap_deinit(audio_render_handle_t render)
+{
+    /* Release the wrapped I2S renderer so freeing the tap frees the chain. */
+    audio_render_free_handle(render);
+}
+
+static audio_render_handle_t room_media_wrap_render(audio_render_handle_t inner)
+{
+    render_tap_target = inner;
+    audio_render_cfg_t tap_cfg = {
+        .ops = {
+            .init = render_tap_init,
+            .open = render_tap_open,
+            .write = render_tap_write,
+            .get_latency = render_tap_get_latency,
+            .get_frame_info = render_tap_get_frame_info,
+            .set_speed = render_tap_set_speed,
+            .close = render_tap_close,
+            .deinit = render_tap_deinit,
+        },
+    };
+    audio_render_handle_t tap = audio_render_alloc_handle(&tap_cfg);
+    return tap != NULL ? tap : inner;
 }
 
 static esp_err_t room_audio_codecs_init(
@@ -237,7 +326,7 @@ esp_err_t room_media_init(room_wake_callback_t callback, void *ctx)
         return ESP_ERR_NO_MEM;
     }
     av_render_cfg_t player_cfg = {
-        .audio_render = renderer,
+        .audio_render = room_media_wrap_render(renderer),
         .audio_raw_fifo_size = 8 * 4096,
         .audio_render_fifo_size = 100 * 1024,
         .allow_drop_data = false,

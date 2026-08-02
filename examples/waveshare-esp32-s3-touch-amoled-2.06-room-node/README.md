@@ -49,13 +49,29 @@ for the entire duration of a call and every `node.invoke` — including
 
 ## Agent face
 
-Talk states render as a procedural face instead of text: two expressive eyes
-(blink, micro-saccades, mood styling) and a mouth whose height follows the
-mean amplitude of the audio the model is actually playing, tapped from the
-audio render path. Connecting shows a thinking gaze; listening widens the eyes
-with a slow bob; errors and setup fall back to text. The face uses more AMOLED
-brightness (40 vs 18) so expressions read across a room, and `canvas.snapshot`
-captures it like any other screen.
+Talk states render as a procedural face instead of text, animated by a tween
+rig: every parameter (eye geometry, gaze, tilt, eyelids, color, mouth) eases
+toward its target with authored curves, so moods and states glide instead of
+snapping. On top of the rig: blink choreography (accelerating close, bounced
+open, occasional double blinks, cat-style slow blinks when happy or sleepy,
+and blinks masking large gaze jumps), saccades with anticipation and
+overshoot, breathing, squash-and-stretch (eyes widen as lids drop), per-eye
+tilt for the eyebrow-less emotional range (outer corners up reads delighted,
+inner corners up reads worried), sliding eyelids, and an arc mouth that rests
+as a mood-shaped smile or frown. While speaking, the mouth becomes three
+equalizer bars driven by the actual playback amplitude with staggered delays,
+and the eyes swell slightly on emphasis. The refresh runs at 60 Hz
+(`LV_DEF_REFR_PERIOD=16`). Errors and setup fall back to text; the face uses
+more AMOLED brightness (40 vs 18) so expressions read across a room, and
+`canvas.snapshot` captures it like any other screen.
+
+`face.gesture {"name":"surprise|yawn|nod|shake"}` plays a short authored
+keyframe gesture; outside a call it pops the face up briefly as a stage. The
+wake word and `talk.start` play the surprise beat automatically, the face
+double-blinks when waking from dark or canvas, and a long-held hint face
+yawns once. Status/talk state is recorded under its own spinlock and painting
+retries on display contention, so a busy display can never lose a state
+transition.
 
 `face.set` styles the face: `{"mood":"neutral|happy|excited|thinking|sleepy|sad","holdMs":0..600000}`.
 During a call — even while canvas covers it — the mood rides the active face
@@ -94,6 +110,7 @@ The node registers these commands. Canvas: `placement` is accepted by `canvas.pr
 | `canvas.a2ui.push` | `{"messages":[{...},{...}]}` or `{"jsonl":"..."}`; `messages` wins when both are present | A2UI payload above |
 | `canvas.a2ui.reset` | `{}` | `{"reset":true}` |
 | `face.set` | `{"mood":"happy","holdMs":8000}` | `{"mood":"happy","holdMs":8000,"visible":true}` |
+| `face.gesture` | `{"name":"nod"}` | `{"gesture":"nod","played":true}` |
 | `talk.start` | `{}` | `{"started":true}` |
 | `talk.stop` | `{}` | `{"stopped":true}` |
 

@@ -18,7 +18,7 @@ See the [Component README](./components/esp-openclaw-node/README.md) for more de
 
 ## Start Here
 
-<a href="https://espressif.github.io/esp-openclaw-node/">
+<a href="https://openclaw.github.io/esp-openclaw-node/">
   <img alt="Try it with ESP Launchpad" src="https://espressif.github.io/esp-launchpad/assets/try_with_launchpad.png" width="220" height="62">
 </a>
 

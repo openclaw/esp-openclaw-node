@@ -17,7 +17,6 @@
 #include "esp_timer.h"
 #include "lvgl.h"
 #include "src/draw/lv_image_decoder_private.h"
-#include "src/misc/cache/instance/lv_image_cache.h"
 #include "mbedtls/base64.h"
 #include "room_ui.h"
 
@@ -153,16 +152,14 @@ static bool response_reserve(room_canvas_http_response_t *response, size_t requi
         return true;
     }
 
+    /* required <= the fetch bound here, so doubling clamped to the bound always
+     * reaches it. */
     size_t capacity = response->capacity > 0 ? response->capacity : 16384;
     while (capacity < required) {
-        size_t next = capacity * 2;
-        capacity = next > ROOM_CANVAS_MAX_IMAGE_BYTES
-            ? ROOM_CANVAS_MAX_IMAGE_BYTES
-            : next;
-        if (capacity < required && capacity == ROOM_CANVAS_MAX_IMAGE_BYTES) {
-            response->too_large = true;
-            return false;
-        }
+        capacity *= 2;
+    }
+    if (capacity > ROOM_CANVAS_MAX_IMAGE_BYTES) {
+        capacity = ROOM_CANVAS_MAX_IMAGE_BYTES;
     }
 
     uint8_t *grown = large_alloc(capacity);
@@ -177,6 +174,12 @@ static bool response_reserve(room_canvas_http_response_t *response, size_t requi
     response->data = grown;
     response->capacity = capacity;
     return true;
+}
+
+static void discard_response(room_canvas_http_response_t *response)
+{
+    heap_caps_free(response->data);
+    free(response->content_type);
 }
 
 static esp_err_t http_event(esp_http_client_event_t *event)
@@ -350,8 +353,7 @@ static esp_err_t fetch_image(
     int status = esp_http_client_get_status_code(client);
     esp_http_client_cleanup(client);
     if (response.too_large) {
-        heap_caps_free(response.data);
-        free(response.content_type);
+        discard_response(&response);
         return set_error(
             out_error,
             "INVALID_PARAMS",
@@ -359,8 +361,7 @@ static esp_err_t fetch_image(
             ESP_ERR_INVALID_SIZE);
     }
     if (response.timed_out) {
-        heap_caps_free(response.data);
-        free(response.content_type);
+        discard_response(&response);
         return set_error(
             out_error,
             "FETCH_FAILED",
@@ -368,8 +369,7 @@ static esp_err_t fetch_image(
             ESP_ERR_TIMEOUT);
     }
     if (response.no_memory) {
-        heap_caps_free(response.data);
-        free(response.content_type);
+        discard_response(&response);
         return set_error(
             out_error,
             "INTERNAL",
@@ -377,8 +377,7 @@ static esp_err_t fetch_image(
             ESP_ERR_NO_MEM);
     }
     if (err != ESP_OK || status < 200 || status >= 300) {
-        heap_caps_free(response.data);
-        free(response.content_type);
+        discard_response(&response);
         return set_error(
             out_error,
             "FETCH_FAILED",
@@ -386,16 +385,13 @@ static esp_err_t fetch_image(
             err != ESP_OK ? err : ESP_FAIL);
     }
     if (content_type_is(response.content_type, "text/html")) {
-        heap_caps_free(response.data);
-        free(response.content_type);
+        discard_response(&response);
         return set_error(out_error, "DECODE_FAILED", HTML_GUIDANCE, ESP_ERR_NOT_SUPPORTED);
     }
     if (content_type_is(response.content_type, "image/svg+xml")) {
-        heap_caps_free(response.data);
-        free(response.content_type);
+        discard_response(&response);
         return set_error(out_error, "DECODE_FAILED", SVG_GUIDANCE, ESP_ERR_NOT_SUPPORTED);
     }
-    free(response.content_type);
 
     room_canvas_image_kind_t kind = ROOM_CANVAS_IMAGE_NONE;
     if (response.data_len >= 2 && response.data[0] == 0xff && response.data[1] == 0xd8) {
@@ -406,7 +402,7 @@ static esp_err_t fetch_image(
         kind = ROOM_CANVAS_IMAGE_PNG;
     }
     if (kind == ROOM_CANVAS_IMAGE_NONE) {
-        heap_caps_free(response.data);
+        discard_response(&response);
         return set_error(
             out_error,
             "DECODE_FAILED",
@@ -414,6 +410,7 @@ static esp_err_t fetch_image(
             ESP_ERR_NOT_SUPPORTED);
     }
 
+    free(response.content_type);
     image->data = response.data;
     image->data_len = response.data_len;
     image->kind = kind;
@@ -434,11 +431,18 @@ static void release_image(room_canvas_image_t *image)
     memset(image, 0, sizeof(*image));
 }
 
+/* Releasing a zeroed entry is a no-op, so callers may always pass the full
+ * array and never reason about how many slots were populated before a failure. */
+static void release_image_array(room_canvas_image_t *array, size_t count)
+{
+    for (size_t i = 0; i < count; ++i) {
+        release_image(&array[i]);
+    }
+}
+
 static void clear_images_locked(void)
 {
-    for (size_t i = 0; i < image_count; ++i) {
-        release_image(&images[i]);
-    }
+    release_image_array(images, ROOM_CANVAS_MAX_IMAGES);
     image_count = 0;
 }
 
@@ -1413,9 +1417,7 @@ static esp_err_t prefetch_a2ui_images(esp_openclaw_node_error_t *out_error)
         cJSON *url = cJSON_GetObjectItemCaseSensitive(type, "url");
         const char *url_text = resolve_string(url);
         if (url_text[0] == '\0') {
-            for (size_t j = 0; j < fetched_count; ++j) {
-                release_image(&fetched[j]);
-            }
+            release_image_array(fetched, ROOM_CANVAS_MAX_IMAGES);
             return set_error(
                 out_error,
                 "INVALID_PARAMS",
@@ -1424,16 +1426,12 @@ static esp_err_t prefetch_a2ui_images(esp_openclaw_node_error_t *out_error)
         }
         esp_err_t err = fetch_image(url_text, &fetched[fetched_count], out_error);
         if (err != ESP_OK) {
-            for (size_t j = 0; j <= fetched_count; ++j) {
-                release_image(&fetched[j]);
-            }
+            release_image_array(fetched, ROOM_CANVAS_MAX_IMAGES);
             return err;
         }
         fetched[fetched_count].component_id = strdup(components[i].id);
         if (fetched[fetched_count].component_id == NULL) {
-            for (size_t j = 0; j <= fetched_count; ++j) {
-                release_image(&fetched[j]);
-            }
+            release_image_array(fetched, ROOM_CANVAS_MAX_IMAGES);
             return set_error(
                 out_error,
                 "INTERNAL",
@@ -1444,9 +1442,7 @@ static esp_err_t prefetch_a2ui_images(esp_openclaw_node_error_t *out_error)
     }
 
     if (!bsp_display_lock(ROOM_CANVAS_DISPLAY_LOCK_MS)) {
-        for (size_t i = 0; i < fetched_count; ++i) {
-            release_image(&fetched[i]);
-        }
+        release_image_array(fetched, ROOM_CANVAS_MAX_IMAGES);
         return set_error(
             out_error,
             "UNAVAILABLE",
@@ -1455,9 +1451,7 @@ static esp_err_t prefetch_a2ui_images(esp_openclaw_node_error_t *out_error)
     }
     for (size_t i = 0; i < fetched_count; ++i) {
         if (!validate_image_locked(&fetched[i])) {
-            for (size_t j = 0; j < fetched_count; ++j) {
-                release_image(&fetched[j]);
-            }
+            release_image_array(fetched, ROOM_CANVAS_MAX_IMAGES);
             bsp_display_unlock();
             return set_error(
                 out_error,
@@ -1469,9 +1463,7 @@ static esp_err_t prefetch_a2ui_images(esp_openclaw_node_error_t *out_error)
 
     lv_obj_t *container = lv_obj_create(canvas_screen);
     if (container == NULL) {
-        for (size_t i = 0; i < fetched_count; ++i) {
-            release_image(&fetched[i]);
-        }
+        release_image_array(fetched, ROOM_CANVAS_MAX_IMAGES);
         bsp_display_unlock();
         return set_error(
             out_error,
@@ -1509,9 +1501,7 @@ static esp_err_t prefetch_a2ui_images(esp_openclaw_node_error_t *out_error)
         &render_error);
     if (root == NULL || render_error.code != NULL) {
         lv_obj_delete(container);
-        for (size_t i = 0; i < fetched_count; ++i) {
-            release_image(&fetched[i]);
-        }
+        release_image_array(fetched, ROOM_CANVAS_MAX_IMAGES);
         if (render_error.code != NULL) {
             *out_error = render_error;
         } else {
@@ -1557,42 +1547,24 @@ static esp_err_t render_a2ui_result(
     char **out_payload_json,
     esp_openclaw_node_error_t *out_error)
 {
-    if (!force_active && !canvas_active) {
-        int required = snprintf(
-            NULL,
-            0,
-            "{\"shown\":false,\"kind\":\"a2ui\",\"components\":%u}",
-            (unsigned)component_count);
-        *out_payload_json = malloc((size_t)required + 1);
-        if (*out_payload_json == NULL) {
-            return set_error(out_error, "INTERNAL", "not enough memory for the command result", ESP_ERR_NO_MEM);
+    bool shown = force_active || canvas_active;
+    if (shown) {
+        esp_err_t err = prefetch_a2ui_images(out_error);
+        if (err != ESP_OK) {
+            return err;
         }
-        snprintf(
-            *out_payload_json,
-            (size_t)required + 1,
-            "{\"shown\":false,\"kind\":\"a2ui\",\"components\":%u}",
-            (unsigned)component_count);
-        return ESP_OK;
     }
-
-    esp_err_t err = prefetch_a2ui_images(out_error);
-    if (err != ESP_OK) {
-        return err;
-    }
-    int required = snprintf(
-        NULL,
-        0,
-        "{\"shown\":true,\"kind\":\"a2ui\",\"components\":%u}",
+    char payload[64];
+    snprintf(
+        payload,
+        sizeof(payload),
+        "{\"shown\":%s,\"kind\":\"a2ui\",\"components\":%u}",
+        shown ? "true" : "false",
         (unsigned)component_count);
-    *out_payload_json = malloc((size_t)required + 1);
+    *out_payload_json = strdup(payload);
     if (*out_payload_json == NULL) {
         return set_error(out_error, "INTERNAL", "not enough memory for the command result", ESP_ERR_NO_MEM);
     }
-    snprintf(
-        *out_payload_json,
-        (size_t)required + 1,
-        "{\"shown\":true,\"kind\":\"a2ui\",\"components\":%u}",
-        (unsigned)component_count);
     return ESP_OK;
 }
 
@@ -2193,7 +2165,7 @@ esp_err_t room_canvas_snapshot(
         heap_caps_free(jpeg);
         return set_error(
             out_error,
-            jpeg_err == JPEG_ERR_NO_MEM ? "INTERNAL" : "INTERNAL",
+            "INTERNAL",
             jpeg_err == JPEG_ERR_NO_MEM
                 ? "not enough memory for the JPEG snapshot"
                 : "the JPEG encoder could not encode the snapshot",

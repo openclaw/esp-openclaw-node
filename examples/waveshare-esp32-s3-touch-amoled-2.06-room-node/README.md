@@ -33,7 +33,13 @@ The first setup-code handshake stores two role-keyed device tokens against one h
 
 WakeNet remains active while playback is running and consumes the AEC-cleaned capture stream. A wake starts one client-owned WebRTC Talk session; the media peer connects directly to the configured provider while OpenClaw owns provider credentials and agent delegation. Calls close after the configured maximum lifetime, and another wake can start a new call.
 
-Canvas mode uses a separate 410x502 LVGL screen at 80% brightness. Hiding it returns to the status screen and the normal AMOLED-off idle policy. Talk state changes do not replace active Canvas content; a small status pill appears in the top-right corner until Talk returns to idle.
+Canvas mode uses a separate 410x502 LVGL screen at 80% brightness. Hiding it returns to the status screen; a user-initiated exit leaves a readable hint rather than dropping straight to the AMOLED-off idle policy. Talk state changes do not replace active Canvas content; a small status pill appears at the top-center until Talk returns to idle.
+
+**Safe area.** The glass has large rounded corners, so laid-out content (A2UI, placeholder, test card) is inset 32 px — the same idea as Apple's safe area. Presented images are intentionally full-bleed, like wallpaper.
+
+**On-device controls.** Tapping the screen or pressing the BOOT button cycles status, a safe-area test card, and a solid fill. The test card draws a border exactly on the safe-area inset with markers at its corners; the solid fill has no content variation, so together they separate panel/transfer artifacts from rendering artifacts without a serial console. The PWR button is hardware power management and is not GPIO-visible.
+
+**Display buffers.** LVGL renders into two internal DMA-capable chunk buffers owned by this example rather than the BSP default. The BSP buffer comes from the default heap and lands in PSRAM, which this QSPI panel cannot DMA from; esp_lcd then bounce-buffers every flush through a fresh internal allocation that fails once Wi-Fi/TLS and audio claim internal RAM, silently dropping flushes. Two buffers also keep the renderer off memory the panel is still transmitting.
 
 ## Canvas commands
 

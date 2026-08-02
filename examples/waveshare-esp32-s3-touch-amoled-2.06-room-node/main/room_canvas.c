@@ -1979,6 +1979,9 @@ static void canvas_screen_clicked(lv_event_t *event)
     if (room_canvas_hide(&payload, &error) == ESP_OK) {
         free(payload);
     }
+    /* Same contract as the BOOT/status toggle: a user-initiated exit must not
+     * land on the idle-dark screen and look like a dead panel. */
+    room_ui_show_awake_hint();
 }
 
 /*

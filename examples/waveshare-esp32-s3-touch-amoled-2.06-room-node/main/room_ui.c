@@ -14,9 +14,9 @@
 #define ROOM_UI_DRAW_ROWS 16
 
 /*
- * The SH8601 requires even-aligned flush windows; odd-aligned partial flushes
- * leave single-row seams. Full-width stripes also keep the chunk cadence even
- * for narrow dirty regions (chunk rows = buffer px / area width).
+ * The SH8601 latches flush windows on 2-pixel boundaries, so dirty areas are
+ * expanded to even rows and full width. Only LV_EVENT_INVALIDATE_AREA carries
+ * an area; refresh-time events do not, and must not be hooked here.
  */
 static void room_ui_align_flush_area(lv_event_t *event)
 {
@@ -96,11 +96,10 @@ void room_ui_init(void)
         heap_caps_free(draw_b);
         ESP_LOGW(TAG, "no internal DMA memory for the draw buffer; flushes will bounce");
     }
-    bsp_display_unlock();
+    /* Registering mutates the display's event list, which the LVGL port task
+     * walks on every refresh; keep the lock held across it. */
     lv_display_add_event_cb(display, room_ui_align_flush_area, LV_EVENT_INVALIDATE_AREA, NULL);
-    /* esp_lvgl_port feeds its rounder from both events; some dirty areas are
-     * (re)injected at refresh time and bypass INVALIDATE_AREA alone. */
-    lv_display_add_event_cb(display, room_ui_align_flush_area, LV_EVENT_REFR_REQUEST, NULL);
+    bsp_display_unlock();
     if (!bsp_display_lock(0)) {
         ESP_LOGE(TAG, "failed to lock display during initialization");
         return;

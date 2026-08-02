@@ -584,6 +584,8 @@ static esp_err_t start_operator_client(void)
     xSemaphoreTake(state_lock, portMAX_DELAY);
     operator_client = created;
     xSemaphoreGive(state_lock);
+    /* The canvas keep-warm refresh needs operator scope. */
+    room_canvas_set_refresh_client(created);
     return esp_openclaw_node_request_connect(created, &request);
 }
 

@@ -622,6 +622,44 @@ bool esp_openclaw_node_has_saved_session(esp_openclaw_node_handle_t node)
     return present;
 }
 
+esp_err_t esp_openclaw_node_store_plugin_surface_url(
+    esp_openclaw_node_handle_t node,
+    const char *surface,
+    const char *url)
+{
+    if (node == NULL || surface == NULL || surface[0] == '\0' ||
+        url == NULL || url[0] == '\0') {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    esp_err_t err = ESP_OK;
+    esp_openclaw_node_lock_state(node);
+    cJSON *urls = node->plugin_surface_urls_json != NULL
+        ? cJSON_Parse(node->plugin_surface_urls_json)
+        : NULL;
+    if (!cJSON_IsObject(urls)) {
+        cJSON_Delete(urls);
+        urls = cJSON_CreateObject();
+    }
+    if (urls == NULL) {
+        err = ESP_ERR_NO_MEM;
+    } else {
+        cJSON_DeleteItemFromObjectCaseSensitive(urls, surface);
+        char *serialized = cJSON_AddStringToObject(urls, surface, url) != NULL
+            ? cJSON_PrintUnformatted(urls)
+            : NULL;
+        if (serialized == NULL) {
+            err = ESP_ERR_NO_MEM;
+        } else {
+            free(node->plugin_surface_urls_json);
+            node->plugin_surface_urls_json = serialized;
+        }
+        cJSON_Delete(urls);
+    }
+    esp_openclaw_node_unlock_state(node);
+    return err;
+}
+
 char *esp_openclaw_node_dup_plugin_surface_url(
     esp_openclaw_node_handle_t node,
     const char *surface)

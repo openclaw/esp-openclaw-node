@@ -3,9 +3,39 @@
 #include <string.h>
 
 #include "bsp/esp-bsp.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "lvgl.h"
 #include "room_canvas.h"
+
+/* 16 rows x 410 px x RGB565 = ~13 KiB, matching CONFIG_BSP_DISPLAY_LVGL_BUF_HEIGHT.
+ * Must stay EVEN: flush chunks advance by this many rows and the SH8601
+ * latches windows on 2-pixel boundaries. */
+#define ROOM_UI_DRAW_ROWS 16
+
+/*
+ * The SH8601 latches flush windows on 2-pixel boundaries, so dirty areas are
+ * expanded to even rows and full width. Only LV_EVENT_INVALIDATE_AREA carries
+ * an area; refresh-time events do not, and must not be hooked here.
+ */
+static void room_ui_align_flush_area(lv_event_t *event)
+{
+    lv_area_t *area = lv_event_get_param(event);
+    if (area == NULL) {
+        return;
+    }
+    area->x1 = 0;
+    area->x2 = BSP_LCD_H_RES - 1;
+    area->y1 &= ~1;
+    area->y2 |= 1;
+}
+
+/* Tap on the status screen jumps to the canvas view. */
+static void room_ui_status_clicked(lv_event_t *event)
+{
+    (void)event;
+    room_canvas_debug_toggle();
+}
 
 static const char *TAG = "room_ui";
 static lv_obj_t *status_label;
@@ -18,10 +48,58 @@ static char current_detail[48];
 
 void room_ui_init(void)
 {
-    if (bsp_display_start() == NULL) {
+    lv_display_t *display = bsp_display_start();
+    if (display == NULL) {
         ESP_LOGE(TAG, "failed to start display");
         return;
     }
+    /*
+     * The BSP's draw buffer is allocated from the default heap and lands in
+     * PSRAM, which this QSPI panel cannot DMA from. esp_lcd then bounce-buffers
+     * every flush through a fresh internal allocation, and once Wi-Fi/TLS and
+     * the always-on audio pipeline claim internal RAM those allocations start
+     * failing, silently dropping flushes (stale/overlapping pixels on screen).
+     * Own the draw buffer instead: internal DMA-capable memory taken once here,
+     * before the network and audio stacks start, so no per-flush allocation is
+     * ever needed. Must run under the display lock; the LVGL port task is
+     * already rendering into the buffers this replaces.
+     */
+    if (!bsp_display_lock(0)) {
+        ESP_LOGE(TAG, "failed to lock display for draw buffer setup");
+        return;
+    }
+    size_t draw_bytes = (size_t)BSP_LCD_H_RES * ROOM_UI_DRAW_ROWS * 2;
+    /* Two buffers: the panel DMAs one chunk while LVGL renders the next. With a
+     * single buffer the renderer and the in-flight transfer share memory, which
+     * shows up as streaks of the wrong row on the glass. */
+    void *draw_a = heap_caps_aligned_alloc(
+        CONFIG_LV_DRAW_BUF_ALIGN,
+        draw_bytes,
+        MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    void *draw_b = heap_caps_aligned_alloc(
+        CONFIG_LV_DRAW_BUF_ALIGN,
+        draw_bytes,
+        MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    if (draw_a != NULL) {
+        lv_display_set_buffers(
+            display,
+            draw_a,
+            draw_b,
+            (uint32_t)draw_bytes,
+            LV_DISPLAY_RENDER_MODE_PARTIAL);
+        ESP_LOGI(
+            TAG,
+            "draw buffers: %u bytes x%d internal DMA",
+            (unsigned)draw_bytes,
+            draw_b != NULL ? 2 : 1);
+    } else {
+        heap_caps_free(draw_b);
+        ESP_LOGW(TAG, "no internal DMA memory for the draw buffer; flushes will bounce");
+    }
+    /* Registering mutates the display's event list, which the LVGL port task
+     * walks on every refresh; keep the lock held across it. */
+    lv_display_add_event_cb(display, room_ui_align_flush_area, LV_EVENT_INVALIDATE_AREA, NULL);
+    bsp_display_unlock();
     if (!bsp_display_lock(0)) {
         ESP_LOGE(TAG, "failed to lock display during initialization");
         return;
@@ -36,6 +114,11 @@ void room_ui_init(void)
 #endif
     lv_obj_center(status_label);
     lv_label_set_text(status_label, "OpenClaw");
+    lv_obj_add_event_cb(
+        lv_screen_active(),
+        room_ui_status_clicked,
+        LV_EVENT_CLICKED,
+        NULL);
     bsp_display_unlock();
     bsp_display_brightness_set(0);
 }
@@ -69,7 +152,8 @@ static bool room_ui_render_locked(void)
                 lv_obj_center(talk_pill_label);
             }
             lv_label_set_text(talk_pill_label, labels[current_state]);
-            lv_obj_align(talk_pill, LV_ALIGN_TOP_RIGHT, -8, 8);
+            /* The rounded glass clips the corners; top-center stays visible. */
+            lv_obj_align(talk_pill, LV_ALIGN_TOP_MID, 0, 14);
         }
         return false;
     }
@@ -108,6 +192,22 @@ void room_ui_set(room_ui_state_t state, const char *detail)
         /* AMOLED is fully dark while idle; active states use a deliberately low brightness. */
         bsp_display_brightness_set(painted_state == ROOM_UI_IDLE ? 0 : 18);
     }
+}
+
+void room_ui_show_awake_hint(void)
+{
+    if (status_label == NULL) {
+        return;
+    }
+    if (!bsp_display_lock(100)) {
+        return;
+    }
+    lv_label_set_text(status_label, "OpenClaw\ntap or BOOT for canvas");
+    lv_obj_set_style_text_align(status_label, LV_TEXT_ALIGN_CENTER, 0);
+    bsp_display_unlock();
+    /* A user-initiated exit must not look like a dead panel, so override the
+     * idle-dark policy until the next state change repaints. */
+    bsp_display_brightness_set(18);
 }
 
 void room_ui_refresh(void)

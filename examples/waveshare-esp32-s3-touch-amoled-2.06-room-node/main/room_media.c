@@ -9,24 +9,34 @@
 #include "esp_audio_dec_default.h"
 #include "esp_audio_enc_default.h"
 #include "esp_capture.h"
-#include "esp_capture_defaults.h"
 #include "esp_capture_sink.h"
 #include "esp_check.h"
 #include "esp_codec_dev.h"
 #include "esp_codec_dev_defaults.h"
 #include "esp_log.h"
+#include "freertos/idf_additions.h"
 #include "media_lib_err.h"
+#include "room_aec_src.h"
 
 #define TAG "room_media"
 
 static esp_capture_handle_t capture;
 static esp_capture_sink_handle_t talk_sink;
+static esp_capture_sink_handle_t wake_sink;
 static av_render_handle_t player;
 static room_wake_callback_t wake_callback;
 static void *wake_callback_ctx;
 static i2s_chan_handle_t audio_tx;
 static i2s_chan_handle_t audio_rx;
 static const audio_codec_data_if_t *audio_data;
+
+static void room_afe_wake(void *ctx)
+{
+    (void)ctx;
+    if (wake_callback != NULL) {
+        wake_callback("hiesp", wake_callback_ctx);
+    }
+}
 
 static esp_err_t room_audio_codecs_init(
     esp_codec_dev_handle_t *record,
@@ -134,6 +144,26 @@ static esp_err_t room_audio_codecs_init(
     return *record != NULL && *playback != NULL ? ESP_OK : ESP_ERR_NO_MEM;
 }
 
+/*
+ * The AFE only runs its WakeNet pass inside fetch(), and fetch() is driven by a
+ * consumer reading the sink. Nothing else reads this path while no Talk call is
+ * active, so drain it here: the frames are discarded, but draining keeps the
+ * pipeline turning (and its feed ringbuffer from overflowing) so ambient wake
+ * detections keep arriving through the AFE callback.
+ */
+static void wake_drain_task(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        esp_capture_stream_frame_t frame = {.stream_type = ESP_CAPTURE_STREAM_TYPE_AUDIO};
+        if (esp_capture_sink_acquire_frame(wake_sink, &frame, false) != ESP_CAPTURE_ERR_OK) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+            continue;
+        }
+        esp_capture_sink_release_frame(wake_sink, &frame);
+    }
+}
+
 esp_err_t room_media_init(room_wake_callback_t callback, void *ctx)
 {
     wake_callback = callback;
@@ -149,14 +179,15 @@ esp_err_t room_media_init(room_wake_callback_t callback, void *ctx)
         return ESP_FAIL;
     }
 
-    esp_capture_audio_aec_src_cfg_t source_cfg = {
+    room_capture_audio_aec_src_cfg_t source_cfg = {
         .mic_layout = "MR",
         .record_handle = record,
         .channel = 2,
         // ES7210 packs the two enabled analog inputs into the two standard-I2S slots.
         .channel_mask = 0x3,
+        .wake_cb = room_afe_wake,
     };
-    esp_capture_audio_src_if_t *audio_source = esp_capture_new_audio_aec_src(&source_cfg);
+    esp_capture_audio_src_if_t *audio_source = room_capture_new_audio_aec_src(&source_cfg);
     if (audio_source == NULL) {
         return ESP_ERR_NO_MEM;
     }
@@ -178,8 +209,24 @@ esp_err_t room_media_init(room_wake_callback_t callback, void *ctx)
             .bits_per_sample = 16,
         },
     };
+    /*
+     * Sink 1 exists only to keep the AEC/AFE pipeline running whenever no Talk
+     * call is active: WakeNet lives inside that pipeline, so without an
+     * always-on path the AFE never fetches and ambient wake never fires.
+     * Nothing consumes its frames; the wake callback comes from the AFE.
+     */
+    esp_capture_sink_cfg_t wake_cfg = {
+        .audio_info = {
+            .format_id = ESP_CAPTURE_FMT_ID_PCM,
+            .sample_rate = 16000,
+            .channel = 1,
+            .bits_per_sample = 16,
+        },
+    };
     // esp_webrtc owns sink 0 and retrieves this exact pre-created path after capture starts.
     if (esp_capture_sink_setup(capture, 0, &talk_cfg, &talk_sink) != ESP_CAPTURE_ERR_OK ||
+        esp_capture_sink_setup(capture, 1, &wake_cfg, &wake_sink) != ESP_CAPTURE_ERR_OK ||
+        esp_capture_sink_enable(wake_sink, ESP_CAPTURE_RUN_MODE_ALWAYS) != ESP_CAPTURE_ERR_OK ||
         esp_capture_start(capture) != ESP_CAPTURE_ERR_OK) {
         return ESP_FAIL;
     }
@@ -210,19 +257,38 @@ esp_err_t room_media_init(room_wake_callback_t callback, void *ctx)
         return ESP_FAIL;
     }
 
-    /*
-     * The AEC capture source above already owns the board's single WakeNet
-     * instance inside its AFE pipeline; creating a second esp-sr instance on
-     * this model aborts inside the closed library on hardware. The AFE does
-     * not surface its wake detections through esp_capture yet, so ambient
-     * wake stays off until that seam exists; the console `wake` command and
-     * gateway-triggered Talk remain fully functional.
-     */
-    ESP_LOGW(
-        TAG,
-        "ambient wake-word detection is disabled on this build; use the console `wake` command to start Talk");
+    if (xTaskCreateWithCaps(
+            wake_drain_task,
+            "wake_drain",
+            3072,
+            NULL,
+            5,
+            NULL,
+            MALLOC_CAP_SPIRAM) != pdPASS) {
+        return ESP_ERR_NO_MEM;
+    }
+    ESP_LOGI(TAG, "ambient WakeNet detections are wired from the AFE");
     ESP_LOGI(TAG, "24 kHz dual-channel capture and device AEC are active");
     return ESP_OK;
+}
+
+esp_err_t room_media_set_ambient_wake(bool enabled)
+{
+    if (wake_sink == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    /*
+     * While a Talk call runs, WebRTC consumes the same AEC/AFE pipeline and
+     * keeps wake detection alive on its own. Leaving this scan path enabled as
+     * well only adds a second consumer that the Opus encoder starves, which
+     * overflows the AFE feed ringbuffer. Disable it for the duration.
+     */
+    esp_capture_run_mode_t mode = enabled
+        ? ESP_CAPTURE_RUN_MODE_ALWAYS
+        : ESP_CAPTURE_RUN_MODE_DISABLE;
+    return esp_capture_sink_enable(wake_sink, mode) == ESP_CAPTURE_ERR_OK
+        ? ESP_OK
+        : ESP_FAIL;
 }
 
 esp_err_t room_media_get_webrtc_provider(esp_webrtc_media_provider_t *provider)

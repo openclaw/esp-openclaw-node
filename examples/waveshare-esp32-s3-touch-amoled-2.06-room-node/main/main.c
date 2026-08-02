@@ -6,6 +6,7 @@
 #include "esp_console.h"
 #include "esp_event.h"
 #include "esp_check.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_openclaw_node.h"
@@ -16,6 +17,8 @@
 #include "esp_peer_default.h"
 #include "esp_webrtc.h"
 #include "esp_capture.h"
+#include "driver/gpio.h"
+#include "freertos/idf_additions.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/timers.h"
@@ -49,6 +52,50 @@ typedef struct {
 } talk_teardown_request_t;
 
 static void start_operator_task(void *arg);
+static void start_talk_once(void);
+static TaskHandle_t talk_start_worker;
+
+/*
+ * The Talk starter is a persistent worker created at boot, when internal RAM
+ * is plentiful: creating an 8 KiB-stack task at wake time fails under load
+ * and surfaced as an on-screen "No memory" error.
+ */
+/*
+ * The BOOT side button (GPIO0, strapping pin, pressed = low) cycles the debug
+ * views like a status-screen tap. The PWR button is wired to hardware power
+ * management and is not GPIO-visible.
+ */
+static void boot_button_task(void *arg)
+{
+    (void)arg;
+    gpio_config_t io = {
+        .pin_bit_mask = 1ULL << GPIO_NUM_0,
+        .mode = GPIO_MODE_INPUT,
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+    };
+    if (gpio_config(&io) != ESP_OK) {
+        vTaskDelete(NULL);
+        return;
+    }
+    bool was_pressed = false;
+    for (;;) {
+        bool pressed = gpio_get_level(GPIO_NUM_0) == 0;
+        if (pressed && !was_pressed) {
+            room_canvas_debug_toggle();
+        }
+        was_pressed = pressed;
+        vTaskDelay(pdMS_TO_TICKS(60));
+    }
+}
+
+static void talk_start_worker_task(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        start_talk_once();
+    }
+}
 
 static char *gateway_http_base_from_uri(const char *gateway_uri)
 {
@@ -273,6 +320,7 @@ static void talk_teardown_task(void *arg)
         }
         xTimerStop(talk_timeout_timer, portMAX_DELAY);
         esp_webrtc_close(request.session);
+        (void)room_media_set_ambient_wake(true);
         room_ui_set(
             request.failed ? ROOM_UI_ERROR : ROOM_UI_IDLE,
             request.failed ? "Talk failed" : NULL);
@@ -320,9 +368,8 @@ static int webrtc_event(esp_webrtc_event_t *event, void *ctx)
     return 0;
 }
 
-static void start_talk_task(void *arg)
+static void start_talk_once(void)
 {
-    (void)arg;
     esp_peer_default_cfg_t peer = {
         .agent_recv_timeout = 500,
         .ice_use_lite_mode = true,
@@ -360,7 +407,6 @@ static void start_talk_task(void *arg)
         talk_starting = false;
         xSemaphoreGive(state_lock);
         room_ui_set(ROOM_UI_ERROR, "WebRTC open");
-        vTaskDelete(NULL);
         return;
     }
     esp_webrtc_media_provider_t media = {0};
@@ -373,7 +419,6 @@ static void start_talk_task(void *arg)
         talk_starting = false;
         xSemaphoreGive(state_lock);
         room_ui_set(ROOM_UI_ERROR, "WebRTC start");
-        vTaskDelete(NULL);
         return;
     }
 
@@ -385,18 +430,17 @@ static void start_talk_task(void *arg)
     xSemaphoreGive(state_lock);
     if (!publish) {
         esp_webrtc_close(session);
-        vTaskDelete(NULL);
         return;
     }
+    /* Talk owns the capture pipeline for the call; ambient scanning resumes at teardown. */
+    (void)room_media_set_ambient_wake(false);
     if (esp_webrtc_start(session) != 0) {
         request_talk_teardown(session, true);
-        vTaskDelete(NULL);
         return;
     }
     if (xTimerStart(talk_timeout_timer, 0) != pdPASS) {
         request_talk_teardown(session, true);
     }
-    vTaskDelete(NULL);
 }
 
 static void on_wake(const char *wake_word, void *ctx)
@@ -413,12 +457,7 @@ static void on_wake(const char *wake_word, void *ctx)
         return;
     }
     room_ui_set(ROOM_UI_CONNECTING, wake_word);
-    if (xTaskCreate(start_talk_task, "start_talk", 8192, NULL, 7, NULL) != pdPASS) {
-        xSemaphoreTake(state_lock, portMAX_DELAY);
-        talk_starting = false;
-        xSemaphoreGive(state_lock);
-        room_ui_set(ROOM_UI_ERROR, "No memory");
-    }
+    xTaskNotifyGive(talk_start_worker);
 }
 
 static void operator_gateway_event(
@@ -707,6 +746,17 @@ void app_main(void)
         state_lock != NULL && talk_teardown_queue != NULL && talk_timeout_timer != NULL
             ? ESP_OK
             : ESP_ERR_NO_MEM);
+    /* Supervisor stacks live in PSRAM; internal RAM is reserved for DMA and the
+     * network/audio task stacks that genuinely require it. */
+    BaseType_t starter_task = xTaskCreateWithCaps(
+        talk_start_worker_task,
+        "talk_start",
+        8192,
+        NULL,
+        7,
+        &talk_start_worker,
+        MALLOC_CAP_SPIRAM);
+    ESP_ERROR_CHECK(starter_task == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
     BaseType_t teardown_task = xTaskCreate(
         talk_teardown_task,
         "talk_teardown",
@@ -745,6 +795,16 @@ void app_main(void)
 
     ESP_ERROR_CHECK(start_node_client());
     ESP_ERROR_CHECK(esp_openclaw_node_example_repl_start(node_client));
+    if (xTaskCreateWithCaps(
+            boot_button_task,
+            "boot_btn",
+            2560,
+            NULL,
+            4,
+            NULL,
+            MALLOC_CAP_SPIRAM) != pdPASS) {
+        ESP_LOGW(TAG, "BOOT button task unavailable");
+    }
     ESP_ERROR_CHECK(register_wake_console_command());
 
     esp_err_t connect_err = request_node_connection();
@@ -757,5 +817,10 @@ void app_main(void)
         ESP_LOGE(TAG, "node connect request failed: %s", esp_err_to_name(connect_err));
         room_ui_set(ROOM_UI_ERROR, "Node connect");
     }
-    ESP_LOGI(TAG, "room node ready; canvas commands become available after pairing");
+    ESP_LOGI(
+        TAG,
+        "room node ready; internal heap free=%u largest=%u, psram free=%u",
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 }

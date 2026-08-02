@@ -22,11 +22,17 @@ CONFIG_LV_USE_CLIB_MALLOC=y
 # leaving the panel garbled or dark. Keep the flush chunk small (16 rows is
 # ~13 KiB) and reserve enough internal memory that the bounce always succeeds.
 CONFIG_BSP_DISPLAY_LVGL_BUF_HEIGHT=16
-CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=131072
+# Task stacks and DMA can only come from internal RAM, and with the 256-byte
+# always-internal threshold nothing else needs it; give them the whole budget.
+CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=262144
 CONFIG_LV_USE_LODEPNG=y
 CONFIG_LV_USE_SNAPSHOT=y
-CONFIG_ESP_OPENCLAW_NODE_TASK_STACK_SIZE=12288
-CONFIG_ESP_OPENCLAW_NODE_TRANSPORT_TASK_STACK_SIZE=12288
+# Two node clients (node + operator role) each run a component task and a
+# websocket task, and all four stacks must be internal RAM. 12 KiB each cost
+# 48 KiB of the scarcest pool and starved websocket task creation once the
+# always-on audio pipeline was added; 8 KiB matches the IDF default.
+CONFIG_ESP_OPENCLAW_NODE_TASK_STACK_SIZE=8192
+CONFIG_ESP_OPENCLAW_NODE_TRANSPORT_TASK_STACK_SIZE=8192
 CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 # PSRAM-first memory policy, matching every esp-webrtc-solution demo config
 # (openai_demo etc.): Wi-Fi/LWIP buffers and mbedTLS allocations in PSRAM and a

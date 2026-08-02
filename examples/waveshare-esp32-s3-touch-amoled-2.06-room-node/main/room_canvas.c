@@ -185,6 +185,16 @@ static esp_err_t http_event(esp_http_client_event_t *event)
     if (response == NULL) {
         return ESP_FAIL;
     }
+    /* timeout_ms bounds one socket operation; the wall-clock deadline also
+     * bounds connect, header, and data progress across the whole request. */
+    bool check_deadline = event->event_id == HTTP_EVENT_ON_CONNECTED ||
+        event->event_id == HTTP_EVENT_ON_HEADER ||
+        (event->event_id == HTTP_EVENT_ON_DATA && event->data_len > 0);
+    if (check_deadline && response->deadline_us != 0 &&
+        esp_timer_get_time() > response->deadline_us) {
+        response->timed_out = true;
+        return ESP_ERR_TIMEOUT;
+    }
     if (event->event_id == HTTP_EVENT_REDIRECT) {
         response->data_len = 0;
         free(response->content_type);
@@ -200,12 +210,6 @@ static esp_err_t http_event(esp_http_client_event_t *event)
         free(response->content_type);
         response->content_type = copy;
     } else if (event->event_id == HTTP_EVENT_ON_DATA && event->data_len > 0) {
-        /* timeout_ms bounds one socket operation; a trickling server would
-         * otherwise hold this synchronous command open indefinitely. */
-        if (response->deadline_us != 0 && esp_timer_get_time() > response->deadline_us) {
-            response->timed_out = true;
-            return ESP_ERR_TIMEOUT;
-        }
         size_t required = response->data_len + (size_t)event->data_len;
         if (!response_reserve(response, required)) {
             return response->too_large ? ESP_ERR_INVALID_SIZE : ESP_ERR_NO_MEM;
@@ -544,20 +548,107 @@ static bool validate_image_locked(room_canvas_image_t *image)
     return true;
 }
 
-static void style_canvas_screen(void)
+/*
+ * The physical glass has large rounded corners, so laid-out content needs a
+ * safe-area inset (Apple's "safe area") to stay visible. Full-bleed image
+ * presentation intentionally keeps zero padding, like wallpaper.
+ */
+#define ROOM_CANVAS_SAFE_PAD 32
+
+static void style_canvas_screen(int32_t pad)
 {
     lv_obj_set_style_bg_color(canvas_screen, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(canvas_screen, LV_OPA_COVER, 0);
     lv_obj_set_style_text_color(canvas_screen, lv_color_white(), 0);
-    lv_obj_set_style_pad_all(canvas_screen, 12, 0);
+    lv_obj_set_style_pad_all(canvas_screen, pad, 0);
     lv_obj_remove_flag(canvas_screen, LV_OBJ_FLAG_SCROLLABLE);
+}
+
+static const lv_font_t *font_for_usage(const char *usage);
+
+/*
+ * Diagnostic placeholder: a full-bleed field with a border drawn exactly on the
+ * safe-area inset and dots at each safe-area corner. Solid coverage makes panel
+ * flush artifacts obvious, and the markers show at a glance how much of the
+ * rectangle the rounded glass actually clips.
+ */
+static void show_test_card_locked(void)
+{
+    lv_obj_clean(canvas_screen);
+    clear_images_locked();
+    style_canvas_screen(0);
+
+    lv_obj_t *field = lv_obj_create(canvas_screen);
+    lv_obj_remove_style_all(field);
+    lv_obj_set_size(field, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(field, lv_color_hex(0x202830), 0);
+    lv_obj_set_style_bg_opa(field, LV_OPA_COVER, 0);
+    lv_obj_remove_flag(field, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(field, LV_OBJ_FLAG_CLICKABLE);
+
+    lv_obj_t *safe = lv_obj_create(field);
+    lv_obj_remove_style_all(safe);
+    lv_obj_set_pos(safe, ROOM_CANVAS_SAFE_PAD, ROOM_CANVAS_SAFE_PAD);
+    lv_obj_set_size(
+        safe,
+        ROOM_CANVAS_WIDTH - 2 * ROOM_CANVAS_SAFE_PAD,
+        ROOM_CANVAS_HEIGHT - 2 * ROOM_CANVAS_SAFE_PAD);
+    lv_obj_set_style_border_width(safe, 2, 0);
+    lv_obj_set_style_border_color(safe, lv_color_hex(0x36d399), 0);
+    lv_obj_set_style_radius(safe, 8, 0);
+    lv_obj_set_style_bg_opa(safe, LV_OPA_TRANSP, 0);
+    lv_obj_remove_flag(safe, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(safe, LV_OBJ_FLAG_CLICKABLE);
+
+    static const lv_align_t corners[] = {
+        LV_ALIGN_TOP_LEFT,
+        LV_ALIGN_TOP_RIGHT,
+        LV_ALIGN_BOTTOM_LEFT,
+        LV_ALIGN_BOTTOM_RIGHT,
+    };
+    for (size_t i = 0; i < sizeof(corners) / sizeof(corners[0]); ++i) {
+        lv_obj_t *dot = lv_obj_create(safe);
+        lv_obj_remove_style_all(dot);
+        lv_obj_set_size(dot, 14, 14);
+        lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_bg_color(dot, lv_color_hex(0xf87272), 0);
+        lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
+        lv_obj_align(dot, corners[i], 0, 0);
+        lv_obj_remove_flag(dot, LV_OBJ_FLAG_CLICKABLE);
+    }
+
+    lv_obj_t *caption = lv_label_create(safe);
+    lv_obj_set_style_text_color(caption, lv_color_white(), 0);
+    lv_obj_set_style_text_font(caption, font_for_usage("body"), 0);
+    lv_label_set_text(caption, "safe area\ntap to exit");
+    lv_obj_set_style_text_align(caption, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_center(caption);
+}
+
+/*
+ * Uniform fill with zero content variation. If the panel still shows streaks
+ * here, the artifact is in the transfer path; if this is clean while the test
+ * card streaks, it is in rendering.
+ */
+static void show_solid_fill_locked(void)
+{
+    lv_obj_clean(canvas_screen);
+    clear_images_locked();
+    style_canvas_screen(0);
+    lv_obj_t *field = lv_obj_create(canvas_screen);
+    lv_obj_remove_style_all(field);
+    lv_obj_set_size(field, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_style_bg_color(field, lv_color_hex(0x1040c0), 0);
+    lv_obj_set_style_bg_opa(field, LV_OPA_COVER, 0);
+    lv_obj_remove_flag(field, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(field, LV_OBJ_FLAG_CLICKABLE);
 }
 
 static void show_placeholder_locked(void)
 {
     lv_obj_clean(canvas_screen);
     clear_images_locked();
-    style_canvas_screen();
+    style_canvas_screen(ROOM_CANVAS_SAFE_PAD);
     lv_obj_t *label = lv_label_create(canvas_screen);
     lv_obj_set_style_text_color(label, lv_color_white(), 0);
 #if LV_FONT_MONTSERRAT_20
@@ -629,7 +720,7 @@ static esp_err_t show_present_image(
 
     lv_obj_clean(canvas_screen);
     clear_images_locked();
-    style_canvas_screen();
+    style_canvas_screen(0);
     images[0] = *image;
     memset(image, 0, sizeof(*image));
     image_count = 1;
@@ -984,12 +1075,15 @@ static lv_flex_align_t cross_alignment(const char *alignment)
     return LV_FLEX_ALIGN_START;
 }
 
-static room_canvas_image_t *find_image(const char *component_id)
+static room_canvas_image_t *find_image(
+    room_canvas_image_t *retained_images,
+    size_t retained_image_count,
+    const char *component_id)
 {
-    for (size_t i = 0; i < image_count; ++i) {
-        if (images[i].component_id != NULL &&
-            strcmp(images[i].component_id, component_id) == 0) {
-            return &images[i];
+    for (size_t i = 0; i < retained_image_count; ++i) {
+        if (retained_images[i].component_id != NULL &&
+            strcmp(retained_images[i].component_id, component_id) == 0) {
+            return &retained_images[i];
         }
     }
     return NULL;
@@ -1008,6 +1102,8 @@ static void button_event(lv_event_t *event)
 static lv_obj_t *render_component(
     const char *id,
     lv_obj_t *parent,
+    room_canvas_image_t *render_images,
+    size_t render_image_count,
     size_t depth,
     bool root,
     bool parent_row,
@@ -1027,6 +1123,8 @@ static void apply_weight(lv_obj_t *object, const room_canvas_component_t *entry)
 static void render_children(
     cJSON *props,
     lv_obj_t *parent,
+    room_canvas_image_t *render_images,
+    size_t render_image_count,
     size_t depth,
     bool parent_row,
     size_t *node_budget,
@@ -1042,6 +1140,8 @@ static void render_children(
             render_component(
                 child->valuestring,
                 parent,
+                render_images,
+                render_image_count,
                 depth + 1,
                 false,
                 parent_row,
@@ -1058,6 +1158,8 @@ static lv_obj_t *render_container(
     const room_canvas_component_t *entry,
     cJSON *props,
     lv_obj_t *parent,
+    room_canvas_image_t *render_images,
+    size_t render_image_count,
     size_t depth,
     bool root,
     bool row,
@@ -1083,7 +1185,15 @@ static lv_obj_t *render_container(
         LV_PCT(100),
         root ? LV_PCT(100) : LV_SIZE_CONTENT);
     apply_weight(object, entry);
-    render_children(props, object, depth, row, node_budget, out_error);
+    render_children(
+        props,
+        object,
+        render_images,
+        render_image_count,
+        depth,
+        row,
+        node_budget,
+        out_error);
     if (alignment_text != NULL && strcmp(alignment_text, "stretch") == 0) {
         uint32_t child_count = lv_obj_get_child_count(object);
         for (uint32_t i = 0; i < child_count; ++i) {
@@ -1101,6 +1211,8 @@ static lv_obj_t *render_container(
 static lv_obj_t *render_component(
     const char *id,
     lv_obj_t *parent,
+    room_canvas_image_t *render_images,
+    size_t render_image_count,
     size_t depth,
     bool root,
     bool parent_row,
@@ -1144,6 +1256,8 @@ static lv_obj_t *render_component(
             entry,
             props,
             parent,
+            render_images,
+            render_image_count,
             depth,
             root,
             false,
@@ -1155,6 +1269,8 @@ static lv_obj_t *render_component(
             entry,
             props,
             parent,
+            render_images,
+            render_image_count,
             depth,
             root,
             true,
@@ -1177,7 +1293,10 @@ static lv_obj_t *render_component(
         return label;
     }
     if (strcmp(name, "Image") == 0) {
-        room_canvas_image_t *image = find_image(id);
+        room_canvas_image_t *image = find_image(
+            render_images,
+            render_image_count,
+            id);
         if (image == NULL) {
             lv_obj_t *missing = lv_label_create(parent);
             lv_label_set_text(missing, "[Image]");
@@ -1225,6 +1344,8 @@ static lv_obj_t *render_component(
             render_component(
                 child->valuestring,
                 card,
+                render_images,
+                render_image_count,
                 depth + 1,
                 false,
                 false,
@@ -1346,37 +1467,84 @@ static esp_err_t prefetch_a2ui_images(esp_openclaw_node_error_t *out_error)
         }
     }
 
-    lv_obj_clean(canvas_screen);
-    clear_images_locked();
-    for (size_t i = 0; i < fetched_count; ++i) {
-        images[i] = fetched[i];
-        memset(&fetched[i], 0, sizeof(fetched[i]));
-        ++image_count;
+    lv_obj_t *container = lv_obj_create(canvas_screen);
+    if (container == NULL) {
+        for (size_t i = 0; i < fetched_count; ++i) {
+            release_image(&fetched[i]);
+        }
+        bsp_display_unlock();
+        return set_error(
+            out_error,
+            "INTERNAL",
+            "not enough memory to stage the A2UI surface",
+            ESP_ERR_NO_MEM);
     }
-    style_canvas_screen();
-    if (root_component_id != NULL) {
-        esp_openclaw_node_error_t render_error = {0};
-        size_t node_budget = ROOM_CANVAS_MAX_RENDER_NODES;
-        render_component(
-            root_component_id,
-            canvas_screen,
-            1,
-            true,
-            false,
-            &node_budget,
-            &render_error);
+    /* This hidden transaction root has exactly the canvas content geometry,
+     * so an LV_PCT(100) root renders as it did directly on canvas_screen. */
+    lv_obj_add_flag(container, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_style_all(container);
+    lv_obj_set_style_bg_opa(container, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_pad_all(container, 0, 0);
+    lv_obj_set_style_border_width(container, 0, 0);
+    lv_obj_set_layout(container, LV_LAYOUT_NONE);
+    lv_obj_set_pos(container, 0, 0);
+    lv_obj_set_size(container, LV_PCT(100), LV_PCT(100));
+    lv_obj_remove_flag(container, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(container, LV_SCROLLBAR_MODE_OFF);
+    /* Background taps must reach the screen's tap-to-hide handler; A2UI
+     * buttons stay individually clickable. */
+    lv_obj_remove_flag(container, LV_OBJ_FLAG_CLICKABLE);
+
+    esp_openclaw_node_error_t render_error = {0};
+    size_t node_budget = ROOM_CANVAS_MAX_RENDER_NODES;
+    lv_obj_t *root = render_component(
+        root_component_id,
+        container,
+        fetched,
+        fetched_count,
+        1,
+        true,
+        false,
+        &node_budget,
+        &render_error);
+    if (root == NULL || render_error.code != NULL) {
+        lv_obj_delete(container);
+        for (size_t i = 0; i < fetched_count; ++i) {
+            release_image(&fetched[i]);
+        }
         if (render_error.code != NULL) {
             *out_error = render_error;
-            show_placeholder_locked();
-            activate_canvas_locked();
-            bsp_display_unlock();
-            bsp_display_brightness_set(ROOM_CANVAS_BRIGHTNESS);
-            room_ui_refresh();
-            return ESP_ERR_INVALID_SIZE;
+        } else {
+            set_error(
+                out_error,
+                "INTERNAL",
+                "not enough memory to render the A2UI surface",
+                ESP_ERR_NO_MEM);
         }
-    } else {
-        show_placeholder_locked();
+        bsp_display_unlock();
+        return render_error.code != NULL ? ESP_ERR_INVALID_SIZE : ESP_ERR_NO_MEM;
     }
+
+    uint32_t child_count = lv_obj_get_child_count(canvas_screen);
+    for (uint32_t i = child_count; i > 0; --i) {
+        lv_obj_t *child = lv_obj_get_child(canvas_screen, (int32_t)i - 1);
+        if (child != container) {
+            lv_obj_delete(child);
+        }
+    }
+    clear_images_locked();
+    for (size_t i = 0; i < fetched_count; ++i) {
+        /* LVGL retains the heap draw-buffer pointer, so moving its owning
+         * record to stable storage does not invalidate the staged widget. */
+        images[i] = fetched[i];
+        memset(&fetched[i], 0, sizeof(fetched[i]));
+    }
+    image_count = fetched_count;
+    /* The image path runs full-bleed (pad 0); restore the safe-area inset for
+     * laid-out content. Only on success, so a failed render leaves the screen
+     * exactly as it was. */
+    style_canvas_screen(ROOM_CANVAS_SAFE_PAD);
+    lv_obj_remove_flag(container, LV_OBJ_FLAG_HIDDEN);
     activate_canvas_locked();
     bsp_display_unlock();
     bsp_display_brightness_set(ROOM_CANVAS_BRIGHTNESS);
@@ -1802,6 +1970,61 @@ static esp_err_t apply_a2ui_array(
     return ESP_OK;
 }
 
+/* Tap on empty canvas background returns to the status screen. */
+static void canvas_screen_clicked(lv_event_t *event)
+{
+    (void)event;
+    char *payload = NULL;
+    esp_openclaw_node_error_t error = {0};
+    if (room_canvas_hide(&payload, &error) == ESP_OK) {
+        free(payload);
+    }
+    /* Same contract as the BOOT/status toggle: a user-initiated exit must not
+     * land on the idle-dark screen and look like a dead panel. */
+    room_ui_show_awake_hint();
+}
+
+/*
+ * Debug view cycling for the on-device buttons/touch: status -> canvas
+ * (existing A2UI content or the placeholder) -> status. Safe from LVGL event
+ * callbacks too: the display lock is a recursive mutex and neither branch
+ * deletes the object dispatching the event.
+ */
+void room_canvas_debug_toggle(void)
+{
+    char *payload = NULL;
+    esp_openclaw_node_error_t error = {0};
+    if (canvas_active) {
+        if (room_canvas_hide(&payload, &error) == ESP_OK) {
+            free(payload);
+        }
+        room_ui_show_awake_hint();
+        return;
+    }
+    if (root_component_id != NULL) {
+        if (room_canvas_present(NULL, &payload, &error) == ESP_OK) {
+            free(payload);
+        }
+        return;
+    }
+    /* Nothing pushed yet: cycle the two diagnostic views so the panel itself
+     * can be judged (solid fill isolates the transfer path from rendering). */
+    if (!bsp_display_lock(ROOM_CANVAS_DISPLAY_LOCK_MS)) {
+        return;
+    }
+    static bool show_solid;
+    if (show_solid) {
+        show_solid_fill_locked();
+    } else {
+        show_test_card_locked();
+    }
+    show_solid = !show_solid;
+    activate_canvas_locked();
+    bsp_display_unlock();
+    bsp_display_brightness_set(ROOM_CANVAS_BRIGHTNESS);
+    room_ui_refresh();
+}
+
 esp_err_t room_canvas_init(void)
 {
     if (!bsp_display_lock(ROOM_CANVAS_DISPLAY_LOCK_MS)) {
@@ -1815,7 +2038,8 @@ esp_err_t room_canvas_init(void)
         ESP_LOGE(TAG, "failed to create canvas screen");
         return ESP_ERR_NO_MEM;
     }
-    style_canvas_screen();
+    style_canvas_screen(ROOM_CANVAS_SAFE_PAD);
+    lv_obj_add_event_cb(canvas_screen, canvas_screen_clicked, LV_EVENT_CLICKED, NULL);
     bsp_display_unlock();
     return ESP_OK;
 }

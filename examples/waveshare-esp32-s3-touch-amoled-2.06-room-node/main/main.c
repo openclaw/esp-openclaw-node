@@ -15,6 +15,7 @@
 #include "esp_openclaw_talk.h"
 #include "esp_peer.h"
 #include "esp_peer_default.h"
+#include "esp_timer.h"
 #include "esp_webrtc.h"
 #include "esp_capture.h"
 #include "driver/gpio.h"
@@ -57,9 +58,12 @@ typedef struct {
 static void start_talk_once(void);
 static esp_err_t register_talk_node_commands(esp_openclaw_node_handle_t node);
 static TaskHandle_t talk_start_worker;
-static TaskHandle_t operator_start_worker;
-/* Pending delay for the next operator start; guarded by state_lock. */
-static uint32_t operator_start_delay_ms;
+/* One-shot timer that (re)tries creating the transient operator-start task.
+ * A permanent worker task was tried and reverted: its always-resident internal
+ * stack starved the AFE open/close sync-tasks during calls (internal RAM is
+ * the scarcest resource on this board). Guarded by state_lock. */
+static esp_timer_handle_t operator_start_timer;
+static bool operator_start_scheduled;
 
 /*
  * The Talk starter is a persistent worker created at boot, when internal RAM
@@ -87,7 +91,7 @@ static void boot_button_task(void *arg)
     for (;;) {
         bool pressed = gpio_get_level(GPIO_NUM_0) == 0;
         if (pressed && !was_pressed) {
-            room_canvas_debug_toggle();
+            room_canvas_view_toggle();
         }
         was_pressed = pressed;
         vTaskDelay(pdMS_TO_TICKS(60));
@@ -207,18 +211,53 @@ static char *derive_gateway_http_base(void)
     return base;
 }
 
+static void operator_start_task(void *arg);
+
+/* Runs on the esp_timer task: only a task-create attempt, nothing heavy.
+ * Creation can fail at the busiest boot moment (internal RAM contention with
+ * Wi-Fi/TLS/audio); re-arming the timer turns that into a delay instead of a
+ * silent dead-end. The task itself is transient so its internal stack is
+ * returned between attempts — a permanent worker starved the AFE sync-tasks. */
+static void operator_start_timer_fired(void *arg)
+{
+    (void)arg;
+    if (xTaskCreate(operator_start_task, "operator_start", 6144, NULL, 6, NULL) == pdPASS) {
+        return;
+    }
+    ESP_LOGW(TAG, "operator start task creation failed; retrying in 2s");
+    esp_timer_start_once(operator_start_timer, 2000000);
+}
+
 static bool schedule_operator_start(uint32_t delay_ms)
 {
-    /* Persistent PSRAM worker (like talk_start): a per-attempt xTaskCreate
-     * here needed contiguous internal RAM at the busiest boot moment and
-     * failed exactly when the operator session was about to come up. */
-    if (operator_start_worker == NULL) {
+    xSemaphoreTake(state_lock, portMAX_DELAY);
+    bool schedule = !operator_start_scheduled;
+    if (schedule) {
+        operator_start_scheduled = true;
+    }
+    xSemaphoreGive(state_lock);
+    if (!schedule) {
+        return true;
+    }
+    if (operator_start_timer == NULL) {
+        const esp_timer_create_args_t args = {
+            .callback = operator_start_timer_fired,
+            .name = "operator_start",
+        };
+        if (esp_timer_create(&args, &operator_start_timer) != ESP_OK) {
+            xSemaphoreTake(state_lock, portMAX_DELAY);
+            operator_start_scheduled = false;
+            xSemaphoreGive(state_lock);
+            return false;
+        }
+    }
+    esp_timer_stop(operator_start_timer);
+    if (esp_timer_start_once(operator_start_timer, (uint64_t)delay_ms * 1000) != ESP_OK) {
+        xSemaphoreTake(state_lock, portMAX_DELAY);
+        operator_start_scheduled = false;
+        xSemaphoreGive(state_lock);
         return false;
     }
-    xSemaphoreTake(state_lock, portMAX_DELAY);
-    operator_start_delay_ms = delay_ms;
-    xSemaphoreGive(state_lock);
-    xTaskNotifyGive(operator_start_worker);
     return true;
 }
 
@@ -529,6 +568,10 @@ static void operator_event(
     }
     if (ready) {
         room_ui_set(ROOM_UI_IDLE, NULL);
+        /* Fully-up moment: greet with the face + gateway line for a few
+         * seconds instead of silently going dark, then the hint expiry
+         * returns the panel to idle. */
+        room_ui_show_face_hint(8000);
         ESP_LOGI(TAG, "operator Talk session ready; ambient WakeNet armed");
     } else {
         room_ui_set(ROOM_UI_ERROR, "Operator offline");
@@ -580,30 +623,25 @@ static esp_err_t start_operator_client(void)
     return esp_openclaw_node_request_connect(created, &request);
 }
 
-static void operator_start_worker_task(void *arg)
+static void operator_start_task(void *arg)
 {
     (void)arg;
-    for (;;) {
-        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        xSemaphoreTake(state_lock, portMAX_DELAY);
-        uint32_t delay_ms = operator_start_delay_ms;
-        xSemaphoreGive(state_lock);
-        if (delay_ms > 0) {
-            vTaskDelay(pdMS_TO_TICKS(delay_ms));
-            /* A newer request may have arrived while sleeping; its notify is
-             * pending and the next loop iteration handles it immediately. */
-        }
-        esp_err_t err = start_operator_client();
-        if (err != ESP_OK) {
-            // Every retry logs: the display alone cannot say WHY the operator
-            // session is down, and a silent loop here cost a debugging session.
-            ESP_LOGW(TAG, "operator client start failed: %s (retrying)", esp_err_to_name(err));
-            room_ui_set(
-                ROOM_UI_ERROR,
-                err == ESP_ERR_NOT_FOUND ? "No operator session\nre-pair via console" : "Operator token");
-            (void)schedule_operator_start(5000);
-        }
+    /* Release the scheduled flag before the attempt so a synchronous failure
+     * can re-arm the next retry. */
+    xSemaphoreTake(state_lock, portMAX_DELAY);
+    operator_start_scheduled = false;
+    xSemaphoreGive(state_lock);
+    esp_err_t err = start_operator_client();
+    if (err != ESP_OK) {
+        // Every retry logs: the display alone cannot say WHY the operator
+        // session is down, and a silent loop here cost a debugging session.
+        ESP_LOGW(TAG, "operator client start failed: %s (retrying)", esp_err_to_name(err));
+        room_ui_set(
+            ROOM_UI_ERROR,
+            err == ESP_ERR_NOT_FOUND ? "No operator session\nre-pair via console" : "Operator token");
+        (void)schedule_operator_start(5000);
     }
+    vTaskDelete(NULL);
 }
 
 static esp_err_t request_node_connection(void)
@@ -689,10 +727,26 @@ static void node_event(
         char *gateway_http_base = derive_gateway_http_base();
         room_canvas_set_gateway_http_base(gateway_http_base);
         free(gateway_http_base);
-        /* The persistent worker exists before the node client starts, so this
-         * cannot fail; the worker loop owns all retry/error reporting. */
-        (void)schedule_operator_start(0);
+        /* Show host:port under the face; the saved URI is authoritative for
+         * which gateway this session actually authenticated against. */
+        char *gateway_uri = load_saved_gateway_uri();
+        const char *host = gateway_uri;
+        if (host != NULL && strncmp(host, "ws://", 5) == 0) {
+            host += 5;
+        } else if (host != NULL && strncmp(host, "wss://", 6) == 0) {
+            host += 6;
+        }
+        room_ui_set_gateway(host);
+        free(gateway_uri);
+        /* The timer path retries task creation itself, so scheduling only
+         * fails on timer-create OOM at boot; retry through the same path. */
+        if (!schedule_operator_start(0)) {
+            ESP_LOGE(TAG, "failed scheduling operator client start; retrying in 5s");
+            room_ui_set(ROOM_UI_ERROR, "Operator token");
+            (void)schedule_operator_start(5000);
+        }
     } else {
+        room_ui_set_gateway(NULL);
         room_ui_set(ROOM_UI_ERROR, "Node offline");
         schedule_node_reconnect(2000);
     }
@@ -908,17 +962,6 @@ void app_main(void)
         &talk_start_worker,
         MALLOC_CAP_SPIRAM);
     ESP_ERROR_CHECK(starter_task == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
-    /* Internal stack (NOT PSRAM like talk_start): this worker calls
-     * esp_openclaw_node_create, whose NVS reads run flash operations, and
-     * flash ops assert unless every running stack is cache-safe internal RAM. */
-    BaseType_t operator_task = xTaskCreate(
-        operator_start_worker_task,
-        "operator_start",
-        6144,
-        NULL,
-        6,
-        &operator_start_worker);
-    ESP_ERROR_CHECK(operator_task == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
     BaseType_t teardown_task = xTaskCreate(
         talk_teardown_task,
         "talk_teardown",

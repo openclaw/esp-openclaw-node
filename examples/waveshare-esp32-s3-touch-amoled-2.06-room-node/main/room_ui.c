@@ -32,17 +32,20 @@ static void room_ui_align_flush_area(lv_event_t *event)
     area->y2 |= 1;
 }
 
-/* Tap on the status screen jumps to the canvas view. */
+/* Tap on the status screen: agent canvas when present, else wake the face. */
 static void room_ui_status_clicked(lv_event_t *event)
 {
     (void)event;
-    room_canvas_debug_toggle();
+    room_canvas_view_toggle();
 }
 
 static const char *TAG = "room_ui";
 static lv_obj_t *status_label;
+static lv_obj_t *gateway_label;
 static lv_obj_t *talk_pill;
 static lv_obj_t *talk_pill_label;
+/* Guarded by state_mux like the state/detail facts. */
+static char gateway_text[64];
 /* Last state/detail survive canvas mode so leaving it restores the live Talk
  * state instead of forcing idle while a call is still active. Guarded by
  * their own spinlock so a display-lock timeout can never DROP a transition:
@@ -148,6 +151,15 @@ void room_ui_init(void)
 #endif
     lv_obj_center(status_label);
     lv_label_set_text(status_label, "OpenClaw");
+    /* Small always-available gateway line at the bottom of the glass; shown
+     * alongside the face so a glance answers "which claw is this?". */
+    gateway_label = lv_label_create(lv_screen_active());
+    lv_obj_set_style_text_color(gateway_label, lv_color_hex(0x8a8a8a), 0);
+    lv_obj_set_style_text_font(gateway_label, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_align(gateway_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(gateway_label, LV_ALIGN_BOTTOM_MID, 0, -56);
+    lv_label_set_text(gateway_label, "");
+    lv_obj_add_flag(gateway_label, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_event_cb(
         lv_screen_active(),
         room_ui_status_clicked,
@@ -172,12 +184,24 @@ static bool room_ui_state_uses_face(room_ui_state_t state)
 static bool room_ui_render_locked(void)
 {
     static const char *labels[] = {"OpenClaw", "Listening", "Connecting", "Speaking", "Error", "Setup"};
-    /* Snapshot the fact under its own lock; the writer may not hold ours. */
+    /* Snapshot the facts under their own lock; the writer may not hold ours. */
     taskENTER_CRITICAL(&state_mux);
     room_ui_state_t state = current_state;
     char detail[sizeof(current_detail)];
     memcpy(detail, current_detail, sizeof(detail));
+    char gateway[sizeof(gateway_text)];
+    memcpy(gateway, gateway_text, sizeof(gateway));
     taskEXIT_CRITICAL(&state_mux);
+    if (gateway_label != NULL) {
+        /* The gateway line rides along with every non-canvas view. */
+        lv_label_set_text(gateway_label, gateway);
+        if (room_canvas_is_active() || gateway[0] == '\0') {
+            lv_obj_add_flag(gateway_label, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_clear_flag(gateway_label, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_move_foreground(gateway_label);
+        }
+    }
     if (room_canvas_is_active()) {
         room_face_hide();
         if (state == ROOM_UI_IDLE) {
@@ -287,21 +311,15 @@ void room_ui_set(room_ui_state_t state, const char *detail)
     room_ui_paint_and_unlock();
 }
 
-void room_ui_show_awake_hint(void)
+void room_ui_set_gateway(const char *gateway_host)
 {
-    if (status_label == NULL) {
-        return;
+    taskENTER_CRITICAL(&state_mux);
+    gateway_text[0] = '\0';
+    if (gateway_host != NULL) {
+        strlcpy(gateway_text, gateway_host, sizeof(gateway_text));
     }
-    if (!bsp_display_lock(100)) {
-        return;
-    }
-    room_face_hide();
-    lv_obj_clear_flag(status_label, LV_OBJ_FLAG_HIDDEN);
-    lv_label_set_text(status_label, "OpenClaw\ntap or BOOT for canvas");
-    bsp_display_unlock();
-    /* A user-initiated exit must not look like a dead panel, so override the
-     * idle-dark policy until the next state change repaints. */
-    bsp_display_brightness_set(18);
+    taskEXIT_CRITICAL(&state_mux);
+    room_ui_refresh();
 }
 
 void room_ui_show_face_hint(uint32_t show_ms)
@@ -321,6 +339,19 @@ void room_ui_show_face_hint(uint32_t show_ms)
     bool shown = room_face_is_visible();
     if (shown) {
         lv_obj_add_flag(status_label, LV_OBJ_FLAG_HIDDEN);
+        if (gateway_label != NULL) {
+            /* The wake-up face is the "which claw am I?" moment: surface the
+             * connected gateway under it whenever one is known. */
+            taskENTER_CRITICAL(&state_mux);
+            char gateway[sizeof(gateway_text)];
+            memcpy(gateway, gateway_text, sizeof(gateway));
+            taskEXIT_CRITICAL(&state_mux);
+            lv_label_set_text(gateway_label, gateway);
+            if (gateway[0] != '\0') {
+                lv_obj_clear_flag(gateway_label, LV_OBJ_FLAG_HIDDEN);
+                lv_obj_move_foreground(gateway_label);
+            }
+        }
     }
     bsp_display_unlock();
     if (shown) {

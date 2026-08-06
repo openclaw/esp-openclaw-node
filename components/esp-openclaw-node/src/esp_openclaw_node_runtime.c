@@ -129,12 +129,46 @@ static void handle_request_connect(
     esp_openclaw_node_work_message_t *message)
 {
     esp_openclaw_node_lock_state(node);
-    bool ready_to_start =
-        node->state == ESP_OPENCLAW_NODE_INTERNAL_IDLE &&
-        node->pending_control == ESP_OPENCLAW_NODE_PENDING_CONTROL_REQUEST_CONNECT;
-    if (!ready_to_start) {
+    esp_openclaw_node_internal_state_t state = node->state;
+    if (state == ESP_OPENCLAW_NODE_INTERNAL_DESTROYING ||
+        state == ESP_OPENCLAW_NODE_INTERNAL_CLOSED) {
         esp_openclaw_node_unlock_state(node);
         return;
+    }
+    if (state != ESP_OPENCLAW_NODE_INTERNAL_IDLE) {
+        /* Saved-session requests are reconnect-loop traffic: reserved
+         * idle-only, but a preempting explicit request can slip in before
+         * this message is processed. Drop it rather than let auto-reconnect
+         * cancel an operator-issued attempt; the loop retries on the next
+         * terminal event. */
+        if (message->connect_source.kind ==
+            ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_SAVED_SESSION) {
+            esp_openclaw_node_unlock_state(node);
+            return;
+        }
+        /* An explicit request reserved over a live attempt/session: tear the
+         * old one down first so its terminal event fires before the new
+         * attempt starts. */
+        esp_openclaw_node_unlock_state(node);
+        if (esp_openclaw_node_state_is_connecting(state)) {
+            esp_openclaw_node_complete_connect_failed(
+                node,
+                ESP_OPENCLAW_NODE_CONNECT_FAILURE_CANCELED,
+                ESP_OK,
+                NULL,
+                true);
+        } else {
+            esp_openclaw_node_complete_disconnected(
+                node,
+                ESP_OPENCLAW_NODE_DISCONNECTED_REASON_REQUESTED,
+                ESP_OK,
+                true);
+        }
+        esp_openclaw_node_lock_state(node);
+        if (node->state != ESP_OPENCLAW_NODE_INTERNAL_IDLE) {
+            esp_openclaw_node_unlock_state(node);
+            return;
+        }
     }
     esp_openclaw_node_clear_pending_control_locked(node);
     esp_openclaw_node_clear_connect_source_struct(&node->active_connect_source);
@@ -160,11 +194,27 @@ static void handle_request_disconnect(esp_openclaw_node_handle_t node)
     esp_openclaw_node_lock_state(node);
     bool request_pending =
         node->pending_control == ESP_OPENCLAW_NODE_PENDING_CONTROL_REQUEST_DISCONNECT;
+    bool was_connecting = esp_openclaw_node_state_is_connecting(node->state);
     bool has_transport =
         node->ws != NULL || node->active_transport_id != 0;
     esp_openclaw_node_unlock_state(node);
 
     if (!request_pending) {
+        /* The session/attempt this targeted already terminated on its own;
+         * complete_* cleared the reservation and emitted the terminal event. */
+        return;
+    }
+
+    /* A canceled connect attempt is a CONNECT_FAILED terminal, not
+     * DISCONNECTED: callers wait for exactly one outcome per accepted
+     * connect request. */
+    if (was_connecting) {
+        esp_openclaw_node_complete_connect_failed(
+            node,
+            ESP_OPENCLAW_NODE_CONNECT_FAILURE_CANCELED,
+            ESP_OK,
+            NULL,
+            has_transport);
         return;
     }
 
@@ -446,7 +496,10 @@ static esp_err_t reserve_disconnect_request_locked(esp_openclaw_node_handle_t no
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (node->state != ESP_OPENCLAW_NODE_INTERNAL_READY) {
+    /* CONNECTING is accepted as a cancel: without it, a client retrying an
+     * unreachable gateway is uncontrollable until its connect timeout. */
+    if (node->state != ESP_OPENCLAW_NODE_INTERNAL_READY &&
+        !esp_openclaw_node_state_is_connecting(node->state)) {
         return ESP_ERR_INVALID_STATE;
     }
     if (node->pending_control != ESP_OPENCLAW_NODE_PENDING_CONTROL_REQUEST_NONE) {

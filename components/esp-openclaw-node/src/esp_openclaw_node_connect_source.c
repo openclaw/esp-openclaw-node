@@ -318,8 +318,10 @@ void esp_openclaw_node_free_connect_material(esp_openclaw_node_connect_material_
 static esp_err_t validate_saved_session_connect_preflight_locked(
     esp_openclaw_node_handle_t node)
 {
+    /* NOT_FOUND (not INVALID_STATE) so callers can tell "no session material
+     * exists, re-pair" apart from "client is busy, retry later". */
     if (!esp_openclaw_node_saved_session_is_present_locked(node)) {
-        return ESP_ERR_INVALID_STATE;
+        return ESP_ERR_NOT_FOUND;
     }
     return esp_openclaw_node_validate_tls_preflight(
         &node->config,
@@ -410,10 +412,20 @@ esp_err_t esp_openclaw_node_reserve_connect_request_locked(
         node->state == ESP_OPENCLAW_NODE_INTERNAL_CLOSED) {
         return ESP_ERR_INVALID_STATE;
     }
-    if (node->state != ESP_OPENCLAW_NODE_INTERNAL_IDLE) {
+
+    /* The control slot is single-entry: a second request while one is queued
+     * would race for it and drop silently. */
+    if (node->pending_control != ESP_OPENCLAW_NODE_PENDING_CONTROL_REQUEST_NONE) {
         return ESP_ERR_INVALID_STATE;
     }
-    if (node->pending_control != ESP_OPENCLAW_NODE_PENDING_CONTROL_REQUEST_NONE) {
+    /* Saved-session requests come from automatic reconnect loops and must
+     * never displace anything: idle-only. Explicit sources are operator
+     * decisions and also reserve from CONNECTING/READY — the worker tears the
+     * old attempt or session down (CANCELED/REQUESTED terminal event) before
+     * starting the new one. Without this preemption a device retrying a dead
+     * gateway can never be re-provisioned from the console. */
+    if (source->kind == ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_SAVED_SESSION &&
+        node->state != ESP_OPENCLAW_NODE_INTERNAL_IDLE) {
         return ESP_ERR_INVALID_STATE;
     }
 

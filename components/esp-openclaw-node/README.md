@@ -292,13 +292,18 @@ and explicit auth input on behalf of the application.
 
 Request rules:
 
-- `ESP_OPENCLAW_NODE_CONNECT_SOURCE_SAVED_SESSION` is valid only when a saved
-reconnect session is present
-Applications can check saved-session availability with
-`esp_openclaw_node_has_saved_session()` before submitting that request.
-- explicit connect requests are valid only when no session is active and no
-  connect or disconnect request is in flight
-- `esp_openclaw_node_request_disconnect()` is valid only while the node is ready
+- `ESP_OPENCLAW_NODE_CONNECT_SOURCE_SAVED_SESSION` is valid only while idle and
+returns `ESP_ERR_NOT_FOUND` when no saved reconnect session is present. The
+persisted session is reloaded from NVS on every saved-session request, so a
+handoff token stored by a sibling-role client is picked up without recreating
+the handle.
+- explicit connect requests (setup code, token, password, no-auth) preempt: an
+in-flight connect attempt ends with a `CONNECT_FAILED(CANCELED)` event and an
+established session ends with `DISCONNECTED(REQUESTED)` before the new attempt
+starts. Automatic reconnect loops must use `SAVED_SESSION` so they can never
+displace an operator-issued request.
+- `esp_openclaw_node_request_disconnect()` disconnects a ready session or
+cancels an in-flight connect attempt (`CONNECT_FAILED(CANCELED)`)
 - once destroy begins, new async requests are rejected
 
 For each accepted connect request, wait for exactly one terminal outcome before

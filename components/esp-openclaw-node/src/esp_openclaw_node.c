@@ -556,6 +556,29 @@ esp_err_t esp_openclaw_node_request_connect(
         return ESP_ERR_INVALID_ARG;
     }
 
+    if (request->source == ESP_OPENCLAW_NODE_CONNECT_SOURCE_SAVED_SESSION) {
+        /* NVS is the authoritative session store and a sibling client can
+         * update it behind this handle's back: a re-pair on the node-role
+         * client persists a fresh operator handoff token that this handle's
+         * boot-time snapshot has never seen. Reload before every
+         * saved-session attempt so recovery needs no handle recreation. */
+        esp_openclaw_node_persisted_session_t fresh = {0};
+        esp_err_t load_err = esp_openclaw_node_persisted_session_load(
+            node->config.role,
+            &fresh);
+        if (load_err == ESP_OK) {
+            esp_openclaw_node_lock_state(node);
+            esp_openclaw_node_persisted_session_free(&node->persisted_session);
+            node->persisted_session = fresh;
+            esp_openclaw_node_unlock_state(node);
+        } else {
+            ESP_LOGW(
+                ESP_OPENCLAW_NODE_TAG,
+                "saved-session reload from NVS failed, using in-memory copy: %s",
+                esp_err_to_name(load_err));
+        }
+    }
+
     esp_openclaw_node_connect_request_source_t connect_source = {0};
     esp_err_t err =
         esp_openclaw_node_build_connect_source_from_request(

@@ -47,7 +47,6 @@ static bool talk_closing;
 /* Set by talk.stop while the worker is still dialing; the worker must abandon
  * the session before the microphone path goes live. */
 static bool talk_cancel_requested;
-static bool operator_start_scheduled;
 static bool node_reconnect_scheduled;
 
 typedef struct {
@@ -55,10 +54,12 @@ typedef struct {
     bool failed;
 } talk_teardown_request_t;
 
-static void start_operator_task(void *arg);
 static void start_talk_once(void);
 static esp_err_t register_talk_node_commands(esp_openclaw_node_handle_t node);
 static TaskHandle_t talk_start_worker;
+static TaskHandle_t operator_start_worker;
+/* Pending delay for the next operator start; guarded by state_lock. */
+static uint32_t operator_start_delay_ms;
 
 /*
  * The Talk starter is a persistent worker created at boot, when internal RAM
@@ -208,28 +209,17 @@ static char *derive_gateway_http_base(void)
 
 static bool schedule_operator_start(uint32_t delay_ms)
 {
-    xSemaphoreTake(state_lock, portMAX_DELAY);
-    bool schedule = !operator_start_scheduled;
-    if (schedule) {
-        operator_start_scheduled = true;
-    }
-    xSemaphoreGive(state_lock);
-    if (!schedule) {
-        return true;
-    }
-    if (xTaskCreate(
-            start_operator_task,
-            "operator_start",
-            6144,
-            (void *)(uintptr_t)delay_ms,
-            6,
-            NULL) == pdPASS) {
-        return true;
+    /* Persistent PSRAM worker (like talk_start): a per-attempt xTaskCreate
+     * here needed contiguous internal RAM at the busiest boot moment and
+     * failed exactly when the operator session was about to come up. */
+    if (operator_start_worker == NULL) {
+        return false;
     }
     xSemaphoreTake(state_lock, portMAX_DELAY);
-    operator_start_scheduled = false;
+    operator_start_delay_ms = delay_ms;
     xSemaphoreGive(state_lock);
-    return false;
+    xTaskNotifyGive(operator_start_worker);
+    return true;
 }
 
 static void media_thread_scheduler(const char *name, media_lib_thread_cfg_t *config)
@@ -552,9 +542,10 @@ static esp_err_t start_operator_client(void)
     esp_openclaw_node_handle_t existing = operator_client;
     xSemaphoreGive(state_lock);
     if (existing != NULL) {
-        if (!esp_openclaw_node_has_saved_session(existing)) {
-            return ESP_ERR_NOT_FOUND;
-        }
+        /* No has_saved_session precheck: the component reloads NVS on every
+         * saved-session connect, so a handoff token persisted later by the
+         * node client (console re-pair) is picked up here. The precheck read
+         * a stale in-memory snapshot and wedged this loop forever. */
         const esp_openclaw_node_connect_request_t reconnect = {
             .source = ESP_OPENCLAW_NODE_CONNECT_SOURCE_SAVED_SESSION,
         };
@@ -589,36 +580,49 @@ static esp_err_t start_operator_client(void)
     return esp_openclaw_node_request_connect(created, &request);
 }
 
-static void start_operator_task(void *arg)
+static void operator_start_worker_task(void *arg)
 {
-    uint32_t delay_ms = (uint32_t)(uintptr_t)arg;
-    if (delay_ms > 0) {
-        vTaskDelay(pdMS_TO_TICKS(delay_ms));
+    (void)arg;
+    for (;;) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        xSemaphoreTake(state_lock, portMAX_DELAY);
+        uint32_t delay_ms = operator_start_delay_ms;
+        xSemaphoreGive(state_lock);
+        if (delay_ms > 0) {
+            vTaskDelay(pdMS_TO_TICKS(delay_ms));
+            /* A newer request may have arrived while sleeping; its notify is
+             * pending and the next loop iteration handles it immediately. */
+        }
+        esp_err_t err = start_operator_client();
+        if (err != ESP_OK) {
+            // Every retry logs: the display alone cannot say WHY the operator
+            // session is down, and a silent loop here cost a debugging session.
+            ESP_LOGW(TAG, "operator client start failed: %s (retrying)", esp_err_to_name(err));
+            room_ui_set(
+                ROOM_UI_ERROR,
+                err == ESP_ERR_NOT_FOUND ? "No operator session\nre-pair via console" : "Operator token");
+            (void)schedule_operator_start(5000);
+        }
     }
-    // A synchronous/fast connect failure must be able to schedule the next retry.
-    xSemaphoreTake(state_lock, portMAX_DELAY);
-    operator_start_scheduled = false;
-    xSemaphoreGive(state_lock);
-    esp_err_t err = start_operator_client();
-    if (err != ESP_OK) {
-        room_ui_set(ROOM_UI_ERROR, "Operator token");
-        (void)schedule_operator_start(5000);
-    }
-    vTaskDelete(NULL);
 }
 
 static esp_err_t request_node_connection(void)
 {
-    esp_openclaw_node_connect_request_t request = {0};
-    if (esp_openclaw_node_has_saved_session(node_client)) {
-        request.source = ESP_OPENCLAW_NODE_CONNECT_SOURCE_SAVED_SESSION;
-    } else {
-        if (CONFIG_OPENCLAW_ROOM_SETUP_CODE[0] == '\0') {
-            return ESP_ERR_NOT_FOUND;
-        }
-        request.source = ESP_OPENCLAW_NODE_CONNECT_SOURCE_SETUP_CODE;
-        request.value = CONFIG_OPENCLAW_ROOM_SETUP_CODE;
+    /* Saved session first (the component reloads it from NVS per request);
+     * only a NOT_FOUND answer falls back to the baked setup code so a live
+     * console-provisioned session is never clobbered by stale Kconfig. */
+    esp_openclaw_node_connect_request_t request = {
+        .source = ESP_OPENCLAW_NODE_CONNECT_SOURCE_SAVED_SESSION,
+    };
+    esp_err_t err = esp_openclaw_node_request_connect(node_client, &request);
+    if (err != ESP_ERR_NOT_FOUND) {
+        return err;
     }
+    if (CONFIG_OPENCLAW_ROOM_SETUP_CODE[0] == '\0') {
+        return ESP_ERR_NOT_FOUND;
+    }
+    request.source = ESP_OPENCLAW_NODE_CONNECT_SOURCE_SETUP_CODE;
+    request.value = CONFIG_OPENCLAW_ROOM_SETUP_CODE;
     return esp_openclaw_node_request_connect(node_client, &request);
 }
 
@@ -685,9 +689,9 @@ static void node_event(
         char *gateway_http_base = derive_gateway_http_base();
         room_canvas_set_gateway_http_base(gateway_http_base);
         free(gateway_http_base);
-        if (!schedule_operator_start(0)) {
-            room_ui_set(ROOM_UI_ERROR, "Operator token");
-        }
+        /* The persistent worker exists before the node client starts, so this
+         * cannot fail; the worker loop owns all retry/error reporting. */
+        (void)schedule_operator_start(0);
     } else {
         room_ui_set(ROOM_UI_ERROR, "Node offline");
         schedule_node_reconnect(2000);
@@ -904,6 +908,17 @@ void app_main(void)
         &talk_start_worker,
         MALLOC_CAP_SPIRAM);
     ESP_ERROR_CHECK(starter_task == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
+    /* Internal stack (NOT PSRAM like talk_start): this worker calls
+     * esp_openclaw_node_create, whose NVS reads run flash operations, and
+     * flash ops assert unless every running stack is cache-safe internal RAM. */
+    BaseType_t operator_task = xTaskCreate(
+        operator_start_worker_task,
+        "operator_start",
+        6144,
+        NULL,
+        6,
+        &operator_start_worker);
+    ESP_ERROR_CHECK(operator_task == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
     BaseType_t teardown_task = xTaskCreate(
         talk_teardown_task,
         "talk_teardown",

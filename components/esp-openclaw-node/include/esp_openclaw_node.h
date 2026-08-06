@@ -66,6 +66,7 @@ typedef enum {
     ESP_OPENCLAW_NODE_CONNECT_FAILURE_CONNECTION_LOST,             /**< The transport dropped before connect completed. */
     ESP_OPENCLAW_NODE_CONNECT_FAILURE_AUTH_REJECTED,               /**< The gateway rejected the auth material or signature. */
     ESP_OPENCLAW_NODE_CONNECT_FAILURE_SESSION_FINALIZATION_FAILED, /**< `hello-ok` handling failed after initial auth acceptance. */
+    ESP_OPENCLAW_NODE_CONNECT_FAILURE_CANCELED,                    /**< The attempt was canceled by a local disconnect or a superseding explicit connect request. */
 } esp_openclaw_node_connect_failure_reason_t;
 
 /** @brief Payload for @ref ESP_OPENCLAW_NODE_EVENT_CONNECT_FAILED. */
@@ -325,15 +326,30 @@ esp_err_t esp_openclaw_node_register_command(
  * - gateway password
  * - no-auth
  *
+ * `SAVED_SESSION` requests are accepted only while idle: they are the
+ * automatic-reconnect path and must never displace an operator-issued attempt.
+ * Every other source is an operator decision and preempts whatever the client
+ * is doing — an in-flight connect attempt or an established session is torn
+ * down first (its terminal event carries the `CANCELED` reason) and the new
+ * attempt starts from the fresh material. Without this, a device stuck
+ * retrying a dead gateway could never be re-provisioned from the console.
+ *
+ * One narrowing of the one-terminal-event rule: an accepted `SAVED_SESSION`
+ * request that loses the race with a concurrent explicit request is dropped
+ * without its own terminal event; the explicit attempt's outcome is the next
+ * event the callback sees, and reconnect loops retry from terminal events
+ * anyway.
+ *
  * @param[in] node Node handle.
  * @param[in] request Connect request to submit.
  *
  * @return
  *      - `ESP_OK` if the request was accepted into the component queue
  *      - `ESP_ERR_INVALID_ARG` if `node` or `request` is invalid
- *      - `ESP_ERR_INVALID_STATE` if a session is already active, another
- *        connect or disconnect request is already in progress, the saved
- *        reconnect session is missing for `SAVED_SESSION`, or destroy has begun
+ *      - `ESP_ERR_INVALID_STATE` if destroy has begun, or a `SAVED_SESSION`
+ *        request arrived while a session or another control request is active
+ *      - `ESP_ERR_NOT_FOUND` if the saved reconnect session is missing for
+ *        `SAVED_SESSION`
  *      - `ESP_ERR_NO_MEM` if the request could not be copied or queued
  *      - `ESP_FAIL` on an unexpected local submission failure
  */
@@ -342,15 +358,20 @@ esp_err_t esp_openclaw_node_request_connect(
     const esp_openclaw_node_connect_request_t *request);
 
 /**
- * @brief Request disconnect of the active session.
+ * @brief Request disconnect of the active session or cancel a connect attempt.
+ *
+ * A ready session ends with a `DISCONNECTED(REQUESTED)` event. An in-flight
+ * connect attempt is aborted and ends with a `CONNECT_FAILED(CANCELED)` event;
+ * without this cancel path, a client retrying an unreachable gateway would be
+ * uncontrollable until its connect timeout expired.
  *
  * @param[in] node Node handle.
  *
  * @return
  *      - `ESP_OK` if the request was accepted into the component queue
  *      - `ESP_ERR_INVALID_ARG` if `node` is `NULL`
- *      - `ESP_ERR_INVALID_STATE` if no active session is present or destroy has
- *        begun
+ *      - `ESP_ERR_INVALID_STATE` if the client is idle (nothing to disconnect),
+ *        another control request is pending, or destroy has begun
  *      - `ESP_ERR_NO_MEM` if the request could not be queued
  *      - `ESP_FAIL` on an unexpected local submission failure
  */

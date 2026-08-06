@@ -30,16 +30,17 @@ static void esp_openclaw_node_example_saved_session_reconnect_task(void *arg)
         if (!esp_openclaw_node_wifi_wait_for_connection(portMAX_DELAY)) {
             continue;
         }
-        if (!esp_openclaw_node_has_saved_session(state->node)) {
-            ESP_LOGI(TAG, "saved-session reconnect skipped because no saved session is available");
-            continue;
-        }
 
         vTaskDelay(pdMS_TO_TICKS(1000));
 
+        /* No has_saved_session precheck: it reads a possibly stale in-memory
+         * snapshot, while the component reloads NVS on every saved-session
+         * request and answers NOT_FOUND itself. */
         esp_err_t err = esp_openclaw_node_request_connect(state->node, &request);
         if (err == ESP_OK) {
             ESP_LOGI(TAG, "requested saved-session reconnect");
+        } else if (err == ESP_ERR_NOT_FOUND) {
+            ESP_LOGI(TAG, "saved-session reconnect skipped because no saved session is available");
         } else if (err != ESP_ERR_INVALID_STATE) {
             ESP_LOGW(TAG, "saved-session reconnect request failed: %s", esp_err_to_name(err));
         }

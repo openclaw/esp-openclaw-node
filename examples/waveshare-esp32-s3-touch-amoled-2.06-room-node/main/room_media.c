@@ -264,7 +264,9 @@ esp_err_t room_media_init(room_wake_callback_t callback, void *ctx)
         room_audio_codecs_init(&record, &playback),
         TAG,
         "audio codec init");
-    if (esp_codec_dev_set_out_vol(playback, 65) != 0) {
+    /* Codec curve is quiet at the bottom: 65 was whisper-level, 85 barely
+     * room-audible. 100 with the 5V PA is the usable speakerphone level; AEC still tracks echo (verified by mic loop measurement). */
+    if (esp_codec_dev_set_out_vol(playback, 100) != 0) {
         return ESP_FAIL;
     }
 

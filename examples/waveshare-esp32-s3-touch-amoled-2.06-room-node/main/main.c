@@ -747,7 +747,12 @@ static void node_event(
         }
     } else {
         room_ui_set_gateway(NULL);
-        room_ui_set(ROOM_UI_ERROR, "Node offline");
+        /* The Talk call is client-owned WebRTC straight to the provider; the
+         * control channel dropping (common under call load) must not stomp
+         * the speaking face with an error. Reconnect quietly instead. */
+        if (!room_ui_talk_face_active()) {
+            room_ui_set(ROOM_UI_ERROR, "Node offline");
+        }
         schedule_node_reconnect(2000);
     }
 }

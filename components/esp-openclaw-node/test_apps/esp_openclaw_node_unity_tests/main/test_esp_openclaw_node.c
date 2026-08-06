@@ -782,7 +782,7 @@ TEST_CASE("connect saved session without persisted session fails", "[esp_opencla
     TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_create(&config, &node));
     TEST_ASSERT_NOT_NULL(node);
     TEST_ASSERT_FALSE(esp_openclaw_node_has_saved_session(node));
-    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, request_connect_saved_session(node));
+    TEST_ASSERT_EQUAL(ESP_ERR_NOT_FOUND, request_connect_saved_session(node));
 
     TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_destroy(node));
 }
@@ -1150,7 +1150,7 @@ TEST_CASE("node.invoke.request is ignored until handshake reaches ready", "[esp_
     vSemaphoreDelete(command_ctx.release);
 }
 
-TEST_CASE("disconnect is rejected while transport start is in progress", "[esp_openclaw_node][transport]")
+TEST_CASE("disconnect while transport start is in progress cancels the attempt", "[esp_openclaw_node][transport]")
 {
     reset_openclaw_storage();
     reset_transport_state();
@@ -1173,12 +1173,13 @@ TEST_CASE("disconnect is rejected while transport start is in progress", "[esp_o
         ESP_OK,
         request_connect_no_auth(node, "ws://gateway.example/ws"));
     TEST_ASSERT_TRUE(xSemaphoreTake(s_transport_state.start_entered, pdMS_TO_TICKS(1000)) == pdTRUE);
-    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, esp_openclaw_node_request_disconnect(node));
+    /* The cancel is accepted while the attempt is connecting; it is processed
+     * after the blocked transport start returns. */
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_request_disconnect(node));
     TEST_ASSERT_TRUE(xSemaphoreGive(s_transport_state.start_release) == pdTRUE);
 
     TEST_ASSERT_TRUE(wait_for_event(ESP_OPENCLAW_NODE_EVENT_CONNECT_FAILED, pdMS_TO_TICKS(1000)));
     TEST_ASSERT_EQUAL(0, s_event_recorder.connected_count);
-    TEST_ASSERT_EQUAL(1, s_event_recorder.connect_failed_count);
     TEST_ASSERT_EQUAL(0, s_event_recorder.disconnected_count);
     TEST_ASSERT_FALSE(esp_openclaw_node_has_saved_session(node));
 
@@ -1189,7 +1190,7 @@ TEST_CASE("disconnect is rejected while transport start is in progress", "[esp_o
     s_transport_state.start_release = NULL;
 }
 
-TEST_CASE("disconnect is rejected after connect request send while still connecting", "[esp_openclaw_node][transport]")
+TEST_CASE("disconnect after connect request send cancels before hello-ok lands", "[esp_openclaw_node][transport]")
 {
     reset_openclaw_storage();
     reset_transport_state();
@@ -1223,7 +1224,10 @@ TEST_CASE("disconnect is rejected after connect request send while still connect
 
     char *connect_id = extract_first_json_id(s_transport_state.last_sent_text);
     TEST_ASSERT_NOT_NULL(connect_id);
-    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, esp_openclaw_node_request_disconnect(node));
+    /* The cancel is accepted while connecting and is queued ahead of the
+     * hello-ok data event, so the attempt ends CONNECT_FAILED(CANCELED) and
+     * the late hello-ok is dropped against the torn-down transport. */
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_request_disconnect(node));
 
     char connect_response[512] = {0};
     snprintf(
@@ -1235,11 +1239,14 @@ TEST_CASE("disconnect is rejected after connect request send while still connect
     TEST_ASSERT_TRUE(xSemaphoreGive(s_transport_state.send_text_release) == pdTRUE);
     emit_ws_event(WEBSOCKET_EVENT_DATA, connect_response, ESP_OK);
 
-    TEST_ASSERT_TRUE(wait_for_event(ESP_OPENCLAW_NODE_EVENT_CONNECTED, pdMS_TO_TICKS(1000)));
-    TEST_ASSERT_EQUAL(1, s_event_recorder.connected_count);
-    TEST_ASSERT_EQUAL(0, s_event_recorder.connect_failed_count);
+    TEST_ASSERT_TRUE(wait_for_event(ESP_OPENCLAW_NODE_EVENT_CONNECT_FAILED, pdMS_TO_TICKS(2000)));
+    TEST_ASSERT_EQUAL(0, s_event_recorder.connected_count);
+    TEST_ASSERT_EQUAL(1, s_event_recorder.connect_failed_count);
     TEST_ASSERT_EQUAL(0, s_event_recorder.disconnected_count);
-    TEST_ASSERT_TRUE(esp_openclaw_node_has_saved_session(node));
+    TEST_ASSERT_EQUAL(
+        ESP_OPENCLAW_NODE_CONNECT_FAILURE_CANCELED,
+        s_event_recorder.connect_failed_reason);
+    TEST_ASSERT_FALSE(esp_openclaw_node_has_saved_session(node));
 
     TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_destroy(node));
     vSemaphoreDelete(s_transport_state.send_text_entered);

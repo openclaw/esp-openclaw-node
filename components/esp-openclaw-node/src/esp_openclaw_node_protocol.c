@@ -552,7 +552,10 @@ static connect_response_finalize_result_t finalize_connect_response_success(
         free(node->plugin_surface_urls_json);
         node->plugin_surface_urls_json = plugin_surface_urls_json;
         node->state = ESP_OPENCLAW_NODE_INTERNAL_READY;
-        esp_openclaw_node_clear_pending_control_locked(node);
+        /* Do NOT clear pending_control here: this attempt's CONNECT
+         * reservation was already consumed when the transport started, so
+         * anything present now is a queued disconnect/preempt that must still
+         * run against the ready session — clearing it loses that request. */
         esp_openclaw_node_clear_session_wait_state_locked(node);
         esp_openclaw_node_clear_connect_source_struct(&node->active_connect_source);
         result.outcome = CONNECT_RESPONSE_OUTCOME_CONNECTED;

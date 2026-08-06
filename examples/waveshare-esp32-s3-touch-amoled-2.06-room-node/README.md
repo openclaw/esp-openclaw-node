@@ -35,9 +35,9 @@ WakeNet remains active while playback is running and consumes the AEC-cleaned ca
 
 Canvas mode uses a separate 410x502 LVGL screen at 80% brightness. Hiding it returns to the status screen; a user-initiated exit leaves a readable hint rather than dropping straight to the AMOLED-off idle policy. Talk state changes do not replace active Canvas content; a small status pill appears at the top-center until Talk returns to idle.
 
-**Safe area.** The glass has large rounded corners, so laid-out content (A2UI, placeholder, test card) is inset 32 px — the same idea as Apple's safe area. Presented images are intentionally full-bleed, like wallpaper.
+**Safe area.** The glass has large rounded corners, so laid-out content (A2UI, placeholder) is inset 32 px — the same idea as Apple's safe area. Presented images are intentionally full-bleed, like wallpaper.
 
-**On-device controls.** Tapping the screen or pressing the BOOT button cycles status, a safe-area test card, and a solid fill. The test card draws a border exactly on the safe-area inset with markers at its corners; the solid fill has no content variation, so together they separate panel/transfer artifacts from rendering artifacts without a serial console. The PWR button is hardware power management and is not GPIO-visible.
+**On-device controls.** Tapping the screen or pressing the BOOT button wakes the face for a few seconds with the connected gateway (host:port) shown underneath — or, when the agent has pushed canvas content, toggles between that content and the status view. Tapping an empty canvas background returns to the face. The PWR button is hardware power management and is not GPIO-visible.
 
 **Task priorities.** The node worker and websocket tasks run at priority 11
 (`ESP_OPENCLAW_NODE_TASK_PRIORITY`, `ESP_OPENCLAW_NODE_TRANSPORT_TASK_PRIORITY`),

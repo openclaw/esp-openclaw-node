@@ -12,9 +12,14 @@
 #include "esp_check.h"
 #include "esp_codec_dev.h"
 #include "esp_log.h"
+#include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
+#include "freertos/semphr.h"
+#include "freertos/task.h"
 #include "media_lib_err.h"
 #include "room_aec_src.h"
+#include "room_diagnostics_data.h"
 #include "room_face.h"
 #include "room_board.h"
 
@@ -27,6 +32,20 @@ static esp_capture_sink_handle_t wake_sink;
 static av_render_handle_t player;
 static room_wake_callback_t wake_callback;
 static void *wake_callback_ctx;
+/* A binary gate, rather than a task-owned FreeRTOS mutex, spans Talk start on
+ * one task and teardown on another. The diagnostics snapshot is the state
+ * owner; this gate is the single serialization path for Talk and local tone. */
+static SemaphoreHandle_t media_owner_gate;
+static portMUX_TYPE tone_mux = portMUX_INITIALIZER_UNLOCKED;
+static room_media_tone_snapshot_t tone_snapshot;
+static bool tone_task_active;
+static bool media_initialized;
+static room_media_talk_busy_cb_t tone_busy_cb;
+static void *tone_busy_ctx;
+/* Only one tone worker can exist. Its frame storage therefore needs no lock
+ * and must not consume a third of the worker's 4 KiB stack. */
+enum { TONE_SAMPLES_PER_CHANNEL = 320 };
+static int16_t tone_pcm[TONE_SAMPLES_PER_CHANNEL * 2];
 
 static void room_afe_wake(void *ctx)
 {
@@ -44,6 +63,7 @@ static void room_afe_wake(void *ctx)
  * needs no knowledge of the render's internals.
  */
 static audio_render_handle_t render_tap_target;
+static uint8_t render_tap_channels = 2;
 
 static audio_render_handle_t render_tap_init(void *cfg, int cfg_size)
 {
@@ -54,6 +74,7 @@ static audio_render_handle_t render_tap_init(void *cfg, int cfg_size)
 
 static int render_tap_open(audio_render_handle_t render, av_render_audio_frame_info_t *info)
 {
+    if (info != NULL && info->channel > 0) render_tap_channels = info->channel;
     return audio_render_open(render, info);
 }
 
@@ -62,21 +83,17 @@ static int render_tap_write(audio_render_handle_t render, av_render_audio_frame_
     if (frame != NULL && frame->data != NULL && frame->size >= 2) {
         const int16_t *samples = (const int16_t *)frame->data;
         size_t count = (size_t)frame->size / 2;
-        /* Stride so any frame costs at most ~128 reads on the render task. */
-        size_t step = count / 128 + 1;
-        uint32_t sum = 0;
-        size_t taken = 0;
-        for (size_t i = 0; i < count; i += step) {
-            int32_t value = samples[i];
-            sum += (uint32_t)(value < 0 ? -value : value);
-            ++taken;
-        }
-        uint32_t mean = taken > 0 ? sum / taken : 0;
-        /* Speech mean-abs rarely exceeds ~4000 at our volume; clamp to full open. */
-        uint32_t level = mean >= 4000 ? 255 : (mean * 255) / 4000;
-        room_face_set_speech_level((uint8_t)level);
+        room_diagnostics_audio_record_renderer_offer(
+            samples, count, render_tap_channels, (size_t)frame->size);
+        room_audio_diagnostics_snapshot_t snapshot = {0};
+        room_diagnostics_audio_get(&snapshot);
+        room_face_set_speech_level((uint8_t)((snapshot.renderer_level * 255U) / 100U));
     }
-    return audio_render_write(render, frame);
+    int result = audio_render_write(render, frame);
+    if (frame != NULL && frame->data != NULL && frame->size > 0) {
+        room_diagnostics_audio_record_renderer_result(result == 0);
+    }
+    return result;
 }
 
 static int render_tap_get_latency(audio_render_handle_t render, uint32_t *latency)
@@ -157,10 +174,122 @@ static void wake_drain_task(void *arg)
     }
 }
 
+static void tone_set_result(
+    room_media_tone_state_t state,
+    room_media_tone_error_t error,
+    uint16_t enqueued,
+    uint16_t accepted)
+{
+    taskENTER_CRITICAL(&tone_mux);
+    tone_snapshot.state = state;
+    tone_snapshot.error = error;
+    tone_snapshot.enqueued_frames = enqueued;
+    tone_snapshot.renderer_accepted_frames = accepted;
+    tone_task_active = false;
+    taskEXIT_CRITICAL(&tone_mux);
+}
+
+static void test_tone_task(void *arg)
+{
+    (void)arg;
+    static const int16_t wave[16] = {
+        0, 1578, 2917, 3811, 4125, 3811, 2917, 1578,
+        0, -1578, -2917, -3811, -4125, -3811, -2917, -1578,
+    };
+    enum { TONE_FRAMES = 25 };
+    uint16_t enqueued = 0;
+    uint16_t accepted = 0;
+    room_media_tone_error_t error = ROOM_MEDIA_TONE_ERROR_NONE;
+
+    xSemaphoreTake(media_owner_gate, portMAX_DELAY);
+    if (tone_busy_cb != NULL && tone_busy_cb(tone_busy_ctx)) {
+        tone_set_result(ROOM_MEDIA_TONE_BUSY, ROOM_MEDIA_TONE_ERROR_NONE, 0, 0);
+        xSemaphoreGive(media_owner_gate);
+        vTaskDelete(NULL);
+        return;
+    }
+    room_audio_diagnostics_snapshot_t before = {0};
+    room_diagnostics_audio_get(&before);
+    if (av_render_reset(player) != ESP_MEDIA_ERR_OK) {
+        error = ROOM_MEDIA_TONE_ERROR_RESET;
+        goto done;
+    }
+    av_render_audio_frame_info_t frame_info = {
+        .sample_rate = 16000,
+        .channel = 2,
+        .bits_per_sample = 16,
+    };
+    /* This pinned av_render stores the pre-stream format while returning
+     * WRONG_STATE; the same public-API quirk is handled during player init. */
+    int frame_info_result = av_render_set_fixed_frame_info(player, &frame_info);
+    if (frame_info_result != ESP_MEDIA_ERR_OK &&
+        frame_info_result != ESP_MEDIA_ERR_WRONG_STATE) {
+        error = ROOM_MEDIA_TONE_ERROR_FRAME_INFO;
+        goto done;
+    }
+    av_render_audio_info_t stream = {
+        .codec = AV_RENDER_AUDIO_CODEC_PCM,
+        .sample_rate = 16000,
+        .channel = 2,
+        .bits_per_sample = 16,
+    };
+    if (av_render_add_audio_stream(player, &stream) != ESP_MEDIA_ERR_OK) {
+        error = ROOM_MEDIA_TONE_ERROR_STREAM;
+        goto done;
+    }
+    for (uint16_t frame_index = 0; frame_index < TONE_FRAMES; ++frame_index) {
+        for (size_t i = 0; i < TONE_SAMPLES_PER_CHANNEL; ++i) {
+            int16_t sample = wave[i & 15U];
+            tone_pcm[i * 2] = sample;
+            tone_pcm[i * 2 + 1] = sample;
+        }
+        av_render_audio_data_t data = {
+            .pts = (uint32_t)frame_index * 20U,
+            .data = (uint8_t *)tone_pcm,
+            .size = sizeof(tone_pcm),
+        };
+        if (av_render_add_audio_data(player, &data) != ESP_MEDIA_ERR_OK) {
+            error = ROOM_MEDIA_TONE_ERROR_FEED;
+            goto done;
+        }
+        ++enqueued;
+    }
+    av_render_audio_data_t eos = {.pts = 500, .eos = true};
+    if (av_render_add_audio_data(player, &eos) != ESP_MEDIA_ERR_OK) {
+        error = ROOM_MEDIA_TONE_ERROR_EOS;
+        goto done;
+    }
+    for (int waited_ms = 0; waited_ms < 1600; waited_ms += 20) {
+        room_audio_diagnostics_snapshot_t now = {0};
+        room_diagnostics_audio_get(&now);
+        uint64_t delta = now.renderer_accepted - before.renderer_accepted;
+        accepted = delta > UINT16_MAX ? UINT16_MAX : (uint16_t)delta;
+        if (accepted >= TONE_FRAMES) break;
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+    if (accepted < TONE_FRAMES) error = ROOM_MEDIA_TONE_ERROR_RENDER_TIMEOUT;
+
+done:
+    int final_reset = av_render_reset(player);
+    if (error == ROOM_MEDIA_TONE_ERROR_NONE && final_reset != ESP_MEDIA_ERR_OK) {
+        error = ROOM_MEDIA_TONE_ERROR_RESET;
+    }
+    tone_set_result(
+        error == ROOM_MEDIA_TONE_ERROR_NONE ? ROOM_MEDIA_TONE_DONE : ROOM_MEDIA_TONE_ERROR,
+        error,
+        enqueued,
+        accepted);
+    xSemaphoreGive(media_owner_gate);
+    vTaskDelete(NULL);
+}
+
 esp_err_t room_media_init(room_wake_callback_t callback, void *ctx)
 {
     wake_callback = callback;
     wake_callback_ctx = ctx;
+    media_owner_gate = xSemaphoreCreateBinary();
+    if (media_owner_gate == NULL) return ESP_ERR_NO_MEM;
+    xSemaphoreGive(media_owner_gate);
 
     esp_codec_dev_handle_t record = NULL;
     esp_codec_dev_handle_t playback = NULL;
@@ -172,6 +301,7 @@ esp_err_t room_media_init(room_wake_callback_t callback, void *ctx)
     if (esp_codec_dev_set_out_vol(playback, board->audio.playback_volume) != 0) {
         return ESP_FAIL;
     }
+    room_diagnostics_audio_set_volume(board->audio.playback_volume);
 
     room_capture_audio_aec_src_cfg_t source_cfg = {
         .mic_layout = board->audio.afe_layout,
@@ -261,7 +391,9 @@ esp_err_t room_media_init(room_wake_callback_t callback, void *ctx)
         return ESP_ERR_NO_MEM;
     }
     ESP_LOGI(TAG, "ambient WakeNet detections are wired from the AFE");
-    ESP_LOGI(TAG, "24 kHz dual-channel capture and device AEC are active");
+    ESP_LOGI(TAG, "16 kHz capture with device AEC is active");
+    room_diagnostics_audio_set_capture_owner(ROOM_DIAGNOSTICS_CAPTURE_AMBIENT);
+    media_initialized = true;
     return ESP_OK;
 }
 
@@ -273,9 +405,10 @@ esp_err_t room_media_set_ambient_wake(bool enabled)
     /*
      * Change the next-open AFE config before handing capture ownership over.
      * Disabling the ambient sink stops the shared source; Talk then reopens it
-     * with AEC and VAD intact but WakeNet absent. After Talk closes, enabling
-     * the ambient sink reopens the source with WakeNet restored.
+     * with AEC+NLP while WakeNet/NS/VAD are disabled. After Talk closes,
+     * enabling the ambient sink reopens the source with WakeNet restored.
      */
+    room_diagnostics_audio_set_capture_owner(ROOM_DIAGNOSTICS_CAPTURE_TRANSITION);
     esp_capture_err_t source_err =
         room_capture_audio_aec_src_set_wakenet_enabled(audio_source, enabled);
     if (source_err != ESP_CAPTURE_ERR_OK) {
@@ -295,6 +428,8 @@ esp_err_t room_media_set_ambient_wake(bool enabled)
         "%s owns capture; WakeNet %s for AFE reopen",
         enabled ? "ambient wake" : "Talk",
         enabled ? "enabled" : "disabled");
+    room_diagnostics_audio_set_capture_owner(
+        enabled ? ROOM_DIAGNOSTICS_CAPTURE_AMBIENT : ROOM_DIAGNOSTICS_CAPTURE_TALK);
     return ESP_OK;
 }
 
@@ -306,4 +441,95 @@ esp_err_t room_media_get_webrtc_provider(esp_webrtc_media_provider_t *provider)
     provider->capture = capture;
     provider->player = player;
     return ESP_OK;
+}
+
+void room_media_begin_talk(void)
+{
+    if (media_owner_gate != NULL) {
+        xSemaphoreTake(media_owner_gate, portMAX_DELAY);
+        room_diagnostics_audio_set_capture_owner(ROOM_DIAGNOSTICS_CAPTURE_TRANSITION);
+    }
+}
+
+void room_media_end_talk(bool capture_remained_ambient)
+{
+    if (capture_remained_ambient) {
+        room_diagnostics_audio_set_capture_owner(ROOM_DIAGNOSTICS_CAPTURE_AMBIENT);
+    }
+    if (media_owner_gate != NULL) xSemaphoreGive(media_owner_gate);
+}
+
+esp_err_t room_media_request_test_tone(room_media_talk_busy_cb_t busy_cb, void *ctx)
+{
+    if (!media_initialized || player == NULL || media_owner_gate == NULL) {
+        tone_set_result(
+            ROOM_MEDIA_TONE_ERROR,
+            ROOM_MEDIA_TONE_ERROR_UNAVAILABLE,
+            0,
+            0);
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (busy_cb != NULL && busy_cb(ctx)) {
+        tone_set_result(ROOM_MEDIA_TONE_BUSY, ROOM_MEDIA_TONE_ERROR_NONE, 0, 0);
+        return ESP_ERR_INVALID_STATE;
+    }
+    taskENTER_CRITICAL(&tone_mux);
+    if (tone_task_active) {
+        taskEXIT_CRITICAL(&tone_mux);
+        return ESP_ERR_INVALID_STATE;
+    }
+    tone_task_active = true;
+    tone_busy_cb = busy_cb;
+    tone_busy_ctx = ctx;
+    tone_snapshot = (room_media_tone_snapshot_t) {
+        .state = ROOM_MEDIA_TONE_RUNNING,
+        .requested_frames = 25,
+    };
+    taskEXIT_CRITICAL(&tone_mux);
+    if (xTaskCreateWithCaps(
+            test_tone_task,
+            "speaker_test",
+            4096,
+            NULL,
+            6,
+            NULL,
+            MALLOC_CAP_SPIRAM) != pdPASS) {
+        tone_set_result(ROOM_MEDIA_TONE_ERROR, ROOM_MEDIA_TONE_ERROR_TASK, 0, 0);
+        return ESP_ERR_NO_MEM;
+    }
+    return ESP_OK;
+}
+
+void room_media_get_tone_snapshot(room_media_tone_snapshot_t *snapshot)
+{
+    if (snapshot == NULL) return;
+    taskENTER_CRITICAL(&tone_mux);
+    *snapshot = tone_snapshot;
+    taskEXIT_CRITICAL(&tone_mux);
+}
+
+const char *room_media_tone_state_name(room_media_tone_state_t state)
+{
+    switch (state) {
+        case ROOM_MEDIA_TONE_RUNNING: return "running";
+        case ROOM_MEDIA_TONE_DONE: return "done";
+        case ROOM_MEDIA_TONE_BUSY: return "busy";
+        case ROOM_MEDIA_TONE_ERROR: return "error";
+        default: return "idle";
+    }
+}
+
+const char *room_media_tone_error_name(room_media_tone_error_t error)
+{
+    switch (error) {
+        case ROOM_MEDIA_TONE_ERROR_UNAVAILABLE: return "unavailable";
+        case ROOM_MEDIA_TONE_ERROR_TASK: return "worker task";
+        case ROOM_MEDIA_TONE_ERROR_RESET: return "player reset";
+        case ROOM_MEDIA_TONE_ERROR_STREAM: return "PCM stream";
+        case ROOM_MEDIA_TONE_ERROR_FRAME_INFO: return "frame format";
+        case ROOM_MEDIA_TONE_ERROR_FEED: return "frame enqueue";
+        case ROOM_MEDIA_TONE_ERROR_EOS: return "EOS enqueue";
+        case ROOM_MEDIA_TONE_ERROR_RENDER_TIMEOUT: return "renderer timeout";
+        default: return "none";
+    }
 }

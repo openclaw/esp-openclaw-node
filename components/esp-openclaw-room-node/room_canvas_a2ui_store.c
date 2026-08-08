@@ -13,6 +13,7 @@
 #include "lvgl.h"
 #include "room_board.h"
 #include "room_canvas_internal.h"
+#include "room_diagnostics.h"
 #include "freertos/FreeRTOS.h"
 
 #define set_error room_canvas_set_error
@@ -60,6 +61,29 @@ size_t room_canvas_image_count;
 static room_canvas_action_handler_t action_handler;
 static portMUX_TYPE owner_session_mux = portMUX_INITIALIZER_UNLOCKED;
 static char owner_session_key[ESP_OPENCLAW_NODE_MAX_SESSION_KEY_LEN + 1];
+static portMUX_TYPE diagnostics_mux = portMUX_INITIALIZER_UNLOCKED;
+static room_canvas_diagnostics_snapshot_t diagnostics_snapshot;
+
+static void record_retained_kind(room_canvas_retained_kind_t kind)
+{
+    taskENTER_CRITICAL(&diagnostics_mux);
+    diagnostics_snapshot.retained_kind = kind;
+    diagnostics_snapshot.retained_components = kind == ROOM_CANVAS_RETAINED_A2UI
+        ? (uint16_t)component_count
+        : 0;
+    diagnostics_snapshot.retained_images = (uint8_t)image_count;
+    taskEXIT_CRITICAL(&diagnostics_mux);
+}
+
+void room_canvas_record_a2ui_retained(void)
+{
+    record_retained_kind(ROOM_CANVAS_RETAINED_A2UI);
+}
+
+void room_canvas_record_no_retained_content(void)
+{
+    record_retained_kind(ROOM_CANVAS_RETAINED_NONE);
+}
 
 void room_canvas_bind_owner_session(const char *session_key)
 {
@@ -201,6 +225,9 @@ void room_canvas_activate_locked(void)
 {
     lv_screen_load(canvas_screen);
     canvas_active = true;
+    taskENTER_CRITICAL(&diagnostics_mux);
+    diagnostics_snapshot.active = true;
+    taskEXIT_CRITICAL(&diagnostics_mux);
 }
 
 void room_canvas_configure_image_object(
@@ -261,6 +288,7 @@ static esp_err_t show_present_image(
     lv_obj_t *object = lv_image_create(canvas_screen);
     lv_image_set_src(object, images[0].decoded);
     configure_image_object(object, canvas_screen, &images[0], true);
+    record_retained_kind(ROOM_CANVAS_RETAINED_IMAGE);
     activate_canvas_locked();
     room_board_display_unlock();
     room_board_display_brightness_set(ROOM_CANVAS_ACTIVE_BRIGHTNESS);
@@ -944,10 +972,17 @@ static esp_err_t apply_a2ui_array(
     return ESP_OK;
 }
 
-/* Tap on empty canvas background returns to the status screen. */
+/* Tap on empty Canvas returns to status; hold opens local diagnostics. */
 static void canvas_screen_clicked(lv_event_t *event)
 {
-    (void)event;
+    lv_event_code_t code = lv_event_get_code(event);
+    if (code == LV_EVENT_LONG_PRESSED) {
+        lv_indev_t *indev = lv_indev_active();
+        if (indev != NULL) lv_indev_wait_release(indev);
+        room_diagnostics_open();
+        return;
+    }
+    if (code != LV_EVENT_CLICKED || room_diagnostics_is_open()) return;
     char *payload = NULL;
     esp_openclaw_node_error_t error = {0};
     if (room_canvas_hide(&payload, &error) == ESP_OK) {
@@ -975,10 +1010,20 @@ void room_canvas_view_toggle(void)
         room_canvas_emit_action(ROOM_CANVAS_ACTION_REQUEST_FACE_HINT, 10000);
         return;
     }
-    if (root_component_id != NULL) {
-        if (room_canvas_present(NULL, &payload, &error) == ESP_OK) {
-            free(payload);
+    taskENTER_CRITICAL(&diagnostics_mux);
+    room_canvas_retained_kind_t retained = diagnostics_snapshot.retained_kind;
+    taskEXIT_CRITICAL(&diagnostics_mux);
+    if (retained == ROOM_CANVAS_RETAINED_IMAGE) {
+        if (room_board_display_lock(ROOM_CANVAS_DISPLAY_LOCK_MS)) {
+            activate_canvas_locked();
+            room_board_display_unlock();
+            room_board_display_brightness_set(ROOM_CANVAS_ACTIVE_BRIGHTNESS);
+            room_canvas_emit_action(ROOM_CANVAS_ACTION_RENDER_CHANGED, 0);
         }
+        return;
+    }
+    if (root_component_id != NULL) {
+        if (room_canvas_present(NULL, &payload, &error) == ESP_OK) free(payload);
         return;
     }
     /* No agent canvas content: wake the face so the tap always answers. */
@@ -999,7 +1044,7 @@ esp_err_t room_canvas_init(void)
         return ESP_ERR_NO_MEM;
     }
     style_canvas_screen(canvas_safe_pad());
-    lv_obj_add_event_cb(canvas_screen, canvas_screen_clicked, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(canvas_screen, canvas_screen_clicked, LV_EVENT_ALL, NULL);
     room_board_display_unlock();
     return ESP_OK;
 }
@@ -1030,6 +1075,14 @@ void room_canvas_set_gateway_http_base(const char *base_url)
 bool room_canvas_is_active(void)
 {
     return canvas_active;
+}
+
+void room_canvas_get_diagnostics(room_canvas_diagnostics_snapshot_t *snapshot)
+{
+    if (snapshot == NULL) return;
+    taskENTER_CRITICAL(&diagnostics_mux);
+    *snapshot = diagnostics_snapshot;
+    taskEXIT_CRITICAL(&diagnostics_mux);
 }
 
 esp_err_t room_canvas_present(
@@ -1067,6 +1120,9 @@ esp_err_t room_canvas_hide(
         return set_error(out_error, "UNAVAILABLE", "the display is busy; retry canvas.hide", ESP_ERR_TIMEOUT);
     }
     canvas_active = false;
+    taskENTER_CRITICAL(&diagnostics_mux);
+    diagnostics_snapshot.active = false;
+    taskEXIT_CRITICAL(&diagnostics_mux);
     lv_screen_load(status_screen);
     room_board_display_unlock();
     /* Restore the live Talk state; forcing idle would blank an active call. */
@@ -1169,6 +1225,7 @@ esp_err_t room_canvas_a2ui_reset(
     lv_obj_clean(canvas_screen);
     clear_images_locked();
     clear_store();
+    record_retained_kind(ROOM_CANVAS_RETAINED_NONE);
     if (canvas_active) {
         show_placeholder_locked();
     }

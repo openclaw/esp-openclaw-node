@@ -64,6 +64,8 @@ int room_canvas_height(void);
 void room_canvas_style_screen(int32_t pad);
 void room_canvas_show_placeholder(void);
 void room_canvas_activate_locked(void);
+void room_canvas_record_a2ui_retained(void);
+void room_canvas_record_no_retained_content(void);
 void room_canvas_clear_images_locked(void);
 void room_canvas_configure_image_object(
     lv_obj_t *object,

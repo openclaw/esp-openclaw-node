@@ -22,6 +22,7 @@
 #include "room_diagnostics_data.h"
 #include "room_face.h"
 #include "room_board.h"
+#include "room_latency_policy.h"
 
 #define TAG "room_media"
 
@@ -209,7 +210,7 @@ static void test_tone_task(void *arg)
     if (tone_busy_cb != NULL && tone_busy_cb(tone_busy_ctx)) {
         xSemaphoreGive(media_owner_gate);
         tone_set_result(ROOM_MEDIA_TONE_BUSY, ROOM_MEDIA_TONE_ERROR_NONE, 0, 0);
-        vTaskDelete(NULL);
+        vTaskDeleteWithCaps(NULL);
         return;
     }
     room_audio_diagnostics_snapshot_t before = {0};
@@ -284,7 +285,7 @@ done:
         error,
         enqueued,
         accepted);
-    vTaskDelete(NULL);
+    vTaskDeleteWithCaps(NULL);
 }
 
 esp_err_t room_media_init(room_wake_callback_t callback, void *ctx)
@@ -377,8 +378,11 @@ esp_err_t room_media_init(room_wake_callback_t callback, void *ctx)
     }
     av_render_cfg_t player_cfg = {
         .audio_render = room_media_wrap_render(renderer),
-        .audio_raw_fifo_size = 8 * 4096,
-        .audio_render_fifo_size = 100 * 1024,
+        /* Queue ownership contract: these pinned WebRTC standard capacities
+         * start playback immediately while bounding stale audio under stalls.
+         * There is no cache, fallback, or additional playback path. */
+        .audio_raw_fifo_size = ROOM_PLAYER_RAW_FIFO_BYTES,
+        .audio_render_fifo_size = ROOM_PLAYER_RENDER_FIFO_BYTES,
         .allow_drop_data = false,
     };
     player = av_render_open(&player_cfg);

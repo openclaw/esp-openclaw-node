@@ -26,6 +26,9 @@ typedef struct {
     uint16_t display_height;
     char afe_layout[16];
     uint8_t configured_volume;
+    uint16_t talk_vad_silence_ms;
+    uint8_t player_raw_queue_kib;
+    uint8_t player_render_queue_kib;
     bool input_gain_configured;
     float configured_input_gain_db;
     bool wifi_connected;

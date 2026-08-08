@@ -40,6 +40,15 @@ The local speaker test queues a 1 second, 1 kHz PCM tone through the same
 Talk playback. It is serialized against the complete Talk media lifetime and
 runs from a worker task. Its result reports queued frames and renderer
 acceptance only; the person at the device remains the audibility check.
+Diagnostics presents this test as a lightweight six-object “tone buddy” card.
+It updates on the existing 75 ms diagnostics refresh, reacts only while the
+tone is running or during its eight-tick success bounce, and does not enable
+the full-screen procedural face on boards that disable it.
+
+Room endpoints request 400 ms of provider server-VAD post-speech silence for
+each Talk session. The player uses the pinned 4 KiB raw and 6 KiB render queue
+capacities: they start playback immediately and bound stale audio backlog under
+stalls, but they do not measure or promise total speech-to-response time.
 
 The USB REPL also exposes one local-only command with four exact forms:
 `diagnostics open`, `diagnostics close`, `diagnostics tone`, and

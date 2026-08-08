@@ -15,7 +15,7 @@ This usually means one of three things:
 Make sure the gateway includes the allowlist from the example README, then restart it:
 
 ```bash
-openclaw config set gateway.nodes.allowCommands '<json-array-from-example>' --strict-json
+openclaw config set gateway.nodes.commands.allow '<json-array-from-example>' --strict-json
 openclaw gateway restart
 ```
 

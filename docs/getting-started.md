@@ -21,11 +21,11 @@ Commands below assume the default OpenClaw install. If you use a named profile, 
 
 If the board will connect over Wi-Fi to a gateway running on another machine, set `gateway.bind` to `lan` first. The default loopback bind is only reachable from the gateway host itself.
 
-Before pairing a board, set `gateway.nodes.allowCommands` for the example you are using. Each example README lists the commands to allow.
+Before pairing a board, set `gateway.nodes.commands.allow` for the example you are using. Each example README lists the commands to allow.
 
 ```bash
 openclaw config set gateway.bind lan
-openclaw config set gateway.nodes.allowCommands '<json-array-from-example>' --strict-json
+openclaw config set gateway.nodes.commands.allow '<json-array-from-example>' --strict-json
 openclaw gateway restart
 openclaw gateway status --probe --json
 ```

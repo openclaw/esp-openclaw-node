@@ -1,3 +1,4 @@
+#include <inttypes.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -29,8 +30,11 @@
 #include "room_canvas_node_cmd.h"
 #include "room_face.h"
 #include "room_device_commands.h"
+#include "room_diagnostics.h"
+#include "room_diagnostics_data.h"
 #include "room_files.h"
 #include "room_media.h"
+#include "room_runtime_diagnostics.h"
 #include "room_ui_controller.h"
 #include "room_board.h"
 #include "esp_openclaw_room_node.h"
@@ -43,6 +47,7 @@ static SemaphoreHandle_t state_lock;
 static QueueHandle_t talk_teardown_queue;
 static TimerHandle_t talk_timeout_timer;
 static bool operator_ready;
+static bool node_ready;
 static bool media_ready;
 static bool talk_start_in_flight;
 static bool talk_dialing;
@@ -267,6 +272,7 @@ static void talk_teardown_task(void *arg)
         }
         talk_closing = false;
         xSemaphoreGive(state_lock);
+        room_media_end_talk(false);
     }
 }
 
@@ -329,6 +335,27 @@ static void start_talk_once(void)
             (!cancelled_early && signaling_client != NULL) ? "Gateway URL" : NULL);
         return;
     }
+    /* One owner spans the complete Talk lifetime. A short local tone that won
+     * the media gate first finishes before Talk proceeds; no player overlap is
+     * possible even if the start request arrived mid-tone. */
+    room_media_begin_talk();
+    xSemaphoreTake(state_lock, portMAX_DELAY);
+    bool cancelled_while_waiting = talk_cancel_requested || !talk_start_in_flight;
+    bool cancelled_while_waiting_failed = talk_cancel_failed;
+    if (cancelled_while_waiting) {
+        talk_cancel_requested = false;
+        talk_cancel_failed = false;
+        talk_start_in_flight = false;
+    }
+    xSemaphoreGive(state_lock);
+    if (cancelled_while_waiting) {
+        room_media_end_talk(true);
+        free(http_base);
+        room_ui_set(
+            cancelled_while_waiting_failed ? ROOM_UI_ERROR : ROOM_UI_IDLE,
+            cancelled_while_waiting_failed ? "Talk failed" : NULL);
+        return;
+    }
     esp_peer_default_cfg_t peer = {
         .agent_recv_timeout = 500,
         .ice_use_lite_mode = true,
@@ -368,6 +395,7 @@ static void start_talk_once(void)
         talk_cancel_requested = false;
         talk_cancel_failed = false;
         xSemaphoreGive(state_lock);
+        room_media_end_talk(true);
         free(http_base);
         room_ui_set(cancelled ? ROOM_UI_IDLE : ROOM_UI_ERROR, cancelled ? NULL : "WebRTC open");
         return;
@@ -384,6 +412,7 @@ static void start_talk_once(void)
         talk_cancel_requested = false;
         talk_cancel_failed = false;
         xSemaphoreGive(state_lock);
+        room_media_end_talk(true);
         free(http_base);
         room_ui_set(cancelled ? ROOM_UI_IDLE : ROOM_UI_ERROR, cancelled ? NULL : "WebRTC start");
         return;
@@ -407,6 +436,7 @@ static void start_talk_once(void)
         talk_start_in_flight = false;
         xSemaphoreGive(state_lock);
         esp_webrtc_close(session);
+        room_media_end_talk(true);
         free(http_base);
         if (cancelled) {
             room_ui_set(ROOM_UI_IDLE, NULL);
@@ -654,6 +684,9 @@ static void node_event(
     (void)client;
     (void)data;
     (void)ctx;
+    xSemaphoreTake(state_lock, portMAX_DELAY);
+    node_ready = event == ESP_OPENCLAW_NODE_EVENT_CONNECTED;
+    xSemaphoreGive(state_lock);
     if (event == ESP_OPENCLAW_NODE_EVENT_CONNECTED) {
         /*
          * The session URI lands in NVS only after the first hello-ok, so the
@@ -923,14 +956,125 @@ static int wake_console_command(int argc, char **argv)
     return 0;
 }
 
-static esp_err_t register_wake_console_command(void)
+static int diagnostics_display_command(bool open)
 {
-    const esp_console_cmd_t command = {
-        .command = "wake",
-        .help = "Simulate the wake word and start one Talk session",
-        .func = wake_console_command,
+    esp_err_t err = open
+        ? room_diagnostics_request_open()
+        : room_diagnostics_request_close();
+    if (err != ESP_OK) {
+        printf("diagnostics %s failed: %s\n", open ? "open" : "close", esp_err_to_name(err));
+        return 1;
+    }
+    printf("diagnostics %s queued\n", open ? "open" : "close");
+    return 0;
+}
+
+static int diagnostics_tone_command(void)
+{
+    esp_err_t err = room_runtime_request_test_tone();
+    room_media_tone_snapshot_t tone = {0};
+    room_media_get_tone_snapshot(&tone);
+    if (err == ESP_OK) {
+        printf("diagnostics tone queued\n");
+        return 0;
+    }
+    if (tone.state == ROOM_MEDIA_TONE_BUSY || tone.state == ROOM_MEDIA_TONE_RUNNING) {
+        printf("diagnostics tone busy\n");
+    } else if (tone.error == ROOM_MEDIA_TONE_ERROR_UNAVAILABLE) {
+        printf("diagnostics tone unavailable\n");
+    } else if (tone.error == ROOM_MEDIA_TONE_ERROR_TASK) {
+        printf("diagnostics tone failed to create worker\n");
+    } else {
+        printf("diagnostics tone request failed: %s\n", esp_err_to_name(err));
+    }
+    return 1;
+}
+
+static int diagnostics_status_command(void)
+{
+    room_audio_diagnostics_snapshot_t audio = {0};
+    room_diagnostics_audio_get(&audio);
+    room_runtime_diagnostics_snapshot_t runtime = {0};
+    room_runtime_get_diagnostics(&runtime);
+    room_media_tone_snapshot_t tone = {0};
+    room_media_get_tone_snapshot(&tone);
+
+    printf("diagnostics=%s Talk=%s tone=%s",
+        runtime.diagnostics_open ? "open" : "closed",
+        runtime.talk_phase,
+        room_media_tone_state_name(tone.state));
+    if (tone.state == ROOM_MEDIA_TONE_ERROR) {
+        printf("/%s", room_media_tone_error_name(tone.error));
+    }
+    printf(" (%u/%u/%u requested/queued/accepted)\n",
+        tone.requested_frames,
+        tone.enqueued_frames,
+        tone.renderer_accepted_frames);
+    printf("audio mic=%u@%" PRId64 "us afe=%u@%" PRId64
+           "us rx=%u@%" PRId64 "us renderer accepted/errors=%" PRIu64 "/%" PRIu64 "\n",
+        audio.mic_level,
+        audio.last_capture_read_us,
+        audio.afe_level,
+        audio.last_fetch_us,
+        audio.renderer_level,
+        audio.last_renderer_accepted_us,
+        audio.renderer_accepted,
+        audio.renderer_errors);
+    printf("wifi=%s ssid=\"%.32s\" rssi=%d dBm heap=%" PRIu32 "/%" PRIu32
+           " B psram=%" PRIu32 " B\n",
+        runtime.wifi_connected ? "connected" : "disconnected",
+        runtime.wifi_ssid,
+        runtime.wifi_rssi,
+        runtime.internal_heap_free,
+        runtime.internal_heap_largest,
+        runtime.psram_free);
+    return 0;
+}
+
+static int diagnostics_console_command(int argc, char **argv)
+{
+    if (argc == 2 && strcmp(argv[1], "open") == 0) {
+        return diagnostics_display_command(true);
+    }
+    if (argc == 2 && strcmp(argv[1], "close") == 0) {
+        return diagnostics_display_command(false);
+    }
+    if (argc == 2 && strcmp(argv[1], "tone") == 0) {
+        return diagnostics_tone_command();
+    }
+    if (argc == 2 && strcmp(argv[1], "status") == 0) {
+        return diagnostics_status_command();
+    }
+    printf("usage: diagnostics open\n");
+    printf("       diagnostics close\n");
+    printf("       diagnostics tone\n");
+    printf("       diagnostics status\n");
+    return 1;
+}
+
+static esp_err_t register_room_console_commands(void)
+{
+    static const esp_console_cmd_t COMMANDS[] = {
+        {
+            .command = "wake",
+            .help = "Simulate the wake word and start one Talk session",
+            .func = wake_console_command,
+        },
+        {
+            .command = "diagnostics",
+            .help = "Control and inspect local room-node diagnostics",
+            .hint = "open | close | tone | status",
+            .func = diagnostics_console_command,
+        },
     };
-    return esp_console_cmd_register(&command);
+    for (size_t i = 0; i < sizeof(COMMANDS) / sizeof(COMMANDS[0]); ++i) {
+        ESP_RETURN_ON_ERROR(
+            esp_console_cmd_register(&COMMANDS[i]),
+            TAG,
+            "register local %s command",
+            COMMANDS[i].command);
+    }
+    return ESP_OK;
 }
 
 bool esp_openclaw_room_node_try_acquire_camera(void)
@@ -960,6 +1104,87 @@ esp_err_t esp_openclaw_room_node_camera_indicator_begin(void)
 void esp_openclaw_room_node_camera_indicator_end(void)
 {
     room_ui_camera_indicator_end();
+}
+
+static bool runtime_talk_busy(void *ctx)
+{
+    (void)ctx;
+    if (state_lock == NULL) return false;
+    xSemaphoreTake(state_lock, portMAX_DELAY);
+    bool busy = talk_start_in_flight || talk_dialing || talk_active || talk_closing;
+    xSemaphoreGive(state_lock);
+    return busy;
+}
+
+esp_err_t room_runtime_request_test_tone(void)
+{
+    return room_media_request_test_tone(runtime_talk_busy, NULL);
+}
+
+void room_runtime_get_diagnostics(room_runtime_diagnostics_snapshot_t *snapshot)
+{
+    if (snapshot == NULL) return;
+    memset(snapshot, 0, sizeof(*snapshot));
+    if (state_lock != NULL) {
+        xSemaphoreTake(state_lock, portMAX_DELAY);
+        snapshot->node_ready = node_ready;
+        snapshot->operator_ready = operator_ready;
+        snapshot->media_ready = media_ready;
+        snapshot->camera_active = camera_active;
+        const char *phase = !media_ready ? "unavailable"
+            : talk_closing ? "closing"
+            : talk_active ? "active"
+            : talk_dialing ? "dialing"
+            : talk_start_in_flight ? "starting"
+            : "idle";
+        strlcpy(snapshot->talk_phase, phase, sizeof(snapshot->talk_phase));
+        xSemaphoreGive(state_lock);
+    } else {
+        strlcpy(snapshot->talk_phase, "unavailable", sizeof(snapshot->talk_phase));
+    }
+
+    room_ui_diagnostics_snapshot_t ui = {0};
+    room_ui_get_diagnostics(&ui);
+    snapshot->diagnostics_open = ui.diagnostics_open;
+    strlcpy(snapshot->ui_state, room_ui_state_name(ui.state), sizeof(snapshot->ui_state));
+    strlcpy(snapshot->ui_detail, ui.detail, sizeof(snapshot->ui_detail));
+    strlcpy(snapshot->gateway, ui.gateway, sizeof(snapshot->gateway));
+
+    room_canvas_diagnostics_snapshot_t canvas = {0};
+    room_canvas_get_diagnostics(&canvas);
+    snapshot->canvas_active = canvas.active;
+    snapshot->canvas_components = canvas.retained_components;
+    snapshot->canvas_images = canvas.retained_images;
+    const char *canvas_kind = canvas.retained_kind == ROOM_CANVAS_RETAINED_IMAGE ? "image"
+        : canvas.retained_kind == ROOM_CANVAS_RETAINED_A2UI ? "a2ui"
+        : "none";
+    strlcpy(snapshot->canvas_kind, canvas_kind, sizeof(snapshot->canvas_kind));
+
+    const esp_openclaw_room_node_config_t *board = room_board_config();
+    if (board != NULL) {
+        strlcpy(snapshot->display_name,
+            board->display_name != NULL ? board->display_name : "",
+            sizeof(snapshot->display_name));
+        strlcpy(snapshot->model_identifier,
+            board->model_identifier != NULL ? board->model_identifier : "",
+            sizeof(snapshot->model_identifier));
+        snapshot->display_width = board->display.native_width;
+        snapshot->display_height = board->display.native_height;
+        strlcpy(snapshot->afe_layout,
+            board->audio.afe_layout != NULL ? board->audio.afe_layout : "",
+            sizeof(snapshot->afe_layout));
+        snapshot->configured_volume = board->audio.playback_volume;
+    }
+    esp_openclaw_node_wifi_status_t wifi = {0};
+    esp_openclaw_node_wifi_get_status(&wifi);
+    snapshot->wifi_connected = wifi.connected;
+    strlcpy(snapshot->wifi_ssid, wifi.ssid, sizeof(snapshot->wifi_ssid));
+    snapshot->wifi_rssi = wifi.rssi;
+    strlcpy(snapshot->wifi_ip, wifi.ip, sizeof(snapshot->wifi_ip));
+    snapshot->internal_heap_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    snapshot->internal_heap_largest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
+    snapshot->psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    snapshot->uptime_seconds = (uint64_t)esp_timer_get_time() / 1000000U;
 }
 
 esp_err_t esp_openclaw_room_node_start(const esp_openclaw_room_node_config_t *config)
@@ -1069,7 +1294,7 @@ esp_err_t esp_openclaw_room_node_start(const esp_openclaw_room_node_config_t *co
 
     ESP_ERROR_CHECK(start_node_client());
     ESP_ERROR_CHECK(esp_openclaw_node_example_repl_start(node_client));
-    ESP_ERROR_CHECK(register_wake_console_command());
+    ESP_ERROR_CHECK(register_room_console_commands());
 
     esp_err_t connect_err = request_node_connection();
     if (connect_err == ESP_ERR_NOT_FOUND) {

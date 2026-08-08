@@ -31,6 +31,7 @@
 #include "freertos/task.h"
 #include "msg_q.h"
 #include "room_aec_src.h"
+#include "room_diagnostics_data.h"
 
 #define TAG  "AUD_AEC_SRC"
 
@@ -101,6 +102,15 @@ typedef struct {
 } audio_aec_src_t;
 
 static int64_t last_wake_callback_us;
+static uint8_t get_src_channel(audio_aec_src_t *src);
+
+static size_t layout_channel_index(const audio_aec_src_t *src, char channel, size_t fallback)
+{
+    const char *found = src->mic_layout != NULL ? strchr(src->mic_layout, channel) : NULL;
+    if (found == NULL) return fallback;
+    size_t index = (size_t)(found - src->mic_layout);
+    return index < get_src_channel((audio_aec_src_t *)src) ? index : fallback;
+}
 
 static bool audio_aec_chunk_samples_to_bytes(int samples, int *bytes)
 {
@@ -132,7 +142,7 @@ static int open_afe_in_ram(void *arg)
         afe_config->wakenet_init = src->wakenet_enabled;
         if (!src->wakenet_enabled) {
             /* Talk streams continuously and the remote session owns turn
-             * detection; keep device AEC but skip redundant NS/VAD work. */
+             * detection. Disable WakeNet/NS/VAD while preserving AEC+NLP. */
             afe_config->ns_init = false;
             afe_config->vad_init = false;
         } else if (src->data_on_vad) {
@@ -228,6 +238,7 @@ static inline void audio_aec_fill_vad_working_buf(audio_aec_src_t *src, uint8_t 
 static int audio_aec_feed_data(audio_aec_src_t *src, uint8_t *feed_data, int feed_size)
 {
     int ret = src->afe_handle->feed(src->afe_data, (int16_t *)feed_data);
+    room_diagnostics_audio_record_feed(ret >= 0);
     return ret;
 }
 
@@ -331,6 +342,14 @@ static void codec_dev_read_thread(void *arg)
             break;
         }
         int ret = esp_codec_dev_read(src->handle, (uint8_t *)data, read_size);
+        size_t channels = get_src_channel(src);
+        room_diagnostics_audio_record_capture_read(
+            data,
+            (size_t)read_size / sizeof(int16_t),
+            channels,
+            layout_channel_index(src, 'M', 0),
+            layout_channel_index(src, 'R', channels),
+            ret == 0);
         if (ret != 0) {
             ESP_LOGE(TAG, "Fail to read data %d", ret);
             esp_gmf_data_queue_release_write(vad_res->in_q, 0);
@@ -398,11 +417,19 @@ static inline int audio_aec_src_read_directly(audio_aec_src_t *src)
         }
         while (!src->stopping) {
             ret = esp_codec_dev_read(src->handle, feed_data, read_size);
+            size_t channels = get_src_channel(src);
+            room_diagnostics_audio_record_capture_read(
+                (const int16_t *)feed_data,
+                (size_t)read_size / sizeof(int16_t),
+                channels,
+                layout_channel_index(src, 'M', 0),
+                layout_channel_index(src, 'R', channels),
+                ret == 0);
             if (ret != 0) {
                 ESP_LOGE(TAG, "Fail to read data %d", ret);
                 break;
             }
-            ret = src->afe_handle->feed(src->afe_data, (int16_t *)feed_data);
+            ret = audio_aec_feed_data(src, (uint8_t *)feed_data, read_size);
             if (ret < 0) {
                 ESP_LOGE(TAG, "Fail to feed data %d", ret);
                 break;
@@ -514,6 +541,39 @@ static esp_capture_err_t prepare_vad(audio_aec_src_t *src)
 
 static esp_capture_err_t audio_aec_src_stop(esp_capture_audio_src_if_t *h);
 
+static bool audio_aec_record_fetch_result(
+    audio_aec_src_t *src,
+    afe_fetch_result_t *res)
+{
+    bool fetch_success = res != NULL && res->ret_value == ESP_OK;
+    bool valid_size = res != NULL && res->data_size >= 0 &&
+        res->data_size <= src->fetch_size &&
+        (res->data_size == 0 || res->data != NULL);
+    uint8_t ringbuffer_free = 0;
+    if (res != NULL && res->ringbuff_free_pct > 0) {
+        float percent = res->ringbuff_free_pct * 100.0f;
+        ringbuffer_free = percent >= 100.0f ? 100 : (uint8_t)percent;
+    }
+    room_diagnostics_audio_record_fetch(
+        valid_size ? res->data : NULL,
+        valid_size ? (size_t)res->data_size / sizeof(int16_t) : 0,
+        fetch_success,
+        valid_size,
+        ringbuffer_free);
+    if (!fetch_success) {
+        ESP_LOGE(TAG, "Fail to read from AEC ret %d",
+            res != NULL ? res->ret_value : ESP_FAIL);
+    }
+    if (!valid_size) {
+        ESP_LOGE(TAG, "AFE fetch size out of bounds: got %d bytes, capacity %d bytes",
+            res != NULL ? res->data_size : -1, src->fetch_size);
+    }
+    if (res != NULL && res->wakeup_state == WAKENET_DETECTED) {
+        room_diagnostics_audio_record_wakenet();
+    }
+    return valid_size;
+}
+
 static esp_capture_err_t audio_aec_src_start(esp_capture_audio_src_if_t *h)
 {
     audio_aec_src_t *src = (audio_aec_src_t *)h;
@@ -547,6 +607,13 @@ static esp_capture_err_t audio_aec_src_start(esp_capture_audio_src_if_t *h)
     }
     src->feed_size = feed_size;
     src->fetch_size = fetch_size;
+    room_diagnostics_audio_set_capture_mode(
+        src->wakenet_enabled
+            ? ROOM_DIAGNOSTICS_AFE_AMBIENT_SR
+            : ROOM_DIAGNOSTICS_AFE_TALK_VC,
+        src->wakenet_enabled,
+        (uint32_t)feed_size,
+        (uint32_t)fetch_size);
     if (src->data_on_vad) {
         ret = prepare_vad(src);
         if (ret != ESP_CAPTURE_ERR_OK) {
@@ -623,24 +690,20 @@ static esp_capture_err_t audio_aec_src_read_frame(esp_capture_audio_src_if_t *h,
             src->wait_feeding = true;
             afe_fetch_result_t *res = src->afe_handle->fetch(src->afe_data);
             src->wait_feeding = false;
-            if (res->ret_value != ESP_OK) {
-                ESP_LOGE(TAG, "Fail to read from AEC ret %d", res->ret_value);
-                // When feed fetch not match may return error ignore it currently
-            }
-            if (res->wakeup_state == WAKENET_DETECTED && src->wake_cb != NULL) {
+            bool valid_size = audio_aec_record_fetch_result(src, res);
+            if (res != NULL && res->wakeup_state == WAKENET_DETECTED) {
                 int64_t now_us = esp_timer_get_time();
-                if (last_wake_callback_us == 0 ||
-                    now_us - last_wake_callback_us >= WAKE_DEBOUNCE_US) {
+                if (src->wake_cb != NULL && (last_wake_callback_us == 0 ||
+                    now_us - last_wake_callback_us >= WAKE_DEBOUNCE_US)) {
                     last_wake_callback_us = now_us;
                     src->wake_cb(src->wake_ctx);
                 }
             }
-            if (res->data_size >= 0 && res->data_size <= src->fetch_size) {
-                memcpy(src->cached_frame, res->data, res->data_size);
+            if (valid_size) {
+                if (res->data_size > 0) {
+                    memcpy(src->cached_frame, res->data, res->data_size);
+                }
                 src->cache_fill = res->data_size;
-            } else {
-                ESP_LOGE(TAG, "AFE fetch size out of bounds: got %d bytes, capacity %d bytes",
-                         res->data_size, src->fetch_size);
             }
         }
     }
@@ -670,7 +733,8 @@ static esp_capture_err_t audio_aec_src_stop(esp_capture_audio_src_if_t *h)
         // fetch once
         if (src->vad_res && src->vad_res->vad_state != VAD_CHECKING_STARTED) {
         } else {
-            src->afe_handle->fetch(src->afe_data);
+            afe_fetch_result_t *res = src->afe_handle->fetch(src->afe_data);
+            (void)audio_aec_record_fetch_result(src, res);
         }
         src->stopping = true;
         WAIT_STATE_TIMEOUT(src->in_quit == false);

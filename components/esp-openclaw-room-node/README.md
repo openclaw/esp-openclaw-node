@@ -20,3 +20,27 @@ drained. It lives here once, alongside the shared capture orchestration, until
 the upstream capture component exposes the equivalent wake callback contract.
 The closure retains Espressif's modified-MIT notice in
 `LICENSE.ESPRESSIF-MODIFIED-MIT`; the rest of this component is Apache-2.0.
+
+Long-press the status screen or an empty Canvas background to open the shared
+Diagnostics overlay. Non-animated status screens show `Hold for diagnostics`
+near the bottom; the hint is hidden on Canvas and while the modal is open. The
+overlay keeps the current screen loaded beneath a blocking, scrollable modal;
+tap the large Close button (or long-press the modal) to return. Audio is shown
+first: live MIC, post-AFE, and RX/SPK PCM meters include freshness, counters,
+capture ownership, AFE/WakeNet mode, and renderer results.
+“Renderer accepted” means the production renderer accepted PCM; it does not
+prove that the codec, amplifier, or analog speaker produced audible sound.
+
+The local speaker test queues a 500 ms, 1 kHz PCM tone through the same
+`av_render` → render FIFO → render tap → I2S renderer → codec/I2S TX path as
+Talk playback. It is serialized against the complete Talk media lifetime and
+runs from a worker task. Its result reports queued frames and renderer
+acceptance only; the person at the device remains the audibility check.
+
+The USB REPL also exposes one local-only command with four exact forms:
+`diagnostics open`, `diagnostics close`, `diagnostics tone`, and
+`diagnostics status`. Open/close queue the modal operation onto the LVGL task;
+tone queues the same asynchronous speaker test as the button. These are not
+OpenClaw node commands and require no gateway allowlist entries. The open and
+close commands report that work was queued; `diagnostics status` reports the
+state after the LVGL task has executed it.

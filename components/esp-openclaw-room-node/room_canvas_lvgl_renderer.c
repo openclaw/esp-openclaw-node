@@ -506,6 +506,7 @@ static esp_err_t prefetch_a2ui_room_canvas_images(esp_openclaw_node_error_t *out
                 ESP_ERR_TIMEOUT);
         }
         room_canvas_show_placeholder();
+        room_canvas_record_no_retained_content();
         room_canvas_activate_locked();
         room_board_display_unlock();
         room_board_display_brightness_set(ROOM_CANVAS_ACTIVE_BRIGHTNESS);
@@ -641,6 +642,8 @@ static esp_err_t prefetch_a2ui_room_canvas_images(esp_openclaw_node_error_t *out
      * exactly as it was. */
     room_canvas_style_screen(room_canvas_safe_pad());
     lv_obj_remove_flag(container, LV_OBJ_FLAG_HIDDEN);
+    /* The successfully staged tree is now the locally retained canvas. */
+    room_canvas_record_a2ui_retained();
     room_canvas_activate_locked();
     room_board_display_unlock();
     room_board_display_brightness_set(ROOM_CANVAS_ACTIVE_BRIGHTNESS);

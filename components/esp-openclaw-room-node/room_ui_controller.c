@@ -8,20 +8,28 @@
 #include "freertos/task.h"
 #include "lvgl.h"
 #include "room_canvas.h"
+#include "room_diagnostics.h"
 #include "room_face.h"
 #include "room_board.h"
 
-/* Tap on the status screen: agent canvas when present, else wake the face. */
+/* Tap toggles retained Canvas content; hold opens local diagnostics. */
 static void room_ui_status_clicked(lv_event_t *event)
 {
-    (void)event;
-    room_canvas_view_toggle();
+    lv_event_code_t code = lv_event_get_code(event);
+    if (code == LV_EVENT_LONG_PRESSED) {
+        lv_indev_t *indev = lv_indev_active();
+        if (indev != NULL) lv_indev_wait_release(indev);
+        room_diagnostics_open();
+    } else if (code == LV_EVENT_CLICKED && !room_diagnostics_is_open()) {
+        room_canvas_view_toggle();
+    }
 }
 
 static const char *TAG = "room_ui";
 #define ROOM_UI_CAMERA_MIN_BRIGHTNESS 40
 static lv_obj_t *status_label;
 static lv_obj_t *gateway_label;
+static lv_obj_t *diagnostics_hint_label;
 static lv_obj_t *talk_pill;
 static lv_obj_t *talk_pill_label;
 static lv_obj_t *camera_indicator;
@@ -36,8 +44,20 @@ static char gateway_text[64];
 static portMUX_TYPE state_mux = portMUX_INITIALIZER_UNLOCKED;
 static room_ui_state_t current_state = ROOM_UI_IDLE;
 static char current_detail[48];
+static bool diagnostics_open;
+static bool text_hint_active;
+static esp_timer_handle_t text_hint_timer;
 
 static void repaint_retry_expired(void *arg);
+
+static void text_hint_expired(void *arg)
+{
+    (void)arg;
+    taskENTER_CRITICAL(&state_mux);
+    text_hint_active = false;
+    taskEXIT_CRITICAL(&state_mux);
+    room_ui_refresh();
+}
 
 static bool controller_canvas_active(void)
 {
@@ -120,13 +140,22 @@ void room_ui_init(void)
     lv_obj_add_event_cb(
         lv_screen_active(),
         room_ui_status_clicked,
-        LV_EVENT_CLICKED,
+        LV_EVENT_ALL,
         NULL);
     const esp_openclaw_room_node_config_t *board = room_board_config();
-    animated_face_enabled = board != NULL && board->display.animated_face;
+    bool board_has_animated_face = board != NULL && board->display.animated_face;
+    animated_face_enabled = board_has_animated_face;
     if (animated_face_enabled && room_face_create(lv_screen_active()) != ESP_OK) {
         animated_face_enabled = false;
         ESP_LOGW(TAG, "face unavailable; talk states fall back to text");
+    }
+    if (!board_has_animated_face) {
+        diagnostics_hint_label = lv_label_create(lv_screen_active());
+        lv_obj_set_style_text_color(diagnostics_hint_label, lv_color_hex(0x707070), 0);
+        lv_obj_set_style_text_font(diagnostics_hint_label, &lv_font_montserrat_14, 0);
+        lv_obj_set_style_text_align(diagnostics_hint_label, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_align(diagnostics_hint_label, LV_ALIGN_BOTTOM_MID, 0, -24);
+        lv_label_set_text(diagnostics_hint_label, "Hold for diagnostics");
     }
     room_board_display_unlock();
     room_board_display_brightness_set(0);
@@ -142,8 +171,13 @@ static bool room_ui_state_uses_face(room_ui_state_t state)
 
 static int room_ui_target_brightness(room_ui_state_t state, bool canvas_active)
 {
+    taskENTER_CRITICAL(&state_mux);
+    bool overlay = diagnostics_open;
+    bool text_hint = text_hint_active;
+    taskEXIT_CRITICAL(&state_mux);
+    if (overlay) return ROOM_CANVAS_ACTIVE_BRIGHTNESS;
     if (canvas_active) return ROOM_CANVAS_ACTIVE_BRIGHTNESS;
-    if (state == ROOM_UI_IDLE) return 0;
+    if (state == ROOM_UI_IDLE) return text_hint ? 18 : 0;
     return room_ui_state_uses_face(state) ? 40 : 18;
 }
 
@@ -159,18 +193,28 @@ static bool room_ui_render_locked(void)
     memcpy(detail, current_detail, sizeof(detail));
     char gateway[sizeof(gateway_text)];
     memcpy(gateway, gateway_text, sizeof(gateway));
+    bool overlay = diagnostics_open;
     taskEXIT_CRITICAL(&state_mux);
+    bool canvas_active = room_canvas_is_active();
     if (gateway_label != NULL) {
         /* The gateway line rides along with every non-canvas view. */
         lv_label_set_text(gateway_label, gateway);
-        if (room_canvas_is_active() || gateway[0] == '\0') {
+        if (canvas_active || gateway[0] == '\0') {
             lv_obj_add_flag(gateway_label, LV_OBJ_FLAG_HIDDEN);
         } else {
             lv_obj_clear_flag(gateway_label, LV_OBJ_FLAG_HIDDEN);
             lv_obj_move_foreground(gateway_label);
         }
     }
-    if (room_canvas_is_active()) {
+    if (diagnostics_hint_label != NULL) {
+        if (canvas_active || overlay) {
+            lv_obj_add_flag(diagnostics_hint_label, LV_OBJ_FLAG_HIDDEN);
+        } else {
+            lv_obj_clear_flag(diagnostics_hint_label, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_move_foreground(diagnostics_hint_label);
+        }
+    }
+    if (canvas_active) {
         room_face_hide();
         if (state == ROOM_UI_IDLE) {
             /* A call that ended behind canvas must not leak its mood into the
@@ -235,7 +279,10 @@ static bool room_ui_render_locked(void)
 
 bool room_ui_talk_face_active(void)
 {
-    return room_ui_state_uses_face(current_state);
+    taskENTER_CRITICAL(&state_mux);
+    room_ui_state_t state = current_state;
+    taskEXIT_CRITICAL(&state_mux);
+    return room_ui_state_uses_face(state);
 }
 
 /* Precondition: display lock held. Renders, releases the lock, then applies
@@ -320,10 +367,35 @@ void room_ui_show_face_hint(uint32_t show_ms)
                 lv_obj_move_foreground(gateway_label);
             }
         }
+    } else {
+        taskENTER_CRITICAL(&state_mux);
+        text_hint_active = true;
+        taskEXIT_CRITICAL(&state_mux);
+        (void)room_ui_render_locked();
     }
     room_board_display_unlock();
     if (shown) {
         room_board_display_brightness_set(40);
+    } else {
+        if (text_hint_timer == NULL) {
+            const esp_timer_create_args_t args = {
+                .callback = text_hint_expired,
+                .name = "text_hint",
+            };
+            (void)esp_timer_create(&args, &text_hint_timer);
+        }
+        bool timer_started = false;
+        if (text_hint_timer != NULL) {
+            (void)esp_timer_stop(text_hint_timer);
+            timer_started = esp_timer_start_once(
+                text_hint_timer, (uint64_t)show_ms * 1000U) == ESP_OK;
+        }
+        if (!timer_started) {
+            taskENTER_CRITICAL(&state_mux);
+            text_hint_active = false;
+            taskEXIT_CRITICAL(&state_mux);
+        }
+        room_board_display_brightness_set(timer_started ? 18 : 0);
     }
 }
 
@@ -390,4 +462,49 @@ void room_ui_camera_indicator_end(void)
     }
     /* Repaint restores the controller-owned brightness for the live state. */
     room_ui_refresh();
+}
+
+void room_ui_get_diagnostics(room_ui_diagnostics_snapshot_t *snapshot)
+{
+    if (snapshot == NULL) return;
+    taskENTER_CRITICAL(&state_mux);
+    snapshot->state = current_state;
+    snapshot->diagnostics_open = diagnostics_open;
+    memcpy(snapshot->detail, current_detail, sizeof(snapshot->detail));
+    memcpy(snapshot->gateway, gateway_text, sizeof(snapshot->gateway));
+    taskEXIT_CRITICAL(&state_mux);
+}
+
+const char *room_ui_state_name(room_ui_state_t state)
+{
+    static const char *names[] = {
+        "idle", "listening", "connecting", "speaking", "error", "setup",
+    };
+    return state >= ROOM_UI_IDLE && state <= ROOM_UI_SETUP ? names[state] : "unknown";
+}
+
+void room_ui_set_diagnostics_open(bool open)
+{
+    taskENTER_CRITICAL(&state_mux);
+    diagnostics_open = open;
+    taskEXIT_CRITICAL(&state_mux);
+    if (open) {
+        if (diagnostics_hint_label != NULL) {
+            lv_obj_add_flag(diagnostics_hint_label, LV_OBJ_FLAG_HIDDEN);
+        }
+        if (camera_indicator != NULL) lv_obj_move_foreground(camera_indicator);
+        room_board_display_brightness_set(ROOM_CANVAS_ACTIVE_BRIGHTNESS);
+    } else {
+        room_ui_refresh();
+    }
+}
+
+void room_ui_raise_camera_indicator(void)
+{
+    if (camera_indicator != NULL) lv_obj_move_foreground(camera_indicator);
+}
+
+bool room_ui_is_initialized(void)
+{
+    return status_label != NULL;
 }

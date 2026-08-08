@@ -147,6 +147,19 @@ static void update_slow_text(const room_audio_diagnostics_snapshot_t *audio)
 
     room_runtime_diagnostics_snapshot_t runtime = {0};
     room_runtime_get_diagnostics(&runtime);
+    char configured_input_gain[48];
+    if (runtime.input_gain_configured) {
+        snprintf(
+            configured_input_gain,
+            sizeof(configured_input_gain),
+            "configured input gain: %.1f dB",
+            runtime.configured_input_gain_db);
+    } else {
+        strlcpy(
+            configured_input_gain,
+            "configured input gain: board default",
+            sizeof(configured_input_gain));
+    }
     snprintf(
         system_text_buffer,
         sizeof(system_text_buffer),
@@ -156,7 +169,7 @@ static void update_slow_text(const room_audio_diagnostics_snapshot_t *audio)
         "Canvas: %s, retained %s (%u components, %u images)\n\n"
         "System\n"
         "%s (%s)   %ux%u\n"
-        "AFE layout: %s   configured volume: %u%%\n"
+        "AFE layout: %s   configured volume: %u%%   %s\n"
         "Wi-Fi: %s   SSID: %s   RSSI: %d dBm   IP: %s\n"
         "Internal heap free/largest: %" PRIu32 "/%" PRIu32 " B   PSRAM free: %" PRIu32 " B\n"
         "Uptime: %" PRIu64 " s",
@@ -179,6 +192,7 @@ static void update_slow_text(const room_audio_diagnostics_snapshot_t *audio)
         runtime.display_height,
         runtime.afe_layout,
         runtime.configured_volume,
+        configured_input_gain,
         runtime.wifi_connected ? "connected" : "disconnected",
         runtime.wifi_ssid[0] != '\0' ? runtime.wifi_ssid : "none",
         runtime.wifi_rssi,

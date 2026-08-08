@@ -40,6 +40,8 @@ typedef struct {
     uint8_t record_channels;
     uint8_t channel_mask;
     uint8_t playback_volume;
+    bool configure_input_gain; /**< Apply input_gain_db instead of preserving the codec/board default. */
+    float input_gain_db;
     void *ctx;
 } esp_openclaw_room_audio_port_t;
 

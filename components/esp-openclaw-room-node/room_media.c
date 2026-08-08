@@ -44,7 +44,13 @@ static room_media_talk_busy_cb_t tone_busy_cb;
 static void *tone_busy_ctx;
 /* Only one tone worker can exist. Its frame storage therefore needs no lock
  * and must not consume a third of the worker's 4 KiB stack. */
-enum { TONE_SAMPLES_PER_CHANNEL = 320 };
+enum {
+    TONE_SAMPLES_PER_CHANNEL = 320,
+    TONE_FRAME_MS = 20,
+    TONE_FRAMES = 50,
+    TONE_DURATION_MS = TONE_FRAME_MS * TONE_FRAMES,
+    TONE_RENDER_WAIT_MS = 2200,
+};
 static int16_t tone_pcm[TONE_SAMPLES_PER_CHANNEL * 2];
 
 static void room_afe_wake(void *ctx)
@@ -193,18 +199,16 @@ static void test_tone_task(void *arg)
 {
     (void)arg;
     static const int16_t wave[16] = {
-        0, 1578, 2917, 3811, 4125, 3811, 2917, 1578,
-        0, -1578, -2917, -3811, -4125, -3811, -2917, -1578,
+        0, 8867, 16384, 21406, 23170, 21406, 16384, 8867,
+        0, -8867, -16384, -21406, -23170, -21406, -16384, -8867,
     };
-    enum { TONE_FRAMES = 25 };
     uint16_t enqueued = 0;
     uint16_t accepted = 0;
     room_media_tone_error_t error = ROOM_MEDIA_TONE_ERROR_NONE;
 
-    xSemaphoreTake(media_owner_gate, portMAX_DELAY);
     if (tone_busy_cb != NULL && tone_busy_cb(tone_busy_ctx)) {
-        tone_set_result(ROOM_MEDIA_TONE_BUSY, ROOM_MEDIA_TONE_ERROR_NONE, 0, 0);
         xSemaphoreGive(media_owner_gate);
+        tone_set_result(ROOM_MEDIA_TONE_BUSY, ROOM_MEDIA_TONE_ERROR_NONE, 0, 0);
         vTaskDelete(NULL);
         return;
     }
@@ -244,7 +248,7 @@ static void test_tone_task(void *arg)
             tone_pcm[i * 2 + 1] = sample;
         }
         av_render_audio_data_t data = {
-            .pts = (uint32_t)frame_index * 20U,
+            .pts = (uint32_t)frame_index * TONE_FRAME_MS,
             .data = (uint8_t *)tone_pcm,
             .size = sizeof(tone_pcm),
         };
@@ -254,18 +258,18 @@ static void test_tone_task(void *arg)
         }
         ++enqueued;
     }
-    av_render_audio_data_t eos = {.pts = 500, .eos = true};
+    av_render_audio_data_t eos = {.pts = TONE_DURATION_MS, .eos = true};
     if (av_render_add_audio_data(player, &eos) != ESP_MEDIA_ERR_OK) {
         error = ROOM_MEDIA_TONE_ERROR_EOS;
         goto done;
     }
-    for (int waited_ms = 0; waited_ms < 1600; waited_ms += 20) {
+    for (int waited_ms = 0; waited_ms < TONE_RENDER_WAIT_MS; waited_ms += TONE_FRAME_MS) {
         room_audio_diagnostics_snapshot_t now = {0};
         room_diagnostics_audio_get(&now);
         uint64_t delta = now.renderer_accepted - before.renderer_accepted;
         accepted = delta > UINT16_MAX ? UINT16_MAX : (uint16_t)delta;
         if (accepted >= TONE_FRAMES) break;
-        vTaskDelay(pdMS_TO_TICKS(20));
+        vTaskDelay(pdMS_TO_TICKS(TONE_FRAME_MS));
     }
     if (accepted < TONE_FRAMES) error = ROOM_MEDIA_TONE_ERROR_RENDER_TIMEOUT;
 
@@ -274,12 +278,12 @@ done:
     if (error == ROOM_MEDIA_TONE_ERROR_NONE && final_reset != ESP_MEDIA_ERR_OK) {
         error = ROOM_MEDIA_TONE_ERROR_RESET;
     }
+    xSemaphoreGive(media_owner_gate);
     tone_set_result(
         error == ROOM_MEDIA_TONE_ERROR_NONE ? ROOM_MEDIA_TONE_DONE : ROOM_MEDIA_TONE_ERROR,
         error,
         enqueued,
         accepted);
-    xSemaphoreGive(media_owner_gate);
     vTaskDelete(NULL);
 }
 
@@ -298,6 +302,18 @@ esp_err_t room_media_init(room_wake_callback_t callback, void *ctx)
         TAG,
         "audio codec init");
     const esp_openclaw_room_node_config_t *board = room_board_config();
+    if (board->audio.configure_input_gain) {
+        int input_gain_result = esp_codec_dev_set_in_gain(record, board->audio.input_gain_db);
+        ESP_RETURN_ON_FALSE(
+            input_gain_result == ESP_CODEC_DEV_OK,
+            ESP_FAIL,
+            TAG,
+            "input gain set failed: %d",
+            input_gain_result);
+        ESP_LOGI(TAG, "configured input gain override: %.1f dB", board->audio.input_gain_db);
+    } else {
+        ESP_LOGI(TAG, "no input gain override configured; preserving codec/board default");
+    }
     if (esp_codec_dev_set_out_vol(playback, board->audio.playback_volume) != 0) {
         return ESP_FAIL;
     }
@@ -469,21 +485,29 @@ esp_err_t room_media_request_test_tone(room_media_talk_busy_cb_t busy_cb, void *
             0);
         return ESP_ERR_INVALID_STATE;
     }
-    if (busy_cb != NULL && busy_cb(ctx)) {
-        tone_set_result(ROOM_MEDIA_TONE_BUSY, ROOM_MEDIA_TONE_ERROR_NONE, 0, 0);
-        return ESP_ERR_INVALID_STATE;
-    }
     taskENTER_CRITICAL(&tone_mux);
     if (tone_task_active) {
         taskEXIT_CRITICAL(&tone_mux);
         return ESP_ERR_INVALID_STATE;
     }
     tone_task_active = true;
+    taskEXIT_CRITICAL(&tone_mux);
+    if (busy_cb != NULL && busy_cb(ctx)) {
+        tone_set_result(ROOM_MEDIA_TONE_BUSY, ROOM_MEDIA_TONE_ERROR_NONE, 0, 0);
+        return ESP_ERR_INVALID_STATE;
+    }
+    /* The request reserves the one media owner before scheduling work; the
+     * worker inherits this ownership and releases it on every exit path. */
+    if (xSemaphoreTake(media_owner_gate, 0) != pdTRUE) {
+        tone_set_result(ROOM_MEDIA_TONE_BUSY, ROOM_MEDIA_TONE_ERROR_NONE, 0, 0);
+        return ESP_ERR_INVALID_STATE;
+    }
+    taskENTER_CRITICAL(&tone_mux);
     tone_busy_cb = busy_cb;
     tone_busy_ctx = ctx;
     tone_snapshot = (room_media_tone_snapshot_t) {
         .state = ROOM_MEDIA_TONE_RUNNING,
-        .requested_frames = 25,
+        .requested_frames = TONE_FRAMES,
     };
     taskEXIT_CRITICAL(&tone_mux);
     if (xTaskCreateWithCaps(
@@ -494,6 +518,7 @@ esp_err_t room_media_request_test_tone(room_media_talk_busy_cb_t busy_cb, void *
             6,
             NULL,
             MALLOC_CAP_SPIRAM) != pdPASS) {
+        xSemaphoreGive(media_owner_gate);
         tone_set_result(ROOM_MEDIA_TONE_ERROR, ROOM_MEDIA_TONE_ERROR_TASK, 0, 0);
         return ESP_ERR_NO_MEM;
     }

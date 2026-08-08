@@ -26,6 +26,8 @@ typedef struct {
     uint16_t display_height;
     char afe_layout[16];
     uint8_t configured_volume;
+    bool input_gain_configured;
+    float configured_input_gain_db;
     bool wifi_connected;
     char wifi_ssid[33];
     int8_t wifi_rssi;

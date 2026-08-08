@@ -1,0 +1,32 @@
+dependencies:
+  idf: "==5.5.5"
+  espressif/esp_hosted: "1.4.0"
+  espressif/esp_wifi_remote: "0.8.5"
+  espressif/esp-sr: "^2.4.7"
+  espressif/esp_new_jpeg: "^0.6.1"
+  espressif/esp_video: "^2.1"
+  espressif/esp_io_expander: "^1.2"
+  espressif/esp_io_expander_pi4ioe5v6408: "*"
+  espressif/esp_lvgl_port: "^2"
+  espressif/esp_lcd_st7123: "*"
+  espressif/esp_lcd_ili9881c: "*"
+  espressif/esp_lcd_touch_st7123: "*"
+  espressif/esp_lcd_touch_gt911: "*"
+  espressif/usb: "^1"
+  espressif/bmi270: "*"
+  esp_webrtc:
+    override_path: ../../../third_party/esp-webrtc-solution/components/esp_webrtc
+  esp_peer:
+    override_path: ../../../third_party/esp-webrtc-solution/components/esp_peer
+  av_render:
+    override_path: ../../../third_party/esp-webrtc-solution/components/av_render
+  media_lib_utils:
+    override_path: ../../../third_party/esp-webrtc-solution/components/media_lib_utils
+  webrtc_utils:
+    override_path: ../../../third_party/esp-webrtc-solution/components/webrtc_utils
+  espressif/esp_websocket_client:
+    override_path: ../../../third_party/esp-protocols/components/esp_websocket_client
+  esp-openclaw-node:
+    override_path: ../../../components/esp-openclaw-node
+  esp-openclaw-talk:
+    override_path: ../../../components/esp-openclaw-talk

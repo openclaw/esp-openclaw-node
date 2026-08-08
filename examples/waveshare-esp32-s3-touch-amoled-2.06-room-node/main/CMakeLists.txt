@@ -1,36 +1,22 @@
 idf_component_register(
     SRCS
         "main.c"
-        "room_aec_src.c"
-        "room_canvas.c"
-        "room_canvas_node_cmd.c"
-        "room_face.c"
-        "room_media.c"
-        "room_ui.c"
-        "../../common/esp_openclaw_node_example_repl.c"
-        "../../common/esp_openclaw_node_example_repl_cmd.c"
-        "../../common/esp_openclaw_node_wifi.c"
-    INCLUDE_DIRS "." "../../common"
+    INCLUDE_DIRS "."
     REQUIRES
         av_render
         console
         esp-openclaw-node
+        esp-openclaw-node-provisioning
+        esp-openclaw-room-node
         esp-openclaw-talk
         esp_event
-        esp_http_client
+        esp_driver_gpio
         esp_netif
         esp_peer
         esp_webrtc
         esp_wifi
-        espressif__esp-sr
-        espressif__esp_audio_codec
-        espressif__esp_capture
         espressif__esp_codec_dev
-        espressif__esp_new_jpeg
         freertos
-        json
         lvgl__lvgl
-        mbedtls
         media_lib_utils
-        nvs_flash
         waveshare__esp32_s3_touch_amoled_2_06)

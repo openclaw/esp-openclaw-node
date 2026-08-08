@@ -7,6 +7,17 @@
 #include "esp_err.h"
 #include "esp_openclaw_node.h"
 
+#define ROOM_CANVAS_ACTIVE_BRIGHTNESS 80
+
+typedef enum {
+    ROOM_CANVAS_ACTION_RENDER_CHANGED,
+    ROOM_CANVAS_ACTION_REQUEST_FACE_HINT,
+} room_canvas_action_t;
+
+typedef void (*room_canvas_action_handler_t)(room_canvas_action_t action, uint32_t value);
+
+void room_canvas_set_action_handler(room_canvas_action_handler_t handler);
+
 esp_err_t room_canvas_init(void);
 void room_canvas_set_node(esp_openclaw_node_handle_t node);
 /** Operator-role client used for plugin.surface.refresh (operator scope). */

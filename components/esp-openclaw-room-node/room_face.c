@@ -18,25 +18,23 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "bsp/esp-bsp.h"
 #include "cJSON.h"
 #include "esp_log.h"
 #include "esp_timer.h"
-#include "room_canvas.h"
-#include "room_ui.h"
+#include "room_board.h"
 
 #define TAG "room_face"
 
-#define FACE_WIDTH 410
-#define FACE_HEIGHT 502
-/* Eye centers sit above the display midline so the mouth clears the rounded
- * bottom corners; all coordinates assume the 32 px safe area. */
-#define EYE_BASE_W 96
-#define EYE_BASE_H 116
-#define EYE_GAP 78
-#define EYE_CENTER_Y 200
-#define MOUTH_CENTER_Y 342
-#define FACE_TICK_MS 16
+/* Geometry is resolved from the active LVGL display. */
+static int32_t face_width;
+static int32_t face_height;
+static int32_t eye_base_w;
+static int32_t eye_base_h;
+static int32_t eye_gap;
+static int32_t eye_center_y;
+static int32_t mouth_center_y;
+#define FACE_DEFAULT_TICK_MS 16
+static uint16_t face_tick_ms = FACE_DEFAULT_TICK_MS;
 /* Speech level decays to closed when the model pauses mid-utterance. */
 #define SPEECH_STALE_MS 300
 
@@ -234,6 +232,12 @@ static lv_obj_t *bars[3];
 static lv_timer_t *face_timer;
 
 static volatile room_face_state_t face_state;
+static room_face_controller_t controller;
+
+void room_face_set_controller(const room_face_controller_t *value)
+{
+    controller = value != NULL ? *value : (room_face_controller_t){0};
+}
 static int64_t hint_until_us;
 static bool hint_yawned;
 static int64_t hint_shown_at_us;
@@ -494,7 +498,7 @@ static void mouth_apply(int32_t smile, lv_color_t color)
         int32_t w = 44 - (h * 14) / 62;
         lv_obj_clear_flag(mouth_o, LV_OBJ_FLAG_HIDDEN);
         lv_obj_set_size(mouth_o, w, h);
-        lv_obj_set_pos(mouth_o, FACE_WIDTH / 2 - w / 2, MOUTH_CENTER_Y - h / 2);
+        lv_obj_set_pos(mouth_o, face_width / 2 - w / 2, mouth_center_y - h / 2);
         lv_obj_set_style_bg_color(mouth_o, color, 0);
     } else {
         lv_obj_add_flag(mouth_o, LV_OBJ_FLAG_HIDDEN);
@@ -514,8 +518,10 @@ static void mouth_apply(int32_t smile, lv_color_t color)
             int32_t w = 32 - (h * 6) / 54;
             lv_obj_clear_flag(bars[i], LV_OBJ_FLAG_HIDDEN);
             lv_obj_set_size(bars[i], w, h);
-            lv_obj_set_pos(bars[i], FACE_WIDTH / 2 - 24 - 48 + i * 48 + (32 - w) / 2,
-                           MOUTH_CENTER_Y - h / 2);
+            int32_t spacing = face_width * 12 / 100;
+            int32_t bar_width = face_width * 8 / 100;
+            lv_obj_set_pos(bars[i], face_width / 2 + (i - 1) * spacing - w / 2 + bar_width / 16,
+                           mouth_center_y - h / 2);
             lv_obj_set_style_bg_color(bars[i], color, 0);
         }
         return;
@@ -539,11 +545,12 @@ static void mouth_apply(int32_t smile, lv_color_t color)
     lv_obj_set_size(mouth_arc, diameter, diameter);
     if (curve > 0) {
         lv_arc_set_bg_angles(mouth_arc, 55, 125);
-        lv_obj_set_pos(mouth_arc, FACE_WIDTH / 2 - diameter / 2,
-                       MOUTH_CENTER_Y - diameter + 26);
+        lv_obj_set_pos(mouth_arc, face_width / 2 - diameter / 2,
+                       mouth_center_y - diameter + face_height * 5 / 100);
     } else {
         lv_arc_set_bg_angles(mouth_arc, 235, 305);
-        lv_obj_set_pos(mouth_arc, FACE_WIDTH / 2 - diameter / 2, MOUTH_CENTER_Y - 26);
+        lv_obj_set_pos(mouth_arc, face_width / 2 - diameter / 2,
+                       mouth_center_y - face_height * 5 / 100);
     }
     lv_obj_set_style_arc_color(mouth_arc, color, LV_PART_MAIN);
 }
@@ -556,7 +563,7 @@ static void face_hint_refresh(void *arg)
     if (face_state == ROOM_FACE_HINT && hint_until_us != 0) {
         return;
     }
-    room_ui_refresh();
+    if (controller.refresh != NULL) controller.refresh();
 }
 
 static void face_tick(lv_timer_t *timer)
@@ -623,7 +630,7 @@ static void face_tick(lv_timer_t *timer)
 
     /* Breathing: slow size-and-bob pulse; stronger while listening. */
     static const int8_t BREATH[16] = {0, 2, 4, 6, 7, 8, 7, 6, 4, 2, 0, -2, -4, -5, -4, -2};
-    uint32_t breath_period_ticks = 4200 / FACE_TICK_MS; /* ~0.24 Hz */
+    uint32_t breath_period_ticks = 4200 / face_tick_ms; /* ~0.24 Hz */
     int32_t breath = BREATH[(tick_count * 16 / breath_period_ticks) % 16];
     bool attentive = state == ROOM_FACE_LISTENING || state == ROOM_FACE_HINT;
     int32_t bob = attentive ? (breath * 4) / 8 : (breath * 2) / 8;
@@ -633,8 +640,8 @@ static void face_tick(lv_timer_t *timer)
      * with squash widening the eye as the lid drops (volume conservation). */
     int32_t h_pct = tw_eye_h.value + breath_pct + tw_sparkle.value;
     int32_t w_pct = tw_eye_w.value + breath_pct / 2 + tw_sparkle.value;
-    int32_t eye_h = (EYE_BASE_H * h_pct) / 100;
-    int32_t eye_w = (EYE_BASE_W * w_pct) / 100;
+    int32_t eye_h = (eye_base_h * h_pct) / 100;
+    int32_t eye_w = (eye_base_w * w_pct) / 100;
     int32_t bq = blink_q10;
     if (bq < 0) {
         bq = 0;
@@ -646,14 +653,14 @@ static void face_tick(lv_timer_t *timer)
         eye_h = 6;
     }
 
-    int32_t center_x = FACE_WIDTH / 2 + tw_gaze_x.value;
-    int32_t center_y = EYE_CENTER_Y + tw_eye_dy.value + tw_gaze_y.value + bob;
+    int32_t center_x = face_width / 2 + tw_gaze_x.value;
+    int32_t center_y = eye_center_y + tw_eye_dy.value + tw_gaze_y.value + bob;
     lv_color_t color = lv_color_make((uint8_t)tw_r.value, (uint8_t)tw_g.value, (uint8_t)tw_b.value);
 
     lv_obj_t *eyes[2] = {eye_left, eye_right};
     lv_obj_t *lids[2] = {lid_left, lid_right};
     for (int i = 0; i < 2; ++i) {
-        int32_t ex = center_x + (i == 0 ? -EYE_GAP : EYE_GAP) - eye_w / 2;
+        int32_t ex = center_x + (i == 0 ? -eye_gap : eye_gap) - eye_w / 2;
         lv_obj_set_style_bg_color(eyes[i], color, 0);
         lv_obj_set_size(eyes[i], eye_w, eye_h);
         lv_obj_set_pos(eyes[i], ex, center_y - eye_h / 2);
@@ -675,6 +682,18 @@ static void face_tick(lv_timer_t *timer)
 
 esp_err_t room_face_create(lv_obj_t *parent)
 {
+    lv_display_t *display = lv_obj_get_display(parent);
+    face_width = lv_display_get_horizontal_resolution(display);
+    face_height = lv_display_get_vertical_resolution(display);
+    const esp_openclaw_room_node_config_t *board = room_board_config();
+    face_tick_ms = board != NULL && board->display.animation_frame_ms > 0
+        ? board->display.animation_frame_ms
+        : FACE_DEFAULT_TICK_MS;
+    eye_base_w = face_width * 23 / 100;
+    eye_base_h = face_height * 23 / 100;
+    eye_gap = face_width * 19 / 100;
+    eye_center_y = face_height * 40 / 100;
+    mouth_center_y = face_height * 68 / 100;
     face_root = lv_obj_create(parent);
     if (face_root == NULL) {
         return ESP_ERR_NO_MEM;
@@ -747,7 +766,7 @@ esp_err_t room_face_create(lv_obj_t *parent)
     tween_jump(&tw_b, c.blue);
     tween_jump(&tw_smile, MOODS[ROOM_FACE_MOOD_NEUTRAL].smile);
 
-    face_timer = lv_timer_create(face_tick, FACE_TICK_MS, NULL);
+    face_timer = lv_timer_create(face_tick, face_tick_ms, NULL);
     if (face_timer == NULL) {
         lv_obj_delete(face_root);
         face_root = NULL;
@@ -818,14 +837,14 @@ void room_face_play_gesture(room_face_gesture_t gesture)
     if ((int)gesture < 0 || (int)gesture >= (int)(sizeof(GESTURES) / sizeof(GESTURES[0]))) {
         return;
     }
-    if (!bsp_display_lock(100)) {
+    if (!room_board_display_lock(100)) {
         return;
     }
     if (face_root != NULL && face_state != ROOM_FACE_HIDDEN) {
         gesture_start(gesture);
         ESP_LOGI(TAG, "gesture: %s", GESTURES[gesture].name);
     }
-    bsp_display_unlock();
+    room_board_display_unlock();
 }
 
 void room_face_set_speech_level(uint8_t level)
@@ -889,12 +908,12 @@ static esp_err_t handle_face_set(
     /* One display-lock hold makes routing atomic against talk-state
      * transitions, which repaint under the same lock. The lock is recursive,
      * so the hint path below may take it again. */
-    if (!bsp_display_lock(200)) {
+    if (!room_board_display_lock(200)) {
         return face_command_error(
             out_error, "UNAVAILABLE", "the display is busy; retry face.set", ESP_ERR_TIMEOUT);
     }
-    bool talk_active = room_ui_talk_face_active();
-    bool canvas_covering = room_canvas_is_active();
+    bool talk_active = controller.talk_active != NULL && controller.talk_active();
+    bool canvas_covering = controller.canvas_active != NULL && controller.canvas_active();
     if (talk_active) {
         /* Mood rides the (possibly canvas-covered) talk face; hold 0 keeps it
          * until the call ends. */
@@ -909,12 +928,12 @@ static esp_err_t handle_face_set(
         face_mood_index = (uint8_t)mood_index;
         mood_hold_until_us = esp_timer_get_time() + show_ms * 1000;
         if (!canvas_covering) {
-            room_ui_show_face_hint((uint32_t)show_ms);
+            if (controller.show_hint != NULL) controller.show_hint((uint32_t)show_ms);
         }
         face_retarget(260, FACE_EASE_OUT_CUBIC);
     }
     bool visible = room_face_is_visible();
-    bsp_display_unlock();
+    room_board_display_unlock();
 
     char payload[96];
     snprintf(
@@ -963,20 +982,21 @@ static esp_err_t handle_face_gesture(
             ESP_ERR_INVALID_ARG);
     }
 
-    if (!bsp_display_lock(200)) {
+    if (!room_board_display_lock(200)) {
         return face_command_error(
             out_error, "UNAVAILABLE", "the display is busy; retry face.gesture", ESP_ERR_TIMEOUT);
     }
     bool visible = room_face_is_visible();
-    if (!visible && !room_canvas_is_active()) {
+    bool canvas_covering = controller.canvas_active != NULL && controller.canvas_active();
+    if (!visible && !canvas_covering) {
         /* Give the gesture a stage: pop the hint face up briefly. */
-        room_ui_show_face_hint(6000);
+        if (controller.show_hint != NULL) controller.show_hint(6000);
         visible = room_face_is_visible();
     }
     if (visible) {
         gesture_start((room_face_gesture_t)index);
     }
-    bsp_display_unlock();
+    room_board_display_unlock();
 
     char payload[80];
     snprintf(

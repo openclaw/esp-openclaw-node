@@ -1,0 +1,39 @@
+menu "OpenClaw room node"
+
+config OPENCLAW_ROOM_WIFI_SSID
+    string "Wi-Fi SSID"
+    default ""
+
+config OPENCLAW_ROOM_WIFI_PASSWORD
+    string "Wi-Fi password"
+    default ""
+
+config OPENCLAW_ROOM_SETUP_CODE
+    string "Voice-node setup code"
+    default ""
+
+config OPENCLAW_ROOM_GATEWAY_HTTP_BASE_URL
+    string "Optional Gateway HTTP origin override"
+    default ""
+    help
+        HTTP(S) origin used by Canvas and Talk. Leave empty to derive it from
+        the authoritative active/saved ws(s) Gateway URI.
+
+config OPENCLAW_ROOM_TALK_PROVIDER
+    string "Optional Talk provider override"
+    default ""
+
+config OPENCLAW_ROOM_TALK_MODEL
+    string "Optional Talk model override"
+    default ""
+
+config OPENCLAW_ROOM_TALK_VOICE
+    string "Optional Talk voice override"
+    default ""
+
+config OPENCLAW_ROOM_CALL_IDLE_SECONDS
+    int "Maximum call lifetime in seconds"
+    range 15 1800
+    default 180
+
+endmenu

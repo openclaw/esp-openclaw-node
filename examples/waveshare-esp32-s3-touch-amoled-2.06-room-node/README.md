@@ -1,8 +1,14 @@
 # Waveshare ESP32-S3 Touch AMOLED 2.06 room node
 
+This example is now a thin Waveshare adapter for the canonical
+`esp-openclaw-room-node` component. It retains only board ownership: the
+SH8601/QSPI DMA and even-row workaround, ES8311/ES7210 MIC1+MIC3 topology, and
+the validated S3 scheduler/memory profile. Dual sessions, reconnect, Talk
+races, wake, Canvas/A2UI, face geometry, and commands are shared with Tab5.
+
 This example turns the watch-shaped Waveshare development board into a USB-powered, always-on OpenClaw room node. The straps are irrelevant; the firmware runs continuously with the AMOLED fully dark while idle.
 
-It uses the maintained Waveshare BSP, the board's ES7210 microphone codec and ES8311 speaker codec, a 24 kHz stereo I2S path, Espressif's AEC capture source, and Espressif WebRTC. Ambient **Hi ESP** wake works through the WakeNet 9 (`wn9_hiesp`) instance already owned by the AFE; the firmware never creates the second esp-sr WakeNet instance that aborts inside the closed library on this hardware. Because esp_capture 1.0.2 does not expose AFE wake events, this example vendors its AEC source compilation unit and private-header closure in `main/`, adding the wake callback locally. That callback should move upstream and the vendored files should be dropped once esp_capture exposes detections. Gateway `voicewake.changed` events are observed, but an arbitrary text trigger cannot replace a compiled local WakeNet model.
+It uses the maintained Waveshare BSP, the board's ES7210 microphone codec and ES8311 speaker codec, a 24 kHz stereo I2S path, Espressif's AEC capture source, and Espressif WebRTC. Ambient **Hi ESP** wake works through the WakeNet 9 (`wn9_hiesp`) instance already owned by the AFE; the firmware never creates the second esp-sr WakeNet instance that aborts inside the closed library on this hardware. Because esp_capture 1.0.2 does not expose AFE wake events, the canonical room component carries one pinned AEC source/private-header closure. That closure should be dropped once esp_capture exposes detections. Gateway `voicewake.changed` events are observed, but an arbitrary text trigger cannot replace a compiled local WakeNet model.
 
 ## Build and provision
 
@@ -31,7 +37,7 @@ The first setup-code handshake stores two role-keyed device tokens against one h
 
 ## Runtime behavior
 
-WakeNet remains active while playback is running and consumes the AEC-cleaned capture stream. A wake starts one client-owned WebRTC Talk session; the media peer connects directly to the configured provider while OpenClaw owns provider credentials and agent delegation. Calls close after the configured maximum lifetime, and another wake can start a new call.
+Ambient WakeNet consumes the AEC-cleaned capture stream until a wake starts one client-owned WebRTC Talk session. Talk reopens the shared AFE with AEC and VAD but without WakeNet; after the call closes, ambient capture reopens with WakeNet restored. The media peer connects directly to the configured provider while OpenClaw owns provider credentials and agent delegation. Calls close after the configured maximum lifetime, and another wake can start a new call.
 
 Canvas mode uses a separate 410x502 LVGL screen at 80% brightness. Hiding it returns to the status screen; a user-initiated exit leaves a readable hint rather than dropping straight to the AMOLED-off idle policy. Talk state changes do not replace active Canvas content; a small status pill appears at the top-center until Talk returns to idle.
 
@@ -143,7 +149,7 @@ Component values may be `{"literalString":"..."}`, `{"literalNumber":1}`, `{"lit
 | `Row` | Horizontal flex layout with the same child and alignment handling. |
 | `Text` | Wrapped label with `h1`, `h2`, `h3`, `h4`, `h5`, `body`, and `caption` font fallbacks. |
 | `Image` | Fetched PNG/JPEG centered and scaled to fit while preserving aspect ratio. |
-| `Button` | LVGL button and label. A tap logs the action name locally; this build has no A2UI user-action back-channel. |
+| `Button` | LVGL button and label. A tap forwards the fixed `CANVAS_A2UI` `agent.request` envelope to the session that invoked the current surface. Ownerless actions are refused; id/name/surface/component are capped at 64 bytes and context at 2 KiB. |
 | `Card` | Padded, rounded dark container with a subtle border and one child. |
 | `Divider` | One-pixel gray horizontal line. |
 | `CheckBox` | Label plus non-interactive checked state resolved from `value`. |

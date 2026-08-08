@@ -1,36 +1,15 @@
-#include "room_ui.h"
+#include "room_ui_controller.h"
 
 #include <string.h>
 
-#include "bsp/esp-bsp.h"
-#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "lvgl.h"
 #include "room_canvas.h"
 #include "room_face.h"
-
-/* 16 rows x 410 px x RGB565 = ~13 KiB, matching CONFIG_BSP_DISPLAY_LVGL_BUF_HEIGHT.
- * Must stay EVEN: flush chunks advance by this many rows and the SH8601
- * latches windows on 2-pixel boundaries. */
-#define ROOM_UI_DRAW_ROWS 16
-
-/*
- * The SH8601 latches flush windows on 2-pixel boundaries, so dirty areas are
- * expanded to even rows and full width. Only LV_EVENT_INVALIDATE_AREA carries
- * an area; refresh-time events do not, and must not be hooked here.
- */
-static void room_ui_align_flush_area(lv_event_t *event)
-{
-    lv_area_t *area = lv_event_get_param(event);
-    if (area == NULL) {
-        return;
-    }
-    area->x1 = 0;
-    area->x2 = BSP_LCD_H_RES - 1;
-    area->y1 &= ~1;
-    area->y2 |= 1;
-}
+#include "room_board.h"
 
 /* Tap on the status screen: agent canvas when present, else wake the face. */
 static void room_ui_status_clicked(lv_event_t *event)
@@ -40,10 +19,13 @@ static void room_ui_status_clicked(lv_event_t *event)
 }
 
 static const char *TAG = "room_ui";
+#define ROOM_UI_CAMERA_MIN_BRIGHTNESS 40
 static lv_obj_t *status_label;
 static lv_obj_t *gateway_label;
 static lv_obj_t *talk_pill;
 static lv_obj_t *talk_pill_label;
+static lv_obj_t *camera_indicator;
+static bool animated_face_enabled;
 /* Guarded by state_mux like the state/detail facts. */
 static char gateway_text[64];
 /* Last state/detail survive canvas mode so leaving it restores the live Talk
@@ -56,6 +38,20 @@ static room_ui_state_t current_state = ROOM_UI_IDLE;
 static char current_detail[48];
 
 static void repaint_retry_expired(void *arg);
+
+static bool controller_canvas_active(void)
+{
+    return room_canvas_is_active();
+}
+
+static void controller_canvas_action(room_canvas_action_t action, uint32_t value)
+{
+    if (action == ROOM_CANVAS_ACTION_REQUEST_FACE_HINT) {
+        room_ui_show_face_hint(value);
+    } else {
+        room_ui_refresh();
+    }
+}
 
 /* One-shot retry: a failed display-lock paint self-heals shortly after. */
 static void arm_repaint_retry(void)
@@ -82,59 +78,20 @@ static void repaint_retry_expired(void *arg)
 
 void room_ui_init(void)
 {
-    lv_display_t *display = bsp_display_start();
+    const room_face_controller_t face_controller = {
+        .refresh = room_ui_refresh,
+        .show_hint = room_ui_show_face_hint,
+        .talk_active = room_ui_talk_face_active,
+        .canvas_active = controller_canvas_active,
+    };
+    room_face_set_controller(&face_controller);
+    room_canvas_set_action_handler(controller_canvas_action);
+    lv_display_t *display = room_board_display_start();
     if (display == NULL) {
         ESP_LOGE(TAG, "failed to start display");
         return;
     }
-    /*
-     * The BSP's draw buffer is allocated from the default heap and lands in
-     * PSRAM, which this QSPI panel cannot DMA from. esp_lcd then bounce-buffers
-     * every flush through a fresh internal allocation, and once Wi-Fi/TLS and
-     * the always-on audio pipeline claim internal RAM those allocations start
-     * failing, silently dropping flushes (stale/overlapping pixels on screen).
-     * Own the draw buffer instead: internal DMA-capable memory taken once here,
-     * before the network and audio stacks start, so no per-flush allocation is
-     * ever needed. Must run under the display lock; the LVGL port task is
-     * already rendering into the buffers this replaces.
-     */
-    if (!bsp_display_lock(0)) {
-        ESP_LOGE(TAG, "failed to lock display for draw buffer setup");
-        return;
-    }
-    size_t draw_bytes = (size_t)BSP_LCD_H_RES * ROOM_UI_DRAW_ROWS * 2;
-    /* Two buffers: the panel DMAs one chunk while LVGL renders the next. With a
-     * single buffer the renderer and the in-flight transfer share memory, which
-     * shows up as streaks of the wrong row on the glass. */
-    void *draw_a = heap_caps_aligned_alloc(
-        CONFIG_LV_DRAW_BUF_ALIGN,
-        draw_bytes,
-        MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-    void *draw_b = heap_caps_aligned_alloc(
-        CONFIG_LV_DRAW_BUF_ALIGN,
-        draw_bytes,
-        MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-    if (draw_a != NULL) {
-        lv_display_set_buffers(
-            display,
-            draw_a,
-            draw_b,
-            (uint32_t)draw_bytes,
-            LV_DISPLAY_RENDER_MODE_PARTIAL);
-        ESP_LOGI(
-            TAG,
-            "draw buffers: %u bytes x%d internal DMA",
-            (unsigned)draw_bytes,
-            draw_b != NULL ? 2 : 1);
-    } else {
-        heap_caps_free(draw_b);
-        ESP_LOGW(TAG, "no internal DMA memory for the draw buffer; flushes will bounce");
-    }
-    /* Registering mutates the display's event list, which the LVGL port task
-     * walks on every refresh; keep the lock held across it. */
-    lv_display_add_event_cb(display, room_ui_align_flush_area, LV_EVENT_INVALIDATE_AREA, NULL);
-    bsp_display_unlock();
-    if (!bsp_display_lock(0)) {
+    if (!room_board_display_lock(0)) {
         ESP_LOGE(TAG, "failed to lock display during initialization");
         return;
     }
@@ -165,18 +122,29 @@ void room_ui_init(void)
         room_ui_status_clicked,
         LV_EVENT_CLICKED,
         NULL);
-    if (room_face_create(lv_screen_active()) != ESP_OK) {
+    const esp_openclaw_room_node_config_t *board = room_board_config();
+    animated_face_enabled = board != NULL && board->display.animated_face;
+    if (animated_face_enabled && room_face_create(lv_screen_active()) != ESP_OK) {
+        animated_face_enabled = false;
         ESP_LOGW(TAG, "face unavailable; talk states fall back to text");
     }
-    bsp_display_unlock();
-    bsp_display_brightness_set(0);
+    room_board_display_unlock();
+    room_board_display_brightness_set(0);
 }
 
 /* Talk-driven states render as the animated face; text is for setup/errors. */
 static bool room_ui_state_uses_face(room_ui_state_t state)
 {
-    return state == ROOM_UI_LISTENING || state == ROOM_UI_CONNECTING ||
-        state == ROOM_UI_SPEAKING;
+    return animated_face_enabled &&
+        (state == ROOM_UI_LISTENING || state == ROOM_UI_CONNECTING ||
+         state == ROOM_UI_SPEAKING);
+}
+
+static int room_ui_target_brightness(room_ui_state_t state, bool canvas_active)
+{
+    if (canvas_active) return ROOM_CANVAS_ACTIVE_BRIGHTNESS;
+    if (state == ROOM_UI_IDLE) return 0;
+    return room_ui_state_uses_face(state) ? 40 : 18;
 }
 
 /* Paints `current_state`/`current_detail` with the display lock held. Returns
@@ -233,7 +201,7 @@ static bool room_ui_render_locked(void)
             /* The rounded glass clips the corners; top-center stays visible. */
             lv_obj_align(talk_pill, LV_ALIGN_TOP_MID, 0, 14);
         }
-        return false;
+        return true;
     }
     if (talk_pill != NULL) {
         lv_obj_delete(talk_pill);
@@ -278,14 +246,14 @@ static void room_ui_paint_and_unlock(void)
     taskENTER_CRITICAL(&state_mux);
     room_ui_state_t painted_state = current_state;
     taskEXIT_CRITICAL(&state_mux);
-    bsp_display_unlock();
+    room_board_display_unlock();
     if (apply_brightness) {
         /* AMOLED is fully dark while idle; the face gets more headroom than
          * the plain text states so expressions read across the room. */
-        int brightness = painted_state == ROOM_UI_IDLE ? 0
-            : room_ui_state_uses_face(painted_state)   ? 40
-                                                       : 18;
-        bsp_display_brightness_set(brightness);
+        int brightness = room_ui_target_brightness(
+            painted_state,
+            room_canvas_is_active());
+        room_board_display_brightness_set(brightness);
     }
 }
 
@@ -303,7 +271,7 @@ void room_ui_set(room_ui_state_t state, const char *detail)
         strlcpy(current_detail, detail, sizeof(current_detail));
     }
     taskEXIT_CRITICAL(&state_mux);
-    if (!bsp_display_lock(100)) {
+    if (!room_board_display_lock(100)) {
         ESP_LOGW(TAG, "display busy; state stored, repaint retries");
         arm_repaint_retry();
         return;
@@ -327,7 +295,7 @@ void room_ui_show_face_hint(uint32_t show_ms)
     if (status_label == NULL) {
         return;
     }
-    if (!bsp_display_lock(100)) {
+    if (!room_board_display_lock(100)) {
         return;
     }
     /* The face tick owns the hint lifetime (expiry triggers a refresh), so
@@ -353,9 +321,9 @@ void room_ui_show_face_hint(uint32_t show_ms)
             }
         }
     }
-    bsp_display_unlock();
+    room_board_display_unlock();
     if (shown) {
-        bsp_display_brightness_set(40);
+        room_board_display_brightness_set(40);
     }
 }
 
@@ -364,7 +332,7 @@ void room_ui_refresh(void)
     if (status_label == NULL) {
         return;
     }
-    if (!bsp_display_lock(100)) {
+    if (!room_board_display_lock(100)) {
         arm_repaint_retry();
         return;
     }
@@ -372,4 +340,54 @@ void room_ui_refresh(void)
      * transition either lands before this render or repaints right after it,
      * so no snapshot of the state can overwrite a newer one. */
     room_ui_paint_and_unlock();
+}
+
+esp_err_t room_ui_camera_indicator_begin(void)
+{
+    if (status_label == NULL || !room_board_display_lock(500)) {
+        return ESP_ERR_TIMEOUT;
+    }
+    if (camera_indicator == NULL) {
+        camera_indicator = lv_label_create(lv_layer_top());
+    }
+    if (camera_indicator == NULL) {
+        room_board_display_unlock();
+        return ESP_ERR_NO_MEM;
+    }
+    lv_label_set_text(camera_indicator, LV_SYMBOL_EYE_OPEN " Camera active");
+    lv_obj_set_style_text_color(camera_indicator, lv_color_hex(0xff4d4d), 0);
+    lv_obj_set_style_bg_color(camera_indicator, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(camera_indicator, LV_OPA_90, 0);
+    lv_obj_set_style_pad_all(camera_indicator, 10, 0);
+    lv_obj_align(camera_indicator, LV_ALIGN_TOP_RIGHT, -18, 18);
+    lv_obj_clear_flag(camera_indicator, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(camera_indicator);
+    lv_refr_now(lv_display_get_default());
+    room_board_display_unlock();
+    taskENTER_CRITICAL(&state_mux);
+    room_ui_state_t state = current_state;
+    taskEXIT_CRITICAL(&state_mux);
+    int brightness = room_ui_target_brightness(state, room_canvas_is_active());
+    if (brightness < ROOM_UI_CAMERA_MIN_BRIGHTNESS) {
+        brightness = ROOM_UI_CAMERA_MIN_BRIGHTNESS;
+    }
+    esp_err_t err = room_board_display_brightness_set(brightness);
+    if (err != ESP_OK) {
+        room_ui_camera_indicator_end();
+    }
+    return err;
+}
+
+void room_ui_camera_indicator_end(void)
+{
+    if (room_board_display_lock(500)) {
+        if (camera_indicator != NULL) {
+            lv_obj_delete(camera_indicator);
+            camera_indicator = NULL;
+            lv_refr_now(lv_display_get_default());
+        }
+        room_board_display_unlock();
+    }
+    /* Repaint restores the controller-owned brightness for the live state. */
+    room_ui_refresh();
 }

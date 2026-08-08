@@ -1,0 +1,46 @@
+idf_component_register(
+    SRCS
+        "esp_openclaw_room_node.c"
+        "room_aec_src.c"
+        "room_board.c"
+        "room_canvas_a2ui_store.c"
+        "room_canvas_http_decode.c"
+        "room_canvas_lvgl_renderer.c"
+        "room_canvas_snapshot.c"
+        "room_canvas_surface_refresh.c"
+        "room_canvas_node_cmd.c"
+        "room_device_commands.c"
+        "room_face.c"
+        "room_file_validation.c"
+        "room_files.c"
+        "room_media.c"
+        "room_ui_controller.c"
+    INCLUDE_DIRS "include"
+    PRIV_INCLUDE_DIRS "."
+    REQUIRES
+        av_render
+        console
+        esp-openclaw-node
+        esp-openclaw-node-provisioning
+        esp-openclaw-talk
+        esp_app_format
+        esp_event
+        esp_http_client
+        esp_lcd
+        esp_netif
+        esp_peer
+        esp_timer
+        esp_webrtc
+        esp_wifi
+        espressif__cjson
+        espressif__esp-sr
+        espressif__esp_audio_codec
+        espressif__esp_capture
+        espressif__esp_codec_dev
+        espressif__esp_new_jpeg
+        freertos
+        json
+        lvgl__lvgl
+        mbedtls
+        media_lib_utils
+        nvs_flash)

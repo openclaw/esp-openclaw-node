@@ -2,7 +2,7 @@
  * SPDX-FileCopyrightText: 2025 Espressif Systems (Shanghai) CO., LTD
  * SPDX-License-Identifier: LicenseRef-Espressif-Modified-MIT
  *
- * See LICENSE file for details.
+ * See LICENSE.ESPRESSIF-MODIFIED-MIT for details.
  */
 
 /*
@@ -12,6 +12,7 @@
  */
 
 #include <sdkconfig.h>
+#include <limits.h>
 #include <string.h>
 #if CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32P4 || CONFIG_IDF_TARGET_ESP32S31
 #include "esp_capture_types.h"
@@ -26,6 +27,8 @@
 #include "esp_vadn_iface.h"
 #include "esp_afe_sr_models.h"
 #include "esp_vad.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "msg_q.h"
 #include "room_aec_src.h"
 
@@ -33,11 +36,9 @@
 
 #define VAD_CACHE_BLOCK   (3)
 #define VAD_SILENT_BLOCK  (20)
-#define DUMP_STOP_IDX     (2)
 #define AFE_RUN_STACK     (8192)
 #define WAKE_DEBOUNCE_US  (2 * 1000 * 1000)
 #define VALID_ON_VAD      // Turn on to not send data if VAD not active or else send silent data
-// #define DUMP_AFE_DATA  // Enable this define to allow dump AFE input and output to file
 #define WAIT_STATE_TIMEOUT(state) do {                    \
     int _wait_time_out = 1000;                            \
     while (state) {                                       \
@@ -81,7 +82,8 @@ typedef struct {
     uint64_t                    samples;
     uint8_t                    *cached_frame;
     int                         cached_read_pos;
-    int                         cache_size;
+    int                         feed_size;
+    int                         fetch_size;
     int                         cache_fill;
     uint8_t                     start        : 1;
     uint8_t                     open         : 1;
@@ -95,9 +97,19 @@ typedef struct {
     audio_aec_vad_res_t        *vad_res;
     void                      (*wake_cb)(void *ctx);
     void                       *wake_ctx;
+    bool                        wakenet_enabled;
 } audio_aec_src_t;
 
 static int64_t last_wake_callback_us;
+
+static bool audio_aec_chunk_samples_to_bytes(int samples, int *bytes)
+{
+    if (samples <= 0 || samples > INT_MAX / (int)sizeof(int16_t)) {
+        return false;
+    }
+    *bytes = samples * (int)sizeof(int16_t);
+    return true;
+}
 
 static int open_afe_in_ram(void *arg)
 {
@@ -108,14 +120,23 @@ static int open_afe_in_ram(void *arg)
         if (src->models == NULL) {
             ESP_LOGW(TAG, "No model to load");
         }
-        afe_config_t *afe_config = afe_config_init(src->mic_layout, src->models, AFE_TYPE_SR, AFE_MODE_LOW_COST);
+        /* Ambient wake uses speech-recognition AFE; active Talk uses the
+         * 16 kHz voice-communication pipeline with AEC but no WakeNet. */
+        afe_type_t afe_type = src->wakenet_enabled ? AFE_TYPE_SR : AFE_TYPE_VC;
+        afe_config_t *afe_config = afe_config_init(src->mic_layout, src->models, afe_type, AFE_MODE_LOW_COST);
         if (afe_config == NULL) {
             ESP_LOGE(TAG, "Failed to create AFE config");
             ret = ESP_CAPTURE_ERR_NO_MEM;
             break;
         }
-        // When data_on_vad turn on VAD process before AFE disable it
-        if (src->data_on_vad) {
+        afe_config->wakenet_init = src->wakenet_enabled;
+        if (!src->wakenet_enabled) {
+            /* Talk streams continuously and the remote session owns turn
+             * detection; keep device AEC but skip redundant NS/VAD work. */
+            afe_config->ns_init = false;
+            afe_config->vad_init = false;
+        } else if (src->data_on_vad) {
+            // When data_on_vad turn on VAD process before AFE disable it
             afe_config->vad_init = false;
         }
         src->afe_handle = esp_afe_handle_from_config(afe_config);
@@ -190,42 +211,6 @@ static uint8_t get_src_channel(audio_aec_src_t *src)
     return ch;
 }
 
-static void dump_data(uint8_t type, void *data, int size)
-{
-#ifdef DUMP_AFE_DATA
-    static FILE *fp[DUMP_STOP_IDX];
-    static uint8_t dump_count = 0;
-    if (type == DUMP_STOP_IDX) {
-        for (int i = 0; i < DUMP_STOP_IDX; i++) {
-            if (fp[i]) {
-                fclose(fp[i]);
-                fp[i] = NULL;
-            }
-        }
-        dump_count++;
-        if (dump_count > 9) {
-            dump_count = 0;
-        }
-        return;
-    }
-    if (size == 0) {
-        return;
-    }
-    if (fp[type] == NULL) {
-        char *pre_name[] = {"feed", "fetch"};
-        char file_name[20];
-        snprintf(file_name, sizeof(file_name), "/sdcard/%s%d.bin", pre_name[type], dump_count);
-        fp[type] = fopen(file_name, "wb");
-        if (fp[type]) {
-            ESP_LOGI(TAG, "dump to %s", file_name);
-        }
-    }
-    if (fp[type]) {
-        fwrite(data, size, 1, fp[type]);
-    }
-#endif
-}
-
 static inline void audio_aec_fill_vad_working_buf(audio_aec_src_t *src, uint8_t *feed_data, int feed_size)
 {
     audio_aec_vad_res_t *vad_res = src->vad_res;
@@ -243,7 +228,6 @@ static inline void audio_aec_fill_vad_working_buf(audio_aec_src_t *src, uint8_t 
 static int audio_aec_feed_data(audio_aec_src_t *src, uint8_t *feed_data, int feed_size)
 {
     int ret = src->afe_handle->feed(src->afe_data, (int16_t *)feed_data);
-    dump_data(0, feed_data, feed_size);
     return ret;
 }
 
@@ -338,7 +322,7 @@ static void codec_dev_read_thread(void *arg)
 {
     audio_aec_src_t *src = (audio_aec_src_t *)arg;
     audio_aec_vad_res_t *vad_res = src->vad_res;
-    int read_size = src->cache_size * get_src_channel(src);
+    int read_size = src->feed_size * get_src_channel(src);
     bool err = false;
     while (!src->stopping) {
         void *data = NULL;
@@ -366,7 +350,7 @@ static void codec_dev_read_thread(void *arg)
 static inline int audio_aec_src_read_from_vad(audio_aec_src_t *src)
 {
     int ret = 0;
-    int read_size = src->cache_size * get_src_channel(src);
+    int read_size = src->feed_size * get_src_channel(src);
     audio_aec_vad_res_t *vad_res = src->vad_res;
     do {
         vad_res->dev_src_running = true;
@@ -403,7 +387,7 @@ static inline int audio_aec_src_read_from_vad(audio_aec_src_t *src)
 
 static inline int audio_aec_src_read_directly(audio_aec_src_t *src)
 {
-    int read_size = src->cache_size * get_src_channel(src);
+    int read_size = src->feed_size * get_src_channel(src);
     int ret = 0;
     uint32_t *feed_data = NULL;
     do {
@@ -423,6 +407,11 @@ static inline int audio_aec_src_read_directly(audio_aec_src_t *src)
                 ESP_LOGE(TAG, "Fail to feed data %d", ret);
                 break;
             }
+#if CONFIG_IDF_TARGET_ESP32P4 && CONFIG_ESP32P4_SELECTS_REV_LESS_V3
+            /* VOIP AEC can continuously drain queued TDM frames on early P4;
+             * yield two 1 kHz ticks so IDLE0 retains watchdog service time. */
+            vTaskDelay(2);
+#endif
         }
     } while (0);
     if (ret < 0) {
@@ -474,7 +463,7 @@ static void release_vad(audio_aec_src_t *src)
     src->vad_res = NULL;
 }
 
-static esp_capture_err_t prepare_vad(audio_aec_src_t *src, int audio_chunksize)
+static esp_capture_err_t prepare_vad(audio_aec_src_t *src)
 {
     if (src->models == NULL || src->data_on_vad == false) {
         return ESP_CAPTURE_ERR_OK;
@@ -499,14 +488,14 @@ static esp_capture_err_t prepare_vad(audio_aec_src_t *src, int audio_chunksize)
             ESP_LOGE(TAG, "Failed to create vad model");
             break;
         }
-        int cache_size = (VAD_CACHE_BLOCK * 3) * (src->cache_size * get_src_channel(src) + 16);
+        int cache_size = (VAD_CACHE_BLOCK * 3) * (src->feed_size * get_src_channel(src) + 16);
         vad_res->in_q = esp_gmf_data_queue_create(cache_size);
         if (vad_res->in_q == NULL) {
             ESP_LOGE(TAG, "Failed to create vad cache");
             break;
         }
         // Only one channel data for vad
-        vad_res->vad_working_buf = capture_calloc(1, src->cache_size);
+        vad_res->vad_working_buf = capture_calloc(1, src->feed_size);
         if (vad_res->vad_working_buf == NULL) {
             ESP_LOGE(TAG, "Failed to allocate vad cache");
             break;
@@ -545,15 +534,26 @@ static esp_capture_err_t audio_aec_src_start(esp_capture_audio_src_if_t *h)
         ESP_LOGE(TAG, "Failed to open AFE");
         return ESP_CAPTURE_ERR_NOT_SUPPORTED;
     }
-    int audio_chunksize = src->afe_handle->get_feed_chunksize(src->afe_data);
-    src->cache_size = audio_chunksize * (16 / 8);
+    int feed_chunksize = src->afe_handle->get_feed_chunksize(src->afe_data);
+    int fetch_chunksize = src->afe_handle->get_fetch_chunksize(src->afe_data);
+    int feed_size = 0;
+    int fetch_size = 0;
+    if (!audio_aec_chunk_samples_to_bytes(feed_chunksize, &feed_size) ||
+        !audio_aec_chunk_samples_to_bytes(fetch_chunksize, &fetch_size)) {
+        ESP_LOGE(TAG, "Invalid AFE frame sizes: feed=%d samples, fetch=%d samples",
+                 feed_chunksize, fetch_chunksize);
+        audio_aec_src_stop(h);
+        return ESP_CAPTURE_ERR_INTERNAL;
+    }
+    src->feed_size = feed_size;
+    src->fetch_size = fetch_size;
     if (src->data_on_vad) {
-        ret = prepare_vad(src, audio_chunksize);
+        ret = prepare_vad(src);
         if (ret != ESP_CAPTURE_ERR_OK) {
             return ret;
         }
     }
-    src->cached_frame = capture_calloc(1, src->cache_size);
+    src->cached_frame = capture_calloc(1, src->fetch_size);
     if (src->cached_frame == NULL) {
         ESP_LOGE(TAG, "Failed to allocate cache frame");
         return ESP_CAPTURE_ERR_NOT_SUPPORTED;
@@ -615,8 +615,8 @@ static esp_capture_err_t audio_aec_src_read_frame(esp_capture_audio_src_if_t *h,
             frame->size = 0;
             return ESP_CAPTURE_ERR_OK;
 #endif
-            memset(src->cached_frame, 0, src->cache_size);
-            src->cache_fill = src->cache_size;
+            memset(src->cached_frame, 0, src->fetch_size);
+            src->cache_fill = src->fetch_size;
             use_silent = true;
         }
         if (use_silent == false) {
@@ -635,12 +635,12 @@ static esp_capture_err_t audio_aec_src_read_frame(esp_capture_audio_src_if_t *h,
                     src->wake_cb(src->wake_ctx);
                 }
             }
-            dump_data(1, res->data, res->data_size);
-            if (res->data_size <= src->cache_size) {
+            if (res->data_size >= 0 && res->data_size <= src->fetch_size) {
                 memcpy(src->cached_frame, res->data, res->data_size);
                 src->cache_fill = res->data_size;
             } else {
-                ESP_LOGE(TAG, "Why so huge %d", res->data_size);
+                ESP_LOGE(TAG, "AFE fetch size out of bounds: got %d bytes, capacity %d bytes",
+                         res->data_size, src->fetch_size);
             }
         }
     }
@@ -686,7 +686,6 @@ static esp_capture_err_t audio_aec_src_stop(esp_capture_audio_src_if_t *h)
     if (src->handle) {
         esp_codec_dev_close(src->handle);
     }
-    dump_data(DUMP_STOP_IDX, NULL, 0);
     src->in_error = false;
     src->start = false;
     return ret;
@@ -719,12 +718,25 @@ esp_capture_audio_src_if_t *room_capture_new_audio_aec_src(room_capture_audio_ae
     src->data_on_vad = cfg->data_on_vad;
     src->wake_cb = cfg->wake_cb;
     src->wake_ctx = cfg->wake_ctx;
+    src->wakenet_enabled = cfg->wake_cb != NULL;
     if (cfg->mic_layout == NULL) {
         src->mic_layout = "MR";
     } else {
         src->mic_layout = cfg->mic_layout;
     }
     return &src->base;
+}
+
+esp_capture_err_t room_capture_audio_aec_src_set_wakenet_enabled(
+    esp_capture_audio_src_if_t *source,
+    bool enabled)
+{
+    if (source == NULL) {
+        return ESP_CAPTURE_ERR_INVALID_ARG;
+    }
+    audio_aec_src_t *src = (audio_aec_src_t *)source;
+    src->wakenet_enabled = enabled;
+    return ESP_CAPTURE_ERR_OK;
 }
 
 #endif  /* CONFIG_IDF_TARGET_ESP32S3 || CONFIG_IDF_TARGET_ESP32P4 */

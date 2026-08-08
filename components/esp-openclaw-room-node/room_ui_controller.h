@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include "esp_err.h"
 
 typedef enum {
     ROOM_UI_IDLE = 0,
@@ -22,3 +23,5 @@ void room_ui_show_face_hint(uint32_t show_ms);
 void room_ui_set_gateway(const char *gateway_host);
 /** True while the current Talk state renders as the face. */
 bool room_ui_talk_face_active(void);
+esp_err_t room_ui_camera_indicator_begin(void);
+void room_ui_camera_indicator_end(void);

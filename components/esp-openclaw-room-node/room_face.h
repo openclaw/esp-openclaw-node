@@ -25,6 +25,15 @@ typedef enum {
     ROOM_FACE_GESTURE_SHAKE,
 } room_face_gesture_t;
 
+typedef struct {
+    void (*refresh)(void);
+    void (*show_hint)(uint32_t show_ms);
+    bool (*talk_active)(void);
+    bool (*canvas_active)(void);
+} room_face_controller_t;
+
+void room_face_set_controller(const room_face_controller_t *controller);
+
 /** Create the face widgets on `parent`. Display lock must be held. */
 esp_err_t room_face_create(lv_obj_t *parent);
 

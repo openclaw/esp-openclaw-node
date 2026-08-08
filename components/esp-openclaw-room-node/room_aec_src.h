@@ -17,3 +17,8 @@ typedef struct {
 
 esp_capture_audio_src_if_t *room_capture_new_audio_aec_src(
     room_capture_audio_aec_src_cfg_t *cfg);
+
+/** Select WakeNet for the next AFE open without mutating a live AFE instance. */
+esp_capture_err_t room_capture_audio_aec_src_set_wakenet_enabled(
+    esp_capture_audio_src_if_t *source,
+    bool enabled);

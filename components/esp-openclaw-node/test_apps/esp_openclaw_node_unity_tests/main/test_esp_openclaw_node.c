@@ -59,6 +59,11 @@ typedef struct {
 } blocking_command_ctx_t;
 
 typedef struct {
+    bool called;
+    char session_key[ESP_OPENCLAW_NODE_MAX_SESSION_KEY_LEN + 1];
+} invocation_command_ctx_t;
+
+typedef struct {
     esp_openclaw_node_handle_t node;
     TaskHandle_t completion_waiter;
     volatile esp_err_t destroy_err;
@@ -424,6 +429,54 @@ static void emit_ws_event(int32_t event_id, const char *text, esp_err_t local_er
         WEBSOCKET_EVENTS,
         event_id,
         &event_data);
+}
+
+static void emit_ws_frame_chunk(
+    uint8_t opcode,
+    char *data,
+    int data_len,
+    int payload_len,
+    int payload_offset,
+    bool fin)
+{
+    TEST_ASSERT_NOT_NULL(s_transport_state.event_handler);
+    esp_websocket_event_data_t event_data = {
+        .op_code = opcode,
+        .fin = fin,
+        .data_ptr = data,
+        .data_len = data_len,
+        .payload_len = payload_len,
+        .payload_offset = payload_offset,
+    };
+    s_transport_state.event_handler(
+        s_transport_state.event_handler_arg,
+        WEBSOCKET_EVENTS,
+        WEBSOCKET_EVENT_DATA,
+        &event_data);
+}
+
+static esp_err_t invocation_command_handler(
+    esp_openclaw_node_handle_t node,
+    void *context,
+    const esp_openclaw_node_command_invocation_t *invocation,
+    const char *params_json,
+    size_t params_len,
+    char **out_payload_json,
+    esp_openclaw_node_error_t *out_error)
+{
+    (void)node;
+    (void)params_json;
+    (void)params_len;
+    (void)out_payload_json;
+    (void)out_error;
+    invocation_command_ctx_t *ctx = context;
+    ctx->called = true;
+    snprintf(
+        ctx->session_key,
+        sizeof(ctx->session_key),
+        "%s",
+        invocation->session_key != NULL ? invocation->session_key : "");
+    return ESP_OK;
 }
 
 static char *extract_first_json_id(const char *json)
@@ -1301,6 +1354,156 @@ TEST_CASE("clean websocket close keeps local err clear", "[esp_openclaw_node][tr
     TEST_ASSERT_EQUAL(ESP_OK, s_event_recorder.local_err);
     TEST_ASSERT_EQUAL(ESP_OPENCLAW_NODE_DISCONNECTED_REASON_CONNECTION_LOST, s_event_recorder.disconnected_reason);
 
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_destroy(node));
+}
+
+TEST_CASE("gateway URI accessor prefers active transport and falls back to saved session", "[esp_openclaw_node][session]")
+{
+    reset_openclaw_storage();
+    reset_transport_state();
+    char saved_uri[] = "wss://saved.example/ws";
+    char saved_token[] = "saved-token";
+    esp_openclaw_node_persisted_session_t session = {0};
+    const esp_openclaw_node_persisted_session_t update = {
+        .version = 1,
+        .gateway_uri = saved_uri,
+        .device_token = saved_token,
+    };
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_persisted_session_store("node", &session, &update));
+    esp_openclaw_node_persisted_session_free(&session);
+
+    esp_openclaw_node_config_t config = {0};
+    esp_openclaw_node_config_init_default(&config);
+    esp_openclaw_node_handle_t node = NULL;
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_create(&config, &node));
+    char *uri = esp_openclaw_node_dup_gateway_uri(node);
+    TEST_ASSERT_EQUAL_STRING("wss://saved.example/ws", uri);
+    free(uri);
+
+    TEST_ASSERT_EQUAL(ESP_OK, request_connect_no_auth(node, "ws://active.example/ws"));
+    TEST_ASSERT_TRUE(wait_for_int_value(&s_transport_state.start_calls, 1, pdMS_TO_TICKS(1000)));
+    uri = esp_openclaw_node_dup_gateway_uri(node);
+    TEST_ASSERT_EQUAL_STRING("ws://active.example/ws", uri);
+    free(uri);
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_destroy(node));
+    TEST_ASSERT_NULL(esp_openclaw_node_dup_gateway_uri(NULL));
+}
+
+TEST_CASE("inbound message ceiling accepts below and fragmented exact limit", "[esp_openclaw_node][transport]")
+{
+    reset_openclaw_storage();
+    reset_transport_state();
+    esp_openclaw_node_config_t config = {0};
+    esp_openclaw_node_config_init_default(&config);
+    esp_openclaw_node_handle_t node = NULL;
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_create(&config, &node));
+    TEST_ASSERT_EQUAL(ESP_OK, request_connect_no_auth(node, "ws://gateway.example/ws"));
+    TEST_ASSERT_TRUE(wait_for_int_value(&s_transport_state.start_calls, 1, pdMS_TO_TICKS(1000)));
+
+    char small[] = "{}";
+    emit_ws_frame_chunk(0x01, small, 2, 2, 0, true);
+
+    const int half = ESP_OPENCLAW_NODE_MAX_INBOUND_MESSAGE_SIZE / 2;
+    char *chunk = calloc((size_t)half, 1);
+    TEST_ASSERT_NOT_NULL(chunk);
+    memset(chunk, ' ', (size_t)half);
+    emit_ws_frame_chunk(0x01, chunk, half, half, 0, false);
+    TEST_ASSERT_NOT_NULL(node->rx_buffer);
+    TEST_ASSERT_EQUAL_UINT32(
+        half,
+        (uint32_t)node->rx_buffer_len);
+    emit_ws_frame_chunk(0x00, chunk, half, half, 0, true);
+    free(chunk);
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_destroy(node));
+}
+
+TEST_CASE("inbound message ceiling rejects above limit before allocation", "[esp_openclaw_node][transport]")
+{
+    reset_openclaw_storage();
+    reset_transport_state();
+    reset_event_recorder();
+    esp_openclaw_node_config_t config = {0};
+    esp_openclaw_node_config_init_default(&config);
+    config.event_cb = test_node_event_cb;
+    esp_openclaw_node_handle_t node = NULL;
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_create(&config, &node));
+    TEST_ASSERT_EQUAL(ESP_OK, request_connect_no_auth(node, "ws://gateway.example/ws"));
+    TEST_ASSERT_TRUE(wait_for_int_value(&s_transport_state.start_calls, 1, pdMS_TO_TICKS(1000)));
+
+    char *exact = calloc(ESP_OPENCLAW_NODE_MAX_INBOUND_MESSAGE_SIZE, 1);
+    TEST_ASSERT_NOT_NULL(exact);
+    memset(exact, ' ', ESP_OPENCLAW_NODE_MAX_INBOUND_MESSAGE_SIZE);
+    emit_ws_frame_chunk(
+        0x01,
+        exact,
+        ESP_OPENCLAW_NODE_MAX_INBOUND_MESSAGE_SIZE,
+        ESP_OPENCLAW_NODE_MAX_INBOUND_MESSAGE_SIZE,
+        0,
+        false);
+    char byte = ' ';
+    emit_ws_frame_chunk(0x00, &byte, 1, 1, 0, true);
+    free(exact);
+    TEST_ASSERT_NULL(node->rx_buffer);
+    TEST_ASSERT_TRUE(wait_for_event(ESP_OPENCLAW_NODE_EVENT_CONNECT_FAILED, pdMS_TO_TICKS(1000)));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_SIZE, s_event_recorder.local_err);
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_destroy(node));
+}
+
+TEST_CASE("malformed websocket continuation is terminal", "[esp_openclaw_node][transport]")
+{
+    reset_openclaw_storage();
+    reset_transport_state();
+    reset_event_recorder();
+    esp_openclaw_node_config_t config = {0};
+    esp_openclaw_node_config_init_default(&config);
+    config.event_cb = test_node_event_cb;
+    esp_openclaw_node_handle_t node = NULL;
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_create(&config, &node));
+    TEST_ASSERT_EQUAL(ESP_OK, request_connect_no_auth(node, "ws://gateway.example/ws"));
+    TEST_ASSERT_TRUE(wait_for_int_value(&s_transport_state.start_calls, 1, pdMS_TO_TICKS(1000)));
+
+    char byte = 'x';
+    emit_ws_frame_chunk(0x00, &byte, 1, 1, 0, true);
+    TEST_ASSERT_TRUE(wait_for_event(ESP_OPENCLAW_NODE_EVENT_CONNECT_FAILED, pdMS_TO_TICKS(1000)));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_SIZE, s_event_recorder.local_err);
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_destroy(node));
+}
+
+TEST_CASE("v2 command dispatch receives bounded invocation session metadata", "[esp_openclaw_node][protocol]")
+{
+    reset_openclaw_storage();
+    reset_transport_state();
+    esp_openclaw_node_config_t config = {0};
+    esp_openclaw_node_config_init_default(&config);
+    esp_openclaw_node_handle_t node = NULL;
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_create(&config, &node));
+
+    invocation_command_ctx_t ctx = {0};
+    const esp_openclaw_node_command_v2_t command = {
+        .name = "metadata.test",
+        .handler = invocation_command_handler,
+        .context = &ctx,
+    };
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_register_command_v2(node, &command));
+    esp_openclaw_node_lock_state(node);
+    node->state = ESP_OPENCLAW_NODE_INTERNAL_READY;
+    esp_openclaw_node_unlock_state(node);
+
+    esp_openclaw_node_process_gateway_message(
+        node,
+        "{\"type\":\"event\",\"event\":\"node.invoke.request\",\"payload\":{\"id\":\"invoke-1\",\"nodeId\":\"node-1\",\"command\":\"metadata.test\",\"paramsJSON\":\"{}\",\"sessionKey\":\"agent:main:room\"}}");
+    TEST_ASSERT_TRUE(ctx.called);
+    TEST_ASSERT_EQUAL_STRING("agent:main:room", ctx.session_key);
+
+    ctx.called = false;
+    esp_openclaw_node_process_gateway_message(
+        node,
+        "{\"type\":\"event\",\"event\":\"node.invoke.request\",\"payload\":{\"id\":\"invoke-2\",\"nodeId\":\"node-1\",\"command\":\"metadata.test\",\"paramsJSON\":\"{}\",\"sessionKey\":null}}");
+    TEST_ASSERT_FALSE(ctx.called);
+
+    esp_openclaw_node_lock_state(node);
+    node->state = ESP_OPENCLAW_NODE_INTERNAL_IDLE;
+    esp_openclaw_node_unlock_state(node);
     TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_destroy(node));
 }
 

@@ -268,6 +268,11 @@ void esp_openclaw_node_clear_data_buffer_locked(esp_openclaw_node_handle_t node)
     free(node->rx_buffer);
     node->rx_buffer = NULL;
     node->rx_buffer_len = 0;
+    node->rx_frame_len = 0;
+    node->rx_frame_received = 0;
+    node->rx_frame_opcode = 0;
+    node->rx_message_started = false;
+    node->rx_frame_fin = false;
 }
 
 void esp_openclaw_node_free_work_message_payload(esp_openclaw_node_work_message_t *message)
@@ -548,6 +553,13 @@ esp_err_t esp_openclaw_node_register_command(
     return esp_openclaw_node_register_command_internal(node, command);
 }
 
+esp_err_t esp_openclaw_node_register_command_v2(
+    esp_openclaw_node_handle_t node,
+    const esp_openclaw_node_command_v2_t *command)
+{
+    return esp_openclaw_node_register_command_v2_internal(node, command);
+}
+
 esp_err_t esp_openclaw_node_request_connect(
     esp_openclaw_node_handle_t node,
     const esp_openclaw_node_connect_request_t *request)
@@ -643,6 +655,22 @@ bool esp_openclaw_node_has_saved_session(esp_openclaw_node_handle_t node)
     bool present = esp_openclaw_node_saved_session_is_present_locked(node);
     esp_openclaw_node_unlock_state(node);
     return present;
+}
+
+char *esp_openclaw_node_dup_gateway_uri(esp_openclaw_node_handle_t node)
+{
+    if (node == NULL) {
+        return NULL;
+    }
+
+    esp_openclaw_node_lock_state(node);
+    const char *uri = esp_openclaw_node_trimmed_or_null(node->transport_gateway_uri);
+    if (uri == NULL) {
+        uri = esp_openclaw_node_trimmed_or_null(node->persisted_session.gateway_uri);
+    }
+    char *copy = uri != NULL ? esp_openclaw_node_duplicate_string(uri) : NULL;
+    esp_openclaw_node_unlock_state(node);
+    return copy;
 }
 
 esp_err_t esp_openclaw_node_store_plugin_surface_url(

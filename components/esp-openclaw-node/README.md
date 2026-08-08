@@ -16,6 +16,12 @@ The component provides:
 - generic post-connect Gateway events and bounded asynchronous Gateway RPCs
 - Handling `node.invoke.request` commands and sending `node.invoke.result` replies
 
+Inbound text messages are assembled across real WebSocket TEXT/CONTINUATION
+frames with a configurable 2 MiB default ceiling. The ceiling is checked
+cumulatively before buffer growth. Oversize or malformed continuation ordering
+closes only the affected transport and reports `ESP_ERR_INVALID_SIZE` through
+`CONNECT_FAILED` during handshake or `DISCONNECTED` after the session is ready.
+
 ## Contents
 
 - [Requirements](#requirements)
@@ -90,6 +96,8 @@ successful `hello-ok`
 - `esp_openclaw_node_register_capability()`
 - `esp_openclaw_node_register_scope()`
 - `esp_openclaw_node_register_command()`
+- `esp_openclaw_node_register_command_v2()` for immutable invocation metadata,
+  including the optional bounded `sessionKey`
 
 ### Async Control
 
@@ -101,6 +109,7 @@ successful `hello-ok`
 
 - `esp_openclaw_node_get_device_id()`
 - `esp_openclaw_node_has_saved_session()`
+- `esp_openclaw_node_dup_gateway_uri()`
 - `esp_openclaw_node_dup_plugin_surface_url()`
 
 `hello-ok` may include `payload.pluginSurfaceUrls`, an object that maps plugin
@@ -247,6 +256,7 @@ Current `menuconfig` options and defaults:
 - `CONFIG_ESP_OPENCLAW_NODE_TASK_STACK_SIZE` = `8192`
 - `CONFIG_ESP_OPENCLAW_NODE_TRANSPORT_TASK_STACK_SIZE` = `8192`
 - `CONFIG_ESP_OPENCLAW_NODE_TRANSPORT_BUFFER_SIZE` = `2048`
+- `CONFIG_ESP_OPENCLAW_NODE_MAX_INBOUND_MESSAGE_SIZE` = `2097152`
 
 The component advertises capability names and command names only. It does not
 currently send parameter schemas to the gateway.
@@ -661,7 +671,7 @@ stay disabled for production-like deployments.
 The component itself does not implement automatic reconnect policy.
 
 This repository's examples provide that behavior outside the component in
-[examples/common/esp_openclaw_node_example_saved_session_reconnect.c](../../examples/common/esp_openclaw_node_example_saved_session_reconnect.c).
+[esp-openclaw-node-provisioning](../esp-openclaw-node-provisioning/README.md).
 That helper:
 
 - waits for Wi-Fi to be online

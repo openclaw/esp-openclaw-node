@@ -36,6 +36,8 @@
     CONFIG_ESP_OPENCLAW_NODE_TRANSPORT_TASK_PRIORITY
 #define ESP_OPENCLAW_NODE_TRANSPORT_BUFFER_SIZE       \
     CONFIG_ESP_OPENCLAW_NODE_TRANSPORT_BUFFER_SIZE
+#define ESP_OPENCLAW_NODE_MAX_INBOUND_MESSAGE_SIZE    \
+    CONFIG_ESP_OPENCLAW_NODE_MAX_INBOUND_MESSAGE_SIZE
 #define ESP_OPENCLAW_NODE_MAX_PENDING_REQUESTS        \
     CONFIG_ESP_OPENCLAW_NODE_MAX_PENDING_REQUESTS
 
@@ -82,6 +84,7 @@ typedef enum {
     ESP_OPENCLAW_NODE_WORK_MSG_WS_CONNECTED,
     ESP_OPENCLAW_NODE_WORK_MSG_WS_DISCONNECTED,
     ESP_OPENCLAW_NODE_WORK_MSG_WS_ERROR,
+    ESP_OPENCLAW_NODE_WORK_MSG_WS_FATAL,
     ESP_OPENCLAW_NODE_WORK_MSG_DATA,
     ESP_OPENCLAW_NODE_WORK_MSG_SHUTDOWN,
 } esp_openclaw_node_work_message_type_t;
@@ -108,6 +111,7 @@ typedef struct {
 typedef struct {
     char *name;
     esp_openclaw_node_command_handler_t handler;
+    esp_openclaw_node_command_handler_v2_t handler_v2;
     void *context;
 } esp_openclaw_node_registered_command_t;
 
@@ -166,6 +170,8 @@ struct esp_openclaw_node {
     esp_openclaw_node_transport_event_ctx_t *transport_ctx;
     uint32_t next_transport_id;
     uint32_t active_transport_id;
+    uint32_t fatal_transport_id;
+    esp_err_t fatal_transport_err;
     bool transport_connected; /* True after the active websocket transport reports CONNECTED. */
     bool client_started; /* True after client_start() succeeds; cleanup should stop before destroy. */
     char pending_connect_id[32];
@@ -173,7 +179,12 @@ struct esp_openclaw_node {
     char *transport_gateway_uri;
     char *plugin_surface_urls_json;
     char *rx_buffer;
-    size_t rx_buffer_len;
+    size_t rx_buffer_len; /* Complete message bytes, including the current partial frame. */
+    size_t rx_frame_len;
+    size_t rx_frame_received;
+    uint8_t rx_frame_opcode;
+    bool rx_message_started;
+    bool rx_frame_fin;
     esp_openclaw_node_connect_request_source_t active_connect_source;
     size_t capability_count;
     char *capabilities[ESP_OPENCLAW_NODE_MAX_CAPABILITIES];
@@ -254,6 +265,7 @@ esp_err_t esp_openclaw_node_dispatch_command(
     const char *command,
     const char *params_json,
     size_t params_len,
+    const esp_openclaw_node_command_invocation_t *invocation,
     char **out_payload_json,
     const char **out_error_code,
     const char **out_error_message);
@@ -275,6 +287,9 @@ esp_err_t esp_openclaw_node_register_scope_internal(
 esp_err_t esp_openclaw_node_register_command_internal(
     esp_openclaw_node_handle_t node,
     const esp_openclaw_node_command_t *command);
+esp_err_t esp_openclaw_node_register_command_v2_internal(
+    esp_openclaw_node_handle_t node,
+    const esp_openclaw_node_command_v2_t *command);
 
 esp_err_t esp_openclaw_node_validate_tls_preflight(
     const esp_openclaw_node_config_t *config,

@@ -36,6 +36,7 @@ void esp_openclaw_node_cleanup_registry(esp_openclaw_node_handle_t node)
         free(node->commands[i].name);
         node->commands[i].name = NULL;
         node->commands[i].handler = NULL;
+        node->commands[i].handler_v2 = NULL;
         node->commands[i].context = NULL;
     }
     node->command_count = 0;
@@ -59,6 +60,7 @@ esp_err_t esp_openclaw_node_dispatch_command(
     const char *command,
     const char *params_json,
     size_t params_len,
+    const esp_openclaw_node_command_invocation_t *invocation,
     char **out_payload_json,
     const char **out_error_code,
     const char **out_error_message)
@@ -79,13 +81,22 @@ esp_err_t esp_openclaw_node_dispatch_command(
         .code = "INVALID_REQUEST",
         .message = "command failed",
     };
-    esp_err_t err = registered->handler(
-        node,
-        registered->context,
-        params_json,
-        params_len,
-        out_payload_json,
-        &error);
+    esp_err_t err = registered->handler_v2 != NULL
+        ? registered->handler_v2(
+              node,
+              registered->context,
+              invocation,
+              params_json,
+              params_len,
+              out_payload_json,
+              &error)
+        : registered->handler(
+              node,
+              registered->context,
+              params_json,
+              params_len,
+              out_payload_json,
+              &error);
     *out_error_code = error.code;
     *out_error_message = error.message;
     return err;
@@ -200,6 +211,38 @@ esp_err_t esp_openclaw_node_register_command_internal(
         return ESP_ERR_NO_MEM;
     }
     slot->handler = command->handler;
+    slot->handler_v2 = NULL;
+    slot->context = command->context;
+    node->command_count += 1;
+    return ESP_OK;
+}
+
+
+esp_err_t esp_openclaw_node_register_command_v2_internal(
+    esp_openclaw_node_handle_t node,
+    const esp_openclaw_node_command_v2_t *command)
+{
+    if (node == NULL || command == NULL || command->name == NULL ||
+        command->name[0] == '\0' || command->handler == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (require_idle_registration_state(node) != ESP_OK) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (esp_openclaw_node_find_command(node, command->name) != NULL) {
+        return ESP_OK;
+    }
+    if (node->command_count >= ESP_OPENCLAW_NODE_MAX_COMMANDS) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    esp_openclaw_node_registered_command_t *slot = &node->commands[node->command_count];
+    slot->name = esp_openclaw_node_duplicate_string(command->name);
+    if (slot->name == NULL) {
+        return ESP_ERR_NO_MEM;
+    }
+    slot->handler = NULL;
+    slot->handler_v2 = command->handler;
     slot->context = command->context;
     node->command_count += 1;
     return ESP_OK;

@@ -24,6 +24,8 @@ extern "C" {
 #define ESP_OPENCLAW_NODE_MAX_SCOPES CONFIG_ESP_OPENCLAW_NODE_MAX_SCOPES
 /** @brief Maximum number of commands a node can register. */
 #define ESP_OPENCLAW_NODE_MAX_COMMANDS CONFIG_ESP_OPENCLAW_NODE_MAX_COMMANDS
+/** @brief Maximum accepted invocation session key length, excluding NUL. */
+#define ESP_OPENCLAW_NODE_MAX_SESSION_KEY_LEN 256
 
 /* Core Types */
 
@@ -189,12 +191,40 @@ typedef esp_err_t (*esp_openclaw_node_command_handler_t)(
     char **out_payload_json,
     esp_openclaw_node_error_t *out_error);
 
+/** @brief Immutable metadata attached to one Gateway command invocation. */
+typedef struct {
+    /** Optional session that originated the invocation; valid only during the handler call. */
+    const char *session_key;
+} esp_openclaw_node_command_invocation_t;
+
+/**
+ * @brief Metadata-aware command handler.
+ *
+ * This is the additive counterpart to @ref esp_openclaw_node_command_handler_t.
+ * Existing handlers and registrations remain source-compatible.
+ */
+typedef esp_err_t (*esp_openclaw_node_command_handler_v2_t)(
+    esp_openclaw_node_handle_t node,
+    void *context,
+    const esp_openclaw_node_command_invocation_t *invocation,
+    const char *params_json,
+    size_t params_len,
+    char **out_payload_json,
+    esp_openclaw_node_error_t *out_error);
+
 /** @brief Command registration entry passed to esp_openclaw_node_register_command(). */
 typedef struct {
     const char *name;                            /**< Command name advertised to the gateway, for example `wifi.status`. */
     esp_openclaw_node_command_handler_t handler; /**< Command callback invoked for matching requests. */
     void *context;                               /**< Opaque caller context passed to @p handler. */
 } esp_openclaw_node_command_t;
+
+/** @brief Metadata-aware command registration entry. */
+typedef struct {
+    const char *name;
+    esp_openclaw_node_command_handler_v2_t handler;
+    void *context;
+} esp_openclaw_node_command_v2_t;
 
 /* Connect Input Types */
 
@@ -314,6 +344,11 @@ esp_err_t esp_openclaw_node_register_command(
     esp_openclaw_node_handle_t node,
     const esp_openclaw_node_command_t *command);
 
+/** @brief Register a metadata-aware command handler before connecting. */
+esp_err_t esp_openclaw_node_register_command_v2(
+    esp_openclaw_node_handle_t node,
+    const esp_openclaw_node_command_v2_t *command);
+
 /* Async Request APIs */
 
 /**
@@ -410,6 +445,19 @@ const char *esp_openclaw_node_get_device_id(esp_openclaw_node_handle_t node);
  * @return `true` when a saved reconnect session is present.
  */
 bool esp_openclaw_node_has_saved_session(esp_openclaw_node_handle_t node);
+
+/**
+ * @brief Return the authoritative Gateway URI for the active or saved session.
+ *
+ * An active transport URI takes precedence. When the node is idle, the most
+ * recently persisted reconnect URI is returned. This keeps applications from
+ * depending on the component's private NVS schema or decoding setup codes a
+ * second time.
+ *
+ * @return A `malloc()`-allocated URI, or `NULL` when no URI is available. The
+ *         caller must free it.
+ */
+char *esp_openclaw_node_dup_gateway_uri(esp_openclaw_node_handle_t node);
 
 /**
  * @brief Return a copy of a plugin surface URL received in `hello-ok`.

@@ -14,7 +14,7 @@
 
 /** @brief Snapshot of the example Wi-Fi station state. */
 typedef struct {
-    bool configured; /**< Whether station credentials are currently stored in NVS. */
+    bool has_saved_network; /**< Whether station credentials are currently stored in NVS. */
     bool connected; /**< Whether the station currently has a live connection and IP. */
     char ssid[33]; /**< Saved station SSID, when configured. */
     char ip[16]; /**< Current IPv4 address in dotted-quad form when connected. */

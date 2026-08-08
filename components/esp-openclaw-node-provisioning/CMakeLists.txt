@@ -1,0 +1,20 @@
+idf_component_register(
+    SRCS
+        "esp_openclaw_node_common_device_node_cmd.c"
+        "esp_openclaw_node_example_json.c"
+        "esp_openclaw_node_example_repl.c"
+        "esp_openclaw_node_example_repl_cmd.c"
+        "esp_openclaw_node_example_saved_session_reconnect.c"
+        "esp_openclaw_node_wifi.c"
+    INCLUDE_DIRS "include"
+    REQUIRES
+        esp-openclaw-node
+        esp_app_format
+        console
+        esp_event
+        esp_netif
+        esp_timer
+        esp_wifi
+        espressif__cjson
+        freertos
+        nvs_flash)

@@ -31,11 +31,11 @@ If the board will connect over Wi-Fi to a gateway running on another machine, se
 
 Set the command allowlist before pairing the board. Without it, the node can connect and still show `commands: []`.
 
-Warning: this command replaces the existing `gateway.nodes.allowCommands` value in the active profile.
+Warning: this command replaces the existing `gateway.nodes.commands.allow` value in the active profile.
 
 ```bash
 openclaw config set gateway.bind lan
-openclaw config set gateway.nodes.allowCommands '[
+openclaw config set gateway.nodes.commands.allow '[
   "device.info",
   "device.status",
   "wifi.status",

@@ -46,11 +46,11 @@ If the board will connect over Wi-Fi to a gateway running on another machine, se
 
 Allow this example's commands before pairing the board:
 
-Warning: this command replaces the existing `gateway.nodes.allowCommands` value in the active profile.
+Warning: this command replaces the existing `gateway.nodes.commands.allow` value in the active profile.
 
 ```bash
 openclaw config set gateway.bind lan
-openclaw config set gateway.nodes.allowCommands '[
+openclaw config set gateway.nodes.commands.allow '[
   "device.info",
   "device.status",
   "wifi.status",

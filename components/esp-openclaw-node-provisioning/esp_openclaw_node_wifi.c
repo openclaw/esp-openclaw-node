@@ -54,20 +54,19 @@ static void clear_connection_state(void)
 static void update_credentials_status_locked(const char *ssid)
 {
     size_t ssid_len = ssid != NULL ? strnlen(ssid, sizeof(s_status.ssid) - 1U) : 0;
-    s_status.configured = ssid_len > 0;
-    s_status.ssid[0] = '\0';
-    if (s_status.configured) {
+    s_status.has_saved_network = ssid_len > 0;
+    memset(s_status.ssid, 0, sizeof(s_status.ssid));
+    if (s_status.has_saved_network) {
         memcpy(s_status.ssid, ssid, ssid_len);
-        s_status.ssid[sizeof(s_status.ssid) - 1U] = '\0';
     }
 }
 
 static void update_credentials_status_from_config_locked(const wifi_config_t *config)
 {
     size_t ssid_len = strnlen((const char *)config->sta.ssid, sizeof(config->sta.ssid));
-    s_status.configured = ssid_len > 0;
+    s_status.has_saved_network = ssid_len > 0;
     s_status.ssid[0] = '\0';
-    if (s_status.configured) {
+    if (s_status.has_saved_network) {
         memcpy(s_status.ssid, config->sta.ssid, ssid_len);
         s_status.ssid[ssid_len] = '\0';
     }
@@ -129,7 +128,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
         case WIFI_EVENT_STA_START:
             if (s_wifi_lock != NULL) {
                 xSemaphoreTake(s_wifi_lock, portMAX_DELAY);
-                bool should_connect = s_status.configured && s_should_reconnect;
+                bool should_connect = s_status.has_saved_network && s_should_reconnect;
                 char ssid[sizeof(s_status.ssid)] = {0};
                 strncpy(ssid, s_status.ssid, sizeof(ssid) - 1U);
                 xSemaphoreGive(s_wifi_lock);
@@ -154,7 +153,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
                 xSemaphoreTake(s_wifi_lock, portMAX_DELAY);
                 clear_ip_fields_locked();
                 s_status.last_disconnect_reason = (uint8_t)event->reason;
-                should_retry = s_status.configured && s_should_reconnect;
+                should_retry = s_status.has_saved_network && s_should_reconnect;
                 xSemaphoreGive(s_wifi_lock);
             }
             if (should_retry) {
@@ -226,7 +225,7 @@ esp_err_t esp_openclaw_node_wifi_start(void)
 
     xSemaphoreTake(s_wifi_lock, portMAX_DELAY);
     update_credentials_status_from_config_locked(&wifi_config);
-    s_should_reconnect = s_status.configured;
+    s_should_reconnect = s_status.has_saved_network;
     clear_ip_fields_locked();
     s_status.last_disconnect_reason = 0;
     xSemaphoreGive(s_wifi_lock);
@@ -307,10 +306,10 @@ esp_err_t esp_openclaw_node_wifi_connect(void)
     }
 
     xSemaphoreTake(s_wifi_lock, portMAX_DELAY);
-    bool have_credentials = s_status.configured;
-    s_should_reconnect = have_credentials;
+    bool wifi_is_configured = s_status.has_saved_network;
+    s_should_reconnect = wifi_is_configured;
     xSemaphoreGive(s_wifi_lock);
-    if (!have_credentials) {
+    if (!wifi_is_configured) {
         return ESP_ERR_INVALID_STATE;
     }
 

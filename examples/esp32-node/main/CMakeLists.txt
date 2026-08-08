@@ -1,20 +1,14 @@
 idf_component_register(
     SRCS
         "app_main.c"
-        "../../common/esp_openclaw_node_common_device_node_cmd.c"
-        "../../common/esp_openclaw_node_example_json.c"
-        "../../common/esp_openclaw_node_example_repl.c"
-        "../../common/esp_openclaw_node_example_repl_cmd.c"
-        "../../common/esp_openclaw_node_example_saved_session_reconnect.c"
-        "../../common/esp_openclaw_node_wifi.c"
         "esp_openclaw_node_example_adc_node_cmd.c"
         "esp_openclaw_node_example_cmd.c"
         "esp_openclaw_node_example_gpio_node_cmd.c"
     INCLUDE_DIRS
         "."
-        "../../common"
     REQUIRES
         esp-openclaw-node
+        esp-openclaw-node-provisioning
         esp_adc
         esp_app_format
         console

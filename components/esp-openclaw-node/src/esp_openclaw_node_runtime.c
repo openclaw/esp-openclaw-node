@@ -334,6 +334,38 @@ static void handle_ws_error(
         esp_err_to_name(message->local_err));
 }
 
+static void handle_ws_fatal(
+    esp_openclaw_node_handle_t node,
+    const esp_openclaw_node_work_message_t *message)
+{
+    esp_openclaw_node_lock_state(node);
+    bool current_transport = node->active_transport_id == message->transport_id;
+    esp_openclaw_node_internal_state_t state = node->state;
+    esp_openclaw_node_unlock_state(node);
+    if (!current_transport) {
+        return;
+    }
+
+    ESP_LOGE(
+        ESP_OPENCLAW_NODE_TAG,
+        "closing websocket after fatal inbound message error: %s",
+        esp_err_to_name(message->local_err));
+    if (esp_openclaw_node_state_is_connecting(state)) {
+        esp_openclaw_node_complete_connect_failed(
+            node,
+            ESP_OPENCLAW_NODE_CONNECT_FAILURE_CONNECTION_LOST,
+            message->local_err,
+            NULL,
+            true);
+    } else if (state == ESP_OPENCLAW_NODE_INTERNAL_READY) {
+        esp_openclaw_node_complete_disconnected(
+            node,
+            ESP_OPENCLAW_NODE_DISCONNECTED_REASON_CONNECTION_LOST,
+            message->local_err,
+            true);
+    }
+}
+
 static void handle_shutdown_request(esp_openclaw_node_handle_t node)
 {
     esp_openclaw_node_cleanup_transport_instance(node, true);
@@ -388,6 +420,9 @@ static bool process_work_message(
     case ESP_OPENCLAW_NODE_WORK_MSG_WS_ERROR:
         handle_ws_error(node, message);
         break;
+    case ESP_OPENCLAW_NODE_WORK_MSG_WS_FATAL:
+        handle_ws_fatal(node, message);
+        break;
     case ESP_OPENCLAW_NODE_WORK_MSG_DATA: {
         esp_openclaw_node_lock_state(node);
         bool current_transport =
@@ -414,6 +449,17 @@ void esp_openclaw_node_task(void *arg)
     esp_openclaw_node_handle_t node = (esp_openclaw_node_handle_t)arg;
 
     for (;;) {
+        esp_openclaw_node_work_message_t fatal = {0};
+        esp_openclaw_node_lock_state(node);
+        fatal.transport_id = node->fatal_transport_id;
+        fatal.local_err = node->fatal_transport_err;
+        node->fatal_transport_id = 0;
+        node->fatal_transport_err = ESP_OK;
+        esp_openclaw_node_unlock_state(node);
+        if (fatal.transport_id != 0) {
+            fatal.type = ESP_OPENCLAW_NODE_WORK_MSG_WS_FATAL;
+            (void)process_work_message(node, &fatal);
+        }
         esp_openclaw_node_work_message_t message = {0};
         if (xQueueReceive(node->work_queue, &message, ESP_OPENCLAW_NODE_TASK_POLL_TICKS) != pdTRUE) {
             esp_openclaw_node_fail_if_connect_timed_out(node);

@@ -769,6 +769,8 @@ static void handle_invoke_request(
     cJSON *command = cJSON_GetObjectItemCaseSensitive(payload, "command");
     cJSON *params_json =
         cJSON_GetObjectItemCaseSensitive(payload, "paramsJSON");
+    cJSON *session_key =
+        cJSON_GetObjectItemCaseSensitive(payload, "sessionKey");
 
     if (!cJSON_IsString(id) || !cJSON_IsString(node_id) ||
         !cJSON_IsString(command) || id->valuestring == NULL ||
@@ -776,6 +778,28 @@ static void handle_invoke_request(
         ESP_LOGW(
             ESP_OPENCLAW_NODE_TAG,
             "dropping malformed node.invoke.request");
+        return;
+    }
+
+    bool session_key_valid = session_key == NULL;
+    if (cJSON_IsString(session_key) && session_key->valuestring != NULL) {
+        size_t session_key_len = strlen(session_key->valuestring);
+        session_key_valid = session_key_len > 0 &&
+            session_key_len <= ESP_OPENCLAW_NODE_MAX_SESSION_KEY_LEN;
+        for (size_t i = 0; session_key_valid && i < session_key_len; ++i) {
+            unsigned char ch = (unsigned char)session_key->valuestring[i];
+            session_key_valid = ch >= 0x21 && ch <= 0x7e;
+        }
+    }
+    if (!session_key_valid) {
+        send_invoke_result(
+            node,
+            id->valuestring,
+            node_id->valuestring,
+            false,
+            NULL,
+            "INVALID_REQUEST",
+            "sessionKey must be 1..256 printable ASCII bytes");
         return;
     }
 
@@ -790,11 +814,15 @@ static void handle_invoke_request(
     char *result_json = NULL;
     const char *error_code = NULL;
     const char *error_message = NULL;
+    const esp_openclaw_node_command_invocation_t invocation = {
+        .session_key = session_key != NULL ? session_key->valuestring : NULL,
+    };
     esp_err_t err = esp_openclaw_node_dispatch_command(
         node,
         command->valuestring,
         effective_params_json,
         effective_params_len,
+        &invocation,
         &result_json,
         &error_code,
         &error_message);

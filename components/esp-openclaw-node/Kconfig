@@ -95,6 +95,18 @@ menu "ESP OpenClaw Node"
                 Buffer size, in bytes, requested for the esp_websocket_client
                 transport buffers used by the OpenClaw connection.
 
+        config ESP_OPENCLAW_NODE_MAX_INBOUND_MESSAGE_SIZE
+            int "Maximum assembled inbound WebSocket message size"
+            range 4096 8388608
+            default 2097152
+            help
+                Maximum size, in bytes, of one assembled inbound text message.
+                The transport enforces this cumulatively across TEXT and
+                CONTINUATION frames before growing its reassembly buffer.
+                Oversize or malformed continuation ordering closes the current
+                transport and emits CONNECT_FAILED (during handshake) or
+                DISCONNECTED (after ready) with ESP_ERR_INVALID_SIZE.
+
     endmenu
 
 endmenu

@@ -22,6 +22,27 @@ static void websocket_event_handler(
     int32_t event_id,
     void *event_data);
 
+static void enqueue_fatal_message_error(
+    esp_openclaw_node_handle_t node,
+    uint32_t transport_id,
+    const char *reason)
+{
+    ESP_LOGE(ESP_OPENCLAW_NODE_TAG, "%s", reason);
+    esp_openclaw_node_lock_state(node);
+    if (esp_openclaw_node_should_accept_callback_transport_id_locked(
+            node, transport_id)) {
+        node->fatal_transport_id = transport_id;
+        node->fatal_transport_err = ESP_ERR_INVALID_SIZE;
+    }
+    esp_openclaw_node_unlock_state(node);
+    esp_openclaw_node_work_message_t message = {
+        .type = ESP_OPENCLAW_NODE_WORK_MSG_WS_FATAL,
+        .transport_id = transport_id,
+        .local_err = ESP_ERR_INVALID_SIZE,
+    };
+    esp_openclaw_node_enqueue_work_message_from_callback(node, &message);
+}
+
 bool esp_openclaw_node_should_accept_callback_transport_id_locked(
     esp_openclaw_node_handle_t node,
     uint32_t transport_id)
@@ -321,6 +342,13 @@ static void websocket_event_handler(
         break;
     }
     case WEBSOCKET_EVENT_DATA:
+        if (data == NULL) {
+            enqueue_fatal_message_error(
+                node,
+                transport_ctx->transport_id,
+                "websocket delivered a data event without metadata");
+            break;
+        }
         if (esp_openclaw_node_state_is_connecting(state)) {
             ESP_LOGD(
                 ESP_OPENCLAW_NODE_TAG,
@@ -338,6 +366,17 @@ static void websocket_event_handler(
             break;
         }
         if (data->op_code != 0x01 && data->op_code != 0x00) {
+            esp_openclaw_node_lock_state(node);
+            bool interrupts_text = node->rx_message_started;
+            if (interrupts_text) esp_openclaw_node_clear_data_buffer_locked(node);
+            esp_openclaw_node_unlock_state(node);
+            if (interrupts_text) {
+                enqueue_fatal_message_error(
+                    node,
+                    transport_ctx->transport_id,
+                    "non-continuation data frame interrupted a fragmented text message");
+                break;
+            }
             ESP_LOGW(
                 ESP_OPENCLAW_NODE_TAG,
                 "ignoring unsupported websocket opcode=0x%x",
@@ -352,36 +391,92 @@ static void websocket_event_handler(
             esp_openclaw_node_unlock_state(node);
             break;
         }
+
+        bool malformed = false;
+        bool oversized = false;
         if (data->payload_offset == 0) {
-            esp_openclaw_node_clear_data_buffer_locked(node);
-            node->rx_buffer =
-                calloc((size_t)data->payload_len + 1U, sizeof(char));
-            node->rx_buffer_len = (size_t)data->payload_len;
-            if (node->rx_buffer == NULL) {
-                node->rx_buffer_len = 0;
-                esp_openclaw_node_unlock_state(node);
-                ESP_LOGE(ESP_OPENCLAW_NODE_TAG, "failed allocating rx buffer");
-                break;
+            /* payload_offset is per frame in esp_websocket_client. A TEXT
+             * frame begins a message and each CONTINUATION frame extends it. */
+            if (node->rx_frame_received != 0 || data->payload_len < 0 ||
+                data->data_len < 0) {
+                malformed = true;
+            } else if (data->op_code == 0x01) {
+                if (node->rx_message_started) {
+                    malformed = true;
+                } else {
+                    esp_openclaw_node_clear_data_buffer_locked(node);
+                    node->rx_message_started = true;
+                }
+            } else if (!node->rx_message_started) {
+                malformed = true;
             }
+
+            if (!malformed &&
+                (size_t)data->payload_len >
+                    ESP_OPENCLAW_NODE_MAX_INBOUND_MESSAGE_SIZE - node->rx_buffer_len) {
+                oversized = true;
+            }
+            if (!malformed && !oversized) {
+                size_t capacity = node->rx_buffer_len + (size_t)data->payload_len + 1U;
+                char *grown = realloc(node->rx_buffer, capacity);
+                if (grown == NULL) {
+                    esp_openclaw_node_clear_data_buffer_locked(node);
+                    esp_openclaw_node_unlock_state(node);
+                    ESP_LOGE(ESP_OPENCLAW_NODE_TAG, "failed growing inbound message buffer");
+                    break;
+                }
+                node->rx_buffer = grown;
+                node->rx_buffer[node->rx_buffer_len] = '\0';
+                node->rx_frame_len = (size_t)data->payload_len;
+                node->rx_frame_received = 0;
+                node->rx_frame_opcode = data->op_code;
+                node->rx_frame_fin = data->fin;
+            }
+        } else if (data->payload_offset < 0 || data->payload_len < 0 ||
+                   data->data_len < 0 || !node->rx_message_started ||
+                   node->rx_frame_opcode != data->op_code ||
+                   node->rx_frame_len != (size_t)data->payload_len ||
+                   node->rx_frame_fin != data->fin ||
+                   (size_t)data->payload_offset != node->rx_frame_received) {
+            malformed = true;
         }
-        if (node->rx_buffer == NULL ||
-            node->rx_buffer_len < (size_t)data->payload_len ||
-            ((size_t)data->payload_offset + (size_t)data->data_len) >
-                node->rx_buffer_len) {
+
+        if (!malformed && !oversized &&
+            ((size_t)data->data_len > node->rx_frame_len - node->rx_frame_received ||
+             (data->data_len > 0 && data->data_ptr == NULL))) {
+            malformed = true;
+        }
+
+        if (malformed || oversized) {
             esp_openclaw_node_clear_data_buffer_locked(node);
             esp_openclaw_node_unlock_state(node);
-            ESP_LOGW(
-                ESP_OPENCLAW_NODE_TAG,
-                "discarding malformed fragmented websocket payload");
+            enqueue_fatal_message_error(
+                node,
+                transport_ctx->transport_id,
+                oversized
+                    ? "assembled inbound websocket message exceeds configured limit"
+                    : "malformed websocket continuation ordering");
             break;
         }
-        memcpy(
-            node->rx_buffer + data->payload_offset,
-            data->data_ptr,
-            (size_t)data->data_len);
-        if (data->payload_offset + data->data_len >= data->payload_len &&
-            data->fin) {
-            node->rx_buffer[data->payload_len] = '\0';
+
+        if (data->data_len > 0) {
+            memcpy(
+                node->rx_buffer + node->rx_buffer_len,
+                data->data_ptr,
+                (size_t)data->data_len);
+        }
+        node->rx_buffer_len += (size_t)data->data_len;
+        node->rx_frame_received += (size_t)data->data_len;
+        node->rx_buffer[node->rx_buffer_len] = '\0';
+
+        if (node->rx_frame_received == node->rx_frame_len) {
+            bool message_complete = node->rx_frame_fin;
+            node->rx_frame_len = 0;
+            node->rx_frame_received = 0;
+            node->rx_frame_opcode = 0;
+            node->rx_frame_fin = false;
+            if (message_complete) {
+                node->rx_message_started = false;
             esp_openclaw_node_work_message_t message = {
                 .type = ESP_OPENCLAW_NODE_WORK_MSG_DATA,
                 .transport_id = transport_ctx->transport_id,
@@ -391,9 +486,10 @@ static void websocket_event_handler(
             node->rx_buffer_len = 0;
             esp_openclaw_node_unlock_state(node);
             esp_openclaw_node_enqueue_work_message_from_callback(node, &message);
-        } else {
-            esp_openclaw_node_unlock_state(node);
+                break;
+            }
         }
+        esp_openclaw_node_unlock_state(node);
         break;
     default:
         break;

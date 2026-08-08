@@ -10,6 +10,10 @@ storage port exposes an approved file root. Codec models, pins, panel
 controllers, remote-Wi-Fi transport, and scheduler profiles remain outside
 this component.
 
+The audio port's input gain override is optional. Boards that set
+`configure_input_gain` also provide `input_gain_db`; otherwise shared media
+initialization preserves the codec or board default.
+
 Storage is explicitly optional. A board that supplies a canonical file root
 gets the bounded file-transfer commands and storage metrics; boards such as the
 Waveshare adapter advertise no file surface.
@@ -31,7 +35,7 @@ capture ownership, AFE/WakeNet mode, and renderer results.
 “Renderer accepted” means the production renderer accepted PCM; it does not
 prove that the codec, amplifier, or analog speaker produced audible sound.
 
-The local speaker test queues a 500 ms, 1 kHz PCM tone through the same
+The local speaker test queues a 1 second, 1 kHz PCM tone through the same
 `av_render` → render FIFO → render tap → I2S renderer → codec/I2S TX path as
 Talk playback. It is serialized against the complete Talk media lifetime and
 runs from a worker task. Its result reports queued frames and renderer

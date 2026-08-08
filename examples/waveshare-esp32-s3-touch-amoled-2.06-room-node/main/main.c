@@ -76,13 +76,15 @@ static lv_display_t *waveshare_display_start(void *ctx)
         CONFIG_LV_DRAW_BUF_ALIGN, draw_bytes, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
     void *draw_b = heap_caps_aligned_alloc(
         CONFIG_LV_DRAW_BUF_ALIGN, draw_bytes, MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-    if (draw_a != NULL) {
-        lv_display_set_buffers(
-            display, draw_a, draw_b, (uint32_t)draw_bytes, LV_DISPLAY_RENDER_MODE_PARTIAL);
-    } else {
+    if (draw_a == NULL || draw_b == NULL) {
+        heap_caps_free(draw_a);
         heap_caps_free(draw_b);
-        ESP_LOGW(TAG, "internal DMA draw buffer unavailable; QSPI flushes will bounce");
+        bsp_display_unlock();
+        ESP_LOGE(TAG, "both internal DMA draw buffers are required for SH8601");
+        return NULL;
     }
+    lv_display_set_buffers(
+        display, draw_a, draw_b, (uint32_t)draw_bytes, LV_DISPLAY_RENDER_MODE_PARTIAL);
     lv_display_add_event_cb(display, align_sh8601_flush, LV_EVENT_INVALIDATE_AREA, NULL);
     bsp_display_unlock();
     return display;
@@ -111,6 +113,11 @@ static esp_err_t waveshare_audio_open(
     esp_openclaw_room_audio_handles_t *handles)
 {
     (void)ctx;
+    ESP_RETURN_ON_FALSE(handles != NULL, ESP_ERR_INVALID_ARG, TAG, "audio handles required");
+    ESP_RETURN_ON_ERROR(bsp_i2c_init(), TAG, "audio I2C bus init");
+    i2c_master_bus_handle_t i2c = bsp_i2c_get_handle();
+    ESP_RETURN_ON_FALSE(i2c != NULL, ESP_ERR_INVALID_STATE, TAG, "audio I2C bus handle");
+
     i2s_chan_handle_t tx = NULL;
     i2s_chan_handle_t rx = NULL;
     i2s_chan_config_t channel_cfg =
@@ -132,6 +139,16 @@ static esp_err_t waveshare_audio_open(
     };
     ESP_RETURN_ON_ERROR(i2s_channel_init_std_mode(tx, &i2s_cfg), TAG, "I2S TX init");
     ESP_RETURN_ON_ERROR(i2s_channel_init_std_mode(rx, &i2s_cfg), TAG, "I2S RX init");
+    i2s_chan_info_t tx_info = {0};
+    i2s_chan_info_t rx_info = {0};
+    ESP_RETURN_ON_ERROR(i2s_channel_get_info(tx, &tx_info), TAG, "I2S TX channel info");
+    ESP_RETURN_ON_ERROR(i2s_channel_get_info(rx, &rx_info), TAG, "I2S RX channel info");
+    ESP_RETURN_ON_FALSE(
+        tx_info.pair_chan == rx && rx_info.pair_chan == tx,
+        ESP_ERR_INVALID_STATE,
+        TAG,
+        "I2S TX/RX failed to establish a reciprocal pair");
+    ESP_LOGI(TAG, "I2S paired at 24 kHz with a symmetric stereo STD frame contract");
     ESP_RETURN_ON_ERROR(i2s_channel_enable(tx), TAG, "I2S TX enable");
     ESP_RETURN_ON_ERROR(i2s_channel_enable(rx), TAG, "I2S RX enable");
 
@@ -141,10 +158,7 @@ static esp_err_t waveshare_audio_open(
         .tx_handle = tx,
     };
     const audio_codec_data_if_t *data = audio_codec_new_i2s_data(&data_cfg);
-    i2c_master_bus_handle_t i2c = bsp_i2c_get_handle();
-    if (data == NULL || i2c == NULL) {
-        return ESP_ERR_NO_MEM;
-    }
+    ESP_RETURN_ON_FALSE(data != NULL, ESP_ERR_NO_MEM, TAG, "I2S codec data interface");
 
     audio_codec_i2c_cfg_t speaker_ctrl_cfg = {
         .port = BSP_I2C_NUM,
@@ -152,7 +166,10 @@ static esp_err_t waveshare_audio_open(
         .bus_handle = i2c,
     };
     const audio_codec_ctrl_if_t *speaker_ctrl = audio_codec_new_i2c_ctrl(&speaker_ctrl_cfg);
+    ESP_RETURN_ON_FALSE(
+        speaker_ctrl != NULL, ESP_ERR_NO_MEM, TAG, "ES8311 control interface");
     const audio_codec_gpio_if_t *gpio = audio_codec_new_gpio();
+    ESP_RETURN_ON_FALSE(gpio != NULL, ESP_ERR_NO_MEM, TAG, "ES8311 GPIO interface");
     esp_codec_dev_hw_gain_t gain = {.pa_voltage = 5.0, .codec_dac_voltage = 3.3};
     es8311_codec_cfg_t speaker_cfg = {
         .ctrl_if = speaker_ctrl,
@@ -163,12 +180,15 @@ static esp_err_t waveshare_audio_open(
         .hw_gain = gain,
     };
     const audio_codec_if_t *speaker = es8311_codec_new(&speaker_cfg);
+    ESP_RETURN_ON_FALSE(speaker != NULL, ESP_ERR_NO_MEM, TAG, "ES8311 codec interface");
     esp_codec_dev_cfg_t speaker_dev = {
         .dev_type = ESP_CODEC_DEV_TYPE_OUT,
         .codec_if = speaker,
         .data_if = data,
     };
     handles->playback = esp_codec_dev_new(&speaker_dev);
+    ESP_RETURN_ON_FALSE(
+        handles->playback != NULL, ESP_ERR_NO_MEM, TAG, "ES8311 playback device");
 
     audio_codec_i2c_cfg_t microphone_ctrl_cfg = {
         .port = BSP_I2C_NUM,
@@ -177,19 +197,25 @@ static esp_err_t waveshare_audio_open(
     };
     const audio_codec_ctrl_if_t *microphone_ctrl =
         audio_codec_new_i2c_ctrl(&microphone_ctrl_cfg);
+    ESP_RETURN_ON_FALSE(
+        microphone_ctrl != NULL, ESP_ERR_NO_MEM, TAG, "ES7210 control interface");
     es7210_codec_cfg_t microphone_cfg = {
         .ctrl_if = microphone_ctrl,
         /* Tested board geometry: near-end MIC1 plus speaker reference on MIC3. */
         .mic_selected = ES7210_SEL_MIC1 | ES7210_SEL_MIC3,
     };
     const audio_codec_if_t *microphone = es7210_codec_new(&microphone_cfg);
+    ESP_RETURN_ON_FALSE(
+        microphone != NULL, ESP_ERR_NO_MEM, TAG, "ES7210 codec interface");
     esp_codec_dev_cfg_t microphone_dev = {
         .dev_type = ESP_CODEC_DEV_TYPE_IN,
         .codec_if = microphone,
         .data_if = data,
     };
     handles->record = esp_codec_dev_new(&microphone_dev);
-    return handles->record != NULL && handles->playback != NULL ? ESP_OK : ESP_ERR_NO_MEM;
+    ESP_RETURN_ON_FALSE(
+        handles->record != NULL, ESP_ERR_NO_MEM, TAG, "ES7210 capture device");
+    return ESP_OK;
 }
 
 void app_main(void)
@@ -215,6 +241,8 @@ void app_main(void)
             .record_channels = 2,
             .channel_mask = 0x3,
             .playback_volume = 100,
+            .configure_input_gain = true,
+            .input_gain_db = 30.0f,
         },
     };
     ESP_ERROR_CHECK(esp_openclaw_room_node_start(&config));

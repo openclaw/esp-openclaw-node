@@ -17,6 +17,7 @@
 #include "esp_check.h"
 #include "esp_codec_dev_defaults.h"
 #include "esp_heap_caps.h"
+#include "esp_io_expander_pi4ioe5v6408.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_st7121.h"
@@ -38,6 +39,7 @@
 #define GT911_BACKUP_ADDRESS 0x14
 #define PANEL_RESET_DELAY_MS 100
 #define TOUCH_STARTUP_DELAY_MS 500
+#define PI4IOE5V6408_OUTPUT_REGISTER 0x05
 #define INA226_ADDRESS 0x41
 #define RX8130_ADDRESS 0x32
 #define CAMERA_SENSOR_WIDTH 1280U
@@ -323,77 +325,151 @@ static esp_err_t display_brightness(void *ctx, int percent)
 static esp_err_t tab5_audio_open(void *ctx, esp_openclaw_room_audio_handles_t *handles)
 {
     (void)ctx;
+    ESP_RETURN_ON_FALSE(handles != NULL, ESP_ERR_INVALID_ARG, TAG, "audio handles required");
+    ESP_RETURN_ON_ERROR(bsp_i2c_init(), TAG, "I2C");
     ESP_RETURN_ON_ERROR(
         bsp_feature_enable(BSP_FEATURE_SPEAKER, true),
         TAG,
         "speaker power enable");
+    esp_io_expander_handle_t speaker_expander = bsp_io_expander_init();
+    ESP_RETURN_ON_FALSE(
+        speaker_expander != NULL,
+        ESP_ERR_INVALID_STATE,
+        TAG,
+        "speaker IO expander");
+    i2c_master_dev_handle_t speaker_expander_readback = NULL;
+    ESP_RETURN_ON_ERROR(
+        add_i2c_device(BSP_IO_EXPANDER_ADDRESS, &speaker_expander_readback),
+        TAG,
+        "speaker expander readback device");
+    uint8_t speaker_latch = 0;
+    esp_err_t speaker_read_err =
+        read_registers(
+            speaker_expander_readback,
+            PI4IOE5V6408_OUTPUT_REGISTER,
+            &speaker_latch,
+            sizeof(speaker_latch));
+    esp_err_t speaker_remove_err = i2c_master_bus_rm_device(speaker_expander_readback);
+    ESP_RETURN_ON_ERROR(speaker_read_err, TAG, "speaker power output-register readback");
+    ESP_RETURN_ON_ERROR(speaker_remove_err, TAG, "speaker expander readback device remove");
+    ESP_RETURN_ON_FALSE(
+        (speaker_latch & BSP_SPEAKER_EN) != 0,
+        ESP_ERR_INVALID_STATE,
+        TAG,
+        "speaker power enable did not latch in output register");
+    ESP_LOGI(TAG, "speaker power enable confirmed by expander output-register readback");
+
     i2s_chan_handle_t tx = NULL;
     i2s_chan_handle_t rx = NULL;
     i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(CONFIG_BSP_I2S_NUM, I2S_ROLE_MASTER);
     chan_cfg.auto_clear = true;
     ESP_RETURN_ON_ERROR(i2s_new_channel(&chan_cfg, &tx, &rx), TAG, "I2S channels");
 
-    const i2s_std_config_t tx_cfg = {
+    i2s_std_config_t tx_cfg = {
         .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(48000),
-        .slot_cfg = I2S_STD_PHILIP_SLOT_DEFAULT_CONFIG(
+        .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(
             I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO),
         .gpio_cfg = {
             .mclk = BSP_I2S_MCLK, .bclk = BSP_I2S_SCLK, .ws = BSP_I2S_LCLK,
-            .dout = BSP_I2S_DOUT, .din = BSP_I2S_DSIN,
+            .dout = BSP_I2S_DOUT, .din = I2S_GPIO_UNUSED,
+            .invert_flags = {.mclk_inv = false, .bclk_inv = false, .ws_inv = false},
         },
     };
-    const i2s_tdm_config_t rx_cfg = {
-        .clk_cfg = {
-            .sample_rate_hz = 48000,
-            .clk_src = I2S_CLK_SRC_DEFAULT,
-            .mclk_multiple = I2S_MCLK_MULTIPLE_256,
-            .bclk_div = 8,
-        },
-        .slot_cfg = {
-            .data_bit_width = I2S_DATA_BIT_WIDTH_16BIT,
-            .slot_bit_width = I2S_SLOT_BIT_WIDTH_AUTO,
-            .slot_mode = I2S_SLOT_MODE_STEREO,
-            .slot_mask = I2S_TDM_SLOT0 | I2S_TDM_SLOT1 | I2S_TDM_SLOT2 | I2S_TDM_SLOT3,
-            .ws_width = I2S_TDM_AUTO_WS_WIDTH,
-            .bit_shift = true,
-            .total_slot = I2S_TDM_AUTO_SLOT_NUM,
-        },
+    tx_cfg.slot_cfg.slot_bit_width = I2S_SLOT_BIT_WIDTH_32BIT;
+    tx_cfg.slot_cfg.slot_mask = I2S_STD_SLOT_BOTH;
+    tx_cfg.slot_cfg.ws_width = 32;
+
+    i2s_tdm_config_t rx_cfg = {
+        .clk_cfg = I2S_TDM_CLK_DEFAULT_CONFIG(48000),
+        .slot_cfg = I2S_TDM_PHILIPS_SLOT_DEFAULT_CONFIG(
+            I2S_DATA_BIT_WIDTH_16BIT,
+            I2S_SLOT_MODE_STEREO,
+            I2S_TDM_SLOT0 | I2S_TDM_SLOT1 | I2S_TDM_SLOT2 | I2S_TDM_SLOT3),
         .gpio_cfg = {
             .mclk = BSP_I2S_MCLK, .bclk = BSP_I2S_SCLK, .ws = BSP_I2S_LCLK,
-            .dout = BSP_I2S_DOUT, .din = BSP_I2S_DSIN,
+            .dout = I2S_GPIO_UNUSED, .din = BSP_I2S_DSIN,
+            .invert_flags = {.mclk_inv = false, .bclk_inv = false, .ws_inv = false},
         },
     };
+    rx_cfg.slot_cfg.slot_bit_width = I2S_SLOT_BIT_WIDTH_16BIT;
+    rx_cfg.slot_cfg.ws_width = 32;
+    rx_cfg.slot_cfg.left_align = true;
+    rx_cfg.slot_cfg.total_slot = 4;
+
     ESP_RETURN_ON_ERROR(i2s_channel_init_std_mode(tx, &tx_cfg), TAG, "I2S playback");
     ESP_RETURN_ON_ERROR(i2s_channel_init_tdm_mode(rx, &rx_cfg), TAG, "four-slot TDM capture");
+    /* Heterogeneous full duplex is valid only while both directions retain the
+     * same 64-bit frame timing and reciprocal ownership of the shared clocks. */
+    i2s_chan_info_t tx_info = {0};
+    i2s_chan_info_t rx_info = {0};
+    ESP_RETURN_ON_ERROR(i2s_channel_get_info(tx, &tx_info), TAG, "I2S TX channel info");
+    ESP_RETURN_ON_ERROR(i2s_channel_get_info(rx, &rx_info), TAG, "I2S RX channel info");
+    ESP_RETURN_ON_FALSE(
+        tx_info.pair_chan == rx && rx_info.pair_chan == tx,
+        ESP_ERR_INVALID_STATE,
+        TAG,
+        "I2S TX/RX failed to establish a reciprocal pair");
+    ESP_LOGI(TAG, "I2S paired at 48 kHz with a shared 64-bit frame contract");
     ESP_RETURN_ON_ERROR(i2s_channel_enable(tx), TAG, "I2S TX enable");
     ESP_RETURN_ON_ERROR(i2s_channel_enable(rx), TAG, "I2S RX enable");
-    const audio_codec_data_if_t *data = audio_codec_new_i2s_data(&(audio_codec_i2s_cfg_t){
-        .port = CONFIG_BSP_I2S_NUM, .tx_handle = tx, .rx_handle = rx,
-    });
+
+    audio_codec_i2s_cfg_t data_cfg = {
+        .port = CONFIG_BSP_I2S_NUM,
+        .tx_handle = tx,
+        .rx_handle = rx,
+    };
+    const audio_codec_data_if_t *data = audio_codec_new_i2s_data(&data_cfg);
     ESP_RETURN_ON_FALSE(data != NULL, ESP_ERR_NO_MEM, TAG, "codec data interface");
-    ESP_RETURN_ON_ERROR(bsp_i2c_init(), TAG, "I2C");
 
-    const audio_codec_ctrl_if_t *speaker_ctrl = audio_codec_new_i2c_ctrl(&(audio_codec_i2c_cfg_t){
-        .port = BSP_I2C_NUM, .addr = ES8388_CODEC_DEFAULT_ADDR, .bus_handle = bsp_i2c_get_handle(),
-    });
-    const audio_codec_if_t *speaker = es8388_codec_new(&(es8388_codec_cfg_t){
-        .ctrl_if = speaker_ctrl, .codec_mode = ESP_CODEC_DEV_WORK_MODE_DAC, .master_mode = false,
-    });
-    handles->playback = esp_codec_dev_new(&(esp_codec_dev_cfg_t){
+    const audio_codec_gpio_if_t *speaker_gpio = audio_codec_new_gpio();
+    ESP_RETURN_ON_FALSE(speaker_gpio != NULL, ESP_ERR_NO_MEM, TAG, "speaker GPIO interface");
+    audio_codec_i2c_cfg_t speaker_ctrl_cfg = {
+        .port = BSP_I2C_NUM,
+        .addr = ES8388_CODEC_DEFAULT_ADDR,
+        .bus_handle = bsp_i2c_get_handle(),
+    };
+    const audio_codec_ctrl_if_t *speaker_ctrl = audio_codec_new_i2c_ctrl(&speaker_ctrl_cfg);
+    ESP_RETURN_ON_FALSE(speaker_ctrl != NULL, ESP_ERR_NO_MEM, TAG, "speaker control interface");
+    esp_codec_dev_hw_gain_t speaker_gain = {
+        .pa_voltage = 5.0,
+        .codec_dac_voltage = 3.3,
+    };
+    es8388_codec_cfg_t speaker_cfg = {
+        .ctrl_if = speaker_ctrl,
+        .gpio_if = speaker_gpio,
+        .codec_mode = ESP_CODEC_DEV_WORK_MODE_DAC,
+        .master_mode = false,
+        .pa_pin = BSP_POWER_AMP_IO,
+        .pa_reverted = false,
+        .hw_gain = speaker_gain,
+    };
+    const audio_codec_if_t *speaker = es8388_codec_new(&speaker_cfg);
+    ESP_RETURN_ON_FALSE(speaker != NULL, ESP_ERR_NO_MEM, TAG, "ES8388 codec interface");
+    esp_codec_dev_cfg_t speaker_dev_cfg = {
         .dev_type = ESP_CODEC_DEV_TYPE_OUT, .codec_if = speaker, .data_if = data,
-    });
+    };
+    handles->playback = esp_codec_dev_new(&speaker_dev_cfg);
+    ESP_RETURN_ON_FALSE(handles->playback != NULL, ESP_ERR_NO_MEM, TAG, "speaker codec device");
 
-    const audio_codec_ctrl_if_t *mic_ctrl = audio_codec_new_i2c_ctrl(&(audio_codec_i2c_cfg_t){
-        .port = BSP_I2C_NUM, .addr = ES7210_CODEC_DEFAULT_ADDR, .bus_handle = bsp_i2c_get_handle(),
-    });
-    const audio_codec_if_t *microphone = es7210_codec_new(&(es7210_codec_cfg_t){
+    audio_codec_i2c_cfg_t mic_ctrl_cfg = {
+        .port = BSP_I2C_NUM,
+        .addr = ES7210_CODEC_DEFAULT_ADDR,
+        .bus_handle = bsp_i2c_get_handle(),
+    };
+    const audio_codec_ctrl_if_t *mic_ctrl = audio_codec_new_i2c_ctrl(&mic_ctrl_cfg);
+    ESP_RETURN_ON_FALSE(mic_ctrl != NULL, ESP_ERR_NO_MEM, TAG, "microphone control interface");
+    es7210_codec_cfg_t microphone_cfg = {
         .ctrl_if = mic_ctrl,
         .mic_selected = ES7210_SEL_MIC1 | ES7210_SEL_MIC2 | ES7210_SEL_MIC3 | ES7210_SEL_MIC4,
-    });
-    handles->record = esp_codec_dev_new(&(esp_codec_dev_cfg_t){
+    };
+    const audio_codec_if_t *microphone = es7210_codec_new(&microphone_cfg);
+    ESP_RETURN_ON_FALSE(microphone != NULL, ESP_ERR_NO_MEM, TAG, "ES7210 codec interface");
+    esp_codec_dev_cfg_t microphone_dev_cfg = {
         .dev_type = ESP_CODEC_DEV_TYPE_IN, .codec_if = microphone, .data_if = data,
-    });
-    return handles->record != NULL && handles->playback != NULL ? ESP_OK : ESP_ERR_NO_MEM;
+    };
+    handles->record = esp_codec_dev_new(&microphone_dev_cfg);
+    ESP_RETURN_ON_FALSE(handles->record != NULL, ESP_ERR_NO_MEM, TAG, "microphone codec device");
+    return ESP_OK;
 }
 
 static void imu_event(void *arg, esp_event_base_t base, int32_t id, void *data)
@@ -1109,6 +1185,8 @@ esp_err_t tab5_room_board_config(esp_openclaw_room_node_config_t *config)
             .record_channels = 4,
             .channel_mask = 0x3,
             .playback_volume = 75,
+            .configure_input_gain = true,
+            .input_gain_db = 30.0f,
         },
         .services = {
             .prepare_runtime = prepare_runtime,

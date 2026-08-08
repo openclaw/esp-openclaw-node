@@ -1174,6 +1174,8 @@ void room_runtime_get_diagnostics(room_runtime_diagnostics_snapshot_t *snapshot)
             board->audio.afe_layout != NULL ? board->audio.afe_layout : "",
             sizeof(snapshot->afe_layout));
         snapshot->configured_volume = board->audio.playback_volume;
+        snapshot->input_gain_configured = board->audio.configure_input_gain;
+        snapshot->configured_input_gain_db = board->audio.input_gain_db;
     }
     esp_openclaw_node_wifi_status_t wifi = {0};
     esp_openclaw_node_wifi_get_status(&wifi);

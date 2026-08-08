@@ -48,7 +48,9 @@ the task watchdog's CPU0 idle subscriber on early 360 MHz P4 silicon. Ambient
 capture uses the speech-recognition AFE, while active Talk reopens the source in
 16 kHz voice-communication mode with WakeNet and redundant device NS/VAD
 disabled; AEC and nonlinear echo suppression remain active. Talk and voiceWake
-advertise only after media/wake init.
+advertise only after media/wake init. Playback and capture use jointly
+allocated, reciprocally paired I2S channels with distinct data lines and the
+shared 48 kHz, 64-bit frame contract; the ES7210 input policy is 30 dB.
 
 ## Commands and policy
 

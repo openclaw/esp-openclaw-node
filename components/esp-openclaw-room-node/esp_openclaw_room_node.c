@@ -57,14 +57,15 @@ static bool talk_closing;
 /* Set by talk.stop while the worker is still dialing; the worker must abandon
  * the session before the microphone path goes live. */
 static bool talk_cancel_requested;
-static bool talk_cancel_failed;
+static const char *talk_cancel_message;
+static uint32_t talk_generation;
 static bool node_reconnect_scheduled;
 static bool camera_active;
 static char *gateway_http_base;
 
 typedef struct {
     esp_webrtc_handle_t session;
-    bool failed;
+    const char *failure_message;
 } talk_teardown_request_t;
 
 static void media_scheduler(const char *name, media_lib_thread_cfg_t *cfg)
@@ -226,9 +227,14 @@ static void seed_wifi_credentials_from_kconfig(void)
     }
 }
 
-static void request_talk_teardown(esp_webrtc_handle_t session, bool failed)
+static void request_talk_teardown(
+    esp_webrtc_handle_t session,
+    const char *failure_message)
 {
-    talk_teardown_request_t request = {.session = session, .failed = failed};
+    talk_teardown_request_t request = {
+        .session = session,
+        .failure_message = failure_message,
+    };
     if (xQueueSend(talk_teardown_queue, &request, 0) != pdTRUE) {
         ESP_LOGW(TAG, "Talk teardown already queued");
     }
@@ -247,7 +253,9 @@ static void talk_teardown_task(void *arg)
         bool defer_to_worker = owns_session && talk_start_in_flight;
         if (defer_to_worker) {
             talk_cancel_requested = true;
-            talk_cancel_failed = talk_cancel_failed || request.failed;
+            if (request.failure_message != NULL) {
+                talk_cancel_message = request.failure_message;
+            }
         } else if (owns_session) {
             talk_closing = true;
         }
@@ -260,11 +268,11 @@ static void talk_teardown_task(void *arg)
         esp_err_t ambient_err = room_media_set_ambient_wake(true);
         if (ambient_err != ESP_OK) {
             ESP_LOGE(TAG, "failed to restore ambient WakeNet after Talk: %s", esp_err_to_name(ambient_err));
-            request.failed = true;
+            request.failure_message = "Talk failed";
         }
         room_ui_set(
-            request.failed ? ROOM_UI_ERROR : ROOM_UI_IDLE,
-            request.failed ? "Talk failed" : NULL);
+            request.failure_message != NULL ? ROOM_UI_ERROR : ROOM_UI_IDLE,
+            request.failure_message);
         xSemaphoreTake(state_lock, portMAX_DELAY);
         if (webrtc == request.session) {
             webrtc = NULL;
@@ -285,7 +293,26 @@ static void call_timeout(TimerHandle_t timer)
     bool active = session != NULL && !talk_closing;
     xSemaphoreGive(state_lock);
     if (active) {
-        request_talk_teardown(session, false);
+        request_talk_teardown(session, NULL);
+    }
+}
+
+static void talk_setup_failed(
+    esp_openclaw_talk_setup_result_t result,
+    void *ctx)
+{
+    uint32_t generation = (uint32_t)(uintptr_t)ctx;
+    xSemaphoreTake(state_lock, portMAX_DELAY);
+    esp_webrtc_handle_t session = generation == talk_generation && !talk_closing
+        ? webrtc
+        : NULL;
+    xSemaphoreGive(state_lock);
+    if (session != NULL) {
+        request_talk_teardown(
+            session,
+            result == ESP_OPENCLAW_TALK_GATEWAY_UPGRADE_REQUIRED
+                ? "Gateway upgrade required"
+                : "Talk setup failed");
     }
 }
 
@@ -308,7 +335,7 @@ static int webrtc_event(esp_webrtc_event_t *event, void *ctx)
                event->type == ESP_WEBRTC_EVENT_DISCONNECTED) {
         request_talk_teardown(
             session,
-            event->type == ESP_WEBRTC_EVENT_CONNECT_FAILED);
+            event->type == ESP_WEBRTC_EVENT_CONNECT_FAILED ? "Talk failed" : NULL);
     }
     return 0;
 }
@@ -317,22 +344,22 @@ static void start_talk_once(void)
 {
     xSemaphoreTake(state_lock, portMAX_DELAY);
     bool cancelled_early = talk_cancel_requested;
-    bool cancelled_early_failed = talk_cancel_failed;
+    const char *cancelled_early_message = talk_cancel_message;
     esp_openclaw_node_handle_t signaling_client = operator_client;
     char *http_base = gateway_http_base != NULL ? strdup(gateway_http_base) : NULL;
     if (cancelled_early || signaling_client == NULL || http_base == NULL) {
         talk_cancel_requested = false;
-        talk_cancel_failed = false;
+        talk_cancel_message = NULL;
         talk_start_in_flight = false;
     }
     xSemaphoreGive(state_lock);
     if (cancelled_early || signaling_client == NULL || http_base == NULL) {
         free(http_base);
         room_ui_set(
-            cancelled_early_failed || (!cancelled_early && signaling_client != NULL)
+            cancelled_early_message != NULL || (!cancelled_early && signaling_client != NULL)
                 ? ROOM_UI_ERROR
                 : ROOM_UI_IDLE,
-            cancelled_early_failed ? "Talk failed" :
+            cancelled_early_message != NULL ? cancelled_early_message :
             (!cancelled_early && signaling_client != NULL) ? "Gateway URL" : NULL);
         return;
     }
@@ -342,10 +369,10 @@ static void start_talk_once(void)
     room_media_begin_talk();
     xSemaphoreTake(state_lock, portMAX_DELAY);
     bool cancelled_while_waiting = talk_cancel_requested || !talk_start_in_flight;
-    bool cancelled_while_waiting_failed = talk_cancel_failed;
+    const char *cancelled_while_waiting_message = talk_cancel_message;
     if (cancelled_while_waiting) {
         talk_cancel_requested = false;
-        talk_cancel_failed = false;
+        talk_cancel_message = NULL;
         talk_start_in_flight = false;
     }
     xSemaphoreGive(state_lock);
@@ -353,14 +380,17 @@ static void start_talk_once(void)
         room_media_end_talk(true);
         free(http_base);
         room_ui_set(
-            cancelled_while_waiting_failed ? ROOM_UI_ERROR : ROOM_UI_IDLE,
-            cancelled_while_waiting_failed ? "Talk failed" : NULL);
+            cancelled_while_waiting_message != NULL ? ROOM_UI_ERROR : ROOM_UI_IDLE,
+            cancelled_while_waiting_message);
         return;
     }
     esp_peer_default_cfg_t peer = {
         .agent_recv_timeout = 500,
         .ice_use_lite_mode = true,
     };
+    xSemaphoreTake(state_lock, portMAX_DELAY);
+    uint32_t generation = ++talk_generation;
+    xSemaphoreGive(state_lock);
     esp_openclaw_talk_signaling_config_t signaling = {
         .operator_node = signaling_client,
         .gateway_http_base_url = http_base,
@@ -368,6 +398,8 @@ static void start_talk_once(void)
         .provider = CONFIG_OPENCLAW_ROOM_TALK_PROVIDER,
         .model = CONFIG_OPENCLAW_ROOM_TALK_MODEL,
         .voice = CONFIG_OPENCLAW_ROOM_TALK_VOICE,
+        .setup_failed_cb = talk_setup_failed,
+        .setup_failed_ctx = (void *)(uintptr_t)generation,
         .silence_duration_ms = ROOM_TALK_VAD_SILENCE_MS,
     };
     esp_webrtc_cfg_t config = {
@@ -378,7 +410,7 @@ static void start_talk_once(void)
                 .channel = 1,
             },
             .audio_dir = ESP_PEER_MEDIA_DIR_SEND_RECV,
-            .enable_data_channel = true,
+            .enable_data_channel = false,
             .extra_cfg = &peer,
             .extra_size = sizeof(peer),
         },
@@ -395,7 +427,7 @@ static void start_talk_once(void)
         talk_start_in_flight = false;
         bool cancelled = talk_cancel_requested;
         talk_cancel_requested = false;
-        talk_cancel_failed = false;
+        talk_cancel_message = NULL;
         xSemaphoreGive(state_lock);
         room_media_end_talk(true);
         free(http_base);
@@ -412,7 +444,7 @@ static void start_talk_once(void)
         talk_start_in_flight = false;
         bool cancelled = talk_cancel_requested;
         talk_cancel_requested = false;
-        talk_cancel_failed = false;
+        talk_cancel_message = NULL;
         xSemaphoreGive(state_lock);
         room_media_end_talk(true);
         free(http_base);
@@ -429,7 +461,7 @@ static void start_talk_once(void)
     }
     if (cancelled) {
         talk_cancel_requested = false;
-        talk_cancel_failed = false;
+        talk_cancel_message = NULL;
         talk_start_in_flight = false;
     }
     xSemaphoreGive(state_lock);
@@ -451,17 +483,17 @@ static void start_talk_once(void)
         ESP_LOGE(TAG, "failed to transfer capture ownership to Talk: %s", esp_err_to_name(ambient_err));
         xSemaphoreTake(state_lock, portMAX_DELAY);
         talk_cancel_requested = true;
-        talk_cancel_failed = true;
+        talk_cancel_message = "Talk setup failed";
         xSemaphoreGive(state_lock);
     } else if (esp_webrtc_start(session) != 0) {
         xSemaphoreTake(state_lock, portMAX_DELAY);
         talk_cancel_requested = true;
-        talk_cancel_failed = true;
+        talk_cancel_message = "Talk setup failed";
         xSemaphoreGive(state_lock);
     } else if (xTimerStart(talk_timeout_timer, 0) != pdPASS) {
         xSemaphoreTake(state_lock, portMAX_DELAY);
         talk_cancel_requested = true;
-        talk_cancel_failed = true;
+        talk_cancel_message = "Talk setup failed";
         xSemaphoreGive(state_lock);
     }
     /* A stop that landed while esp_webrtc_start was in flight was recorded as
@@ -469,14 +501,14 @@ static void start_talk_once(void)
      * that start has returned. */
     xSemaphoreTake(state_lock, portMAX_DELAY);
     bool cancel_after_start = talk_cancel_requested;
-    bool cancel_after_start_failed = talk_cancel_failed;
+    const char *cancel_after_start_message = talk_cancel_message;
     talk_cancel_requested = false;
-    talk_cancel_failed = false;
+    talk_cancel_message = NULL;
     talk_start_in_flight = false;
     xSemaphoreGive(state_lock);
     free(http_base);
     if (cancel_after_start) {
-        request_talk_teardown(session, cancel_after_start_failed);
+        request_talk_teardown(session, cancel_after_start_message);
     }
 }
 
@@ -490,7 +522,7 @@ static void on_wake(const char *wake_word, void *ctx)
     if (start) {
         talk_start_in_flight = true;
         talk_cancel_requested = false;
-        talk_cancel_failed = false;
+        talk_cancel_message = NULL;
     }
     xSemaphoreGive(state_lock);
     if (!start) {
@@ -860,7 +892,7 @@ static esp_err_t handle_talk_start(
     if (start) {
         talk_start_in_flight = true;
         talk_cancel_requested = false;
-        talk_cancel_failed = false;
+        talk_cancel_message = NULL;
     }
     bool operator_offline = !operator_ready;
     xSemaphoreGive(state_lock);
@@ -913,11 +945,11 @@ static esp_err_t handle_talk_stop(
     bool active = !cancelling && session != NULL && !talk_closing;
     if (cancelling) {
         talk_cancel_requested = true;
-        talk_cancel_failed = false;
+        talk_cancel_message = NULL;
     }
     xSemaphoreGive(state_lock);
     if (active) {
-        request_talk_teardown(session, false);
+        request_talk_teardown(session, NULL);
     }
     *out_payload_json = strdup(
         active || cancelling ? "{\"stopped\":true}" : "{\"stopped\":false}");

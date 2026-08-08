@@ -15,6 +15,15 @@
 extern "C" {
 #endif
 
+typedef enum {
+    ESP_OPENCLAW_TALK_SETUP_FAILED = 0,
+    ESP_OPENCLAW_TALK_GATEWAY_UPGRADE_REQUIRED,
+} esp_openclaw_talk_setup_result_t;
+
+typedef void (*esp_openclaw_talk_setup_failed_cb_t)(
+    esp_openclaw_talk_setup_result_t result,
+    void *user_ctx);
+
 /** Configuration copied by the signaling implementation at start. */
 typedef struct {
     /** Ready operator-role client with operator.talk scope. */
@@ -29,6 +38,9 @@ typedef struct {
     const char *model;
     /** Optional provider voice override. */
     const char *voice;
+    /** Optional notification for failures before peer creation. */
+    esp_openclaw_talk_setup_failed_cb_t setup_failed_cb;
+    void *setup_failed_ctx;
     /**
      * Optional provider server-VAD post-speech silence override in milliseconds.
      * Zero omits the field and preserves the Gateway configuration or default.
@@ -39,9 +51,9 @@ typedef struct {
 /**
  * Provider-neutral ESP WebRTC signaling implementation backed by OpenClaw Talk.
  *
- * `talk.client.create` supplies a short-lived offer credential. The ESP32 then
- * posts its SDP to the returned URL; media flows directly to the provider while
- * the Gateway retains credentials, provider policy, and agent delegation.
+ * `talk.client.create` supplies a single-use Gateway broker credential. The
+ * ESP32 posts its SDP to the returned URL while the Gateway owns realtime
+ * control, provider policy, and agent delegation.
  */
 const esp_peer_signaling_impl_t *esp_openclaw_talk_signaling_impl(void);
 

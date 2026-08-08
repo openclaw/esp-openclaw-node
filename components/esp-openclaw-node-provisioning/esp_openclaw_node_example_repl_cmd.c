@@ -137,8 +137,8 @@ static int handle_status_command(int argc, char **argv)
     esp_openclaw_node_wifi_get_status(&wifi_status);
 
     printf("saved session available: %s\n", esp_openclaw_node_has_saved_session(s_node) ? "yes" : "no");
-    printf("wifi configured: %s\n", wifi_status.configured ? "yes" : "no");
-    if (wifi_status.configured && wifi_status.ssid[0] != '\0') {
+    printf("wifi configured: %s\n", wifi_status.has_saved_network ? "yes" : "no");
+    if (wifi_status.has_saved_network && wifi_status.ssid[0] != '\0') {
         printf("wifi ssid: %s\n", wifi_status.ssid);
     }
     printf("wifi connected: %s\n", wifi_status.connected ? "yes" : "no");

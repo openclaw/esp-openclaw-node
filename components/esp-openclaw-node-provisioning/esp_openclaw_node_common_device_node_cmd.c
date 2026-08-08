@@ -13,9 +13,6 @@
 #include "cJSON.h"
 #include "esp_app_desc.h"
 #include "esp_check.h"
-#include "esp_chip_info.h"
-#include "esp_heap_caps.h"
-#include "esp_mac.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
@@ -23,27 +20,6 @@
 #include "esp_openclaw_node_wifi.h"
 
 static const char *TAG = "esp_openclaw_node_device_cmd";
-
-static void bytes_to_lower_hex(const uint8_t *input, size_t input_len, char *output, size_t output_size)
-{
-    static const char HEX[] = "0123456789abcdef";
-    if (output_size < (input_len * 2U) + 1U) {
-        if (output_size > 0) {
-            output[0] = '\0';
-        }
-        return;
-    }
-    for (size_t i = 0; i < input_len; ++i) {
-        output[(i * 2U)] = HEX[(input[i] >> 4) & 0x0f];
-        output[(i * 2U) + 1U] = HEX[input[i] & 0x0f];
-    }
-    output[input_len * 2U] = '\0';
-}
-
-static const char *firmware_version(void)
-{
-    return esp_app_get_description()->version;
-}
 
 static const char *wifi_auth_mode_name(uint8_t authmode)
 {
@@ -71,20 +47,6 @@ static const char *wifi_auth_mode_name(uint8_t authmode)
     }
 }
 
-static void format_mac_address(const uint8_t mac[6], char *buffer, size_t buffer_size)
-{
-    snprintf(
-        buffer,
-        buffer_size,
-        "%02x:%02x:%02x:%02x:%02x:%02x",
-        mac[0],
-        mac[1],
-        mac[2],
-        mac[3],
-        mac[4],
-        mac[5]);
-}
-
 static void add_wifi_status_fields(cJSON *object)
 {
     esp_openclaw_node_wifi_status_t wifi = {0};
@@ -106,48 +68,67 @@ static void add_wifi_status_fields(cJSON *object)
     }
 }
 
-static cJSON *build_device_info_payload(esp_openclaw_node_handle_t node)
+static bool empty_object(const char *json, size_t len)
 {
-    const char *device_id = esp_openclaw_node_get_device_id(node);
-    const esp_app_desc_t *app = esp_app_get_description();
-    esp_chip_info_t chip = {0};
-    esp_chip_info(&chip);
+    cJSON *root = cJSON_ParseWithLength(json, len);
+    bool valid = cJSON_IsObject(root) && root->child == NULL;
+    cJSON_Delete(root);
+    return valid;
+}
 
-    uint8_t mac[6] = {0};
-    char mac_text[18] = {0};
-    char app_sha256[65] = {0};
-    esp_read_mac(mac, ESP_MAC_WIFI_STA);
-    format_mac_address(mac, mac_text, sizeof(mac_text));
-    bytes_to_lower_hex(app->app_elf_sha256, sizeof(app->app_elf_sha256), app_sha256, sizeof(app_sha256));
+static cJSON *build_device_info_payload(
+    const esp_openclaw_node_device_commands_config_t *config)
+{
+    const esp_app_desc_t *app = esp_app_get_description();
+    char build[40];
+    snprintf(build, sizeof(build), "%s %s", app->date, app->time);
 
     cJSON *root = cJSON_CreateObject();
-    cJSON_AddStringToObject(root, "deviceId", device_id != NULL ? device_id : "");
-    cJSON_AddStringToObject(root, "firmwareVersion", firmware_version());
-    cJSON_AddStringToObject(root, "idfVersion", esp_get_idf_version());
-    cJSON_AddStringToObject(root, "chipModel", CONFIG_IDF_TARGET);
-    cJSON_AddNumberToObject(root, "chipRevision", chip.revision);
-    cJSON_AddNumberToObject(root, "cores", chip.cores);
-    cJSON_AddStringToObject(root, "projectName", app->project_name);
+    cJSON_AddStringToObject(root, "deviceName",
+        config != NULL && config->device_name != NULL ? config->device_name : "OpenClaw ESP Node");
+    cJSON_AddStringToObject(root, "modelIdentifier",
+        config != NULL && config->model_identifier != NULL ? config->model_identifier : CONFIG_IDF_TARGET);
+    cJSON_AddStringToObject(root, "systemName", "ESP-IDF");
+    cJSON_AddStringToObject(root, "systemVersion", esp_get_idf_version());
     cJSON_AddStringToObject(root, "appVersion", app->version);
-    cJSON_AddStringToObject(root, "appElfSha256", app_sha256);
-    cJSON_AddStringToObject(root, "wifiMac", mac_text);
+    cJSON_AddStringToObject(root, "appBuild", build);
+    cJSON_AddStringToObject(root, "locale",
+        config != NULL && config->locale != NULL ? config->locale : "en-US");
     return root;
 }
 
-static cJSON *build_device_status_payload(esp_openclaw_node_handle_t node)
+static cJSON *build_device_status_payload(
+    const esp_openclaw_node_device_commands_config_t *config)
 {
     cJSON *root = cJSON_CreateObject();
-    cJSON_AddNumberToObject(root, "uptimeMs", esp_timer_get_time() / 1000LL);
-    cJSON_AddNumberToObject(root, "freeHeap", esp_get_free_heap_size());
-    cJSON_AddNumberToObject(root, "minFreeHeap", esp_get_minimum_free_heap_size());
-    cJSON_AddNumberToObject(
-        root,
-        "largestFreeBlock",
-        heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
-    cJSON_AddBoolToObject(root, "savedSessionAvailable", esp_openclaw_node_has_saved_session(node));
-    cJSON *wifi = cJSON_CreateObject();
-    add_wifi_status_fields(wifi);
-    cJSON_AddItemToObject(root, "wifi", wifi);
+    cJSON *battery = cJSON_AddObjectToObject(root, "battery");
+    cJSON_AddNullToObject(battery, "level");
+    cJSON_AddStringToObject(battery, "state", "unknown");
+    cJSON_AddBoolToObject(battery, "lowPowerModeEnabled", false);
+    cJSON *thermal = cJSON_AddObjectToObject(root, "thermal");
+    cJSON_AddStringToObject(thermal, "state", "nominal");
+    uint64_t total = 0;
+    uint64_t free_bytes = 0;
+    if (config != NULL && config->get_storage_metrics != NULL) {
+        if (config->get_storage_metrics(config->context, &total, &free_bytes) != ESP_OK ||
+            free_bytes > total) {
+            total = 0;
+            free_bytes = 0;
+        }
+    }
+    cJSON *storage = cJSON_AddObjectToObject(root, "storage");
+    cJSON_AddNumberToObject(storage, "totalBytes", (double)total);
+    cJSON_AddNumberToObject(storage, "freeBytes", (double)free_bytes);
+    cJSON_AddNumberToObject(storage, "usedBytes", (double)(total - free_bytes));
+    esp_openclaw_node_wifi_status_t wifi = {0};
+    esp_openclaw_node_wifi_get_status(&wifi);
+    cJSON *network = cJSON_AddObjectToObject(root, "network");
+    cJSON_AddStringToObject(network, "status", wifi.connected ? "satisfied" : "unsatisfied");
+    cJSON_AddBoolToObject(network, "isExpensive", false);
+    cJSON_AddBoolToObject(network, "isConstrained", false);
+    cJSON *interfaces = cJSON_AddArrayToObject(network, "interfaces");
+    if (wifi.connected) cJSON_AddItemToArray(interfaces, cJSON_CreateString("wifi"));
+    cJSON_AddNumberToObject(root, "uptimeSeconds", esp_timer_get_time() / 1000000.0);
     return root;
 }
 
@@ -166,12 +147,14 @@ static esp_err_t handle_device_info(
     char **out_payload_json,
     esp_openclaw_node_error_t *out_error)
 {
-    (void)context;
-    (void)params_json;
-    (void)params_len;
-    (void)out_error;
+    (void)node;
+    if (!empty_object(params_json, params_len)) {
+        out_error->code = "INVALID_PARAMS";
+        out_error->message = "device.info accepts only {}";
+        return ESP_ERR_INVALID_ARG;
+    }
     return esp_openclaw_node_example_take_json_payload(
-        build_device_info_payload(node),
+        build_device_info_payload(context),
         out_payload_json);
 }
 
@@ -183,12 +166,14 @@ static esp_err_t handle_device_status(
     char **out_payload_json,
     esp_openclaw_node_error_t *out_error)
 {
-    (void)context;
-    (void)params_json;
-    (void)params_len;
-    (void)out_error;
+    (void)node;
+    if (!empty_object(params_json, params_len)) {
+        out_error->code = "INVALID_PARAMS";
+        out_error->message = "device.status accepts only {}";
+        return ESP_ERR_INVALID_ARG;
+    }
     return esp_openclaw_node_example_take_json_payload(
-        build_device_status_payload(node),
+        build_device_status_payload(context),
         out_payload_json);
 }
 
@@ -202,9 +187,11 @@ static esp_err_t handle_wifi_status(
 {
     (void)node;
     (void)context;
-    (void)params_json;
-    (void)params_len;
-    (void)out_error;
+    if (!empty_object(params_json, params_len)) {
+        out_error->code = "INVALID_PARAMS";
+        out_error->message = "wifi.status accepts only {}";
+        return ESP_ERR_INVALID_ARG;
+    }
     return esp_openclaw_node_example_take_json_payload(
         build_wifi_status_payload(),
         out_payload_json);
@@ -212,15 +199,22 @@ static esp_err_t handle_wifi_status(
 
 esp_err_t esp_openclaw_node_common_register_device_node_commands(esp_openclaw_node_handle_t node)
 {
-    static const esp_openclaw_node_command_t DEVICE_INFO_COMMAND = {
+    return esp_openclaw_node_register_device_commands(node, NULL);
+}
+
+esp_err_t esp_openclaw_node_register_device_commands(
+    esp_openclaw_node_handle_t node,
+    const esp_openclaw_node_device_commands_config_t *config)
+{
+    const esp_openclaw_node_command_t DEVICE_INFO_COMMAND = {
         .name = "device.info",
         .handler = handle_device_info,
-        .context = NULL,
+        .context = (void *)config,
     };
-    static const esp_openclaw_node_command_t DEVICE_STATUS_COMMAND = {
+    const esp_openclaw_node_command_t DEVICE_STATUS_COMMAND = {
         .name = "device.status",
         .handler = handle_device_status,
-        .context = NULL,
+        .context = (void *)config,
     };
     static const esp_openclaw_node_command_t WIFI_STATUS_COMMAND = {
         .name = "wifi.status",

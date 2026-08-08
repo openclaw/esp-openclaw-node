@@ -16,7 +16,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: component-unity-tests
+          - name: component-test-app-build
             path: components/esp-openclaw-node/test_apps/esp_openclaw_node_unity_tests
             target: esp32s3
           - name: esp32-node
@@ -28,12 +28,25 @@ jobs:
           - name: waveshare-amoled-room-node
             path: examples/waveshare-esp32-s3-touch-amoled-2.06-room-node
             target: esp32s3
+          - name: m5stack-tab5-room-node
+            path: examples/m5stack-tab5-room-node
+            target: esp32p4
 
     name: ${{ matrix.name }} (${{ matrix.target }})
     steps:
       - uses: actions/checkout@v6
         with:
           submodules: recursive
+
+      - name: Host file validation tests
+        if: matrix.name == 'component-test-app-build'
+        run: |
+          cc -std=c11 -Wall -Wextra -Werror \
+            -I components/esp-openclaw-room-node \
+            components/esp-openclaw-room-node/room_file_validation.c \
+            components/esp-openclaw-room-node/tests/test_room_file_validation.c \
+            -o /tmp/room_file_validation_test
+          /tmp/room_file_validation_test
 
       - name: Build
         uses: espressif/esp-idf-ci-action@v1

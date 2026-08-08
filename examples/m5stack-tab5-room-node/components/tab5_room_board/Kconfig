@@ -1,0 +1,21 @@
+menu "M5Stack Tab5 room board"
+
+choice OPENCLAW_TAB5_HARDWARE_MODE
+    prompt "GPIO20 hardware mode"
+    default OPENCLAW_TAB5_USB_HOST
+
+config OPENCLAW_TAB5_USB_HOST
+    bool "USB_HOST"
+
+config OPENCLAW_TAB5_RS485
+    bool "RS485"
+
+endchoice
+
+config OPENCLAW_TAB5_RS485_BAUD
+    int "RS-485 baud rate"
+    depends on OPENCLAW_TAB5_RS485
+    default 115200
+    range 1200 2000000
+
+endmenu

@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include <stdint.h>
+
 #include "esp_openclaw_node.h"
 #include "esp_peer_signaling.h"
 
@@ -27,6 +29,11 @@ typedef struct {
     const char *model;
     /** Optional provider voice override. */
     const char *voice;
+    /**
+     * Optional provider server-VAD post-speech silence override in milliseconds.
+     * Zero omits the field and preserves the Gateway configuration or default.
+     */
+    uint16_t silence_duration_ms;
 } esp_openclaw_talk_signaling_config_t;
 
 /**

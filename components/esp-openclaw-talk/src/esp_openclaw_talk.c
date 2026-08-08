@@ -35,6 +35,7 @@ typedef struct {
     char *provider;
     char *model;
     char *voice;
+    uint16_t silence_duration_ms;
     char *offer_url;
     char *client_secret;
     char *voice_session_id;
@@ -298,6 +299,7 @@ static int talk_signaling_start(
     talk->provider = duplicate_optional(config->provider);
     talk->model = duplicate_optional(config->model);
     talk->voice = duplicate_optional(config->voice);
+    talk->silence_duration_ms = config->silence_duration_ms;
     if (talk->session_key == NULL) {
         free_talk_signaling(talk);
         return ESP_PEER_ERR_NO_MEM;
@@ -316,6 +318,12 @@ static int talk_signaling_start(
     }
     if (talk->voice != NULL) {
         cJSON_AddStringToObject(params, "voice", talk->voice);
+    }
+    if (talk->silence_duration_ms > 0) {
+        cJSON_AddNumberToObject(
+            params,
+            "silenceDurationMs",
+            talk->silence_duration_ms);
     }
     char *params_json = cJSON_PrintUnformatted(params);
     cJSON_Delete(params);

@@ -22,19 +22,204 @@ typedef struct {
     const char *name;
 } diagnostics_meter_t;
 
+typedef enum {
+    TONE_FACE_OPEN,
+    TONE_FACE_O,
+    TONE_FACE_HAPPY,
+    TONE_FACE_SIDE_EYE,
+    TONE_FACE_WORRIED,
+} tone_buddy_face_t;
+
+typedef struct {
+    const char *primary, *supporting;
+    uint32_t color;
+    tone_buddy_face_t face;
+} tone_buddy_state_desc_t;
+
+typedef struct {
+    int16_t face_x, eye_y, eye_gap;
+    int16_t eye_width, eye_height, mouth_y;
+} tone_buddy_layout_t;
+
+typedef struct {
+    int16_t eye_width[2], eye_height[2];
+    int16_t eye_dx[2], eye_dy[2], eye_rotation[2];
+    int16_t mouth_width, mouth_height, mouth_dx, mouth_y;
+    int16_t mouth_start, mouth_end;
+} tone_buddy_pose_t;
+
+static const tone_buddy_state_desc_t TONE_BUDDY_STATES[] = {
+    [ROOM_MEDIA_TONE_IDLE] = {
+        "Test speaker", "Tap the face to play a tone.", 0x53d7ff, TONE_FACE_OPEN},
+    [ROOM_MEDIA_TONE_RUNNING] = {
+        "Listen for the tone...", "Sending the test tone now.", 0x3c8ee6, TONE_FACE_O},
+    [ROOM_MEDIA_TONE_DONE] = {
+        "Tone sent!", "Renderer accepted it. Did you hear it? Tap me again.",
+        0xffd166, TONE_FACE_HAPPY},
+    [ROOM_MEDIA_TONE_BUSY] = {
+        "Shh, I'm talking", "Tap me after Talk ends.", 0x9b8cff, TONE_FACE_SIDE_EYE},
+    [ROOM_MEDIA_TONE_ERROR] = {
+        "That didn't sing", "Tap me to retry. Details are below.",
+        0xff6b6b, TONE_FACE_WORRIED},
+};
+
 static lv_obj_t *modal;
 static lv_obj_t *audio_text;
 static lv_obj_t *system_text;
-static lv_obj_t *tone_button_label;
+static lv_obj_t *tone_card, *tone_mouth;
+static lv_obj_t *tone_eyes[2], *tone_labels[2];
 static lv_timer_t *refresh_timer;
 static diagnostics_meter_t mic_meter;
 static diagnostics_meter_t afe_meter;
 static diagnostics_meter_t renderer_meter;
 static uint8_t slow_ticks;
+static room_media_tone_state_t tone_buddy_last_state = ROOM_MEDIA_TONE_ERROR + 1;
+static uint8_t tone_buddy_ticks_since_entry;
+static bool tone_buddy_compact;
+static tone_buddy_layout_t tone_buddy_layout;
 /* Refresh runs only on taskLVGL. Keep its large format destinations out of
  * that task's stack without adding locking or an allocation failure path. */
 static char audio_text_buffer[1400];
 static char system_text_buffer[1200];
+
+static void tone_buddy_pose(const tone_buddy_pose_t *pose, lv_color_t color)
+{
+    for (size_t i = 0; i < 2; ++i) {
+        int32_t side = i == 0 ? -1 : 1;
+        int32_t center_x = tone_buddy_layout.face_x +
+            side * tone_buddy_layout.eye_gap + pose->eye_dx[i];
+        int32_t center_y = tone_buddy_layout.eye_y + pose->eye_dy[i];
+        lv_obj_set_size(tone_eyes[i], pose->eye_width[i], pose->eye_height[i]);
+        lv_obj_set_pos(
+            tone_eyes[i],
+            center_x - pose->eye_width[i] / 2,
+            center_y - pose->eye_height[i] / 2);
+        lv_obj_set_style_bg_color(tone_eyes[i], color, 0);
+        lv_obj_set_style_transform_rotation(tone_eyes[i], pose->eye_rotation[i], 0);
+    }
+    lv_obj_set_size(tone_mouth, pose->mouth_width, pose->mouth_height);
+    lv_obj_set_pos(
+        tone_mouth,
+        tone_buddy_layout.face_x + pose->mouth_dx - pose->mouth_width / 2,
+        pose->mouth_y);
+    lv_arc_set_bg_angles(tone_mouth, pose->mouth_start, pose->mouth_end);
+    lv_obj_set_style_arc_color(tone_mouth, color, LV_PART_MAIN);
+}
+
+static void tone_buddy_apply_state(room_media_tone_state_t state)
+{
+    const tone_buddy_state_desc_t *desc = &TONE_BUDDY_STATES[state];
+    int32_t mouth_diameter = tone_buddy_compact ? 56 : 70;
+    tone_buddy_pose_t pose = {
+        .eye_width = {tone_buddy_layout.eye_width, tone_buddy_layout.eye_width},
+        .eye_height = {tone_buddy_layout.eye_height, tone_buddy_layout.eye_height},
+        .mouth_width = mouth_diameter,
+        .mouth_height = mouth_diameter,
+        .mouth_y = tone_buddy_layout.mouth_y - mouth_diameter + 8,
+        .mouth_start = 55,
+        .mouth_end = 125,
+    };
+
+    switch (desc->face) {
+        case TONE_FACE_O:
+            pose.eye_width[0] += tone_buddy_compact ? 8 : 12;
+            pose.eye_width[1] = pose.eye_width[0];
+            pose.eye_height[0] += tone_buddy_compact ? 3 : 5;
+            pose.eye_height[1] = pose.eye_height[0];
+            pose.mouth_width = tone_buddy_compact ? 28 : 34;
+            pose.mouth_height = tone_buddy_compact ? 34 : 42;
+            pose.mouth_y = tone_buddy_layout.mouth_y - pose.mouth_height / 2;
+            pose.mouth_start = 0;
+            pose.mouth_end = 360;
+            break;
+        case TONE_FACE_HAPPY:
+            pose.eye_width[0] += tone_buddy_compact ? 5 : 8;
+            pose.eye_width[1] = pose.eye_width[0];
+            pose.eye_height[0] = pose.eye_height[1] = tone_buddy_compact ? 8 : 10;
+            pose.eye_rotation[0] = 60;
+            pose.eye_rotation[1] = -60;
+            mouth_diameter = tone_buddy_compact ? 52 : 66;
+            pose.mouth_width = pose.mouth_height = mouth_diameter;
+            pose.mouth_y = tone_buddy_layout.mouth_y - mouth_diameter + 10;
+            pose.mouth_start = 42;
+            pose.mouth_end = 138;
+            break;
+        case TONE_FACE_SIDE_EYE: {
+            int32_t gaze = tone_buddy_compact ? 9 : 14;
+            pose.eye_height[0] = tone_buddy_compact ? 14 : 18;
+            pose.eye_height[1] = pose.eye_height[0] - 3;
+            pose.eye_width[1] -= tone_buddy_compact ? 10 : 14;
+            pose.eye_dx[0] = pose.eye_dx[1] = gaze;
+            pose.eye_dy[1] = 3;
+            pose.mouth_width = pose.mouth_height = mouth_diameter + 8;
+            pose.mouth_dx = gaze;
+            pose.mouth_start = 78;
+            pose.mouth_end = 102;
+            break;
+        }
+        case TONE_FACE_WORRIED:
+            pose.eye_height[0] -= tone_buddy_compact ? 5 : 7;
+            pose.eye_height[1] = pose.eye_height[0];
+            pose.eye_rotation[0] = -80;
+            pose.eye_rotation[1] = 80;
+            pose.mouth_y = tone_buddy_layout.mouth_y - 5;
+            pose.mouth_start = 230;
+            pose.mouth_end = 310;
+            break;
+        default:
+            break;
+    }
+
+    lv_color_t color = lv_color_hex(desc->color);
+    lv_obj_set_style_border_color(tone_card, color, 0);
+    lv_obj_set_style_text_color(tone_labels[0], color, 0);
+    lv_label_set_text_static(tone_labels[0], desc->primary);
+    lv_label_set_text_static(tone_labels[1], desc->supporting);
+    tone_buddy_pose(&pose, color);
+}
+
+static void tone_buddy_update(
+    const room_media_tone_snapshot_t *tone,
+    uint8_t renderer_level)
+{
+    if (tone->state != tone_buddy_last_state) {
+        tone_buddy_last_state = tone->state;
+        tone_buddy_ticks_since_entry = 0;
+        tone_buddy_apply_state(tone->state);
+    }
+
+    if (tone->state == ROOM_MEDIA_TONE_RUNNING) {
+        static const int8_t BOB[4] = {-2, 0, 2, 0};
+        int32_t bob = BOB[tone_buddy_ticks_since_entry & 3U];
+        int32_t eye_height = tone_buddy_layout.eye_height +
+            (tone_buddy_compact ? 3 : 5);
+        int32_t eye_y = tone_buddy_layout.eye_y - eye_height / 2 + bob;
+        int32_t mouth_height = (tone_buddy_compact ? 24 : 30) +
+            ((int32_t)renderer_level * (tone_buddy_compact ? 20 : 24)) / 100;
+        /* Exactly three animated geometry writes: two-eye bob plus the
+         * renderer-reactive O. Everything else stays fixed for the state. */
+        lv_obj_set_y(tone_eyes[0], eye_y);
+        lv_obj_set_y(tone_eyes[1], eye_y);
+        lv_obj_set_height(tone_mouth, mouth_height);
+    } else if (tone->state == ROOM_MEDIA_TONE_DONE) {
+        static const int8_t BOUNCE[8] = {-6, -3, 1, 0, -2, 0, 1, 0};
+        if (tone_buddy_ticks_since_entry <= 8U) {
+            int32_t bounce = tone_buddy_ticks_since_entry < 8U
+                ? BOUNCE[tone_buddy_ticks_since_entry]
+                : 0;
+            int32_t eye_y = tone_buddy_layout.eye_y -
+                (tone_buddy_compact ? 8 : 10) / 2;
+            int32_t mouth_diameter = tone_buddy_compact ? 52 : 66;
+            int32_t mouth_y = tone_buddy_layout.mouth_y - mouth_diameter + 10;
+            lv_obj_set_y(tone_eyes[0], eye_y + bounce);
+            lv_obj_set_y(tone_eyes[1], eye_y + bounce);
+            lv_obj_set_y(tone_mouth, mouth_y + bounce);
+        }
+    }
+    if (tone_buddy_ticks_since_entry < UINT8_MAX) {
+        ++tone_buddy_ticks_since_entry;
+    }
+}
 
 static const char *afe_mode_name(room_diagnostics_afe_mode_t mode)
 {
@@ -81,21 +266,15 @@ static void update_meter(
     }
 }
 
-static void update_slow_text(const room_audio_diagnostics_snapshot_t *audio)
+static void update_slow_text(
+    const room_audio_diagnostics_snapshot_t *audio,
+    const room_media_tone_snapshot_t *tone)
 {
-    room_media_tone_snapshot_t tone = {0};
-    room_media_get_tone_snapshot(&tone);
-    const char *tone_summary = tone.state == ROOM_MEDIA_TONE_RUNNING ? "Running"
-        : tone.state == ROOM_MEDIA_TONE_DONE ? "Queued/accepted"
-        : tone.state == ROOM_MEDIA_TONE_BUSY ? "Busy (Talk owns media)"
-        : tone.state == ROOM_MEDIA_TONE_ERROR ? room_media_tone_error_name(tone.error)
+    const char *tone_summary = tone->state == ROOM_MEDIA_TONE_RUNNING ? "Running"
+        : tone->state == ROOM_MEDIA_TONE_DONE ? "Queued/accepted"
+        : tone->state == ROOM_MEDIA_TONE_BUSY ? "Busy (Talk owns media)"
+        : tone->state == ROOM_MEDIA_TONE_ERROR ? room_media_tone_error_name(tone->error)
         : "Not run";
-    lv_label_set_text(tone_button_label,
-        tone.state == ROOM_MEDIA_TONE_RUNNING ? "Running"
-        : tone.state == ROOM_MEDIA_TONE_DONE ? "Queued/accepted"
-        : tone.state == ROOM_MEDIA_TONE_BUSY ? "Busy"
-        : tone.state == ROOM_MEDIA_TONE_ERROR ? "Tone error"
-        : "Play test tone");
 
     char read_age[20], fetch_age[20], wake_age[20], render_age[20];
     int64_t now_us = esp_timer_get_time();
@@ -140,9 +319,9 @@ static void update_slow_text(const room_audio_diagnostics_snapshot_t *audio)
         audio->renderer_errors,
         render_age,
         tone_summary,
-        tone.requested_frames,
-        tone.enqueued_frames,
-        tone.renderer_accepted_frames);
+        tone->requested_frames,
+        tone->enqueued_frames,
+        tone->renderer_accepted_frames);
     lv_label_set_text(audio_text, audio_text_buffer);
 
     room_runtime_diagnostics_snapshot_t runtime = {0};
@@ -166,7 +345,8 @@ static void update_slow_text(const room_audio_diagnostics_snapshot_t *audio)
         "Runtime\n"
         "Node: %s   operator: %s   media: %s   Talk: %s   camera: %s\n"
         "UI: %s%s%s   gateway: %s\n"
-        "Canvas: %s, retained %s (%u components, %u images)\n\n"
+        "Canvas: %s, retained %s (%u components, %u images)\n"
+        "Talk VAD silence: %u ms   player queues: %u/%u KiB\n\n"
         "System\n"
         "%s (%s)   %ux%u\n"
         "AFE layout: %s   configured volume: %u%%   %s\n"
@@ -186,6 +366,9 @@ static void update_slow_text(const room_audio_diagnostics_snapshot_t *audio)
         runtime.canvas_kind,
         runtime.canvas_components,
         runtime.canvas_images,
+        runtime.talk_vad_silence_ms,
+        runtime.player_raw_queue_kib,
+        runtime.player_render_queue_kib,
         runtime.display_name,
         runtime.model_identifier,
         runtime.display_width,
@@ -221,7 +404,10 @@ static void refresh_diagnostics(lv_timer_t *timer)
         audio.renderer_level,
         audio.last_renderer_accepted_us,
         now_us);
-    if (slow_ticks == 0) update_slow_text(&audio);
+    room_media_tone_snapshot_t tone = {0};
+    room_media_get_tone_snapshot(&tone);
+    tone_buddy_update(&tone, audio.renderer_level);
+    if (slow_ticks == 0) update_slow_text(&audio, &tone);
     slow_ticks = (uint8_t)((slow_ticks + 1U) % 14U);
 }
 
@@ -242,6 +428,96 @@ static void tone_event(lv_event_t *event)
         (void)room_runtime_request_test_tone();
         slow_ticks = 0;
     }
+}
+
+static void tone_buddy_clear(void)
+{
+    tone_labels[0] = tone_labels[1] = NULL;
+    tone_eyes[0] = tone_eyes[1] = NULL;
+    tone_card = tone_mouth = NULL;
+    tone_buddy_last_state = ROOM_MEDIA_TONE_ERROR + 1;
+    tone_buddy_ticks_since_entry = 0;
+    tone_buddy_compact = false;
+    tone_buddy_layout = (tone_buddy_layout_t){0};
+}
+
+static void create_tone_buddy(lv_obj_t *parent)
+{
+    int32_t horizontal_resolution =
+        lv_display_get_horizontal_resolution(lv_obj_get_display(parent));
+    int32_t card_width = horizontal_resolution - 28;
+    tone_buddy_compact = horizontal_resolution < 700;
+    tone_buddy_layout = tone_buddy_compact
+        ? (tone_buddy_layout_t){card_width / 2, 40, 42, 42, 28, 82}
+        : (tone_buddy_layout_t){176, 52, 58, 58, 36, 116};
+
+    tone_card = lv_button_create(parent);
+    tone_eyes[0] = lv_obj_create(tone_card);
+    tone_eyes[1] = lv_obj_create(tone_card);
+    tone_mouth = lv_arc_create(tone_card);
+    tone_labels[0] = lv_label_create(tone_card);
+    tone_labels[1] = lv_label_create(tone_card);
+    lv_obj_t *children[] = {
+        tone_eyes[0], tone_eyes[1], tone_mouth, tone_labels[0], tone_labels[1]};
+    for (size_t i = 0; i < sizeof(children) / sizeof(children[0]); ++i) {
+        lv_obj_remove_flag(children[i], LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    }
+
+    lv_obj_set_size(tone_card, LV_PCT(100), 174);
+    lv_obj_set_style_radius(tone_card, 22, 0);
+    lv_obj_set_style_bg_color(tone_card, lv_color_hex(0x171c26), 0);
+    lv_obj_set_style_bg_color(tone_card, lv_color_hex(0x202734), LV_STATE_PRESSED);
+    lv_obj_set_style_border_width(tone_card, 2, 0);
+    lv_obj_set_style_border_color(tone_card, lv_color_hex(0x53d7ff), 0);
+    lv_obj_set_style_shadow_width(tone_card, 0, 0);
+    lv_obj_set_style_pad_all(tone_card, 0, 0);
+    lv_obj_set_style_text_align(
+        tone_card,
+        tone_buddy_compact ? LV_TEXT_ALIGN_CENTER : LV_TEXT_ALIGN_LEFT,
+        0);
+    lv_obj_remove_flag(tone_card, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(tone_card, tone_event, LV_EVENT_CLICKED, NULL);
+
+    for (size_t i = 0; i < 2; ++i) {
+        lv_obj_remove_style_all(tone_eyes[i]);
+        lv_obj_set_style_bg_opa(tone_eyes[i], LV_OPA_COVER, 0);
+        lv_obj_set_style_radius(tone_eyes[i], LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_transform_pivot_x(tone_eyes[i], lv_pct(50), 0);
+        lv_obj_set_style_transform_pivot_y(tone_eyes[i], lv_pct(50), 0);
+    }
+
+    lv_obj_remove_style_all(tone_mouth);
+    lv_obj_set_style_arc_width(tone_mouth, tone_buddy_compact ? 7 : 9, LV_PART_MAIN);
+    lv_obj_set_style_arc_rounded(tone_mouth, true, LV_PART_MAIN);
+    lv_obj_set_style_arc_opa(tone_mouth, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_arc_opa(tone_mouth, LV_OPA_TRANSP, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(tone_mouth, LV_OPA_TRANSP, LV_PART_KNOB);
+
+    int32_t text_width = tone_buddy_compact ? card_width - 24 : card_width - 354;
+    lv_align_t text_align = tone_buddy_compact ? LV_ALIGN_TOP_MID : LV_ALIGN_TOP_LEFT;
+    int32_t text_x = tone_buddy_compact ? 0 : 330;
+    lv_obj_set_size(tone_labels[0], text_width, 36);
+    lv_obj_align(tone_labels[0], text_align, text_x, tone_buddy_compact ? 101 : 43);
+    const lv_font_t *primary_font = LV_FONT_DEFAULT;
+    const lv_font_t *supporting_font = LV_FONT_DEFAULT;
+#if LV_FONT_MONTSERRAT_20
+    primary_font = &lv_font_montserrat_20;
+    supporting_font = &lv_font_montserrat_20;
+#endif
+#if LV_FONT_MONTSERRAT_28
+    if (!tone_buddy_compact) primary_font = &lv_font_montserrat_28;
+#endif
+#if LV_FONT_MONTSERRAT_16
+    if (tone_buddy_compact) supporting_font = &lv_font_montserrat_16;
+#endif
+    lv_obj_set_style_text_font(tone_labels[0], primary_font, 0);
+
+    lv_obj_set_size(tone_labels[1], text_width, tone_buddy_compact ? 42 : 48);
+    lv_obj_align(tone_labels[1], text_align, text_x, tone_buddy_compact ? 130 : 86);
+    lv_label_set_long_mode(tone_labels[1], LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_color(tone_labels[1], lv_color_hex(0xbdc7d6), 0);
+    lv_obj_set_style_text_font(tone_labels[1], supporting_font, 0);
+    tone_buddy_apply_state(ROOM_MEDIA_TONE_IDLE);
 }
 
 static diagnostics_meter_t create_meter(lv_obj_t *parent, const char *name, uint32_t color)
@@ -298,6 +574,8 @@ esp_err_t room_diagnostics_open(void)
     lv_label_set_text(close_label, "Close");
     lv_obj_center(close_label);
 
+    create_tone_buddy(modal);
+
     mic_meter = create_meter(modal, "MIC", 0x38c979);
     afe_meter = create_meter(modal, "AFE", 0x3c8ee6);
     renderer_meter = create_meter(modal, "RX/SPK", 0xe69b3c);
@@ -306,14 +584,6 @@ esp_err_t room_diagnostics_open(void)
     lv_obj_set_width(audio_text, LV_PCT(100));
     lv_label_set_long_mode(audio_text, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_color(audio_text, lv_color_hex(0xd7dce5), 0);
-
-    lv_obj_t *tone_button = lv_button_create(modal);
-    lv_obj_set_size(tone_button, LV_PCT(100), 58);
-    lv_obj_set_style_bg_color(tone_button, lv_color_hex(0x176b43), 0);
-    lv_obj_add_event_cb(tone_button, tone_event, LV_EVENT_CLICKED, NULL);
-    tone_button_label = lv_label_create(tone_button);
-    lv_label_set_text(tone_button_label, "Play test tone");
-    lv_obj_center(tone_button_label);
 
     system_text = lv_label_create(modal);
     lv_obj_set_width(system_text, LV_PCT(100));
@@ -338,7 +608,8 @@ esp_err_t room_diagnostics_close(void)
     modal = NULL;
     audio_text = NULL;
     system_text = NULL;
-    tone_button_label = NULL;
+    tone_buddy_clear();
+    slow_ticks = 0;
     lv_obj_add_flag(closing, LV_OBJ_FLAG_HIDDEN);
     lv_obj_delete_async(closing);
     room_ui_set_diagnostics_open(false);

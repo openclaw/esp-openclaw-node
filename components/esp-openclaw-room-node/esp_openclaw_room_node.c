@@ -33,6 +33,7 @@
 #include "room_diagnostics.h"
 #include "room_diagnostics_data.h"
 #include "room_files.h"
+#include "room_latency_policy.h"
 #include "room_media.h"
 #include "room_runtime_diagnostics.h"
 #include "room_ui_controller.h"
@@ -367,6 +368,7 @@ static void start_talk_once(void)
         .provider = CONFIG_OPENCLAW_ROOM_TALK_PROVIDER,
         .model = CONFIG_OPENCLAW_ROOM_TALK_MODEL,
         .voice = CONFIG_OPENCLAW_ROOM_TALK_VOICE,
+        .silence_duration_ms = ROOM_TALK_VAD_SILENCE_MS,
     };
     esp_webrtc_cfg_t config = {
         .peer_cfg = {
@@ -1028,6 +1030,10 @@ static int diagnostics_status_command(void)
         runtime.internal_heap_free,
         runtime.internal_heap_largest,
         runtime.psram_free);
+    printf("Talk VAD silence=%u ms player queues=%u/%u KiB\n",
+        runtime.talk_vad_silence_ms,
+        runtime.player_raw_queue_kib,
+        runtime.player_render_queue_kib);
     return 0;
 }
 
@@ -1160,6 +1166,9 @@ void room_runtime_get_diagnostics(room_runtime_diagnostics_snapshot_t *snapshot)
         : "none";
     strlcpy(snapshot->canvas_kind, canvas_kind, sizeof(snapshot->canvas_kind));
 
+    snapshot->talk_vad_silence_ms = ROOM_TALK_VAD_SILENCE_MS;
+    snapshot->player_raw_queue_kib = ROOM_PLAYER_RAW_FIFO_KIB;
+    snapshot->player_render_queue_kib = ROOM_PLAYER_RENDER_FIFO_KIB;
     const esp_openclaw_room_node_config_t *board = room_board_config();
     if (board != NULL) {
         strlcpy(snapshot->display_name,

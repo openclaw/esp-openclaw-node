@@ -28,6 +28,8 @@ not require a live OpenClaw gateway.
 - destroy-path notification safety
 - transport-state edge cases around challenge ping, clean close, and disconnect
   rejection while still connecting
+- Gateway-owned Talk negotiation, strict descriptor rejection, bounded close,
+  late-create cancellation, and second-call recovery
 
 ## Build and run
 

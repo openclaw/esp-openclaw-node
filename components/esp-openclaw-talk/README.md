@@ -1,8 +1,8 @@
 # esp-openclaw-talk
 
-`esp-openclaw-talk` adapts OpenClaw's client-owned Talk API to Espressif's `esp_webrtc` signaling interface. Firmware asks the Gateway for a provider session with `talk.client.create`, then posts its local SDP to the returned offer URL with the returned short-lived credential.
+`esp-openclaw-talk` adapts OpenClaw's Gateway-owned Talk API to Espressif's `esp_webrtc` signaling interface. Firmware requests `gateway-control-v1` with `talk.client.create`, then posts its local SDP to the returned Gateway offer URL with the returned single-use broker token.
 
-The component is intentionally provider-neutral. OpenAI API keys and ChatGPT OAuth credentials stay on the Gateway. Standard OpenAI Realtime sessions return the direct `/v1/realtime/calls` offer URL. GPT-Live sessions return a Gateway-relative offer URL; the Gateway exchanges SDP with `/v1/live` and owns the agent-consult sideband.
+The response must contain the exact descriptor `clientControl: { owner: "gateway" }`. Missing or different descriptors fail before peer creation, with no fallback to client-owned tool handling. Provider credentials and the agent-consult sideband stay on the Gateway.
 
 Configure `esp_openclaw_talk_signaling_config_t` as `esp_webrtc_cfg_t.signaling_cfg.extra_cfg`, and use `esp_openclaw_talk_signaling_impl()` as the signaling implementation. The referenced `operator_node` must already be connected with `operator.talk`. `gateway_http_base_url` is required only for relative offer URLs.
 

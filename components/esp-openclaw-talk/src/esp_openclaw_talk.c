@@ -21,6 +21,8 @@
 
 #define TAG "esp_openclaw_talk"
 #define MAX_SDP_RESPONSE_BYTES (256U * 1024U)
+#define MAX_VOICE_SESSION_ID_BYTES 128U
+#define GATEWAY_CONTROL_CAPABILITY "gateway-control-v1"
 
 typedef struct {
     char *name;
@@ -36,6 +38,8 @@ typedef struct {
     char *model;
     char *voice;
     uint16_t silence_duration_ms;
+    esp_openclaw_talk_setup_failed_cb_t setup_failed_cb;
+    void *setup_failed_ctx;
     char *offer_url;
     char *client_secret;
     char *voice_session_id;
@@ -43,9 +47,9 @@ typedef struct {
     size_t offer_header_count;
     portMUX_TYPE state_lock;
     size_t refs;
-    bool create_pending;
     bool stopped;
     bool close_notified;
+    bool gateway_owned;
 } talk_signaling_t;
 
 typedef struct {
@@ -66,8 +70,6 @@ static void free_offer_headers(talk_signaling_t *talk)
         free(talk->offer_headers[i].value);
     }
     free(talk->offer_headers);
-    talk->offer_headers = NULL;
-    talk->offer_header_count = 0;
 }
 
 static void free_talk_signaling(talk_signaling_t *talk)
@@ -179,15 +181,73 @@ static bool copy_offer_headers(talk_signaling_t *talk, cJSON *headers)
         offer_header_t *dst = &talk->offer_headers[talk->offer_header_count];
         dst->name = strdup(entry->string);
         dst->value = strdup(entry->valuestring);
+        ++talk->offer_header_count;
         if (dst->name == NULL || dst->value == NULL) {
             return false;
         }
-        ++talk->offer_header_count;
     }
     return true;
 }
 
-static void signal_failed(talk_signaling_t *talk, const char *message)
+static void ignore_close_result(
+    esp_openclaw_node_handle_t node,
+    const esp_openclaw_node_gateway_result_t *result,
+    void *user_ctx);
+
+static void close_voice_session(
+    esp_openclaw_node_handle_t operator_node,
+    const char *session_key,
+    const char *voice_session_id)
+{
+    if (voice_session_id == NULL || voice_session_id[0] == '\0' ||
+        strlen(voice_session_id) > MAX_VOICE_SESSION_ID_BYTES) {
+        return;
+    }
+    cJSON *params = cJSON_CreateObject();
+    if (params == NULL) {
+        return;
+    }
+    cJSON_AddStringToObject(params, "sessionKey", session_key);
+    cJSON_AddStringToObject(params, "voiceSessionId", voice_session_id);
+    char *params_json = cJSON_PrintUnformatted(params);
+    cJSON_Delete(params);
+    if (params_json != NULL) {
+        (void)esp_openclaw_node_gateway_request(
+            operator_node,
+            "talk.client.close",
+            params_json,
+            ignore_close_result,
+            NULL);
+        free(params_json);
+    }
+}
+
+static char *duplicate_voice_session_id(cJSON *value)
+{
+    if (!cJSON_IsString(value) || value->valuestring == NULL) {
+        return NULL;
+    }
+    size_t len = strlen(value->valuestring);
+    return len > 0 && len <= MAX_VOICE_SESSION_ID_BYTES
+        ? strdup(value->valuestring)
+        : NULL;
+}
+
+static bool has_gateway_control_descriptor(cJSON *payload)
+{
+    cJSON *control = cJSON_IsObject(payload)
+        ? cJSON_GetObjectItemCaseSensitive(payload, "clientControl")
+        : NULL;
+    cJSON *owner = cJSON_IsObject(control) ? control->child : NULL;
+    return owner != NULL && owner->next == NULL && owner->string != NULL &&
+           strcmp(owner->string, "owner") == 0 && cJSON_IsString(owner) &&
+           owner->valuestring != NULL && strcmp(owner->valuestring, "gateway") == 0;
+}
+
+static void signal_failed(
+    talk_signaling_t *talk,
+    esp_openclaw_talk_setup_result_t result,
+    const char *message)
 {
     ESP_LOGE(TAG, "%s", message);
     bool notify = false;
@@ -197,8 +257,13 @@ static void signal_failed(talk_signaling_t *talk, const char *message)
         notify = true;
     }
     portEXIT_CRITICAL(&talk->state_lock);
-    if (notify && talk->signaling.on_close != NULL) {
-        talk->signaling.on_close(talk->signaling.ctx);
+    if (notify) {
+        if (talk->setup_failed_cb != NULL) {
+            talk->setup_failed_cb(result, talk->setup_failed_ctx);
+        }
+        if (talk->signaling.on_close != NULL) {
+            talk->signaling.on_close(talk->signaling.ctx);
+        }
     }
 }
 
@@ -209,21 +274,9 @@ static void handle_talk_create(
 {
     (void)node;
     talk_signaling_t *talk = user_ctx;
-    portENTER_CRITICAL(&talk->state_lock);
-    talk->create_pending = false;
-    bool stopped = talk->stopped;
-    portEXIT_CRITICAL(&talk->state_lock);
-    if (stopped) {
-        release_talk_signaling(talk);
-        return;
-    }
-    if (!result->ok || result->payload_json == NULL) {
-        signal_failed(talk, "Gateway rejected talk.client.create");
-        release_talk_signaling(talk);
-        return;
-    }
-
-    cJSON *payload = cJSON_Parse(result->payload_json);
+    cJSON *payload = result->ok && result->payload_json != NULL
+        ? cJSON_Parse(result->payload_json)
+        : NULL;
     cJSON *transport = cJSON_IsObject(payload)
         ? cJSON_GetObjectItemCaseSensitive(payload, "transport")
         : NULL;
@@ -239,24 +292,54 @@ static void handle_talk_create(
     cJSON *offer_headers = cJSON_IsObject(payload)
         ? cJSON_GetObjectItemCaseSensitive(payload, "offerHeaders")
         : NULL;
-    bool valid = cJSON_IsString(transport) &&
+    bool gateway_control = has_gateway_control_descriptor(payload);
+    char *session_id = duplicate_voice_session_id(voice_session_id);
+    bool valid = gateway_control && cJSON_IsString(transport) &&
                  strcmp(transport->valuestring, "webrtc") == 0 &&
                  cJSON_IsString(offer_url) &&
+                 offer_url->valuestring[0] == '/' &&
                  cJSON_IsString(client_secret) &&
-                 cJSON_IsString(voice_session_id);
+                 session_id != NULL;
     if (valid) {
         talk->offer_url = resolve_offer_url(
             talk->gateway_http_base_url,
             offer_url->valuestring);
         talk->client_secret = duplicate_optional(client_secret->valuestring);
-        talk->voice_session_id = duplicate_optional(voice_session_id->valuestring);
+        talk->voice_session_id = session_id;
+        session_id = NULL;
         valid = talk->offer_url != NULL && talk->client_secret != NULL &&
-                talk->voice_session_id != NULL &&
                 copy_offer_headers(talk, offer_headers);
     }
     cJSON_Delete(payload);
     if (!valid) {
-        signal_failed(talk, "talk.client.create returned an invalid WebRTC offer");
+        close_voice_session(
+            talk->operator_node,
+            talk->session_key,
+            session_id != NULL ? session_id : talk->voice_session_id);
+        free(session_id);
+        bool upgrade_required = result->ok && !gateway_control;
+        if (!result->ok && result->error_code != NULL) {
+            upgrade_required = strcmp(result->error_code, "INVALID_REQUEST") == 0 ||
+                               strcmp(result->error_code, "NOT_SUPPORTED") == 0;
+        }
+        signal_failed(
+            talk,
+            upgrade_required
+                ? ESP_OPENCLAW_TALK_GATEWAY_UPGRADE_REQUIRED
+                : ESP_OPENCLAW_TALK_SETUP_FAILED,
+            upgrade_required ? "Gateway upgrade required" : "Talk setup failed");
+        release_talk_signaling(talk);
+        return;
+    }
+
+    portENTER_CRITICAL(&talk->state_lock);
+    bool stopped = talk->stopped;
+    if (!stopped) {
+        talk->gateway_owned = true;
+    }
+    portEXIT_CRITICAL(&talk->state_lock);
+    if (stopped) {
+        close_voice_session(talk->operator_node, talk->session_key, talk->voice_session_id);
         release_talk_signaling(talk);
         return;
     }
@@ -300,6 +383,8 @@ static int talk_signaling_start(
     talk->model = duplicate_optional(config->model);
     talk->voice = duplicate_optional(config->voice);
     talk->silence_duration_ms = config->silence_duration_ms;
+    talk->setup_failed_cb = config->setup_failed_cb;
+    talk->setup_failed_ctx = config->setup_failed_ctx;
     if (talk->session_key == NULL) {
         free_talk_signaling(talk);
         return ESP_PEER_ERR_NO_MEM;
@@ -325,6 +410,15 @@ static int talk_signaling_start(
             "silenceDurationMs",
             talk->silence_duration_ms);
     }
+    cJSON *capabilities = cJSON_AddArrayToObject(params, "capabilities");
+    cJSON *gateway_control = cJSON_CreateString(GATEWAY_CONTROL_CAPABILITY);
+    if (capabilities == NULL || gateway_control == NULL ||
+        !cJSON_AddItemToArray(capabilities, gateway_control)) {
+        cJSON_Delete(gateway_control);
+        cJSON_Delete(params);
+        free_talk_signaling(talk);
+        return ESP_PEER_ERR_NO_MEM;
+    }
     char *params_json = cJSON_PrintUnformatted(params);
     cJSON_Delete(params);
     if (params_json == NULL) {
@@ -332,9 +426,6 @@ static int talk_signaling_start(
         return ESP_PEER_ERR_NO_MEM;
     }
 
-    portENTER_CRITICAL(&talk->state_lock);
-    talk->create_pending = true;
-    portEXIT_CRITICAL(&talk->state_lock);
     retain_talk_signaling(talk);
     esp_err_t err = esp_openclaw_node_gateway_request(
         talk->operator_node,
@@ -462,7 +553,8 @@ static int talk_signaling_send_msg(
         release_talk_signaling(talk);
         return ESP_PEER_ERR_NONE;
     }
-    if (message->type != ESP_PEER_SIGNALING_MSG_SDP || talk->offer_url == NULL ||
+    if (message->type != ESP_PEER_SIGNALING_MSG_SDP || !talk->gateway_owned ||
+        talk->offer_url == NULL ||
         talk->client_secret == NULL) {
         release_talk_signaling(talk);
         return ESP_PEER_ERR_FAIL;
@@ -501,23 +593,11 @@ static int talk_signaling_stop(esp_peer_signaling_handle_t handle)
     }
     talk->stopped = true;
     bool notify = !talk->close_notified;
+    bool close = talk->gateway_owned;
     talk->close_notified = true;
     portEXIT_CRITICAL(&talk->state_lock);
-    if (talk->voice_session_id != NULL) {
-        cJSON *params = cJSON_CreateObject();
-        cJSON_AddStringToObject(params, "sessionKey", talk->session_key);
-        cJSON_AddStringToObject(params, "voiceSessionId", talk->voice_session_id);
-        char *params_json = cJSON_PrintUnformatted(params);
-        cJSON_Delete(params);
-        if (params_json != NULL) {
-            (void)esp_openclaw_node_gateway_request(
-                talk->operator_node,
-                "talk.client.close",
-                params_json,
-                ignore_close_result,
-                NULL);
-            free(params_json);
-        }
+    if (close) {
+        close_voice_session(talk->operator_node, talk->session_key, talk->voice_session_id);
     }
     if (notify && talk->signaling.on_close != NULL) {
         talk->signaling.on_close(talk->signaling.ctx);

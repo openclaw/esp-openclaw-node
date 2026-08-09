@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Require Gateway-owned realtime control for room Talk and fail visibly before peer creation when the Gateway contract is unavailable.
 - Add authoritative Gateway URI inspection and bound assembled inbound WebSocket messages to 2 MiB by default.
 
 - Add `esp_openclaw_node_store_plugin_surface_url()` so applications can adopt refreshed capability-scoped surface URLs (for example from a `plugin.surface.refresh` RPC) into the component's canonical store.

@@ -49,6 +49,9 @@ Room endpoints request 400 ms of provider server-VAD post-speech silence for
 each Talk session. The player uses the pinned 4 KiB raw and 6 KiB render queue
 capacities: they start playback immediately and bound stale audio backlog under
 stalls, but they do not measure or promise total speech-to-response time.
+Talk WebRTC is audio-only. A compatible Gateway must own realtime control and
+return the negotiated Gateway-control descriptor; older Gateways fail visibly
+before the room creates a peer.
 
 The USB REPL also exposes one local-only command with four exact forms:
 `diagnostics open`, `diagnostics close`, `diagnostics tone`, and

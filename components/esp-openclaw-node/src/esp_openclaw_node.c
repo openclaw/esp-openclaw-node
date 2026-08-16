@@ -479,34 +479,46 @@ esp_err_t esp_openclaw_node_destroy(esp_openclaw_node_handle_t node)
     }
 
     esp_openclaw_node_lock_state(node);
-    if (node->state == ESP_OPENCLAW_NODE_INTERNAL_DESTROYING ||
-        node->state == ESP_OPENCLAW_NODE_INTERNAL_CLOSED) {
+    if (node->destroy_waiter_active) {
         esp_openclaw_node_unlock_state(node);
         return ESP_ERR_INVALID_STATE;
     }
+    bool already_closed = node->state == ESP_OPENCLAW_NODE_INTERNAL_CLOSED;
+    bool need_shutdown = node->state != ESP_OPENCLAW_NODE_INTERNAL_DESTROYING && !already_closed;
+    esp_openclaw_node_internal_state_t previous_state = node->state;
     SemaphoreHandle_t destroy_done = node->destroy_done;
     if (destroy_done == NULL) {
         esp_openclaw_node_unlock_state(node);
-        return ESP_FAIL;
+        return already_closed ? ESP_ERR_INVALID_STATE : ESP_FAIL;
     }
-    node->state = ESP_OPENCLAW_NODE_INTERNAL_DESTROYING;
+    if (!already_closed) {
+        node->state = ESP_OPENCLAW_NODE_INTERNAL_DESTROYING;
+    }
+    node->destroy_waiter_active = true;
     esp_openclaw_node_unlock_state(node);
 
-    (void)xSemaphoreTake(destroy_done, 0);
+    if (need_shutdown) {
+        (void)xSemaphoreTake(destroy_done, 0);
 
-    esp_openclaw_node_work_message_t message = {
-        .type = ESP_OPENCLAW_NODE_WORK_MSG_SHUTDOWN,
-    };
-    if (node->work_queue == NULL ||
-        xQueueSend(node->work_queue, &message, portMAX_DELAY) != pdTRUE) {
-        esp_openclaw_node_lock_state(node);
-        node->state = ESP_OPENCLAW_NODE_INTERNAL_IDLE;
-        esp_openclaw_node_unlock_state(node);
-        return ESP_FAIL;
+        esp_openclaw_node_work_message_t message = {
+            .type = ESP_OPENCLAW_NODE_WORK_MSG_SHUTDOWN,
+        };
+        if (node->work_queue == NULL ||
+            xQueueSend(node->work_queue, &message, ESP_OPENCLAW_NODE_DESTROY_WAIT_TICKS) !=
+                pdTRUE) {
+            esp_openclaw_node_lock_state(node);
+            node->state = previous_state;
+            node->destroy_waiter_active = false;
+            esp_openclaw_node_unlock_state(node);
+            return ESP_ERR_TIMEOUT;
+        }
     }
 
-    if (xSemaphoreTake(destroy_done, portMAX_DELAY) != pdTRUE) {
-        return ESP_FAIL;
+    if (xSemaphoreTake(destroy_done, ESP_OPENCLAW_NODE_DESTROY_WAIT_TICKS) != pdTRUE) {
+        esp_openclaw_node_lock_state(node);
+        node->destroy_waiter_active = false;
+        esp_openclaw_node_unlock_state(node);
+        return ESP_ERR_TIMEOUT;
     }
 
     if (node->work_queue != NULL) {

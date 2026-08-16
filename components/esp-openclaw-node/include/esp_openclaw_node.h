@@ -289,15 +289,19 @@ esp_err_t esp_openclaw_node_create(
  * @brief Destroy a node instance and release all owned resources.
  *
  * This API is synchronous. It rejects self-destroy from the component task or
- * callback context.
+ * callback context. If the component task is wedged, destroy returns
+ * `ESP_ERR_TIMEOUT` instead of waiting forever. Call destroy again after the
+ * task can run to finish teardown. If the task finishes after that timeout,
+ * the next destroy call still completes cleanup.
  *
  * @param[in] node Node handle to destroy.
  *
  * @return
  *      - `ESP_OK` on success
  *      - `ESP_ERR_INVALID_ARG` if `node` is `NULL`
- *      - `ESP_ERR_INVALID_STATE` if destroy has already begun or the current
- *        task is the component task
+ *      - `ESP_ERR_INVALID_STATE` if the current task is the component task,
+ *        or if another destroy call is already waiting
+ *      - `ESP_ERR_TIMEOUT` if the component task does not finish teardown
  */
 esp_err_t esp_openclaw_node_destroy(esp_openclaw_node_handle_t node);
 

@@ -243,6 +243,9 @@ bool esp_openclaw_node_is_node_task_context(esp_openclaw_node_handle_t node);
 
 void esp_openclaw_node_clear_connect_source_struct(
     esp_openclaw_node_connect_request_source_t *source);
+void esp_openclaw_node_move_connect_source_struct(
+    esp_openclaw_node_connect_request_source_t *destination,
+    esp_openclaw_node_connect_request_source_t *source);
 esp_err_t esp_openclaw_node_build_connect_source_from_request(
     const esp_openclaw_node_connect_request_t *request,
     esp_openclaw_node_connect_request_source_t *out_source);

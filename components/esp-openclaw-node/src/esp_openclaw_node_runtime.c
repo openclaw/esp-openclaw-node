@@ -171,9 +171,9 @@ static void handle_request_connect(
         }
     }
     esp_openclaw_node_clear_pending_control_locked(node);
-    esp_openclaw_node_clear_connect_source_struct(&node->active_connect_source);
-    node->active_connect_source = message->connect_source;
-    memset(&message->connect_source, 0, sizeof(message->connect_source));
+    esp_openclaw_node_move_connect_source_struct(
+        &node->active_connect_source,
+        &message->connect_source);
     node->state = ESP_OPENCLAW_NODE_INTERNAL_CONNECTING;
     node->connect_started_ms = esp_timer_get_time() / 1000LL;
     esp_openclaw_node_unlock_state(node);
@@ -520,9 +520,10 @@ esp_err_t esp_openclaw_node_submit_connect_request(
 
     esp_openclaw_node_work_message_t message = {
         .type = ESP_OPENCLAW_NODE_WORK_MSG_REQUEST_CONNECT,
-        .connect_source = *connect_source,
     };
-    memset(connect_source, 0, sizeof(*connect_source));
+    esp_openclaw_node_move_connect_source_struct(
+        &message.connect_source,
+        connect_source);
 
     err = submit_pending_request(
         node,

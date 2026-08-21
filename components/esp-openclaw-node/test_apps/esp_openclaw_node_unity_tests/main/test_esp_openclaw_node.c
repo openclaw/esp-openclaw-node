@@ -979,18 +979,39 @@ TEST_CASE("password auth is excluded from the signed device payload", "[esp_open
     esp_openclaw_node_connect_material_t password_material = {0};
     esp_openclaw_node_connect_material_t token_material = {0};
 
+    char *password_gateway_uri = password_source.gateway_uri;
+    char *password_secret = password_source.secret;
     esp_openclaw_node_lock_state(node);
-    node->active_connect_source = password_source;
-    memset(&password_source, 0, sizeof(password_source));
+    esp_openclaw_node_move_connect_source_struct(
+        &node->active_connect_source,
+        &password_source);
+    TEST_ASSERT_EQUAL(
+        ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_PASSWORD,
+        node->active_connect_source.kind);
+    TEST_ASSERT_EQUAL_PTR(password_gateway_uri, node->active_connect_source.gateway_uri);
+    TEST_ASSERT_EQUAL_PTR(password_secret, node->active_connect_source.secret);
+    TEST_ASSERT_EQUAL(ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_NONE, password_source.kind);
+    TEST_ASSERT_NULL(password_source.gateway_uri);
+    TEST_ASSERT_NULL(password_source.secret);
     TEST_ASSERT_EQUAL(
         ESP_OK,
         esp_openclaw_node_resolve_active_connect_material_locked(
             node,
             &password_material));
 
-    esp_openclaw_node_clear_connect_source_struct(&node->active_connect_source);
-    node->active_connect_source = token_source;
-    memset(&token_source, 0, sizeof(token_source));
+    char *token_gateway_uri = token_source.gateway_uri;
+    char *token_secret = token_source.secret;
+    esp_openclaw_node_move_connect_source_struct(
+        &node->active_connect_source,
+        &token_source);
+    TEST_ASSERT_EQUAL(
+        ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_SHARED_TOKEN,
+        node->active_connect_source.kind);
+    TEST_ASSERT_EQUAL_PTR(token_gateway_uri, node->active_connect_source.gateway_uri);
+    TEST_ASSERT_EQUAL_PTR(token_secret, node->active_connect_source.secret);
+    TEST_ASSERT_EQUAL(ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_NONE, token_source.kind);
+    TEST_ASSERT_NULL(token_source.gateway_uri);
+    TEST_ASSERT_NULL(token_source.secret);
     TEST_ASSERT_EQUAL(
         ESP_OK,
         esp_openclaw_node_resolve_active_connect_material_locked(
@@ -1529,9 +1550,20 @@ TEST_CASE("device token source signs auth material", "[esp_openclaw_node][auth]"
     TEST_ASSERT_EQUAL(ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_DEVICE_TOKEN, source.kind);
 
     esp_openclaw_node_connect_material_t material = {0};
+    char *gateway_uri = source.gateway_uri;
+    char *secret = source.secret;
     esp_openclaw_node_lock_state(node);
-    node->active_connect_source = source;
-    memset(&source, 0, sizeof(source));
+    esp_openclaw_node_move_connect_source_struct(
+        &node->active_connect_source,
+        &source);
+    TEST_ASSERT_EQUAL(
+        ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_DEVICE_TOKEN,
+        node->active_connect_source.kind);
+    TEST_ASSERT_EQUAL_PTR(gateway_uri, node->active_connect_source.gateway_uri);
+    TEST_ASSERT_EQUAL_PTR(secret, node->active_connect_source.secret);
+    TEST_ASSERT_EQUAL(ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_NONE, source.kind);
+    TEST_ASSERT_NULL(source.gateway_uri);
+    TEST_ASSERT_NULL(source.secret);
     TEST_ASSERT_EQUAL(
         ESP_OK,
         esp_openclaw_node_resolve_active_connect_material_locked(node, &material));

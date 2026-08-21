@@ -33,6 +33,21 @@ void esp_openclaw_node_clear_connect_source_struct(
     source->kind = ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_NONE;
 }
 
+void esp_openclaw_node_move_connect_source_struct(
+    esp_openclaw_node_connect_request_source_t *destination,
+    esp_openclaw_node_connect_request_source_t *source)
+{
+    if (destination == NULL || source == NULL || destination == source) {
+        return;
+    }
+
+    esp_openclaw_node_clear_connect_source_struct(destination);
+    *destination = *source;
+    source->gateway_uri = NULL;
+    source->secret = NULL;
+    source->kind = ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_NONE;
+}
+
 static esp_err_t validate_connect_source(
     const esp_openclaw_node_connect_request_source_t *source)
 {

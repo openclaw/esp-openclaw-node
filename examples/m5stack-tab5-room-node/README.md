@@ -16,7 +16,7 @@ idf.py build
 The official BSP manifest pins `esp_video ~2.0`, while P4-capable
 `esp_capture` requires `esp_video ^2.1`. The source-only BSP build bridge uses
 exact inspected commit `f0ef9497efce684997ce391edd19733483e250a5` without
-patching/copying BSP production source, and resolves maintained esp_video 2.3.
+patching/copying BSP production source, and resolves maintained esp_video 2.4.1.
 The exact commit tarball is the default. Developers who already have the same
 checkout may explicitly set `OPENCLAW_TAB5_BSP_LOCAL_PATH`; configuration
 rejects it unless HEAD is that commit and the worktree is clean.

@@ -12,4 +12,4 @@ dependencies:
   espressif/esp_websocket_client:
     version: "1.6.1"
   espressif/libsodium:
-    version: "1.0.21"
+    version: "1.0.22~1"

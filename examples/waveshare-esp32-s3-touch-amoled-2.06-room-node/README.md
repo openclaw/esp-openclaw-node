@@ -10,6 +10,13 @@ This example turns the watch-shaped Waveshare development board into a USB-power
 
 It uses the maintained Waveshare BSP, the board's ES7210 microphone codec and ES8311 speaker codec, a 24 kHz stereo I2S path, Espressif's AEC capture source, and Espressif WebRTC. The capture policy requests 30 dB input gain, matching the ES7210 initialization level and Espressif reference applications; the codec API does not expose hardware gain readback. Ambient **Hi ESP** wake works through the WakeNet 9 (`wn9_hiesp`) instance already owned by the AFE; the firmware never creates the second esp-sr WakeNet instance that aborts inside the closed library on this hardware. Because esp_capture 1.0.2 does not expose AFE wake events, the canonical room component carries one pinned AEC source/private-header closure. That closure should be dropped once esp_capture exposes detections. Gateway `voicewake.changed` events are observed, but an arbitrary text trigger cannot replace a compiled local WakeNet model.
 
+Playback uses 100% codec volume and a +6 dB post-decode PCM16 boost in the shared
+renderer. Quiet speech is louder, while peaks above the remaining digital
+headroom saturate. The local speaker test compensates for this boost to retain
+its existing digital level. Neither renderer acceptance nor a successful Talk
+session proves analog clipping-free output; validate loudness and distortion
+at the physical speaker.
+
 ## Build and provision
 
 Build and flash with ESP-IDF release 5.5:
@@ -157,4 +164,7 @@ Component values may be `{"literalString":"..."}`, `{"literalNumber":1}`, `{"lit
 
 The surface is bounded to 96 stored components, 256 KiB per JSONL or messages input, 256 KiB of retained A2UI data, 8 component nesting levels, 6 images per surface, and 2 MiB per fetched image. Exceeding a bound returns `INVALID_PARAMS` and names the bound in the error message.
 
-This pre-hardware build proves dependency resolution, model packaging, protocol code, and the complete ESP32-S3 image. Microphone geometry, speaker gain, false accepts, acoustic echo performance, thermals, and long-running room stability still require validation on the physical board.
+A firmware build proves compilation and image generation, not acoustic quality
+or long-running stability. Validate speaker loudness and distortion, wake false
+accepts, acoustic echo performance, thermals, and sustained Talk on the physical
+board, especially after changing playback gain.

@@ -51,6 +51,10 @@ disabled; AEC and nonlinear echo suppression remain active. Talk and voiceWake
 advertise only after media/wake init. Playback and capture use jointly
 allocated, reciprocally paired I2S channels with distinct data lines and the
 shared 48 kHz, 64-bit frame contract; the ES7210 input policy is 30 dB.
+Playback uses 100% codec volume and a +6 dB post-decode PCM16 boost in the shared
+renderer. This raises quiet speech but saturates peaks that exceed digital
+headroom. The local speaker test compensates for the PCM boost, retaining its
+existing digital tone level; the codec-volume increase still applies to it.
 
 ## Commands and policy
 

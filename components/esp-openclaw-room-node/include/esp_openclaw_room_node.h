@@ -34,12 +34,15 @@ typedef struct {
     esp_codec_dev_handle_t playback;
 } esp_openclaw_room_audio_handles_t;
 
+#define ESP_OPENCLAW_ROOM_PLAYBACK_GAIN_MAX_DB 12.0f
+
 typedef struct {
     esp_err_t (*open)(void *ctx, esp_openclaw_room_audio_handles_t *handles);
     const char *afe_layout;
     uint8_t record_channels;
     uint8_t channel_mask;
     uint8_t playback_volume;
+    float playback_gain_db; /**< Post-decode PCM16 boost, 0..12 dB; 0 preserves samples exactly. */
     bool configure_input_gain; /**< Apply input_gain_db instead of preserving the codec/board default. */
     float input_gain_db;
     void *ctx;

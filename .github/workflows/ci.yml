@@ -47,6 +47,11 @@ jobs:
             components/esp-openclaw-room-node/tests/test_room_file_validation.c \
             -o /tmp/room_file_validation_test
           /tmp/room_file_validation_test
+          cc -std=c11 -Wall -Wextra -Werror \
+            components/esp-openclaw-talk/tests/test_talk_sdp_http_redirect.c \
+            -o /tmp/talk_sdp_http_redirect_test
+          /tmp/talk_sdp_http_redirect_test \
+            components/esp-openclaw-talk/src/esp_openclaw_talk.c
 
       - name: Build
         uses: espressif/esp-idf-ci-action@v1

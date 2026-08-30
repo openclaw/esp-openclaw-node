@@ -490,6 +490,8 @@ static int exchange_sdp(talk_signaling_t *talk, const char *sdp)
         .user_data = &response,
         .buffer_size = 4096,
         .buffer_size_tx = 8192,
+        /* Bearer clientSecret must not follow a 3xx Location hop. */
+        .disable_auto_redirect = true,
 #if CONFIG_MBEDTLS_CERTIFICATE_BUNDLE
         .crt_bundle_attach = esp_crt_bundle_attach,
 #endif

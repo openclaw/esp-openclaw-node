@@ -51,6 +51,7 @@ jobs:
       - name: Host room audio tests
         if: matrix.name == 'component-test-app-build'
         run: |
+          python3 components/esp-openclaw-room-node/tests/test_room_audio_port_compat.py
           cc -std=c11 -Wall -Wextra -Werror \
             -I components/esp-openclaw-room-node \
             components/esp-openclaw-room-node/room_diagnostics_metrics.c \

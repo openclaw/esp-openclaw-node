@@ -42,10 +42,11 @@ typedef struct {
     uint8_t record_channels;
     uint8_t channel_mask;
     uint8_t playback_volume;
-    float playback_gain_db; /**< Post-decode PCM16 boost, 0..12 dB; 0 preserves samples exactly. */
     bool configure_input_gain; /**< Apply input_gain_db instead of preserving the codec/board default. */
     float input_gain_db;
     void *ctx;
+    /* Append optional policy so existing positional board initializers retain their meaning. */
+    float playback_gain_db; /**< Post-decode PCM16 boost, 0..12 dB; 0 preserves samples exactly. */
 } esp_openclaw_room_audio_port_t;
 
 typedef struct {

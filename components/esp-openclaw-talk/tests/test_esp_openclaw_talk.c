@@ -3,7 +3,19 @@
 #include "unity.h"
 
 #define esp_openclaw_node_gateway_request test_talk_gateway_request
+#define esp_http_client_init test_http_client_init
+#define esp_http_client_set_header test_http_client_set_header
+#define esp_http_client_set_post_field test_http_client_set_post_field
+#define esp_http_client_perform test_http_client_perform
+#define esp_http_client_get_status_code test_http_client_get_status_code
+#define esp_http_client_cleanup test_http_client_cleanup
 #include "../src/esp_openclaw_talk.c"
+#undef esp_http_client_cleanup
+#undef esp_http_client_get_status_code
+#undef esp_http_client_perform
+#undef esp_http_client_set_post_field
+#undef esp_http_client_set_header
+#undef esp_http_client_init
 #undef esp_openclaw_node_gateway_request
 
 typedef struct {
@@ -19,7 +31,71 @@ typedef struct {
     esp_openclaw_talk_setup_result_t setup_result;
 } talk_test_state_t;
 
+typedef struct {
+    bool disable_auto_redirect;
+    char authorization[128];
+    int perform_count;
+    int last_status;
+} test_http_state_t;
+
 static talk_test_state_t s_talk;
+static test_http_state_t s_http;
+
+esp_http_client_handle_t test_http_client_init(const esp_http_client_config_t *config)
+{
+    if (config == NULL) {
+        return NULL;
+    }
+    s_http.disable_auto_redirect = config->disable_auto_redirect;
+    return (esp_http_client_handle_t)1;
+}
+
+esp_err_t test_http_client_set_header(
+    esp_http_client_handle_t client,
+    const char *key,
+    const char *value)
+{
+    (void)client;
+    if (key != NULL && strcmp(key, "Authorization") == 0 && value != NULL) {
+        snprintf(s_http.authorization, sizeof(s_http.authorization), "%s", value);
+    }
+    return ESP_OK;
+}
+
+esp_err_t test_http_client_set_post_field(
+    esp_http_client_handle_t client,
+    const char *data,
+    int len)
+{
+    (void)client;
+    (void)data;
+    (void)len;
+    return ESP_OK;
+}
+
+esp_err_t test_http_client_perform(esp_http_client_handle_t client)
+{
+    (void)client;
+    ++s_http.perform_count;
+    if (!s_http.disable_auto_redirect && s_http.last_status >= 300 &&
+        s_http.last_status < 400) {
+        ++s_http.perform_count;
+        s_http.last_status = 200;
+    }
+    return ESP_OK;
+}
+
+int test_http_client_get_status_code(esp_http_client_handle_t client)
+{
+    (void)client;
+    return s_http.last_status;
+}
+
+esp_err_t test_http_client_cleanup(esp_http_client_handle_t client)
+{
+    (void)client;
+    return ESP_OK;
+}
 
 esp_err_t test_talk_gateway_request(
     esp_openclaw_node_handle_t node,
@@ -73,6 +149,8 @@ static void record_setup_failed(esp_openclaw_talk_setup_result_t result, void *c
 static esp_peer_signaling_handle_t start_signaling(void)
 {
     memset(&s_talk, 0, sizeof(s_talk));
+    memset(&s_http, 0, sizeof(s_http));
+    s_http.last_status = 200;
     const esp_openclaw_talk_signaling_config_t extra = {
         .operator_node = (esp_openclaw_node_handle_t)1,
         .gateway_http_base_url = "https://gateway.example/",
@@ -193,4 +271,22 @@ TEST_CASE("Talk setup failure is actionable and a second call recovers", "[esp_o
     TEST_ASSERT_EQUAL(1, s_talk.connected_count);
     TEST_ASSERT_EQUAL(0, s_talk.setup_failed_count);
     TEST_ASSERT_EQUAL(ESP_PEER_ERR_NONE, talk_signaling_stop(recovered));
+}
+
+TEST_CASE("Talk SDP POST disables HTTP auto-redirect", "[esp_openclaw_talk]")
+{
+    esp_peer_signaling_handle_t handle = start_signaling();
+    respond_to_create(true, valid_response(), NULL);
+    s_http.last_status = 302;
+    const char sdp[] = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\n";
+    esp_peer_signaling_msg_t message = {
+        .type = ESP_PEER_SIGNALING_MSG_SDP,
+        .data = (uint8_t *)sdp,
+        .size = (int)sizeof(sdp) - 1,
+    };
+    TEST_ASSERT_EQUAL(ESP_PEER_ERR_FAIL, talk_signaling_send_msg(handle, &message));
+    TEST_ASSERT_TRUE(s_http.disable_auto_redirect);
+    TEST_ASSERT_EQUAL_STRING("Bearer broker-token", s_http.authorization);
+    TEST_ASSERT_EQUAL(1, s_http.perform_count);
+    TEST_ASSERT_EQUAL(ESP_PEER_ERR_NONE, talk_signaling_stop(handle));
 }

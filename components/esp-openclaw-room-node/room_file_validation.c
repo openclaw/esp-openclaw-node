@@ -75,3 +75,11 @@ bool room_file_mutation_allowed(bool preflight_only)
     return !preflight_only;
 }
 
+char *room_file_parent_walk_start(char *parent, const char *root)
+{
+    if (parent == NULL || root == NULL) return NULL;
+    size_t root_len = strlen(root);
+    if (strlen(parent) <= root_len) return NULL;
+    return parent + root_len + 1;
+}
+

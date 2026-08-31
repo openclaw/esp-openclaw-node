@@ -1,19 +1,25 @@
 #pragma once
 
 #include <assert.h>
+#include <pthread.h>
+#include <stdbool.h>
+#include <stdint.h>
 
-typedef unsigned portMUX_TYPE;
-#define portMUX_INITIALIZER_UNLOCKED 0U
-extern unsigned talk_host_critical_depth;
-
-/* Callbacks are scheduled explicitly by the tests, not by host threads. Track
- * critical sections so the fake transport can reject submission while locked. */
+typedef pthread_mutex_t portMUX_TYPE;
+#define portMUX_INITIALIZER_UNLOCKED PTHREAD_MUTEX_INITIALIZER
+extern _Thread_local unsigned talk_host_critical_depth;
 #define portENTER_CRITICAL(lock) do { \
-    ++*(lock); \
+    assert(pthread_mutex_lock(lock) == 0); \
     ++talk_host_critical_depth; \
 } while (0)
 #define portEXIT_CRITICAL(lock) do { \
-    assert(*(lock) > 0 && talk_host_critical_depth > 0); \
-    --*(lock); \
+    assert(talk_host_critical_depth > 0); \
     --talk_host_critical_depth; \
+    assert(pthread_mutex_unlock(lock) == 0); \
 } while (0)
+
+typedef int BaseType_t;
+typedef uint32_t TickType_t;
+#define pdTRUE 1
+#define pdFALSE 0
+#define portMAX_DELAY UINT32_MAX

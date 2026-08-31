@@ -75,5 +75,9 @@ jobs:
             idf.py reconfigure &&
             ninja -C build -j2 &&
             if [ "${{ matrix.name }}" = "component-test-app-build" ]; then
-              python3 ../../../esp-openclaw-talk/tests/run_host_tests.py --sanitize
+              python3 ../../../esp-openclaw-talk/tests/run_host_tests.py --sanitize &&
+              python3 ../../../esp-openclaw-talk/tests/run_threaded_tests.py
+            fi &&
+            if [ "${{ matrix.name }}" = "waveshare-amoled-room-node" ]; then
+              python3 ../../components/esp-openclaw-room-node/tests/run_lifecycle_host_tests.py --managed-components managed_components
             fi

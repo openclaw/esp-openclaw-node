@@ -3,7 +3,7 @@
 #include <stddef.h>
 
 void talk_host_register_test(void (*test)(void), const char *name, int line);
-extern unsigned talk_host_critical_depth;
+extern _Thread_local unsigned talk_host_critical_depth;
 extern unsigned talk_host_error_count;
 
 #define TALK_HOST_JOIN_INNER(a, b) a##b

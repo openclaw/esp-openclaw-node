@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Return `ESP_ERR_TIMEOUT` from `esp_openclaw_node_destroy()` when the component task does not finish teardown, instead of waiting forever.
 - Update ESP-IDF component dependencies and the CI checkout action while preserving the vendored WebRTC stack and Tab5 firmware compatibility pins.
 - Require Gateway-owned realtime control for room Talk and fail visibly before peer creation when the Gateway contract is unavailable.
 - Add authoritative Gateway URI inspection and bound assembled inbound WebSocket messages to 2 MiB by default.

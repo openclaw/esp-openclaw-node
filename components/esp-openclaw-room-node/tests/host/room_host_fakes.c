@@ -6,21 +6,25 @@
 #include <stdlib.h>
 #include <string.h>
 #include "cJSON.h"
+#include "esp_heap_caps.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
+#include "esp_openclaw_node_wifi.h"
 #include "esp_openclaw_talk.h"
 #include "esp_peer_default.h"
 #include "room_board.h"
 #include "room_canvas.h"
 #include "room_canvas_node_cmd.h"
 #include "room_device_commands.h"
+#include "room_diagnostics.h"
+#include "room_diagnostics_data.h"
 #include "room_face.h"
 #include "room_files.h"
 #include "room_media.h"
 
 room_host_observations_t host = {.ambient = true};
 struct host_mutex { bool held; bool binary; bool available; };
-struct host_queue { unsigned capacity, size, count; unsigned char *data; };
+struct host_queue { size_t capacity, size, count, storage_size; unsigned char *data; };
 struct host_timer { bool active; void *id; void (*callback)(TimerHandle_t); };
 struct esp_timer { bool active; esp_timer_create_args_t args; };
 struct host_task {
@@ -139,14 +143,31 @@ SemaphoreHandle_t xSemaphoreCreateBinary(void)
 }
 void vSemaphoreDelete(SemaphoreHandle_t value) { free(value); }
 
+static bool queue_storage_size(size_t capacity, size_t size, size_t *bytes)
+{
+    if (capacity == 0 || size == 0 || capacity > SIZE_MAX / size) return false;
+    *bytes = capacity * size;
+    return true;
+}
+
+static size_t queue_item_bytes(QueueHandle_t value, size_t count)
+{
+    host_require(value->size != 0 && count <= value->capacity &&
+        count <= value->storage_size / value->size, "queue items fit allocated storage");
+    return count * value->size;
+}
+
 QueueHandle_t xQueueCreate(UBaseType_t capacity, UBaseType_t size)
 {
     host_require(queue == NULL, "fixture creates one teardown queue");
+    size_t storage_size = 0;
+    host_require(queue_storage_size(capacity, size, &storage_size), "queue dimensions fit size_t");
     queue = calloc(1, sizeof(*queue));
     host_require(queue != NULL, "queue allocation");
     queue->capacity = capacity;
     queue->size = size;
-    queue->data = calloc(capacity, size);
+    queue->storage_size = storage_size;
+    queue->data = calloc(1, storage_size);
     host_require(queue->data != NULL, "queue items allocation");
     return queue;
 }
@@ -155,14 +176,17 @@ BaseType_t xQueueSend(QueueHandle_t value, const void *item, TickType_t wait)
 {
     host_require(wait == 0, "teardown enqueue must be nonblocking");
     if (value->count == value->capacity) return pdFALSE;
-    memcpy(value->data + value->count++ * value->size, item, value->size);
+    size_t offset = queue_item_bytes(value, value->count);
+    host_require(value->size <= value->storage_size - offset, "queue send fits allocated storage");
+    memcpy(value->data + offset, item, value->size);
+    ++value->count;
     return pdTRUE;
 }
 
 BaseType_t xQueueOverwrite(QueueHandle_t value, const void *item)
 {
     host_require(value->capacity == 1, "coalesced wakeup requires one slot");
-    memcpy(value->data, item, value->size);
+    memcpy(value->data, item, queue_item_bytes(value, 1));
     value->count = 1;
     return pdTRUE;
 }
@@ -180,9 +204,10 @@ BaseType_t xQueueReceive(QueueHandle_t value, void *item, TickType_t wait)
         host_require(wait == portMAX_DELAY, "expected blocking queue receive");
         block_task();
     }
+    size_t bytes = queue_item_bytes(value, value->count);
     memcpy(item, value->data, value->size);
     --value->count;
-    memmove(value->data, value->data + value->size, value->count * value->size);
+    memmove(value->data, value->data + value->size, bytes - value->size);
     return pdTRUE;
 }
 
@@ -589,6 +614,45 @@ const esp_openclaw_room_node_config_t *room_board_config(void)
     };
     return &board;
 }
+
+/* GCC ASan retains the console callback table through global registration even
+ * when board startup is collected. These external boundaries must never run. */
+static _Noreturn void unsupported_boundary(const char *name)
+{
+    fprintf(stderr, "HARNESS/SETUP FAILURE: unsupported boundary %s\n", name);
+    abort();
+}
+
+esp_err_t room_diagnostics_request_open(void)
+{ unsupported_boundary(__func__); }
+esp_err_t room_diagnostics_request_close(void)
+{ unsupported_boundary(__func__); }
+void room_diagnostics_audio_get(room_audio_diagnostics_snapshot_t *snapshot)
+{ (void)snapshot; unsupported_boundary(__func__); }
+esp_err_t room_media_request_test_tone(room_media_talk_busy_cb_t busy_cb, void *ctx)
+{ (void)busy_cb; (void)ctx; unsupported_boundary(__func__); }
+void room_media_get_tone_snapshot(room_media_tone_snapshot_t *snapshot)
+{ (void)snapshot; unsupported_boundary(__func__); }
+const char *room_media_tone_state_name(room_media_tone_state_t state)
+{ (void)state; unsupported_boundary(__func__); }
+const char *room_media_tone_error_name(room_media_tone_error_t error)
+{ (void)error; unsupported_boundary(__func__); }
+void room_ui_get_diagnostics(room_ui_diagnostics_snapshot_t *snapshot)
+{ (void)snapshot; unsupported_boundary(__func__); }
+const char *room_ui_state_name(room_ui_state_t state)
+{ (void)state; unsupported_boundary(__func__); }
+void room_canvas_get_diagnostics(room_canvas_diagnostics_snapshot_t *snapshot)
+{ (void)snapshot; unsupported_boundary(__func__); }
+void esp_openclaw_node_wifi_get_status(esp_openclaw_node_wifi_status_t *snapshot)
+{ (void)snapshot; unsupported_boundary(__func__); }
+size_t heap_caps_get_free_size(uint32_t caps)
+{ (void)caps; unsupported_boundary(__func__); }
+size_t heap_caps_get_largest_free_block(uint32_t caps)
+{ (void)caps; unsupported_boundary(__func__); }
+int64_t esp_timer_get_time(void)
+{ unsupported_boundary(__func__); }
+size_t strlcpy(char *destination, const char *source, size_t capacity)
+{ (void)destination; (void)source; (void)capacity; unsupported_boundary(__func__); }
 
 /* Real HTTP header, intentionally no implementation capable of networking. */
 esp_http_client_handle_t esp_http_client_init(const esp_http_client_config_t *config)

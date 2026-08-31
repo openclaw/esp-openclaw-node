@@ -5,6 +5,7 @@ import argparse
 import os
 from pathlib import Path
 import shlex
+import signal
 import subprocess
 import sys
 import tempfile
@@ -37,7 +38,7 @@ def main():
         managed / "espressif__media_lib_sal/include", managed / "espressif__media_lib_sal/include/port",
         managed / "lvgl__lvgl", idf / "esp_common/include", idf / "esp_http_client/include",
         idf / "esp_timer/include", idf / "esp_hw_support/include", idf / "console",
-        idf / "soc/include", idf / "soc/linux/include",
+        idf / "soc/include", idf / "soc/linux/include", idf / "heap/include",
     ]
     for path in [*includes, cjson / "cJSON.c"]:
         if not path.exists():
@@ -52,17 +53,33 @@ def main():
         ]
         for include in includes:
             command += ["-I", str(include)]
+        command += ["-include", str(tests / "host/room_host_fakes.h")]
         if args.analyze:
-            return subprocess.run(command + ["--analyze", "-Xanalyzer", "-analyzer-output=text",
-                "-include", str(tests / "host/room_host_fakes.h"),
-                str(tests / "test_room_talk_lifecycle.c")], cwd=directory).returncode
+            for source in [tests / "test_room_talk_lifecycle.c", tests / "host/room_host_fakes.c",
+                           tests / "test_room_host_queue.c"]:
+                result = subprocess.run(command + ["--analyze", "-Xanalyzer", "-analyzer-output=text",
+                    str(source)], cwd=directory)
+                if result.returncode:
+                    return result.returncode
+            return 0
+        link = [str(cjson / "cJSON.c"), "-lm",
+                "-Wl,-dead_strip" if sys.platform == "darwin" else "-Wl,--gc-sections"]
+        queue_binary = Path(directory) / "room-host-queue-tests"
+        queue_command = command + [str(tests / "test_room_host_queue.c"), *link, "-o", str(queue_binary)]
+        print("BUILD", shlex.join(queue_command), flush=True)
+        subprocess.run(queue_command, check=True)
+        subprocess.run([str(queue_binary)], check=True)
+        for case, message in [("unsupported", "unsupported boundary room_diagnostics_request_open"),
+                              ("out-of-bounds", "queue items fit allocated storage")]:
+            result = subprocess.run([str(queue_binary), case], capture_output=True, text=True)
+            if result.returncode != -signal.SIGABRT or f"HARNESS/SETUP FAILURE: {message}" not in result.stderr:
+                print(f"FAIL {case}: expected boundary abort, got {result.returncode}\n{result.stderr}", file=sys.stderr)
+                return 1
+            print(f"PASS {case}: expected boundary abort", flush=True)
         command += [
-            "-include", str(tests / "host/room_host_fakes.h"),
             str(tests / "test_room_talk_lifecycle.c"), str(tests / "host/room_host_fakes.c"),
             str(repo / "components/esp-openclaw-talk/src/esp_openclaw_talk.c"),
-            str(cjson / "cJSON.c"), "-lm",
-            "-Wl,-dead_strip" if sys.platform == "darwin" else "-Wl,--gc-sections",
-            "-o", str(binary),
+            *link, "-o", str(binary),
         ]
         print("BUILD", shlex.join(command), flush=True)
         result = subprocess.run(command)

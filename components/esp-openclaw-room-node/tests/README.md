@@ -130,8 +130,32 @@ lifecycle. The isolated pthread runner provides the true concurrent admission
 and drain proof for the reusable callback boundary. The room fake copies the
 SDK's pointer-sized prepared-call binding and uses real Talk/Node/WebRTC/peer,
 capture, renderer, codec, LVGL, SAL, ESP error, console, timer and HTTP headers.
-Unreferenced board startup and physical media code are omitted by linker section
-collection. All fixtures use synthetic identities and data.
+It also uses the real ESP-IDF heap header. Unreferenced board startup and physical
+media code are omitted by linker section collection, but GCC ASan global
+registration retains the static console command table and its diagnostic
+callbacks. Those callbacks' external diagnostics, tone, Wi-Fi, heap, clock and
+`strlcpy` boundaries have correctly typed stubs that abort with the symbol name
+if executed. The real controller and Talk lifecycle remain linked and exercised.
+All fixtures use synthetic identities and data.
+
+The room runner also checks its queue fixture before running the 36 lifecycle
+cases. Allocation dimensions, item counts and byte arithmetic use `size_t`;
+allocation overflow is rejected before allocation, and copy extents are checked
+against the allocated storage. The queue regression uses the fixture's own
+helpers to check arithmetic above `UINT_MAX` and at the `SIZE_MAX` boundary
+without large allocations, then exercises actual FIFO copies, compaction, full
+queue rejection and reuse with small buffers. Separate subprocesses must abort
+on an unsupported diagnostics call and on an extent beyond allocated storage.
+`--analyze` covers the fixture and queue regression as well as the controller.
+
+The original published fixture's link failure was reproduced in a local Linux
+AArch64 container with Debian GCC 12.2.0 and ASan+UBSan. Object relocations showed
+the retention chain from `.init_array` through the ASan global metadata to the
+console `COMMANDS` table and `diagnostics_console_command`. The corrected fixture
+passed all 36 lifecycle cases and the queue/boundary checks with the same GCC,
+warning, sanitizer and section-collection flags. This is local-container host
+proof; the published PR's CI and CodeQL gates still require a new run after the
+repair is reviewed and pushed.
 
 The Node API already supplies source handle and ordered, transport-filtered
 callbacks. The room freezes its connection incarnation at admission; no Node

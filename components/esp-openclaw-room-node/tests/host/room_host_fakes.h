@@ -47,5 +47,5 @@ void host_fire_operator_timer(esp_timer_handle_t timer);
 bool host_timer_active(TimerHandle_t timer);
 
 /* strlcpy is not in POSIX C (including Darwin with strict feature macros).
- * Only the unlinked room diagnostics path needs this declaration. */
+ * Only the unsupported room diagnostics path needs this declaration. */
 size_t strlcpy(char *destination, const char *source, size_t capacity);

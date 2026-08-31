@@ -71,4 +71,9 @@ jobs:
           esp_idf_version: release-v5.5
           target: ${{ matrix.target }}
           path: ${{ matrix.path }}
-          command: idf.py reconfigure && ninja -C build -j2
+          command: |
+            idf.py reconfigure &&
+            ninja -C build -j2 &&
+            if [ "${{ matrix.name }}" = "component-test-app-build" ]; then
+              python3 ../../../esp-openclaw-talk/tests/run_host_tests.py --sanitize
+            fi

@@ -63,6 +63,93 @@ static char *duplicate_optional(const char *value)
     return value != NULL && value[0] != '\0' ? strdup(value) : NULL;
 }
 
+/* Match the Gateway's String.trim whitespace without changing UTF-8 key bytes. */
+static size_t routing_space_bytes(const unsigned char *value, size_t length)
+{
+    if (value[0] == ' ' || (value[0] >= '\t' && value[0] <= '\r')) return 1;
+    if (length >= 2 && value[0] == 0xc2 && value[1] == 0xa0) return 2;
+    if (length < 3) return 0;
+    bool space = (value[0] == 0xe1 && value[1] == 0x9a && value[2] == 0x80) ||
+        (value[0] == 0xe2 && value[1] == 0x80 &&
+         ((value[2] >= 0x80 && value[2] <= 0x8a) ||
+          value[2] == 0xa8 || value[2] == 0xa9 || value[2] == 0xaf)) ||
+        (value[0] == 0xe2 && value[1] == 0x81 && value[2] == 0x9f) ||
+        (value[0] == 0xe3 && value[1] == 0x80 && value[2] == 0x80) ||
+        (value[0] == 0xef && value[1] == 0xbb && value[2] == 0xbf);
+    return space ? 3 : 0;
+}
+
+static bool normalize_routing_value(cJSON *field)
+{
+    unsigned char *value = (unsigned char *)field->valuestring;
+    size_t length = strnlen((const char *)value, ESP_OPENCLAW_NODE_MAX_SESSION_KEY_LEN + 1U);
+    if (length > ESP_OPENCLAW_NODE_MAX_SESSION_KEY_LEN) return false;
+    size_t begin = 0;
+    size_t width;
+    while (begin < length && (width = routing_space_bytes(value + begin, length - begin)) != 0) {
+        begin += width;
+    }
+    size_t end = begin;
+    for (size_t i = begin; i < length;) {
+        width = routing_space_bytes(value + i, length - i);
+        if (width > 0) i += width;
+        else end = ++i;
+    }
+    length = end - begin;
+    memmove(value, value + begin, length);
+    for (size_t i = 0; i < length; ++i) {
+        if (value[i] >= 'A' && value[i] <= 'Z') value[i] += 'a' - 'A';
+    }
+    value[length] = '\0';
+    return true;
+}
+
+static char *resolve_default_session_key(const char *payload_json)
+{
+    cJSON *payload = payload_json != NULL ? cJSON_Parse(payload_json) : NULL;
+    cJSON *config = cJSON_GetObjectItemCaseSensitive(payload, "config");
+    cJSON *settings = cJSON_GetObjectItemCaseSensitive(config, "talk");
+    cJSON *session = cJSON_GetObjectItemCaseSensitive(config, "session");
+    cJSON *owner = cJSON_GetObjectItemCaseSensitive(settings, "agentId");
+    cJSON *main = cJSON_GetObjectItemCaseSensitive(session, "mainKey");
+    char *key = NULL;
+    bool valid = cJSON_IsObject(config) &&
+        (settings == NULL || cJSON_IsObject(settings)) &&
+        (session == NULL || cJSON_IsObject(session)) &&
+        (owner == NULL || cJSON_IsString(owner)) &&
+        (main == NULL || cJSON_IsString(main));
+    /* This decoded snapshot is ours; validate both fields before selecting any
+     * default, and retain only the final key after freeing the snapshot. */
+    if (!valid || (owner != NULL && !normalize_routing_value(owner)) ||
+        (main != NULL && !normalize_routing_value(main))) goto done;
+    const char *agent_id = owner != NULL ? owner->valuestring : NULL;
+    const char *main_key = main != NULL ? main->valuestring : NULL;
+    if (agent_id == NULL || agent_id[0] == '\0') {
+        /* Preserve the public default: the Gateway resolves a unique owner or
+         * rejects ambiguity. Never select a roster entry or omit the target. */
+        key = strdup("main");
+        goto done;
+    }
+    /* A malformed reference must not be sanitized into a different owner. */
+    size_t agent_length = strlen(agent_id);
+    if (agent_length > 64U) goto done;
+    for (size_t i = 0; i < agent_length; ++i) {
+        char byte = agent_id[i];
+        bool slug = (byte >= 'a' && byte <= 'z') || (byte >= '0' && byte <= '9') ||
+            (i > 0 && (byte == '_' || byte == '-'));
+        if (!slug) goto done;
+    }
+    const char *selected_main = main_key != NULL && main_key[0] != '\0' ? main_key : "main";
+    size_t key_length = strlen("agent:") + agent_length + 1U + strlen(selected_main);
+    if (key_length > ESP_OPENCLAW_NODE_MAX_SESSION_KEY_LEN) goto done;
+    key = malloc(key_length + 1U);
+    if (key != NULL) snprintf(key, key_length + 1U, "agent:%s:%s", agent_id, selected_main);
+
+done:
+    cJSON_Delete(payload);
+    return key;
+}
+
 static void free_offer_headers(talk_signaling_t *talk)
 {
     for (size_t i = 0; i < talk->offer_header_count; ++i) {
@@ -87,13 +174,6 @@ static void free_talk_signaling(talk_signaling_t *talk)
     free(talk->voice_session_id);
     free_offer_headers(talk);
     free(talk);
-}
-
-static void retain_talk_signaling(talk_signaling_t *talk)
-{
-    portENTER_CRITICAL(&talk->state_lock);
-    ++talk->refs;
-    portEXIT_CRITICAL(&talk->state_lock);
 }
 
 static void release_talk_signaling(talk_signaling_t *talk)
@@ -122,14 +202,25 @@ static bool retain_if_running(talk_signaling_t *talk)
     return running;
 }
 
+/* Reserve the callback's reference before enqueueing; stop may release the
+ * handle meanwhile. Immediate submission failure releases the reservation. */
+static esp_err_t request_talk_rpc(
+    talk_signaling_t *talk,
+    const char *method,
+    const char *params_json,
+    esp_openclaw_node_gateway_request_cb_t callback)
+{
+    if (!retain_if_running(talk)) return ESP_ERR_INVALID_STATE;
+    esp_err_t err = esp_openclaw_node_gateway_request(
+        talk->operator_node, method, params_json, callback, talk);
+    if (err != ESP_OK) release_talk_signaling(talk);
+    return err;
+}
+
 static char *resolve_offer_url(const char *base_url, const char *offer_url)
 {
     if (offer_url == NULL || offer_url[0] == '\0') {
         return NULL;
-    }
-    if (strncmp(offer_url, "https://", 8) == 0 ||
-        strncmp(offer_url, "http://", 7) == 0) {
-        return strdup(offer_url);
     }
     if (offer_url[0] != '/' || base_url == NULL || base_url[0] == '\0') {
         return NULL;
@@ -247,9 +338,9 @@ static bool has_gateway_control_descriptor(cJSON *payload)
 static void signal_failed(
     talk_signaling_t *talk,
     esp_openclaw_talk_setup_result_t result,
-    const char *message)
+    const char *message,
+    const char *code)
 {
-    ESP_LOGE(TAG, "%s", message);
     bool notify = false;
     portENTER_CRITICAL(&talk->state_lock);
     if (!talk->close_notified) {
@@ -258,6 +349,8 @@ static void signal_failed(
     }
     portEXIT_CRITICAL(&talk->state_lock);
     if (notify) {
+        /* Error codes are bounded; provider/configuration payloads stay private. */
+        ESP_LOGE(TAG, "%s%s%.32s", message, code != NULL ? ": " : "", code != NULL ? code : "");
         if (talk->setup_failed_cb != NULL) {
             talk->setup_failed_cb(result, talk->setup_failed_ctx);
         }
@@ -319,15 +412,15 @@ static void handle_talk_create(
         free(session_id);
         bool upgrade_required = result->ok && !gateway_control;
         if (!result->ok && result->error_code != NULL) {
-            upgrade_required = strcmp(result->error_code, "INVALID_REQUEST") == 0 ||
-                               strcmp(result->error_code, "NOT_SUPPORTED") == 0;
+            upgrade_required = strcmp(result->error_code, "NOT_SUPPORTED") == 0;
         }
         signal_failed(
             talk,
             upgrade_required
                 ? ESP_OPENCLAW_TALK_GATEWAY_UPGRADE_REQUIRED
                 : ESP_OPENCLAW_TALK_SETUP_FAILED,
-            upgrade_required ? "Gateway upgrade required" : "Talk setup failed");
+            upgrade_required ? "Gateway upgrade required" : "Talk setup failed",
+            result->ok ? NULL : result->error_code);
         release_talk_signaling(talk);
         return;
     }
@@ -354,42 +447,8 @@ static void handle_talk_create(
     release_talk_signaling(talk);
 }
 
-static int talk_signaling_start(
-    esp_peer_signaling_cfg_t *cfg,
-    esp_peer_signaling_handle_t *handle)
+static esp_err_t request_talk_create(talk_signaling_t *talk)
 {
-    if (cfg == NULL || handle == NULL || cfg->extra_cfg == NULL) {
-        return ESP_PEER_ERR_INVALID_ARG;
-    }
-    const esp_openclaw_talk_signaling_config_t *config = cfg->extra_cfg;
-    if (config->operator_node == NULL) {
-        return ESP_PEER_ERR_INVALID_ARG;
-    }
-
-    talk_signaling_t *talk = calloc(1, sizeof(*talk));
-    if (talk == NULL) {
-        return ESP_PEER_ERR_NO_MEM;
-    }
-    talk->state_lock = (portMUX_TYPE)portMUX_INITIALIZER_UNLOCKED;
-    talk->refs = 1;
-    talk->signaling = *cfg;
-    talk->operator_node = config->operator_node;
-    talk->gateway_http_base_url = duplicate_optional(config->gateway_http_base_url);
-    talk->session_key = strdup(
-        config->session_key != NULL && config->session_key[0] != '\0'
-            ? config->session_key
-            : "main");
-    talk->provider = duplicate_optional(config->provider);
-    talk->model = duplicate_optional(config->model);
-    talk->voice = duplicate_optional(config->voice);
-    talk->silence_duration_ms = config->silence_duration_ms;
-    talk->setup_failed_cb = config->setup_failed_cb;
-    talk->setup_failed_ctx = config->setup_failed_ctx;
-    if (talk->session_key == NULL) {
-        free_talk_signaling(talk);
-        return ESP_PEER_ERR_NO_MEM;
-    }
-
     cJSON *params = cJSON_CreateObject();
     cJSON_AddStringToObject(params, "mode", "realtime");
     cJSON_AddStringToObject(params, "transport", "webrtc");
@@ -416,26 +475,87 @@ static int talk_signaling_start(
         !cJSON_AddItemToArray(capabilities, gateway_control)) {
         cJSON_Delete(gateway_control);
         cJSON_Delete(params);
-        free_talk_signaling(talk);
-        return ESP_PEER_ERR_NO_MEM;
+        return ESP_ERR_NO_MEM;
     }
     char *params_json = cJSON_PrintUnformatted(params);
     cJSON_Delete(params);
-    if (params_json == NULL) {
+    if (params_json == NULL) return ESP_ERR_NO_MEM;
+    esp_err_t err = request_talk_rpc(talk, "talk.client.create", params_json, handle_talk_create);
+    free(params_json);
+    return err;
+}
+
+static void handle_talk_config(
+    esp_openclaw_node_handle_t node,
+    const esp_openclaw_node_gateway_result_t *result,
+    void *user_ctx)
+{
+    (void)node;
+    talk_signaling_t *talk = user_ctx;
+    portENTER_CRITICAL(&talk->state_lock);
+    bool stopped = talk->stopped;
+    portEXIT_CRITICAL(&talk->state_lock);
+    if (stopped) goto done;
+    if (!result->ok) {
+        signal_failed(talk, ESP_OPENCLAW_TALK_SETUP_FAILED,
+            "Talk configuration lookup failed", result->error_code);
+        goto done;
+    }
+    /* Freeze the selected key before create; close must not rediscover
+     * a new owner after configuration changes or cancellation. */
+    talk->session_key = resolve_default_session_key(result->payload_json);
+    if (talk->session_key == NULL) {
+        signal_failed(talk, ESP_OPENCLAW_TALK_SETUP_FAILED,
+            "Talk routing configuration is invalid", NULL);
+        goto done;
+    }
+    esp_err_t err = request_talk_create(talk);
+    if (err != ESP_OK) {
+        signal_failed(talk, ESP_OPENCLAW_TALK_SETUP_FAILED,
+            "Talk create request failed", esp_err_to_name(err));
+    }
+
+done:
+    release_talk_signaling(talk);
+}
+
+static int talk_signaling_start(
+    esp_peer_signaling_cfg_t *cfg,
+    esp_peer_signaling_handle_t *handle)
+{
+    if (cfg == NULL || handle == NULL || cfg->extra_cfg == NULL) {
+        return ESP_PEER_ERR_INVALID_ARG;
+    }
+    const esp_openclaw_talk_signaling_config_t *config = cfg->extra_cfg;
+    if (config->operator_node == NULL) {
+        return ESP_PEER_ERR_INVALID_ARG;
+    }
+
+    talk_signaling_t *talk = calloc(1, sizeof(*talk));
+    if (talk == NULL) {
+        return ESP_PEER_ERR_NO_MEM;
+    }
+    talk->state_lock = (portMUX_TYPE)portMUX_INITIALIZER_UNLOCKED;
+    talk->refs = 1;
+    talk->signaling = *cfg;
+    talk->operator_node = config->operator_node;
+    talk->gateway_http_base_url = duplicate_optional(config->gateway_http_base_url);
+    talk->session_key = duplicate_optional(config->session_key);
+    talk->provider = duplicate_optional(config->provider);
+    talk->model = duplicate_optional(config->model);
+    talk->voice = duplicate_optional(config->voice);
+    talk->silence_duration_ms = config->silence_duration_ms;
+    talk->setup_failed_cb = config->setup_failed_cb;
+    talk->setup_failed_ctx = config->setup_failed_ctx;
+    if (config->session_key != NULL && config->session_key[0] != '\0' && talk->session_key == NULL) {
         free_talk_signaling(talk);
         return ESP_PEER_ERR_NO_MEM;
     }
 
-    retain_talk_signaling(talk);
-    esp_err_t err = esp_openclaw_node_gateway_request(
-        talk->operator_node,
-        "talk.client.create",
-        params_json,
-        handle_talk_create,
-        talk);
-    free(params_json);
+    esp_err_t err = talk->session_key != NULL
+        ? request_talk_create(talk)
+        : request_talk_rpc(talk, "talk.config", "{\"includeSecrets\":false}", handle_talk_config);
     if (err != ESP_OK) {
-        release_talk_signaling(talk);
         release_talk_signaling(talk);
         return ESP_PEER_ERR_FAIL;
     }

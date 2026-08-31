@@ -63,6 +63,13 @@ Talk WebRTC is audio-only. A compatible Gateway must own realtime control and
 return the negotiated Gateway-control descriptor; older Gateways fail visibly
 before the room creates a peer.
 
+Session routing uses the Gateway's existing Talk configuration. On an explicit
+multi-agent Gateway, select the intended agent with `talk.agentId`; the shared
+[Talk adapter](../esp-openclaw-talk/README.md) prepares an owned main-session key
+and retains it until the call closes. No firmware-specific agent setting is
+needed, and a configuration change affects the next call rather than an active
+one.
+
 The USB REPL also exposes one local-only command with four exact forms:
 `diagnostics open`, `diagnostics close`, `diagnostics tone`, and
 `diagnostics status`. Open/close queue the modal operation onto the LVGL task;

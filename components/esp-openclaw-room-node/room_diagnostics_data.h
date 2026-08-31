@@ -25,6 +25,7 @@ typedef struct {
     room_diagnostics_capture_owner_t capture_owner;
     bool wakenet_enabled;
     uint8_t configured_volume;
+    float configured_playback_gain_db;
     uint8_t ringbuffer_free_percent;
     uint32_t feed_bytes;
     uint32_t fetch_bytes;
@@ -53,7 +54,7 @@ void room_diagnostics_audio_set_capture_mode(
     uint32_t feed_bytes,
     uint32_t fetch_bytes);
 void room_diagnostics_audio_set_capture_owner(room_diagnostics_capture_owner_t owner);
-void room_diagnostics_audio_set_volume(uint8_t volume);
+void room_diagnostics_audio_set_output(uint8_t volume, float playback_gain_db);
 void room_diagnostics_audio_record_capture_read(
     const int16_t *interleaved,
     size_t sample_count,
@@ -75,4 +76,3 @@ void room_diagnostics_audio_record_renderer_offer(
     size_t channel_count,
     size_t bytes);
 void room_diagnostics_audio_record_renderer_result(bool accepted);
-

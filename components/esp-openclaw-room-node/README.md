@@ -14,6 +14,14 @@ The audio port's input gain override is optional. Boards that set
 `configure_input_gain` also provide `input_gain_db`; otherwise shared media
 initialization preserves the codec or board default.
 
+The board-owned `playback_gain_db` is an optional 0–12 dB post-decode PCM16
+boost; zero leaves playback samples unchanged. The shared renderer applies it
+with fixed-point saturation immediately before diagnostics and I2S output.
+Compressed media is never mutated, and the boards retain their physical
+speaker-reference capture path for AEC. Samples above the remaining digital
+headroom saturate at PCM16 full scale; this is not a limiter or a guarantee
+against analog distortion. Diagnostics shows the configured volume and boost.
+
 Storage is explicitly optional. A board that supplies a canonical file root
 gets the bounded file-transfer commands and storage metrics; boards such as the
 Waveshare adapter advertise no file surface.
@@ -40,6 +48,8 @@ The local speaker test queues a 1 second, 1 kHz PCM tone through the same
 Talk playback. It is serialized against the complete Talk media lifetime and
 runs from a worker task. Its result reports queued frames and renderer
 acceptance only; the person at the device remains the audibility check.
+Its input amplitude is reduced by the inverse board gain before entering that
+same path, preserving tone level and headroom without a separate playback route.
 Diagnostics presents this test as a lightweight six-object “tone buddy” card.
 It updates on the existing 75 ms diagnostics refresh, reacts only while the
 tone is running or during its eight-tick success bounce, and does not enable
@@ -52,6 +62,13 @@ stalls, but they do not measure or promise total speech-to-response time.
 Talk WebRTC is audio-only. A compatible Gateway must own realtime control and
 return the negotiated Gateway-control descriptor; older Gateways fail visibly
 before the room creates a peer.
+
+Session routing uses the Gateway's existing Talk configuration. On an explicit
+multi-agent Gateway, select the intended agent with `talk.agentId`; the shared
+[Talk adapter](../esp-openclaw-talk/README.md) prepares an owned main-session key
+and retains it until the call closes. No firmware-specific agent setting is
+needed, and a configuration change affects the next call rather than an active
+one.
 
 The USB REPL also exposes one local-only command with four exact forms:
 `diagnostics open`, `diagnostics close`, `diagnostics tone`, and

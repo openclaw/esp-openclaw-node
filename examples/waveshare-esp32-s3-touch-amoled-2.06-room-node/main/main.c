@@ -241,6 +241,7 @@ void app_main(void)
             .record_channels = 2,
             .channel_mask = 0x3,
             .playback_volume = 100,
+            .playback_gain_db = 6.0f,
             .configure_input_gain = true,
             .input_gain_db = 30.0f,
         },

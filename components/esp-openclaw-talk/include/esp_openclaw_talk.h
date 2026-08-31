@@ -26,11 +26,14 @@ typedef void (*esp_openclaw_talk_setup_failed_cb_t)(
 
 /** Configuration copied by the signaling implementation at start. */
 typedef struct {
-    /** Ready operator-role client with operator.talk scope. */
+    /** Ready operator client with operator.talk; default routing also needs operator.read. */
     esp_openclaw_node_handle_t operator_node;
     /** HTTP(S) Gateway origin used when talk.client.create returns a relative offer URL. */
     const char *gateway_http_base_url;
-    /** Agent session key; defaults to `main`. */
+    /**
+     * Explicit key, or NULL/empty to resolve Gateway Talk routing.
+     * Without a configured Talk owner, retain the Gateway-resolved `main` default.
+     */
     const char *session_key;
     /** Optional provider override; omit to use Gateway Talk configuration. */
     const char *provider;

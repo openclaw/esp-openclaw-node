@@ -23,6 +23,7 @@
 #include "room_face.h"
 #include "room_board.h"
 #include "room_latency_policy.h"
+#include "room_pcm_gain.h"
 
 #define TAG "room_media"
 
@@ -71,6 +72,9 @@ static void room_afe_wake(void *ctx)
  */
 static audio_render_handle_t render_tap_target;
 static uint8_t render_tap_channels = 2;
+static uint8_t render_tap_bits_per_sample;
+static uint32_t render_gain_q12 = ROOM_PCM_GAIN_UNITY_Q12;
+static uint32_t tone_input_gain_q12 = ROOM_PCM_GAIN_UNITY_Q12;
 
 static audio_render_handle_t render_tap_init(void *cfg, int cfg_size)
 {
@@ -81,15 +85,24 @@ static audio_render_handle_t render_tap_init(void *cfg, int cfg_size)
 
 static int render_tap_open(audio_render_handle_t render, av_render_audio_frame_info_t *info)
 {
-    if (info != NULL && info->channel > 0) render_tap_channels = info->channel;
+    if (info != NULL) {
+        if (info->channel > 0) render_tap_channels = info->channel;
+        render_tap_bits_per_sample = info->bits_per_sample;
+    }
     return audio_render_open(render, info);
 }
 
 static int render_tap_write(audio_render_handle_t render, av_render_audio_frame_t *frame)
 {
     if (frame != NULL && frame->data != NULL && frame->size >= 2) {
-        const int16_t *samples = (const int16_t *)frame->data;
+        int16_t *samples = (int16_t *)frame->data;
         size_t count = (size_t)frame->size / 2;
+        /* Pinned av_render queues a PCM copy and consumes each write once,
+         * including errors; pause happens before this tap. Never boost the
+         * decoder input or retain this buffer for replay. */
+        if (render_tap_bits_per_sample == 16) {
+            room_pcm_gain_apply_s16(samples, count, render_gain_q12);
+        }
         room_diagnostics_audio_record_renderer_offer(
             samples, count, render_tap_channels, (size_t)frame->size);
         room_audio_diagnostics_snapshot_t snapshot = {0};
@@ -145,7 +158,8 @@ static audio_render_handle_t room_media_wrap_render(audio_render_handle_t inner)
         },
     };
     audio_render_handle_t tap = audio_render_alloc_handle(&tap_cfg);
-    return tap != NULL ? tap : inner;
+    if (tap == NULL) audio_render_free_handle(inner);
+    return tap;
 }
 
 static esp_err_t room_audio_codecs_init(
@@ -248,6 +262,12 @@ static void test_tone_task(void *arg)
             tone_pcm[i * 2] = sample;
             tone_pcm[i * 2 + 1] = sample;
         }
+        /* Preserve the original test-tone output level while leaving its PCM
+         * enough headroom for the canonical renderer gain. */
+        room_pcm_gain_apply_s16(
+            tone_pcm,
+            sizeof(tone_pcm) / sizeof(tone_pcm[0]),
+            tone_input_gain_q12);
         av_render_audio_data_t data = {
             .pts = (uint32_t)frame_index * TONE_FRAME_MS,
             .data = (uint8_t *)tone_pcm,
@@ -290,6 +310,20 @@ done:
 
 esp_err_t room_media_init(room_wake_callback_t callback, void *ctx)
 {
+    const esp_openclaw_room_node_config_t *board = room_board_config();
+    ESP_RETURN_ON_FALSE(board != NULL, ESP_ERR_INVALID_STATE, TAG, "board not bound");
+    ESP_RETURN_ON_FALSE(
+        board->audio.playback_gain_db >= 0.0f &&
+            board->audio.playback_gain_db <= ESP_OPENCLAW_ROOM_PLAYBACK_GAIN_MAX_DB,
+        ESP_ERR_INVALID_ARG,
+        TAG,
+        "playback gain must be 0..%.1f dB",
+        ESP_OPENCLAW_ROOM_PLAYBACK_GAIN_MAX_DB);
+    render_gain_q12 = room_pcm_gain_q12_from_db(board->audio.playback_gain_db);
+    tone_input_gain_q12 =
+        (ROOM_PCM_GAIN_UNITY_Q12 * ROOM_PCM_GAIN_UNITY_Q12 + render_gain_q12 / 2U) /
+        render_gain_q12;
+
     wake_callback = callback;
     wake_callback_ctx = ctx;
     media_owner_gate = xSemaphoreCreateBinary();
@@ -302,7 +336,6 @@ esp_err_t room_media_init(room_wake_callback_t callback, void *ctx)
         room_audio_codecs_init(&record, &playback),
         TAG,
         "audio codec init");
-    const esp_openclaw_room_node_config_t *board = room_board_config();
     if (board->audio.configure_input_gain) {
         int input_gain_result = esp_codec_dev_set_in_gain(record, board->audio.input_gain_db);
         ESP_RETURN_ON_FALSE(
@@ -318,7 +351,14 @@ esp_err_t room_media_init(room_wake_callback_t callback, void *ctx)
     if (esp_codec_dev_set_out_vol(playback, board->audio.playback_volume) != 0) {
         return ESP_FAIL;
     }
-    room_diagnostics_audio_set_volume(board->audio.playback_volume);
+    room_diagnostics_audio_set_output(
+        board->audio.playback_volume,
+        board->audio.playback_gain_db);
+    ESP_LOGI(
+        TAG,
+        "configured playback volume %u%% with +%.1f dB post-decode gain",
+        board->audio.playback_volume,
+        board->audio.playback_gain_db);
 
     room_capture_audio_aec_src_cfg_t source_cfg = {
         .mic_layout = board->audio.afe_layout,
@@ -376,8 +416,10 @@ esp_err_t room_media_init(room_wake_callback_t callback, void *ctx)
     if (renderer == NULL) {
         return ESP_ERR_NO_MEM;
     }
+    renderer = room_media_wrap_render(renderer);
+    if (renderer == NULL) return ESP_ERR_NO_MEM;
     av_render_cfg_t player_cfg = {
-        .audio_render = room_media_wrap_render(renderer),
+        .audio_render = renderer,
         /* Queue ownership contract: these pinned WebRTC standard capacities
          * start playback immediately while bounding stale audio under stalls.
          * There is no cache, fallback, or additional playback path. */

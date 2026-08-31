@@ -38,10 +38,11 @@ void room_diagnostics_audio_set_capture_owner(room_diagnostics_capture_owner_t o
     taskEXIT_CRITICAL(&audio_mux);
 }
 
-void room_diagnostics_audio_set_volume(uint8_t volume)
+void room_diagnostics_audio_set_output(uint8_t volume, float playback_gain_db)
 {
     taskENTER_CRITICAL(&audio_mux);
     audio_snapshot.configured_volume = volume;
+    audio_snapshot.configured_playback_gain_db = playback_gain_db;
     taskEXIT_CRITICAL(&audio_mux);
 }
 

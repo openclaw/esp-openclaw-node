@@ -394,7 +394,6 @@ static void start_talk_once(void)
     esp_openclaw_talk_signaling_config_t signaling = {
         .operator_node = signaling_client,
         .gateway_http_base_url = http_base,
-        .session_key = "main",
         .provider = CONFIG_OPENCLAW_ROOM_TALK_PROVIDER,
         .model = CONFIG_OPENCLAW_ROOM_TALK_MODEL,
         .voice = CONFIG_OPENCLAW_ROOM_TALK_VOICE,

@@ -48,10 +48,32 @@ jobs:
             -o /tmp/room_file_validation_test
           /tmp/room_file_validation_test
 
+      - name: Host room audio tests
+        if: matrix.name == 'component-test-app-build'
+        run: |
+          python3 components/esp-openclaw-room-node/tests/test_room_audio_port_compat.py
+          cc -std=c11 -Wall -Wextra -Werror \
+            -I components/esp-openclaw-room-node \
+            components/esp-openclaw-room-node/room_diagnostics_metrics.c \
+            components/esp-openclaw-room-node/tests/test_room_diagnostics_metrics.c \
+            -o /tmp/room_diagnostics_metrics_test
+          /tmp/room_diagnostics_metrics_test
+          cc -std=c11 -Wall -Wextra -Werror \
+            -I components/esp-openclaw-room-node \
+            components/esp-openclaw-room-node/room_pcm_gain.c \
+            components/esp-openclaw-room-node/tests/test_room_pcm_gain.c \
+            -lm -o /tmp/room_pcm_gain_test
+          /tmp/room_pcm_gain_test
+
       - name: Build
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: release-v5.5
           target: ${{ matrix.target }}
           path: ${{ matrix.path }}
-          command: idf.py reconfigure && ninja -C build -j2
+          command: |
+            idf.py reconfigure &&
+            ninja -C build -j2 &&
+            if [ "${{ matrix.name }}" = "component-test-app-build" ]; then
+              python3 ../../../esp-openclaw-talk/tests/run_host_tests.py --sanitize
+            fi

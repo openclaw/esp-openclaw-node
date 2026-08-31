@@ -285,7 +285,7 @@ static void update_slow_text(
     snprintf(
         audio_text_buffer,
         sizeof(audio_text_buffer),
-        "Capture owner: %s   AFE: %s   WakeNet: %s   volume: %u%%\n"
+        "Capture owner: %s   AFE: %s   WakeNet: %s   volume: %u%%   gain: +%.1f dB\n"
         "Raw reference: %u/100   AFE ring free: %u%%   feed/fetch: %" PRIu32 "/%" PRIu32 " B\n"
         "Capture read ok/err: %" PRIu64 "/%" PRIu64 " (last %s)\n"
         "AFE feed ok/err: %" PRIu64 "/%" PRIu64
@@ -298,6 +298,7 @@ static void update_slow_text(
         afe_mode_name(audio->afe_mode),
         audio->wakenet_enabled ? "on" : "off",
         audio->configured_volume,
+        audio->configured_playback_gain_db,
         audio->playback_reference_level,
         audio->ringbuffer_free_percent,
         audio->feed_bytes,

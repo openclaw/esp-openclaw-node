@@ -77,3 +77,25 @@ tone queues the same asynchronous speaker test as the button. These are not
 OpenClaw node commands and require no gateway allowlist entries. The open and
 close commands report that work was queued; `diagnostics status` reports the
 state after the LVGL task has executed it.
+
+Talk admission freezes the authoritative operator handle, its authenticated
+connection incarnation, the Gateway origin, and a monotonically increasing
+call generation before the wake/command worker or media gate can run. Losing
+that operator, deliberately rebinding its Gateway, or receiving an exactly
+matched Gateway `session.closed` event cancels the admitted call. Reconnecting
+never revives it. A node-role disconnect alone keeps the quiet reconnect path;
+recoverable final errors do not terminate Talk.
+
+All stop causes share a durable cancellation latch and a one-slot coalesced
+worker wakeup. Media callbacks, setup failures, and per-call timeout IDs carry
+the generation, so a reused WebRTC address cannot give an old action authority
+over a replacement call. Teardown seals/drains the reusable Talk callback owner
+before SDK close, restores ambient capture, releases the media gate, and updates
+UI before making another call admissible. It runs only on the worker, including
+canceled starts and failed setup. The operator Node is reused across reconnects
+and remains alive for pending RPC cleanup.
+
+The source-only [lifetime tests](tests/README.md) exercise these boundaries with
+synthetic transports. Physical operator-control-loss reproduction and acoustic
+teardown proof remain outstanding; host results do not establish audible
+continuation or hardware behavior.

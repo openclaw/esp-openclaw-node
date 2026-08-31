@@ -13,7 +13,7 @@ static struct {
     int line;
 } tests[128];
 static size_t test_count;
-unsigned talk_host_critical_depth;
+_Thread_local unsigned talk_host_critical_depth;
 unsigned talk_host_error_count;
 
 void talk_host_log_error(const char *tag, const char *format, ...)

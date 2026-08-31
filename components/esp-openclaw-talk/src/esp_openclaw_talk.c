@@ -15,6 +15,7 @@
 #include "esp_http_client.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #if CONFIG_MBEDTLS_CERTIFICATE_BUNDLE
 #include "esp_crt_bundle.h"
 #endif
@@ -29,7 +30,7 @@ typedef struct {
     char *value;
 } offer_header_t;
 
-typedef struct {
+typedef struct esp_openclaw_talk_call {
     esp_peer_signaling_cfg_t signaling;
     esp_openclaw_node_handle_t operator_node;
     char *gateway_http_base_url;
@@ -47,6 +48,13 @@ typedef struct {
     size_t offer_header_count;
     portMUX_TYPE state_lock;
     size_t refs;
+    size_t dispatches;
+    SemaphoreHandle_t drained;
+    esp_openclaw_talk_closed_cb_t closed_cb;
+    void *closed_ctx;
+    bool started;
+    bool signaling_released;
+    bool sealed;
     bool stopped;
     bool close_notified;
     bool gateway_owned;
@@ -173,7 +181,52 @@ static void free_talk_signaling(talk_signaling_t *talk)
     free(talk->client_secret);
     free(talk->voice_session_id);
     free_offer_headers(talk);
+    if (talk->drained != NULL) vSemaphoreDelete(talk->drained);
     free(talk);
+}
+
+/* Admission and sealing share the same lock. A dispatch protects borrowed SDK
+ * and app contexts; RPC/HTTP references protect only this owner allocation. */
+static void release_talk_signaling(talk_signaling_t *talk);
+
+static bool dispatch_enter(talk_signaling_t *talk)
+{
+    portENTER_CRITICAL(&talk->state_lock);
+    bool admitted = !talk->sealed;
+    if (admitted) {
+        ++talk->dispatches;
+        ++talk->refs;
+    }
+    portEXIT_CRITICAL(&talk->state_lock);
+    return admitted;
+}
+
+static void dispatch_exit(talk_signaling_t *talk)
+{
+    portENTER_CRITICAL(&talk->state_lock);
+    bool drained = --talk->dispatches == 0 && talk->sealed;
+    portEXIT_CRITICAL(&talk->state_lock);
+    if (drained) xSemaphoreGive(talk->drained);
+    release_talk_signaling(talk);
+}
+
+void esp_openclaw_talk_call_cancel(esp_openclaw_talk_call_handle_t talk)
+{
+    if (talk == NULL) return;
+    portENTER_CRITICAL(&talk->state_lock);
+    talk->sealed = true;
+    talk->stopped = true;
+    portEXIT_CRITICAL(&talk->state_lock);
+}
+
+void esp_openclaw_talk_call_quiesce(esp_openclaw_talk_call_handle_t talk)
+{
+    if (talk == NULL) return;
+    esp_openclaw_talk_call_cancel(talk);
+    portENTER_CRITICAL(&talk->state_lock);
+    bool pending = talk->dispatches != 0;
+    portEXIT_CRITICAL(&talk->state_lock);
+    if (pending) xSemaphoreTake(talk->drained, portMAX_DELAY);
 }
 
 static void release_talk_signaling(talk_signaling_t *talk)
@@ -188,6 +241,18 @@ static void release_talk_signaling(talk_signaling_t *talk)
     if (free_now) {
         free_talk_signaling(talk);
     }
+}
+
+void esp_openclaw_talk_call_retain(esp_openclaw_talk_call_handle_t talk)
+{
+    portENTER_CRITICAL(&talk->state_lock);
+    ++talk->refs;
+    portEXIT_CRITICAL(&talk->state_lock);
+}
+
+void esp_openclaw_talk_call_release(esp_openclaw_talk_call_handle_t talk)
+{
+    if (talk != NULL) release_talk_signaling(talk);
 }
 
 static bool retain_if_running(talk_signaling_t *talk)
@@ -210,10 +275,12 @@ static esp_err_t request_talk_rpc(
     const char *params_json,
     esp_openclaw_node_gateway_request_cb_t callback)
 {
-    if (!retain_if_running(talk)) return ESP_ERR_INVALID_STATE;
+    if (!dispatch_enter(talk)) return ESP_ERR_INVALID_STATE;
+    esp_openclaw_talk_call_retain(talk);
     esp_err_t err = esp_openclaw_node_gateway_request(
         talk->operator_node, method, params_json, callback, talk);
     if (err != ESP_OK) release_talk_signaling(talk);
+    dispatch_exit(talk);
     return err;
 }
 
@@ -319,6 +386,11 @@ static char *duplicate_voice_session_id(cJSON *value)
         return NULL;
     }
     size_t len = strlen(value->valuestring);
+    for (size_t i = 0; i < len; ++i) {
+        unsigned char ch = (unsigned char)value->valuestring[i];
+        if (!((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+              (ch >= '0' && ch <= '9') || ch == '_' || ch == '-')) return NULL;
+    }
     return len > 0 && len <= MAX_VOICE_SESSION_ID_BYTES
         ? strdup(value->valuestring)
         : NULL;
@@ -341,6 +413,7 @@ static void signal_failed(
     const char *message,
     const char *code)
 {
+    if (!dispatch_enter(talk)) return;
     bool notify = false;
     portENTER_CRITICAL(&talk->state_lock);
     if (!talk->close_notified) {
@@ -354,9 +427,13 @@ static void signal_failed(
         if (talk->setup_failed_cb != NULL) {
             talk->setup_failed_cb(result, talk->setup_failed_ctx);
         }
-        if (talk->signaling.on_close != NULL) {
-            talk->signaling.on_close(talk->signaling.ctx);
-        }
+    }
+    dispatch_exit(talk);
+    /* A failure callback may have canceled the call. Admit each SDK callback
+     * separately so it cannot reopen the peer after that cancellation. */
+    if (notify && dispatch_enter(talk)) {
+        if (talk->signaling.on_close != NULL) talk->signaling.on_close(talk->signaling.ctx);
+        dispatch_exit(talk);
     }
 }
 
@@ -398,8 +475,6 @@ static void handle_talk_create(
             talk->gateway_http_base_url,
             offer_url->valuestring);
         talk->client_secret = duplicate_optional(client_secret->valuestring);
-        talk->voice_session_id = session_id;
-        session_id = NULL;
         valid = talk->offer_url != NULL && talk->client_secret != NULL &&
                 copy_offer_headers(talk, offer_headers);
     }
@@ -408,7 +483,7 @@ static void handle_talk_create(
         close_voice_session(
             talk->operator_node,
             talk->session_key,
-            session_id != NULL ? session_id : talk->voice_session_id);
+            session_id);
         free(session_id);
         bool upgrade_required = result->ok && !gateway_control;
         if (!result->ok && result->error_code != NULL) {
@@ -426,6 +501,7 @@ static void handle_talk_create(
     }
 
     portENTER_CRITICAL(&talk->state_lock);
+    talk->voice_session_id = session_id;
     bool stopped = talk->stopped;
     if (!stopped) {
         talk->gateway_owned = true;
@@ -438,11 +514,15 @@ static void handle_talk_create(
     }
 
     esp_peer_signaling_ice_info_t ice_info = {.is_initiator = true};
-    if (talk->signaling.on_ice_info != NULL) {
-        talk->signaling.on_ice_info(&ice_info, talk->signaling.ctx);
+    if (dispatch_enter(talk)) {
+        if (talk->signaling.on_ice_info != NULL) {
+            talk->signaling.on_ice_info(&ice_info, talk->signaling.ctx);
+        }
+        dispatch_exit(talk);
     }
-    if (talk->signaling.on_connected != NULL) {
-        talk->signaling.on_connected(talk->signaling.ctx);
+    if (dispatch_enter(talk)) {
+        if (talk->signaling.on_connected != NULL) talk->signaling.on_connected(talk->signaling.ctx);
+        dispatch_exit(talk);
     }
     release_talk_signaling(talk);
 }
@@ -519,25 +599,20 @@ done:
     release_talk_signaling(talk);
 }
 
-static int talk_signaling_start(
-    esp_peer_signaling_cfg_t *cfg,
-    esp_peer_signaling_handle_t *handle)
+esp_err_t esp_openclaw_talk_call_prepare(
+    const esp_openclaw_talk_signaling_config_t *config,
+    esp_openclaw_talk_call_handle_t *out_call)
 {
-    if (cfg == NULL || handle == NULL || cfg->extra_cfg == NULL) {
-        return ESP_PEER_ERR_INVALID_ARG;
-    }
-    const esp_openclaw_talk_signaling_config_t *config = cfg->extra_cfg;
-    if (config->operator_node == NULL) {
-        return ESP_PEER_ERR_INVALID_ARG;
-    }
+    if (config == NULL || out_call == NULL || config->operator_node == NULL) return ESP_ERR_INVALID_ARG;
+    *out_call = NULL;
 
     talk_signaling_t *talk = calloc(1, sizeof(*talk));
     if (talk == NULL) {
-        return ESP_PEER_ERR_NO_MEM;
+        return ESP_ERR_NO_MEM;
     }
     talk->state_lock = (portMUX_TYPE)portMUX_INITIALIZER_UNLOCKED;
     talk->refs = 1;
-    talk->signaling = *cfg;
+    talk->drained = xSemaphoreCreateBinary();
     talk->operator_node = config->operator_node;
     talk->gateway_http_base_url = duplicate_optional(config->gateway_http_base_url);
     talk->session_key = duplicate_optional(config->session_key);
@@ -547,10 +622,45 @@ static int talk_signaling_start(
     talk->silence_duration_ms = config->silence_duration_ms;
     talk->setup_failed_cb = config->setup_failed_cb;
     talk->setup_failed_ctx = config->setup_failed_ctx;
-    if (config->session_key != NULL && config->session_key[0] != '\0' && talk->session_key == NULL) {
+    if (talk->drained == NULL ||
+        (config->gateway_http_base_url != NULL && config->gateway_http_base_url[0] != '\0' && talk->gateway_http_base_url == NULL) ||
+        (config->session_key != NULL && config->session_key[0] != '\0' && talk->session_key == NULL) ||
+        (config->provider != NULL && config->provider[0] != '\0' && talk->provider == NULL) ||
+        (config->model != NULL && config->model[0] != '\0' && talk->model == NULL) ||
+        (config->voice != NULL && config->voice[0] != '\0' && talk->voice == NULL)) {
         free_talk_signaling(talk);
-        return ESP_PEER_ERR_NO_MEM;
+        return ESP_ERR_NO_MEM;
     }
+    *out_call = talk;
+    return ESP_OK;
+}
+
+esp_err_t esp_openclaw_talk_call_set_closed_handler(
+    esp_openclaw_talk_call_handle_t talk, esp_openclaw_talk_closed_cb_t cb, void *ctx)
+{
+    if (talk == NULL) return ESP_ERR_INVALID_ARG;
+    portENTER_CRITICAL(&talk->state_lock);
+    bool valid = !talk->started && !talk->stopped;
+    if (valid) {
+        talk->closed_cb = cb;
+        talk->closed_ctx = ctx;
+    }
+    portEXIT_CRITICAL(&talk->state_lock);
+    return valid ? ESP_OK : ESP_ERR_INVALID_STATE;
+}
+
+static int start_prepared(talk_signaling_t *talk, esp_peer_signaling_cfg_t *cfg,
+    esp_peer_signaling_handle_t *handle)
+{
+    portENTER_CRITICAL(&talk->state_lock);
+    bool valid = !talk->started && !talk->stopped;
+    if (valid) {
+        talk->started = true;
+        talk->signaling = *cfg;
+        ++talk->refs; /* SDK signaling handle, separate from the prepared owner. */
+    }
+    portEXIT_CRITICAL(&talk->state_lock);
+    if (!valid) return ESP_PEER_ERR_FAIL;
 
     esp_err_t err = talk->session_key != NULL
         ? request_talk_create(talk)
@@ -561,6 +671,72 @@ static int talk_signaling_start(
     }
     *handle = talk;
     return ESP_PEER_ERR_NONE;
+}
+
+static int talk_signaling_start(esp_peer_signaling_cfg_t *cfg, esp_peer_signaling_handle_t *handle)
+{
+    if (cfg == NULL || handle == NULL || cfg->extra_cfg == NULL) return ESP_PEER_ERR_INVALID_ARG;
+    talk_signaling_t *talk = NULL;
+    esp_err_t err = esp_openclaw_talk_call_prepare(cfg->extra_cfg, &talk);
+    if (err != ESP_OK) return err == ESP_ERR_NO_MEM ? ESP_PEER_ERR_NO_MEM : ESP_PEER_ERR_INVALID_ARG;
+    int result = start_prepared(talk, cfg, handle);
+    release_talk_signaling(talk);
+    return result;
+}
+
+static int prepared_signaling_start(esp_peer_signaling_cfg_t *cfg, esp_peer_signaling_handle_t *handle)
+{
+    if (cfg == NULL || handle == NULL || cfg->extra_cfg == NULL ||
+        cfg->extra_size != (int)sizeof(esp_openclaw_talk_call_handle_t)) return ESP_PEER_ERR_INVALID_ARG;
+    talk_signaling_t *talk = *(esp_openclaw_talk_call_handle_t *)cfg->extra_cfg;
+    return talk != NULL ? start_prepared(talk, cfg, handle) : ESP_PEER_ERR_INVALID_ARG;
+}
+
+/* cJSON accepts duplicate keys. Ambiguous identity envelopes are not authority. */
+static cJSON *unique_field(cJSON *object, const char *name)
+{
+    if (!cJSON_IsObject(object)) return NULL;
+    cJSON *found = NULL;
+    cJSON *entry = NULL;
+    cJSON_ArrayForEach(entry, object) {
+        if (entry->string != NULL && strcmp(entry->string, name) == 0) {
+            if (found != NULL) return NULL;
+            found = entry;
+        }
+    }
+    return found;
+}
+
+void esp_openclaw_talk_call_gateway_event(
+    esp_openclaw_talk_call_handle_t talk, esp_openclaw_node_handle_t source,
+    const char *event, const char *payload_json)
+{
+    if (talk == NULL || source != talk->operator_node || event == NULL ||
+        strcmp(event, "talk.event") != 0 || payload_json == NULL) return;
+    /* Embedded JSON NULs lose their suffix in cJSON's C-string API. */
+    if (strstr(payload_json, "\\u0000") != NULL) return;
+    cJSON *payload = cJSON_ParseWithOpts(payload_json, NULL, true);
+    cJSON *outer = unique_field(payload, "voiceSessionId");
+    cJSON *nested = unique_field(payload, "talkEvent");
+    cJSON *inner = unique_field(nested, "sessionId");
+    cJSON *type = unique_field(nested, "type");
+    bool terminal = cJSON_IsObject(payload) && cJSON_IsObject(nested) &&
+        cJSON_IsString(outer) && cJSON_IsString(inner) && cJSON_IsString(type) &&
+        strcmp(type->valuestring, "session.closed") == 0 &&
+        strcmp(outer->valuestring, inner->valuestring) == 0;
+    if (terminal && dispatch_enter(talk)) {
+        portENTER_CRITICAL(&talk->state_lock);
+        bool matches = !talk->stopped && talk->voice_session_id != NULL &&
+            strcmp(outer->valuestring, talk->voice_session_id) == 0;
+        if (matches) {
+            talk->stopped = true;
+            talk->sealed = true;
+        }
+        portEXIT_CRITICAL(&talk->state_lock);
+        if (matches && talk->closed_cb != NULL) talk->closed_cb(talk->closed_ctx);
+        dispatch_exit(talk);
+    }
+    cJSON_Delete(payload);
 }
 
 static esp_err_t http_event_handler(esp_http_client_event_t *event)
@@ -651,9 +827,11 @@ static int exchange_sdp(talk_signaling_t *talk, const char *sdp)
         .data = (uint8_t *)response.data,
         .size = (int)response.len,
     };
-    int callback_result = talk->signaling.on_msg != NULL
-        ? talk->signaling.on_msg(&answer, talk->signaling.ctx)
-        : ESP_PEER_ERR_NONE;
+    int callback_result = ESP_PEER_ERR_NONE;
+    if (dispatch_enter(talk)) {
+        if (talk->signaling.on_msg != NULL) callback_result = talk->signaling.on_msg(&answer, talk->signaling.ctx);
+        dispatch_exit(talk);
+    }
     free(response.data);
     return callback_result;
 }
@@ -673,7 +851,10 @@ static int talk_signaling_send_msg(
         release_talk_signaling(talk);
         return ESP_PEER_ERR_NONE;
     }
-    if (message->type != ESP_PEER_SIGNALING_MSG_SDP || !talk->gateway_owned ||
+    portENTER_CRITICAL(&talk->state_lock);
+    bool owned = talk->gateway_owned;
+    portEXIT_CRITICAL(&talk->state_lock);
+    if (message->type != ESP_PEER_SIGNALING_MSG_SDP || !owned ||
         talk->offer_url == NULL ||
         talk->client_secret == NULL) {
         release_talk_signaling(talk);
@@ -707,15 +888,18 @@ static int talk_signaling_stop(esp_peer_signaling_handle_t handle)
         return ESP_PEER_ERR_INVALID_ARG;
     }
     portENTER_CRITICAL(&talk->state_lock);
-    if (talk->stopped) {
+    if (talk->signaling_released) {
         portEXIT_CRITICAL(&talk->state_lock);
         return ESP_PEER_ERR_FAIL;
     }
+    talk->signaling_released = true;
+    bool notify = !talk->close_notified && !talk->sealed;
     talk->stopped = true;
-    bool notify = !talk->close_notified;
+    talk->sealed = true;
     bool close = talk->gateway_owned;
     talk->close_notified = true;
     portEXIT_CRITICAL(&talk->state_lock);
+    esp_openclaw_talk_call_quiesce(talk);
     if (close) {
         close_voice_session(talk->operator_node, talk->session_key, talk->voice_session_id);
     }
@@ -730,6 +914,16 @@ const esp_peer_signaling_impl_t *esp_openclaw_talk_signaling_impl(void)
 {
     static const esp_peer_signaling_impl_t implementation = {
         .start = talk_signaling_start,
+        .send_msg = talk_signaling_send_msg,
+        .stop = talk_signaling_stop,
+    };
+    return &implementation;
+}
+
+const esp_peer_signaling_impl_t *esp_openclaw_talk_call_signaling_impl(void)
+{
+    static const esp_peer_signaling_impl_t implementation = {
+        .start = prepared_signaling_start,
         .send_msg = talk_signaling_send_msg,
         .stop = talk_signaling_stop,
     };

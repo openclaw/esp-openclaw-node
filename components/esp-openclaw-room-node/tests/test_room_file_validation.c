@@ -49,6 +49,20 @@ int main(void)
 
     assert(!room_file_mutation_allowed(true));
     assert(room_file_mutation_allowed(false));
+
+    char parent[16];
+    memset(parent, 'X', sizeof(parent));
+    memcpy(parent, "/sd", 4);
+    assert(room_file_parent_walk_start(parent, "/sd") == NULL);
+    assert(room_file_parent_walk_start(NULL, "/sd") == NULL);
+    assert(room_file_parent_walk_start(parent, NULL) == NULL);
+
+    memset(parent, 'X', sizeof(parent));
+    memcpy(parent, "/sd/a/b", 8);
+    char *walk = room_file_parent_walk_start(parent, "/sd");
+    assert(walk == parent + 4);
+    assert(*walk == 'a');
+
     puts("room file validation tests passed");
     return 0;
 }

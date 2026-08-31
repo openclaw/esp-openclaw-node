@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Refresh both room nodes to ESP-SR 2.5.2 for the upstream WakeNet and direction-of-arrival improvements.
 - Update ESP-IDF component dependencies and the CI checkout action while preserving the vendored WebRTC stack and Tab5 firmware compatibility pins.
 - Require Gateway-owned realtime control for room Talk and fail visibly before peer creation when the Gateway contract is unavailable.
 - Add authoritative Gateway URI inspection and bound assembled inbound WebSocket messages to 2 MiB by default.

@@ -38,7 +38,7 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Host file validation tests
+      - name: Host unit tests
         if: matrix.name == 'component-test-app-build'
         run: |
           cc -std=c11 -Wall -Wextra -Werror \
@@ -47,6 +47,12 @@ jobs:
             components/esp-openclaw-room-node/tests/test_room_file_validation.c \
             -o /tmp/room_file_validation_test
           /tmp/room_file_validation_test
+          cc -std=c11 -Wall -Wextra -Werror \
+            -I components/esp-openclaw-room-node \
+            components/esp-openclaw-room-node/room_diagnostics_metrics.c \
+            components/esp-openclaw-room-node/tests/test_room_diagnostics_metrics.c \
+            -lm -o /tmp/room_diagnostics_metrics_test
+          /tmp/room_diagnostics_metrics_test
 
       - name: Host room audio tests
         if: matrix.name == 'component-test-app-build'
@@ -68,7 +74,8 @@ jobs:
       - name: Build
         uses: espressif/esp-idf-ci-action@v1
         with:
-          esp_idf_version: release-v5.5
+          # Match the Tab5 manifest's exact framework requirement.
+          esp_idf_version: v5.5.5
           target: ${{ matrix.target }}
           path: ${{ matrix.path }}
           command: |

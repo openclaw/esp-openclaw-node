@@ -13,6 +13,40 @@ typedef enum {
     ROOM_UI_SETUP,
 } room_ui_state_t;
 
+typedef enum {
+    ROOM_UI_WIFI_STARTING = 0,
+    ROOM_UI_WIFI_UNCONFIGURED,
+    ROOM_UI_WIFI_CONNECTING,
+    ROOM_UI_WIFI_CONNECTED,
+    ROOM_UI_WIFI_OFFLINE,
+    ROOM_UI_WIFI_UNAVAILABLE,
+} room_ui_wifi_state_t;
+
+typedef enum {
+    ROOM_UI_GATEWAY_STARTING = 0,
+    ROOM_UI_GATEWAY_CONNECTING,
+    ROOM_UI_GATEWAY_CONNECTED,
+    ROOM_UI_GATEWAY_OFFLINE,
+    ROOM_UI_GATEWAY_NO_SESSION,
+} room_ui_gateway_state_t;
+
+typedef enum {
+    ROOM_UI_TALK_STARTING = 0,
+    ROOM_UI_TALK_UNAVAILABLE,
+    ROOM_UI_TALK_WAITING,
+    ROOM_UI_TALK_NO_SESSION,
+    ROOM_UI_TALK_READY,
+    ROOM_UI_TALK_CONNECTING,
+    ROOM_UI_TALK_ACTIVE,
+    ROOM_UI_TALK_STOPPING,
+} room_ui_talk_state_t;
+
+typedef struct {
+    room_ui_wifi_state_t wifi;
+    room_ui_gateway_state_t gateway;
+    room_ui_talk_state_t talk;
+} room_ui_facts_t;
+
 typedef struct {
     room_ui_state_t state;
     bool diagnostics_open;
@@ -22,6 +56,8 @@ typedef struct {
 
 void room_ui_init(void);
 void room_ui_set(room_ui_state_t state, const char *detail);
+/** Store one coherent snapshot without taking the display lock. Refresh after releasing owner locks. */
+void room_ui_store_facts(const room_ui_facts_t *facts);
 /** Repaint the most recently set state, e.g. after leaving canvas mode. */
 void room_ui_refresh(void);
 /** Show the idle face for `show_ms` (tap wake-up or agent face.set outside a call). */

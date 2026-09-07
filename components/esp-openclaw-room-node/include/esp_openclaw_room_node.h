@@ -27,6 +27,7 @@ typedef struct {
     bool animated_face; /**< Enable the procedural face when the display pipeline can sustain it. */
     uint16_t animation_frame_ms; /**< Sustainable face cadence for this display pipeline; 0 uses 16 ms. */
     void *ctx;
+    uint8_t idle_brightness; /**< Idle backlight percentage, 0..100; omitted/0 preserves display sleep. */
 } esp_openclaw_room_display_port_t;
 
 typedef struct {

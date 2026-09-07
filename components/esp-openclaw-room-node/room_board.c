@@ -10,7 +10,8 @@ esp_err_t room_board_bind(const esp_openclaw_room_node_config_t *config)
     if (config == NULL || config->display.start == NULL ||
         config->display.lock == NULL || config->display.unlock == NULL ||
         config->display.set_brightness == NULL || config->audio.open == NULL ||
-        config->audio.afe_layout == NULL || config->audio.record_channels == 0) {
+        config->audio.afe_layout == NULL || config->audio.record_channels == 0 ||
+        config->display.idle_brightness > 100) {
         return ESP_ERR_INVALID_ARG;
     }
     board = *config;

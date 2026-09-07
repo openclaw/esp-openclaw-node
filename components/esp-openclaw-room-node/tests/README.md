@@ -1,5 +1,31 @@
 # Talk lifetime source proofs
 
+## Static home UI
+
+The UI host runner compiles the real UI controller and board binding with LVGL 9,
+ASan and UBSan. Display, timer, Canvas, diagnostics and animated-face boundaries
+are synthetic; it does not access a device, network, Gateway or provider.
+
+```sh
+python3 components/esp-openclaw-room-node/tests/run_ui_host_tests.py --lvgl-dir "$LVGL"
+```
+
+`LVGL` points to existing LVGL 9 sources, such as a configured room example's
+`managed_components/lvgl__lvgl`. Optional `--snapshot home.ppm` writes the
+synthetic Tab5 framebuffer. CI uses the existing Waveshare build's dependency.
+The three cases cover Tab5 idle brightness, zero-default display sleep and the
+animated-board path. They check independent connection text, retained facts
+after paint lock failure, noninteractive bounded home content, tap/hold
+dispatch, Canvas/diagnostics visibility, camera-indicator priority and
+brightness, hint expiry, explicit off requests and a nonblank rendered mascot.
+Error details remain visible alongside ready connection facts, yield to
+Diagnostics, and clear on a later non-error state.
+The lifecycle runner also checks real node/operator/network event handling for
+the home facts, including missing-session results versus ordinary disconnects,
+raw busy/failure results, accepted reconnects and later connection failures.
+
+## Talk lifecycle
+
 These tests compile the real room controller and Talk adapter against synthetic
 Node, WebRTC, media, UI and scheduling boundaries. They do not operate hardware
 or connect to a Gateway/provider. Production deployment delta is **ZERO**.

@@ -340,10 +340,9 @@ esp_err_t esp_openclaw_node_register_command(esp_openclaw_node_handle_t node,
 esp_err_t esp_openclaw_node_request_connect(esp_openclaw_node_handle_t node,
     const esp_openclaw_node_connect_request_t *request)
 {
-    (void)node;
     host_require(request->source == ESP_OPENCLAW_NODE_CONNECT_SOURCE_SAVED_SESSION,
         "synthetic saved-session connect only; no credentials accessed");
-    return ESP_OK;
+    return strcmp(node->config.role, "node") == 0 ? host.node_connect_result : host.operator_connect_result;
 }
 esp_err_t esp_openclaw_node_request_disconnect(esp_openclaw_node_handle_t node)
 { (void)node; return ESP_OK; }
@@ -356,10 +355,15 @@ void host_emit_node(esp_openclaw_node_handle_t node, esp_openclaw_node_event_t e
     const esp_openclaw_node_disconnected_event_t disconnected = {
         .reason = ESP_OPENCLAW_NODE_DISCONNECTED_REASON_CONNECTION_LOST,
     };
+    const esp_openclaw_node_connect_failed_event_t failed = {
+        .reason = ESP_OPENCLAW_NODE_CONNECT_FAILURE_TRANSPORT_START_FAILED,
+        .local_err = ESP_FAIL,
+    };
     host_require(node->config.event_cb != NULL, "registered Node event callback");
     ++host.callback_depth;
     node->config.event_cb(node, event,
-        event == ESP_OPENCLAW_NODE_EVENT_DISCONNECTED ? &disconnected : NULL,
+        event == ESP_OPENCLAW_NODE_EVENT_DISCONNECTED ? (const void *)&disconnected
+            : event == ESP_OPENCLAW_NODE_EVENT_CONNECT_FAILED ? (const void *)&failed : NULL,
         node->config.event_user_ctx);
     --host.callback_depth;
 }
@@ -595,6 +599,10 @@ esp_err_t room_media_get_webrtc_provider(esp_webrtc_media_provider_t *provider)
 }
 void room_ui_set(room_ui_state_t state, const char *detail)
 { (void)detail; host.ui = state; }
+void room_ui_store_facts(const room_ui_facts_t *facts) { host.home = *facts; }
+void room_ui_refresh(void) {}
+const char *WIFI_EVENT = "wifi";
+const char *IP_EVENT = "ip";
 void room_ui_show_face_hint(uint32_t ms) { (void)ms; }
 void room_ui_set_gateway(const char *gateway) { (void)gateway; }
 bool room_ui_talk_face_active(void) { return host.ui == ROOM_UI_SPEAKING; }
@@ -644,7 +652,7 @@ const char *room_ui_state_name(room_ui_state_t state)
 void room_canvas_get_diagnostics(room_canvas_diagnostics_snapshot_t *snapshot)
 { (void)snapshot; unsupported_boundary(__func__); }
 void esp_openclaw_node_wifi_get_status(esp_openclaw_node_wifi_status_t *snapshot)
-{ (void)snapshot; unsupported_boundary(__func__); }
+{ *snapshot = host.wifi; }
 size_t heap_caps_get_free_size(uint32_t caps)
 { (void)caps; unsupported_boundary(__func__); }
 size_t heap_caps_get_largest_free_block(uint32_t caps)

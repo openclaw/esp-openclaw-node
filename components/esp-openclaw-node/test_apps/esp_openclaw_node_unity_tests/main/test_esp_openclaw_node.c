@@ -1147,6 +1147,78 @@ TEST_CASE("connect kicks challenge ping and disconnect is not dropped while busy
     vSemaphoreDelete(command_ctx.release);
 }
 
+TEST_CASE("destroy times out while a command blocks the work task", "[esp_openclaw_node][lifecycle]")
+{
+    reset_openclaw_storage();
+    reset_transport_state();
+
+    esp_openclaw_node_config_t config = {0};
+    esp_openclaw_node_config_init_default(&config);
+    config.event_cb = test_node_event_cb;
+
+    esp_openclaw_node_handle_t node = NULL;
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_create(&config, &node));
+
+    blocking_command_ctx_t command_ctx = {
+        .entered = xSemaphoreCreateBinary(),
+        .release = xSemaphoreCreateBinary(),
+    };
+    TEST_ASSERT_NOT_NULL(command_ctx.entered);
+    TEST_ASSERT_NOT_NULL(command_ctx.release);
+
+    esp_openclaw_node_command_t command = {
+        .name = "block",
+        .handler = blocking_command_handler,
+        .context = &command_ctx,
+    };
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_register_command(node, &command));
+
+    reset_event_recorder();
+    TEST_ASSERT_EQUAL(
+        ESP_OK,
+        request_connect_no_auth(node, "ws://gateway.example/ws"));
+    TEST_ASSERT_TRUE(wait_for_int_value(&s_transport_state.start_calls, 1, pdMS_TO_TICKS(1000)));
+
+    emit_ws_event(WEBSOCKET_EVENT_CONNECTED, NULL, ESP_OK);
+    TEST_ASSERT_TRUE(
+        wait_for_int_value(&s_transport_state.send_with_opcode_calls, 1, pdMS_TO_TICKS(1000)));
+
+    emit_ws_event(
+        WEBSOCKET_EVENT_DATA,
+        "{\"type\":\"event\",\"event\":\"connect.challenge\",\"payload\":{\"nonce\":\"nonce-1\",\"ts\":123}}",
+        ESP_OK);
+    TEST_ASSERT_TRUE(wait_for_int_value(&s_transport_state.send_text_calls, 1, pdMS_TO_TICKS(1000)));
+
+    char *connect_id = extract_first_json_id(s_transport_state.last_sent_text);
+    TEST_ASSERT_NOT_NULL(connect_id);
+
+    char connect_response[512] = {0};
+    snprintf(
+        connect_response,
+        sizeof(connect_response),
+        "{\"type\":\"res\",\"id\":\"%s\",\"ok\":true,\"payload\":{\"type\":\"hello-ok\",\"auth\":{\"deviceToken\":\"device-token-123\"}}}",
+        connect_id);
+    free(connect_id);
+
+    emit_ws_event(WEBSOCKET_EVENT_DATA, connect_response, ESP_OK);
+    TEST_ASSERT_TRUE(wait_for_event(ESP_OPENCLAW_NODE_EVENT_CONNECTED, pdMS_TO_TICKS(1000)));
+
+    emit_ws_event(
+        WEBSOCKET_EVENT_DATA,
+        "{\"type\":\"event\",\"event\":\"node.invoke.request\",\"payload\":{\"id\":\"invoke-1\",\"nodeId\":\"node-1\",\"command\":\"block\",\"paramsJSON\":\"{}\"}}",
+        ESP_OK);
+    TEST_ASSERT_TRUE(xSemaphoreTake(command_ctx.entered, pdMS_TO_TICKS(1000)) == pdTRUE);
+
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, esp_openclaw_node_destroy(node));
+    TEST_ASSERT_EQUAL(ESP_OPENCLAW_NODE_INTERNAL_DESTROYING, node->state);
+
+    TEST_ASSERT_TRUE(xSemaphoreGive(command_ctx.release) == pdTRUE);
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_destroy(node));
+
+    vSemaphoreDelete(command_ctx.entered);
+    vSemaphoreDelete(command_ctx.release);
+}
+
 TEST_CASE("node.invoke.request is ignored until handshake reaches ready", "[esp_openclaw_node][protocol]")
 {
     reset_openclaw_storage();

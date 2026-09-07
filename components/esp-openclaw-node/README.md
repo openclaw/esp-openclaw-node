@@ -446,11 +446,19 @@ Identity:
 
 - `device_seed`: 32-byte Ed25519 seed
 
-Saved reconnect session:
+Saved node-role reconnect session:
 
 - `session_v`
 - `session_uri`
 - `session_dev_tok`
+
+Saved operator-role reconnect session:
+
+- `op_v`
+- `op_uri`
+- `op_dev_tok`
+
+The two roles share the device identity but keep separate reconnect sessions.
 
 Derived at runtime from `device_seed`:
 
@@ -464,7 +472,8 @@ Persistence rules:
 - explicit shared gateway tokens are never persisted
 - explicit gateway passwords are never persisted
 - explicit no-auth selections are never persisted
-- only the final `{ gateway_uri, device_token }` reconnect session is persisted
+- final `{ gateway_uri, device_token }` reconnect sessions are persisted per role,
+including valid other-role handoff tokens returned in `hello-ok`
 
 ## Reference
 
@@ -586,9 +595,13 @@ Successful `hello-ok` response:
 
 The gateway may return the primary node reconnect token in
 `payload.auth.deviceToken` plus additional tokens in
-`payload.auth.deviceTokens`.  
-This component persists and reuses only
-`payload.auth.deviceToken`; it ignores any extra `payload.auth.deviceTokens` entries.
+`payload.auth.deviceTokens`. The component persists the primary token for the
+connecting role. It also persists non-empty handoff tokens for the other
+supported role (`node` or `operator`) against the connected Gateway URI.
+Entries with missing or blank roles/tokens, unsupported roles, or the connecting
+role are skipped. A handoff persistence failure fails connection finalization.
+Each saved-session request reloads its role's NVS record, so a sibling-role
+client can use a newly handed-off token without recreating its handle.
 
 Example `node.invoke.request` from the gateway:
 

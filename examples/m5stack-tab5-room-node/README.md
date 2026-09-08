@@ -105,6 +105,69 @@ normal CI still builds the real SDK. Target Unity lifecycle tests are built,
 not run by CI. Remove this temporary diagnostic patch and its explicit
 packaging mode after the observed failure is identified and qualified.
 
+### SDIO allocation diagnostic build
+
+This branch also applies `patches/esp-hosted/tab5-sdio-first-allocation-failure.patch`
+to the registry `esp_hosted` 1.4.0 component at revision
+`6040085eefe908de68fcd3438bf10b8ecd6de0c6`. It observes the streaming RX buffer's
+first failed allocation; it is not a repair for the receive-buffer assertion.
+The allocator remains `esp_dma_capable_malloc` with 64-byte alignment and DMA
+capabilities. Existing assertions, block reads, counter advancement, task
+stacks, mempools, SDK patches and allocation configuration are unchanged.
+
+In an isolated configured project, explicitly apply the component patch
+after `idf.py reconfigure` and before normal Ninja:
+
+```sh
+python3 ../../scripts/tab5_sdio_diagnostics.py \
+  --project-path . --component-path managed_components/espressif__esp_hosted --build-path build
+ninja -C build -j2
+python3 ../../scripts/tab5_sdio_diagnostics.py \
+  --project-path . --component-path managed_components/espressif__esp_hosted --build-path build --verify-only
+```
+
+The helper requires the pinned lock identity, manifest/revision, whole component
+and source hashes, patch hash, and configured compile input. Verification checks
+actual bytes and permits exactly the selected patch, not arbitrary local edits.
+Do not rewrite component-manager integrity metadata or bypass a reconfiguration
+failure. Packaging additionally requires `--sdio-diagnostics` alongside
+`--nvs-diagnostics`; the separate `component_diagnostic_patch` manifest record
+identifies the modified component. The symbol artifact retains that same manifest.
+
+One unprefixed ROM line has this exact field order, with decimal integers and
+no trailing period:
+
+```text
+sdio_alloc_diag requested=%u padded=%u buffer_index=%d old_size=%u dma_free=%u dma_largest=%u reg_raw=%u reg_masked=%u rx_count=%u last_seen=%u last_err=%d last_logical_len=%u last_transfer_arg_len=%u last_counter=%u
+```
+
+`requested` and `padded` describe the current allocation before/after existing
+block padding. `buffer_index` and `old_size` describe the previous write buffer.
+`dma_free` and `dma_largest` are DMA heap samples after allocation failure,
+not a proof that an aligned allocation would fit. `reg_raw`, `reg_masked`,
+and `rx_count` are the current packet-length register, its masked value,
+and local RX byte counter.
+
+The remaining fields retain the last failed block read this boot. `last_seen`
+is 0/1; when zero, its other fields are unset zeros. `last_err` is the original
+return. `last_logical_len` is the original pending length used by the unchanged
+counter-advance policy. `last_transfer_arg_len` is the actual `uint16_t` argument
+after the existing padding and conversion, not the pre-conversion padded value.
+`last_counter` is the local counter before that read's advancement. Successful
+reads do not clear this record. None of these lengths measures bytes consumed.
+All unsigned fields are uint32 values except the uint16 transfer argument
+and boolean `last_seen`; buffer index and error are signed int32 values.
+
+The probe does not log payloads, addresses, IDs, URLs, credentials, or normal
+successful frames. The RX owner retains its existing driver mutex, samples
+heap information after allocation returns, and prints after heap queries
+release their locks. Absence of a record is not evidence of healthy transport.
+Helper and packaging tests exercise real component hashing and rejection
+boundaries. CI builds the actual driver but does not execute an SDIO
+allocation-failure fixture. Hardware failure capture remains a separate
+qualification step; remove this temporary patch and packaging mode after
+the cause is identified and a repair is qualified.
+
 The official BSP manifest pins `esp_video ~2.0`, while P4-capable
 `esp_capture` requires `esp_video ^2.1`. The source-only BSP build bridge uses
 exact inspected commit `f0ef9497efce684997ce391edd19733483e250a5` without

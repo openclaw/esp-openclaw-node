@@ -16,6 +16,7 @@ import tempfile
 from urllib.parse import urlsplit
 
 from idf_tab5_compat import verify_sdk_patch
+from tab5_sdio_diagnostics import COMPONENT as SDIO_COMPONENT, verify_component_patch
 
 
 EXAMPLES = {
@@ -162,7 +163,8 @@ def tab5_provenance(project, build):
     }
 
 
-def package_firmware(project, build, output, target, provenance, dependencies, nvs_diagnostics=False):
+def package_firmware(project, build, output, target, provenance, dependencies,
+                     nvs_diagnostics=False, sdio_diagnostics=False):
     project, build, output = project.resolve(), build.resolve(), output.resolve()
     repo = Path(git(project, "rev-parse", "--show-toplevel")).resolve()
     if project.parent != repo / "examples" or EXAMPLES.get(project.name) != target:
@@ -201,6 +203,16 @@ def package_firmware(project, build, output, target, provenance, dependencies, n
         idf_compatibility = verify_sdk_patch(idf, nvs_diagnostics)
     if not dependencies.get("dependencies"):
         raise ValueError("Resolved dependency lock is empty")
+    sdio_patch = None
+    if sdio_diagnostics and (project.name != "m5stack-tab5-room-node" or not nvs_diagnostics):
+        raise ValueError("SDIO diagnostics require the explicitly selected Tab5 diagnostic build")
+    if sdio_diagnostics or (
+            project.name == "m5stack-tab5-room-node"
+            and SDIO_COMPONENT in dependencies["dependencies"]):
+        sdio_patch = verify_component_patch(
+            project, project / "managed_components/espressif__esp_hosted",
+            build, dependencies, patched=sdio_diagnostics,
+        )
     normalize = [(build, "<build>"), (project, "<project>"), (repo, "<repository>"), (idf, "<idf>")]
     lock_file = checked_file(project / "dependencies.lock", roots)
     manifest = {
@@ -234,6 +246,8 @@ def package_firmware(project, build, output, target, provenance, dependencies, n
     }
     if idf_compatibility is not None:
         manifest["idf"].update(idf_compatibility)
+    if sdio_diagnostics:
+        manifest["component_diagnostic_patch"] = sdio_patch
     if project.name == "m5stack-tab5-room-node":
         manifest["tab5_bsp"] = tab5_provenance(project, build)
     extra = flash["extra_esptool_args"]
@@ -341,10 +355,12 @@ def main():
         parser.add_argument("--" + name, required=True)
     parser.add_argument("--pr-head-sha", default="")
     parser.add_argument("--nvs-diagnostics", action="store_true")
+    parser.add_argument("--sdio-diagnostics", action="store_true")
     args = parser.parse_args()
     provenance = vars(args).copy()
     provenance.pop("target")
     provenance.pop("nvs_diagnostics")
+    provenance.pop("sdio_diagnostics")
     project = Path.cwd()
     # ruamel.yaml is already part of ESP-IDF's component-manager environment.
     try:
@@ -355,7 +371,7 @@ def main():
         dependencies = read_dependency_lock(project / "dependencies.lock")
         output = package_firmware(
             project, project / "build", project / "build/firmware",
-            args.target, provenance, dependencies, args.nvs_diagnostics,
+            args.target, provenance, dependencies, args.nvs_diagnostics, args.sdio_diagnostics,
         )
     except ValueError as error:
         parser.exit(1, f"Firmware packaging failed: {error}\n")

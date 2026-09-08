@@ -53,6 +53,58 @@ The separate ELF/map artifact copies that same firmware manifest unchanged.
 Retire the patch, helper and packaging exception together only after an
 upstream SDK fix is selected and qualified on affected hardware.
 
+### NVS diagnostic build
+
+This diagnostic branch additionally applies
+`patches/esp-idf/tab5-nvs-first-failure.patch` in Tab5 CI. It does not repair
+session loss or change storage, retry, initialization recovery, or allocation
+policy. The SDK base and SPM patch above remain unchanged. Manual diagnostic
+builds must explicitly add `--nvs-diagnostics` to both helper commands above;
+packaging requires the same option. Verification permits exactly the two
+approved dirty SDK paths, with separate `compatibility_patch` and
+`diagnostic_patch` manifest records. The symbol artifact retains that same
+manifest.
+
+The following unprefixed ROM-output records contain fixed numeric fields only.
+Capture them before filtering for normal I/W/E log prefixes:
+
+| Record | Fields |
+| --- | --- |
+| `nvs_io_diag` | `op`, `err`; first captured failure per boot |
+| `nvs_session_diag` | `role`, `stage`, `err`, `presence` |
+| `nvs_connect_diag` | `role`, `cached`, `fresh_known`, `fresh`, `err` |
+| `nvs_init_diag` | `err`; initial initialization failure before existing recovery |
+
+`op`: 1 read_raw, 2 read, 3 write_raw, 4 write, 5 erase_range.
+Read/write alignment errors retain their original return and perform no I/O,
+but also claim the first-failure record. The other records follow the underlying
+partition call's return. The internal-RAM atomic claim is lock-free; output
+does not allocate or hold that claim as a lock. No success records, offsets,
+lengths, keys, URLs, IDs, or credential values are emitted by this SDK probe.
+
+`role`: 0 unknown, 1 node, 2 operator.
+Session `stage`: 1 open, 2 version, 3 URI size, 4 URI allocation/value read,
+5 token size, 6 token allocation/value read, 7 validation, 8 clear result.
+Session `presence` is a classification: 0 unread/not classified, 1 missing,
+2 empty, 3 unsupported version, 4 incomplete fields, 5 invalid URI.
+The original error precedes normalization or clear; clear has its own result.
+An `err=0` clear result is not proof of a physical write.
+
+Connect booleans are 0/1. `cached` is sampled under the state lock before
+replacement, or from the retained cache after a load error; `fresh_known=0`
+means a failed load, not authoritative absence. These are observations, not
+authorization or new recovery behavior. ROM output can interleave with other
+console output, and lack of a record does not prove healthy NVS. The SDK probe
+covers these five NVSPartition methods, not every flash operation.
+
+Host tests execute the patched SDK methods and actual session loader against
+I/O stubs, including original return values, no-I/O alignment failures,
+concurrent first capture, clear failures and synthetic canary non-disclosure.
+The fixture SDK file is the exact Apache-2.0 source at the pinned commit;
+normal CI still builds the real SDK. Target Unity lifecycle tests are built,
+not run by CI. Remove this temporary diagnostic patch and its explicit
+packaging mode after the observed failure is identified and qualified.
+
 The official BSP manifest pins `esp_video ~2.0`, while P4-capable
 `esp_capture` requires `esp_video ^2.1`. The source-only BSP build bridge uses
 exact inspected commit `f0ef9497efce684997ce391edd19733483e250a5` without

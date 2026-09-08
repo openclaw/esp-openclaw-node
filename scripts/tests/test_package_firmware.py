@@ -133,11 +133,11 @@ class FirmwareBundleTests(unittest.TestCase):
         (self.build / "project_description.json").write_text(json.dumps(self.description))
         (self.build / "flasher_args.json").write_text(json.dumps(self.flash))
 
-    def package(self):
+    def package(self, nvs_diagnostics=False):
         self.write_metadata()
         return firmware.package_firmware(
             self.project, self.build, self.output, self.description["target"],
-            self.provenance, self.dependencies,
+            self.provenance, self.dependencies, nvs_diagnostics,
         )
 
     def test_relocated_bundle_preserves_every_image_and_original_inputs(self):
@@ -349,7 +349,7 @@ class FirmwareBundleTests(unittest.TestCase):
         metadata = json.loads((self.output / "manifest.json").read_text())["idf"]
         self.assertTrue(metadata["dirty"])
         self.assertEqual(metadata["commit"], base)
-        self.assertEqual(metadata["compatibility_patch"], expected)
+        self.assertEqual(metadata["compatibility_patch"], expected["compatibility_patch"])
         self.assertEqual(
             metadata["compatibility_patch"]["patched_source_sha256"],
             firmware.sha256(self.idf / compat.SOURCE_PATH),
@@ -383,6 +383,34 @@ class FirmwareBundleTests(unittest.TestCase):
             compat.apply_sdk_patch(self.idf)
             with self.assertRaisesRegex(ValueError, "IDF contains modified source"):
                 self.package()
+        self.assertFalse(self.output.exists())
+
+    def test_diagnostic_bundle_requires_explicit_mode_and_records_both_actual_patches(self):
+        self.configure_tab5()
+        base = seed_sdk(self.idf)
+        with fixture_profile(base):
+            expected = compat.apply_sdk_patch(self.idf, nvs_diagnostics=True)
+            with self.assertRaises(ValueError):
+                self.package()
+            self.assertFalse(self.output.exists())
+            self.package(nvs_diagnostics=True)
+        metadata = json.loads((self.output / "manifest.json").read_text())["idf"]
+        self.assertTrue(metadata["dirty"])
+        self.assertEqual(metadata["commit"], base)
+        for name in ("compatibility_patch", "diagnostic_patch"):
+            self.assertEqual(metadata[name], expected[name])
+
+    def test_diagnostic_mode_rejects_clean_sdk_and_non_tab5(self):
+        with self.assertRaises(ValueError):
+            self.package(nvs_diagnostics=True)
+        self.configure_tab5()
+        with self.assertRaises(ValueError):
+            self.package(nvs_diagnostics=True)
+        base = seed_sdk(self.idf)
+        with fixture_profile(base):
+            compat.apply_sdk_patch(self.idf)
+            with self.assertRaises(ValueError):
+                self.package(nvs_diagnostics=True)
         self.assertFalse(self.output.exists())
 
 

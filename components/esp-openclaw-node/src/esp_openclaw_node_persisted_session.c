@@ -11,8 +11,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "esp_attr.h"
 #include "esp_check.h"
 #include "esp_log.h"
+#include "esp_rom_sys.h"
 #include "nvs.h"
 
 static const char *TAG = "esp_openclaw_node_session";
@@ -29,7 +31,36 @@ typedef struct {
     const char *version;
     const char *uri;
     const char *device_token;
+    unsigned diagnostic_role;
 } persisted_session_keys_t;
+
+enum {
+    SESSION_DIAG_OPEN = 1,
+    SESSION_DIAG_VERSION,
+    SESSION_DIAG_URI_SIZE,
+    SESSION_DIAG_URI_VALUE,
+    SESSION_DIAG_TOKEN_SIZE,
+    SESSION_DIAG_TOKEN_VALUE,
+    SESSION_DIAG_VALIDATE,
+    SESSION_DIAG_CLEAR,
+};
+
+enum {
+    SESSION_DIAG_UNREAD = 0,
+    SESSION_DIAG_ABSENT,
+    SESSION_DIAG_EMPTY,
+    SESSION_DIAG_UNSUPPORTED,
+    SESSION_DIAG_INCOMPLETE,
+    SESSION_DIAG_INVALID_URI,
+};
+
+static void log_session_load(
+    unsigned role, unsigned stage, esp_err_t err, unsigned presence)
+{
+    esp_rom_printf(
+        DRAM_STR("nvs_session_diag role=%u stage=%u err=%d presence=%u\n"),
+        role, stage, (int)err, presence);
+}
 
 static esp_err_t resolve_session_keys(
     const char *role,
@@ -43,6 +74,7 @@ static esp_err_t resolve_session_keys(
             .version = NVS_KEY_VERSION,
             .uri = NVS_KEY_URI,
             .device_token = NVS_KEY_DEVICE_TOKEN,
+            .diagnostic_role = 1,
         };
         return ESP_OK;
     }
@@ -51,6 +83,7 @@ static esp_err_t resolve_session_keys(
             .version = NVS_KEY_OPERATOR_VERSION,
             .uri = NVS_KEY_OPERATOR_URI,
             .device_token = NVS_KEY_OPERATOR_DEVICE_TOKEN,
+            .diagnostic_role = 2,
         };
         return ESP_OK;
     }
@@ -113,10 +146,17 @@ static esp_err_t validate_persisted_session(const esp_openclaw_node_persisted_se
 static esp_err_t load_optional_string(
     nvs_handle_t nvs,
     const char *key,
-    char **out_value)
+    char **out_value,
+    unsigned role,
+    unsigned size_stage,
+    unsigned value_stage)
 {
     size_t required = 0;
     esp_err_t err = nvs_get_str(nvs, key, NULL, &required);
+    if (err != ESP_OK) {
+        log_session_load(role, size_stage, err,
+            err == ESP_ERR_NVS_NOT_FOUND ? SESSION_DIAG_ABSENT : SESSION_DIAG_UNREAD);
+    }
     if (err == ESP_ERR_NVS_NOT_FOUND) {
         *out_value = NULL;
         return ESP_OK;
@@ -125,14 +165,18 @@ static esp_err_t load_optional_string(
 
     char *value = malloc(required);
     if (value == NULL) {
+        log_session_load(role, value_stage, ESP_ERR_NO_MEM, SESSION_DIAG_UNREAD);
         return ESP_ERR_NO_MEM;
     }
     err = nvs_get_str(nvs, key, value, &required);
     if (err != ESP_OK) {
+        log_session_load(role, value_stage, err,
+            err == ESP_ERR_NVS_NOT_FOUND ? SESSION_DIAG_ABSENT : SESSION_DIAG_UNREAD);
         free(value);
         return err;
     }
     if (value[0] == '\0') {
+        log_session_load(role, value_stage, err, SESSION_DIAG_EMPTY);
         free(value);
         value = NULL;
     }
@@ -184,6 +228,8 @@ static esp_err_t clear_invalid_loaded_session(
     clear_persisted_session_struct(session);
 
     esp_err_t clear_err = clear_session_keys(nvs, keys);
+    log_session_load(
+        keys->diagnostic_role, SESSION_DIAG_CLEAR, clear_err, SESSION_DIAG_UNREAD);
     if (clear_err != ESP_OK) {
         ESP_LOGW(
             TAG,
@@ -263,11 +309,17 @@ esp_err_t esp_openclaw_node_persisted_session_load(
     nvs_handle_t nvs = 0;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs);
     if (err != ESP_OK) {
+        log_session_load(
+            keys.diagnostic_role, SESSION_DIAG_OPEN, err, SESSION_DIAG_UNREAD);
         return err;
     }
 
     uint8_t version = 0;
     err = nvs_get_u8(nvs, keys.version, &version);
+    if (err != ESP_OK) {
+        log_session_load(keys.diagnostic_role, SESSION_DIAG_VERSION, err,
+            err == ESP_ERR_NVS_NOT_FOUND ? SESSION_DIAG_ABSENT : SESSION_DIAG_UNREAD);
+    }
     if (err == ESP_ERR_NVS_NOT_FOUND) {
         nvs_close(nvs);
         return ESP_OK;
@@ -277,11 +329,15 @@ esp_err_t esp_openclaw_node_persisted_session_load(
         return err;
     }
     if (version != PERSISTED_SESSION_VERSION) {
+        log_session_load(
+            keys.diagnostic_role, SESSION_DIAG_VERSION, err, SESSION_DIAG_UNSUPPORTED);
         ESP_LOGW(
             TAG,
             "ignoring unsupported persisted session version %u",
             (unsigned)version);
         esp_err_t clear_err = clear_session_keys(nvs, &keys);
+        log_session_load(
+            keys.diagnostic_role, SESSION_DIAG_CLEAR, clear_err, SESSION_DIAG_UNREAD);
         nvs_close(nvs);
         if (clear_err != ESP_OK) {
             ESP_LOGW(
@@ -293,13 +349,21 @@ esp_err_t esp_openclaw_node_persisted_session_load(
     }
 
     session->version = version;
-    err = load_optional_string(nvs, keys.uri, &session->gateway_uri);
+    err = load_optional_string(
+        nvs, keys.uri, &session->gateway_uri, keys.diagnostic_role,
+        SESSION_DIAG_URI_SIZE, SESSION_DIAG_URI_VALUE);
     if (err == ESP_OK) {
-        err = load_optional_string(nvs, keys.device_token, &session->device_token);
+        err = load_optional_string(
+            nvs, keys.device_token, &session->device_token, keys.diagnostic_role,
+            SESSION_DIAG_TOKEN_SIZE, SESSION_DIAG_TOKEN_VALUE);
     }
     if (err == ESP_OK) {
         err = validate_persisted_session(session);
         if (err == ESP_ERR_INVALID_ARG) {
+            bool has_uri = session->gateway_uri != NULL && session->gateway_uri[0] != '\0';
+            bool has_token = session->device_token != NULL && session->device_token[0] != '\0';
+            log_session_load(keys.diagnostic_role, SESSION_DIAG_VALIDATE, err,
+                has_uri != has_token ? SESSION_DIAG_INCOMPLETE : SESSION_DIAG_INVALID_URI);
             err = clear_invalid_loaded_session(
                 nvs,
                 &keys,

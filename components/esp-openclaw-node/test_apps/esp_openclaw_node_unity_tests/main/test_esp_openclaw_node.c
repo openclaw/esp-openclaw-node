@@ -956,11 +956,13 @@ TEST_CASE("saved reconnect retains cached session when NVS reload fails", "[esp_
 {
     reset_openclaw_storage();
     reset_transport_state();
+    char saved_uri[] = "wss://saved.example/ws";
+    char saved_token[] = "synthetic-saved-token";
     esp_openclaw_node_persisted_session_t session = {0};
     const esp_openclaw_node_persisted_session_t update = {
         .version = 1,
-        .gateway_uri = "wss://saved.example/ws",
-        .device_token = "synthetic-saved-token",
+        .gateway_uri = saved_uri,
+        .device_token = saved_token,
     };
     TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_persisted_session_store("node", &session, &update));
     esp_openclaw_node_persisted_session_free(&session);

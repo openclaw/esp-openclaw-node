@@ -12,6 +12,7 @@
 #include "esp_openclaw_node_wifi.h"
 #include "esp_openclaw_talk.h"
 #include "esp_peer_default.h"
+#include "esp_rom_sys.h"
 #include "room_board.h"
 #include "room_canvas.h"
 #include "room_canvas_node_cmd.h"
@@ -81,6 +82,15 @@ void host_log(const char *tag, const char *format, ...)
     vfprintf(stderr, format, args);
     fputc('\n', stderr);
     va_end(args);
+}
+
+int esp_rom_printf(const char *format, ...)
+{
+    va_list args;
+    va_start(args, format);
+    int written = vfprintf(stderr, format, args);
+    va_end(args);
+    return written;
 }
 
 const char *esp_err_to_name(esp_err_t code)

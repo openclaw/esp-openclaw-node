@@ -64,6 +64,16 @@ rejects it unless HEAD is that commit and the worktree is clean.
 Provision from USB with `wifi set <ssid> <passphrase>` and `gateway setup-code
 <code>`. Kconfig credentials only seed an unconfigured unit.
 
+### Allocation policy
+
+Tab5 sets `CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=1024`, so ordinary allocations
+above 1 KiB prefer PSRAM, including each 2 KiB WebSocket receive/transmit
+buffer. This reduces competition for internal memory without changing the
+32 KiB internal reserve, task stacks, TLS allocation policy, or SDIO DMA
+requirements. The preference can fall back to internal memory; it is not a
+hard placement guarantee. The 1 KiB cutoff is a qualification candidate, not
+a proven optimum or a confirmed fix for the observed SDIO allocation assertion.
+
 ## C6 Wi-Fi prerequisite
 
 The ESP32-C6 must already run firmware compatible with `esp_hosted` 1.4.0 and

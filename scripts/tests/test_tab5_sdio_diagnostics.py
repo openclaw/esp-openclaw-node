@@ -19,6 +19,10 @@ import tab5_sdio_diagnostics as sdio
 HAS_MANAGER = importlib.util.find_spec("idf_component_tools") is not None
 ORIGINAL = b"/* Synthetic component fixture, not a transport simulator. */\nint fixture;\n"
 PATCHED = ORIGINAL + b"/* Diagnostic fixture change. */\n"
+REGISTRY_SOURCE = {
+    "type": "service",
+    "registry_url": "https://components.espressif.com/",
+}
 
 
 def directory_hash(component):
@@ -64,7 +68,7 @@ def component_fixture(project, build, dependencies):
     dependencies["target"] = "esp32p4"
     dependencies.setdefault("dependencies", {})[sdio.COMPONENT] = {
         "version": sdio.VERSION, "component_hash": original_hash,
-        "source": {"type": "service", "service_url": "https://components.espressif.com/"},
+        "source": copy.deepcopy(REGISTRY_SOURCE),
     }
     with patch.multiple(
         sdio, COMPONENT_HASH=original_hash, PATCHED_COMPONENT_HASH=patched_hash,
@@ -101,6 +105,20 @@ class SdioPatchTests(unittest.TestCase):
         return sdio.verify_component_patch(
             self.project, self.component, self.build, self.dependencies, patched=patched,
         )
+
+    def test_registry_source_matches_pinned_manager_lock_contract(self):
+        from idf_component_tools.sources.web_service import WebServiceSource
+        source = WebServiceSource(registry_url="https://components.espressif.com/")
+        self.assertEqual(source.model_dump(), REGISTRY_SOURCE)
+        self.assertFalse(self.verify(patched=False)["modified"])
+
+    def test_service_url_only_source_is_rejected_before_mutation(self):
+        self.dependencies["dependencies"][sdio.COMPONENT]["source"] = {
+            "type": "service", "service_url": "https://components.espressif.com/",
+        }
+        with self.assertRaisesRegex(ValueError, "Resolved esp_hosted identity"):
+            self.apply()
+        self.assertEqual(self.source.read_bytes(), ORIGINAL)
 
     def test_apply_idempotence_and_metadata_preserve_unrelated_bytes(self):
         before = {p: p.read_bytes() for p in self.component.rglob("*") if p.is_file()}

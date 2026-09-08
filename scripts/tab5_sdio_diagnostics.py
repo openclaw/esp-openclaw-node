@@ -49,7 +49,7 @@ def inspect_component(project, component, build, dependencies):
             or dependency.get("version") != VERSION
             or dependency.get("component_hash") != COMPONENT_HASH
             or source.get("type") != "service"
-            or source.get("service_url") != "https://components.espressif.com/"):
+            or source.get("registry_url") != "https://components.espressif.com/"):
         raise ValueError("Resolved esp_hosted identity is not the approved 1.4.0 component")
     if digest((component / "idf_component.yml").read_bytes()) != MANIFEST_SHA256:
         raise ValueError("Component manifest or registry revision differs")

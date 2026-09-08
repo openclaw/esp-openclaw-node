@@ -117,13 +117,15 @@ jobs:
             build/firmware/manifest.json; do
             test -s "$file" || { echo "::error::Missing or empty $file"; exit 1; }
           done
-          mkdir build/symbols
+          # The container-owned build directory is not writable by the host runner.
+          symbols="$RUNNER_TEMP/tab5-build-symbols"
+          mkdir "$symbols"
           cp \
             build/openclaw_m5stack_tab5_room_node.elf \
             build/openclaw_m5stack_tab5_room_node.map \
             build/firmware/manifest.json \
-            build/symbols/
-          cd build/symbols
+            "$symbols/"
+          cd "$symbols"
           sha256sum \
             openclaw_m5stack_tab5_room_node.elf \
             openclaw_m5stack_tab5_room_node.map \
@@ -134,5 +136,5 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: symbols-${{ matrix.name }}-${{ matrix.target }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ matrix.path }}/build/symbols/
+          path: ${{ runner.temp }}/tab5-build-symbols/
           if-no-files-found: error

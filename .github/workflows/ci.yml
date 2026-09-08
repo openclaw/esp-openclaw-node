@@ -67,7 +67,9 @@ jobs:
 
       - name: Firmware packaging tests
         if: matrix.name == 'component-test-app-build'
-        run: python3 -m unittest discover -s scripts/tests -p 'test_package_firmware.py' -v
+        run: |
+          python3 -m unittest discover -s scripts/tests -p 'test_package_firmware.py' -v
+          python3 -m unittest discover -s scripts/tests -p 'test_idf_tab5_compat.py' -v
 
       - name: Build
         uses: espressif/esp-idf-ci-action@v1
@@ -76,6 +78,9 @@ jobs:
           target: ${{ matrix.target }}
           path: ${{ matrix.path }}
           command: |
+            if [ "${{ matrix.name }}" = "m5stack-tab5-room-node" ]; then
+              python3 ../../scripts/idf_tab5_compat.py --idf-path "$IDF_PATH"
+            fi &&
             idf.py reconfigure &&
             ninja -C build -j2 &&
             if [ "${{ matrix.name }}" = "component-test-app-build" ]; then

@@ -15,6 +15,8 @@ import subprocess
 import tempfile
 from urllib.parse import urlsplit
 
+from idf_tab5_compat import verify_sdk_patch
+
 
 EXAMPLES = {
     "esp32-node": "esp32s3",
@@ -189,8 +191,12 @@ def package_firmware(project, build, output, target, provenance, dependencies):
         raise ValueError("Build metadata does not match the active IDF")
     if git(repo, "status", "--porcelain", "--untracked-files=normal"):
         raise ValueError("Repository contains modified source")
-    if git(idf, "status", "--porcelain", "--untracked-files=normal"):
-        raise ValueError("IDF contains modified source")
+    idf_dirty = bool(git(idf, "status", "--porcelain", "--untracked-files=all"))
+    idf_compatibility = None
+    if idf_dirty:
+        if project.name != "m5stack-tab5-room-node":
+            raise ValueError("IDF contains modified source")
+        idf_compatibility = verify_sdk_patch(idf)
     if not dependencies.get("dependencies"):
         raise ValueError("Resolved dependency lock is empty")
     normalize = [(build, "<build>"), (project, "<project>"), (repo, "<repository>"), (idf, "<idf>")]
@@ -208,6 +214,7 @@ def package_firmware(project, build, output, target, provenance, dependencies):
             "commit": git(idf, "rev-parse", "HEAD"),
             "build_revision": description["git_revision"],
             "image_requested": provenance["idf_image"],
+            "dirty": idf_dirty,
         },
         "tools": {
             "esptool": importlib.metadata.version("esptool"),
@@ -223,6 +230,8 @@ def package_firmware(project, build, output, target, provenance, dependencies):
             "flasher_args.json": sha256(flash_file),
         },
     }
+    if idf_compatibility is not None:
+        manifest["idf"]["compatibility_patch"] = idf_compatibility
     if project.name == "m5stack-tab5-room-node":
         manifest["tab5_bsp"] = tab5_provenance(project, build)
     extra = flash["extra_esptool_args"]

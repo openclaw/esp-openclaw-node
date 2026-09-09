@@ -21,6 +21,8 @@ from test_idf_tab5_compat import fixture_profile, seed_sdk
 import idf_tab5_compat as compat
 from test_tab5_sdio_diagnostics import HAS_MANAGER, component_fixture
 import tab5_sdio_diagnostics as sdio
+from test_tab5_camera_compat import camera_fixture, seed_camera_sdk, write_object
+import tab5_camera_compat as camera
 
 SPEC = importlib.util.spec_from_file_location("package_firmware", SCRIPT)
 firmware = importlib.util.module_from_spec(SPEC)
@@ -135,11 +137,13 @@ class FirmwareBundleTests(unittest.TestCase):
         (self.build / "project_description.json").write_text(json.dumps(self.description))
         (self.build / "flasher_args.json").write_text(json.dumps(self.flash))
 
-    def package(self, nvs_diagnostics=False, sdio_diagnostics=False, sdio_psram_rx=False):
+    def package(self, nvs_diagnostics=False, sdio_diagnostics=False, sdio_psram_rx=False,
+                camera_compat=False):
         self.write_metadata()
         return firmware.package_firmware(
             self.project, self.build, self.output, self.description["target"],
             self.provenance, self.dependencies, nvs_diagnostics, sdio_diagnostics, sdio_psram_rx,
+            camera_compat,
         )
 
     def test_relocated_bundle_preserves_every_image_and_original_inputs(self):
@@ -486,6 +490,76 @@ class FirmwareBundleTests(unittest.TestCase):
             self.assertEqual(len(expected["patches"]), 2)
             self.assertEqual(expected["patched_source_sha256"],
                              firmware.sha256(component / sdio.SOURCE_PATH))
+
+    @unittest.skipUnless(HAS_MANAGER, "actual component hashing runs in the IDF environment")
+    def test_camera_metadata_is_additive_and_revalidates_final_component_and_object(self):
+        self.configure_tab5()
+        self.config += "CONFIG_SPIRAM=y\nCONFIG_SOC_SDMMC_PSRAM_DMA_CAPABLE=y\n"
+        self.config += "".join(f"{k}={v}\n" for k, v in camera.PROFILE.items())
+        base = seed_camera_sdk(self.idf)
+        self.write_metadata()
+        with fixture_profile(base), component_fixture(
+                self.project, self.build, self.dependencies) as sdio_component, camera_fixture(
+                self.project, self.build, self.idf, self.dependencies) as camera_component:
+            expected_sdk = compat.apply_sdk_patch(self.idf, nvs_diagnostics=True)
+            expected_sdio = sdio.apply_component_patch(
+                self.project, sdio_component, self.build, self.dependencies, psram_rx=True)
+            camera.apply_component_patch(
+                self.project, camera_component, self.build, self.idf, self.dependencies)
+            with self.assertRaises(FileNotFoundError):
+                self.package(True, True, True, True)
+            self.assertFalse(self.output.exists())
+            source = camera_component / camera.SOURCE_PATH
+            write_object(self.build, source)
+            with self.assertRaises(ValueError):
+                self.package(True, True, True)
+            other = camera_component / "other.c"
+            original = other.read_bytes()
+            other.write_bytes(original + b"/* after-build tamper */\n")
+            with self.assertRaises(ValueError):
+                self.package(True, True, True, True)
+            self.assertFalse(self.output.exists())
+            other.write_bytes(original)
+            self.package(True, True, True, True)
+            manifest = json.loads((self.output / "manifest.json").read_text())
+            self.assertEqual(manifest["component_compatibility_patch"], expected_sdio)
+            for key, value in expected_sdk.items():
+                self.assertEqual(manifest["idf"][key], value)
+            self.assertEqual(manifest["camera_compatibility_patch"], camera.verify_component_patch(
+                self.project, camera_component, self.build, self.idf, self.dependencies))
+            self.assertEqual(manifest["camera_compatibility_patch"]["patched_source_sha256"],
+                             firmware.sha256(source))
+
+    def test_camera_profile_does_not_enable_itself_on_other_builds(self):
+        with self.assertRaises(ValueError):
+            self.package(camera_compat=True)
+        self.assertFalse(self.output.exists())
+        self.configure_tab5()
+        with self.assertRaises(ValueError):
+            self.package(camera_compat=True)
+        self.assertFalse(self.output.exists())
+
+    @unittest.skipUnless(HAS_MANAGER, "actual component hashing runs in the IDF environment")
+    def test_unpatched_rev3_packages_but_camera_patch_profile_rejects_it(self):
+        self.configure_tab5()
+        self.config += (
+            "CONFIG_ESP32P4_REV_MIN_FULL=300\nCONFIG_ESP32P4_REV_MAX_FULL=399\n"
+            "CONFIG_ESP32P4_SELECTS_REV_LESS_V3=n\n"
+        )
+        self.description.update(min_rev="300", max_rev="399")
+        base = seed_camera_sdk(self.idf)
+        self.write_metadata()
+        with fixture_profile(base), camera_fixture(
+                self.project, self.build, self.idf, self.dependencies) as component:
+            compat.apply_sdk_patch(self.idf, nvs_diagnostics=True)
+            before = {p: p.read_bytes() for p in component.rglob("*") if p.is_file()}
+            with self.assertRaisesRegex(ValueError, "unchanged early-P4 Tab5 profile"):
+                self.package(nvs_diagnostics=True, camera_compat=True)
+            self.assertFalse(self.output.exists())
+            self.package(nvs_diagnostics=True)
+            manifest = json.loads((self.output / "manifest.json").read_text())
+            self.assertNotIn("camera_compatibility_patch", manifest)
+            self.assertEqual({p: p.read_bytes() for p in before}, before)
 
 
 if __name__ == "__main__":

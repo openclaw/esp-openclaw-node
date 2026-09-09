@@ -1,0 +1,18 @@
+diff --git a/src/device/esp_video_csi_format.c b/src/device/esp_video_csi_format.c
+--- a/src/device/esp_video_csi_format.c
++++ b/src/device/esp_video_csi_format.c
+@@ -506,13 +506,8 @@ esp_err_t esp_video_csi_check_format(esp_cam_sensor_output_format_t sensor_fmt, uint
+         /* ISP output to requested format */
+         in_out_format->isp_output_fmt = v4l2_to_isp_color(requested_fmt);
+
+-        /* ISP output to CSI output */
+-#if ESP_IDF_VERSION < ESP_IDF_VERSION_VAL(6, 0, 0)
+-        /* Old IDF version: use sensor format as CSI input */
+-        in_out_format->csi_input_fmt = v4l2_to_csi_color(sensor_v4l2_fmt);
+-#else
++        /* The pinned Tab5 SDK backports the post-ISP CSI input contract. */
+         in_out_format->csi_input_fmt = v4l2_to_csi_color(requested_fmt);
+-#endif
+         in_out_format->csi_output_fmt = v4l2_to_csi_color(requested_fmt);
+
+         ESP_LOGD(TAG, "Format supported: sensor->ISP(process)->CSI(passthrough)");

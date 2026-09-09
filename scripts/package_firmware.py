@@ -17,6 +17,7 @@ from urllib.parse import urlsplit
 
 from idf_tab5_compat import verify_sdk_patch
 from tab5_sdio_diagnostics import COMPONENT as SDIO_COMPONENT, verify_component_patch
+from tab5_camera_compat import COMPONENT as CAMERA_COMPONENT, verify_component_patch as verify_camera_patch
 
 
 EXAMPLES = {
@@ -164,7 +165,8 @@ def tab5_provenance(project, build):
 
 
 def package_firmware(project, build, output, target, provenance, dependencies,
-                     nvs_diagnostics=False, sdio_diagnostics=False, sdio_psram_rx=False):
+                     nvs_diagnostics=False, sdio_diagnostics=False, sdio_psram_rx=False,
+                     camera_compat=False):
     project, build, output = project.resolve(), build.resolve(), output.resolve()
     repo = Path(git(project, "rev-parse", "--show-toplevel")).resolve()
     if project.parent != repo / "examples" or EXAMPLES.get(project.name) != target:
@@ -217,6 +219,16 @@ def package_firmware(project, build, output, target, provenance, dependencies,
             project, project / "managed_components/espressif__esp_hosted",
             build, dependencies, patched=sdio_diagnostics, psram_rx=sdio_psram_rx,
         )
+    camera_patch = None
+    if camera_compat and (project.name != "m5stack-tab5-room-node" or not nvs_diagnostics):
+        raise ValueError("Camera compatibility requires the explicitly patched Tab5 SDK")
+    if camera_compat or (
+            project.name == "m5stack-tab5-room-node"
+            and CAMERA_COMPONENT in dependencies["dependencies"]):
+        camera_patch = verify_camera_patch(
+            project, project / "managed_components/espressif__esp_video",
+            build, idf, dependencies, patched=camera_compat, compiled=camera_compat,
+        )
     normalize = [(build, "<build>"), (project, "<project>"), (repo, "<repository>"), (idf, "<idf>")]
     lock_file = checked_file(project / "dependencies.lock", roots)
     manifest = {
@@ -254,6 +266,8 @@ def package_firmware(project, build, output, target, provenance, dependencies,
         manifest["component_compatibility_patch"] = sdio_patch
     elif sdio_diagnostics:
         manifest["component_diagnostic_patch"] = sdio_patch
+    if camera_compat:
+        manifest["camera_compatibility_patch"] = camera_patch
     if project.name == "m5stack-tab5-room-node":
         manifest["tab5_bsp"] = tab5_provenance(project, build)
     extra = flash["extra_esptool_args"]
@@ -363,12 +377,14 @@ def main():
     parser.add_argument("--nvs-diagnostics", action="store_true")
     parser.add_argument("--sdio-diagnostics", action="store_true")
     parser.add_argument("--sdio-psram-rx", action="store_true")
+    parser.add_argument("--camera-compat", action="store_true")
     args = parser.parse_args()
     provenance = vars(args).copy()
     provenance.pop("target")
     provenance.pop("nvs_diagnostics")
     provenance.pop("sdio_diagnostics")
     provenance.pop("sdio_psram_rx")
+    provenance.pop("camera_compat")
     project = Path.cwd()
     # ruamel.yaml is already part of ESP-IDF's component-manager environment.
     try:
@@ -380,7 +396,7 @@ def main():
         output = package_firmware(
             project, project / "build", project / "build/firmware",
             args.target, provenance, dependencies, args.nvs_diagnostics,
-            args.sdio_diagnostics, args.sdio_psram_rx,
+            args.sdio_diagnostics, args.sdio_psram_rx, args.camera_compat,
         )
     except ValueError as error:
         parser.exit(1, f"Firmware packaging failed: {error}\n")

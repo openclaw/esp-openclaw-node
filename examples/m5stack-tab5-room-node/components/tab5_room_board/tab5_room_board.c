@@ -46,7 +46,7 @@
 #define CAMERA_SENSOR_WIDTH 1280U
 #define CAMERA_SENSOR_HEIGHT 720U
 #define CAMERA_MAX_PIXELS (1024U * 1024U)
-#define CAMERA_DIMENSION_ALIGNMENT 8U
+#define CAMERA_SCALE_DENOMINATOR 16U
 #define CAMERA_ALIGN_UP(value, alignment) (((value) + (alignment) - 1) & ~((alignment) - 1))
 
 _Static_assert(
@@ -941,17 +941,18 @@ static esp_err_t transform_camera_frame(
     uint32_t natural_width = swaps_dimensions ? camera->height : camera->width;
     uint32_t natural_height = swaps_dimensions ? camera->width : camera->height;
     ESP_RETURN_ON_FALSE(
+        natural_width != 0 && natural_height != 0 &&
         (uint64_t)natural_width * natural_height <= CAMERA_MAX_PIXELS,
         ESP_ERR_NOT_SUPPORTED,
         TAG,
         "rotated camera frame exceeds one megapixel");
 
-    uint32_t output_width = natural_width;
-    if ((uint32_t)max_width < output_width) output_width = (uint32_t)max_width;
-    output_width &= ~(CAMERA_DIMENSION_ALIGNMENT - 1U);
-    uint32_t output_height = (uint32_t)(
-        ((uint64_t)natural_height * output_width / natural_width) &
-        ~(uint64_t)(CAMERA_DIMENSION_ALIGNMENT - 1U));
+    uint32_t width_limit = natural_width;
+    if ((uint32_t)max_width < width_limit) width_limit = (uint32_t)max_width;
+    /* PPA truncates scales to 1/16; geometry and DMA pitch must use that same scale. */
+    uint32_t scale_steps = (uint64_t)width_limit * CAMERA_SCALE_DENOMINATOR / natural_width;
+    uint32_t output_width = (uint64_t)natural_width * scale_steps / CAMERA_SCALE_DENOMINATOR;
+    uint32_t output_height = (uint64_t)natural_height * scale_steps / CAMERA_SCALE_DENOMINATOR;
     ESP_RETURN_ON_FALSE(
         output_width != 0 && output_height != 0 &&
         (uint64_t)output_width * output_height <= CAMERA_MAX_PIXELS,
@@ -968,12 +969,7 @@ static esp_err_t transform_camera_frame(
         MALLOC_CAP_SPIRAM);
     ESP_RETURN_ON_FALSE(output != NULL, ESP_ERR_NO_MEM, TAG, "camera transform buffer allocation failed");
 
-    float scale_x = (float)output_width / camera->width;
-    float scale_y = (float)output_height / camera->height;
-    if (swaps_dimensions) {
-        scale_x = (float)output_height / camera->width;
-        scale_y = (float)output_width / camera->height;
-    }
+    float scale = (float)scale_steps / CAMERA_SCALE_DENOMINATOR;
     const ppa_srm_oper_config_t config = {
         .in = {
             .buffer = camera->buffers[camera->frame.index],
@@ -991,8 +987,8 @@ static esp_err_t transform_camera_frame(
             .srm_cm = PPA_SRM_COLOR_MODE_RGB888,
         },
         .rotation_angle = rotation,
-        .scale_x = scale_x,
-        .scale_y = scale_y,
+        .scale_x = scale,
+        .scale_y = scale,
         .mode = PPA_TRANS_MODE_BLOCKING,
     };
     esp_err_t result = ppa_do_scale_rotate_mirror(camera_ppa_srm, &config);

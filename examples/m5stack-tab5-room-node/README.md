@@ -265,6 +265,23 @@ mislabeling the front image.
 openclaw nodes camera snap --node <tab5-node> --facing front
 ```
 
+### Media stage diagnostics
+
+The capture owner emits one `camera_capture_diag` failure with a fixed `stage`,
+`domain` and numeric `error`. `esp` is the BSP result; `errno` is captured
+immediately after the failed syscall; `validation` uses zero rather than stale
+errno. Existing numeric format, stride and length rejection details remain.
+The single `dqbuf_begin` marker precedes the first blocking dequeue; its
+presence without a terminal record does not prove capture success or failure.
+There is no per-frame trace, new timeout, capture retry or format fallback.
+The camera RPC's existing error code and cleanup behavior are unchanged.
+
+Talk uses the [component's fixed-field stage diagnostics](../../components/esp-openclaw-talk/README.md#stage-diagnostics),
+with room-generation startup/peer/teardown records and existing audio-counter
+snapshots. They separate local progress from RTC/media success and contain no
+SDP, broker credentials or session identifiers. Native builds and synthetic
+fixtures are not physical camera, RTC or audio qualification.
+
 | Surface | Commands and bounds |
 | --- | --- |
 | Device | `device.info`, `device.status`, `wifi.status` |

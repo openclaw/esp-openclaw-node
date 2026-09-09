@@ -3,10 +3,14 @@
 #include <assert.h>
 #include <pthread.h>
 #include <stdatomic.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+static void *fixture_realloc(void *pointer, size_t size);
+#define realloc fixture_realloc
 #include "../src/esp_openclaw_talk.c"
+#undef realloc
 
 _Thread_local unsigned talk_host_critical_depth;
 
@@ -23,6 +27,16 @@ static atomic_bool closed;
 static bool reject_submission;
 static bool reply_ok = true;
 static bool use_config;
+static const char *http_case = "";
+static unsigned http_headers, http_posts, http_performs, http_cleanups;
+static int answer_result;
+static int ice_result, connected_result;
+static struct {
+    char stage[40], phase[16];
+    int error, first;
+} diagnostic_records[64];
+static size_t diagnostic_count;
+static pthread_mutex_t diagnostic_lock = PTHREAD_MUTEX_INITIALIZER;
 static unsigned config_count, create_count;
 static char close_key[257], close_voice[129];
 static esp_openclaw_node_handle_t close_node;
@@ -36,6 +50,21 @@ static esp_peer_signaling_handle_t signaling;
 static const esp_peer_signaling_impl_t *implementation;
 struct callback_context { unsigned magic; };
 static struct callback_context *callback_context;
+
+static void *fixture_realloc(void *pointer, size_t size)
+{
+    return strcmp(http_case, "response_alloc") == 0 ? NULL : realloc(pointer, size);
+}
+
+static bool diagnostic_has(const char *stage, const char *phase, int error, int first)
+{
+    for (size_t i = 0; i < diagnostic_count; ++i) {
+        if (strcmp(diagnostic_records[i].stage, stage) == 0 &&
+            strcmp(diagnostic_records[i].phase, phase) == 0 &&
+            diagnostic_records[i].error == error && diagnostic_records[i].first == first) return true;
+    }
+    return false;
+}
 
 static void pause_here(enum pause_point point)
 {
@@ -71,14 +100,14 @@ static int on_ice(esp_peer_signaling_ice_info_t *info, void *ctx)
     atomic_fetch_add(&ice_count, 1);
     pause_here(ICE);
     touch_context(ctx);
-    return 0;
+    return ice_result;
 }
 static int on_connected(void *ctx)
 {
     atomic_fetch_add(&connected_count, 1);
     pause_here(CONNECTED);
     touch_context(ctx);
-    return 0;
+    return connected_result;
 }
 static int on_close(void *ctx)
 {
@@ -92,7 +121,7 @@ static int on_answer(esp_peer_signaling_msg_t *msg, void *ctx)
     atomic_fetch_add(&answer_count, 1);
     pause_here(ANSWER);
     touch_context(ctx);
-    return 0;
+    return answer_result;
 }
 static void on_failure(esp_openclaw_talk_setup_result_t result, void *ctx)
 {
@@ -107,8 +136,42 @@ static void on_terminal(void *ctx)
     atomic_fetch_add(&terminal_count, 1);
 }
 
+static void capture_diagnostic(const char *format, va_list args)
+{
+    assert(talk_host_critical_depth == 0);
+    char line[1024];
+    int length = vsnprintf(line, sizeof(line), format, args);
+    assert(length >= 0 && (size_t)length < sizeof(line));
+    const char *canaries[] = {"gateway.example", "synthetic", "voice-a", "agent:fixture",
+        "SDP_CANARY", "HEADER_CANARY", "SECRET_ERROR_CANARY"};
+    for (size_t i = 0; i < sizeof(canaries) / sizeof(*canaries); ++i) assert(strstr(line, canaries[i]) == NULL);
+    if (strncmp(line, "talk_rtc_diag ", 14) != 0) return;
+    assert(pthread_mutex_lock(&diagnostic_lock) == 0);
+    assert(diagnostic_count < sizeof(diagnostic_records) / sizeof(*diagnostic_records));
+    size_t i = diagnostic_count++;
+    int consumed = 0;
+    assert(sscanf(line, "talk_rtc_diag stage=%39s phase=%15s error=%d first_failure=%d%n",
+        diagnostic_records[i].stage, diagnostic_records[i].phase,
+        &diagnostic_records[i].error, &diagnostic_records[i].first, &consumed) == 4);
+    assert(line[consumed] == '\0');
+    assert(pthread_mutex_unlock(&diagnostic_lock) == 0);
+}
+void talk_host_log_info(const char *tag, const char *format, ...)
+{
+    (void)tag;
+    va_list args;
+    va_start(args, format);
+    capture_diagnostic(format, args);
+    va_end(args);
+}
 void talk_host_log_error(const char *tag, const char *format, ...)
-{ (void)tag; (void)format; }
+{
+    (void)tag;
+    va_list args;
+    va_start(args, format);
+    capture_diagnostic(format, args);
+    va_end(args);
+}
 const char *esp_err_to_name(esp_err_t error)
 { (void)error; return "synthetic failure"; }
 
@@ -147,7 +210,7 @@ static void *reply_thread(void *arg)
     pending.cb = NULL;
     const esp_openclaw_node_gateway_result_t result = {
         .ok = reply_ok,
-        .error_code = reply_ok ? NULL : "UNAVAILABLE",
+        .error_code = reply_ok ? NULL : "SECRET_ERROR_CANARY",
         .payload_json = use_config ? "{\"config\":{\"talk\":{\"agentId\":\"fixture\"}}}" :
             "{\"transport\":\"webrtc\",\"offerUrl\":\"/offer\",\"clientSecret\":\"synthetic\","
             "\"voiceSessionId\":\"voice-a\",\"clientControl\":{\"owner\":\"gateway\"}}",
@@ -185,6 +248,7 @@ static void wait_for_drain(void)
 
 static void prepare(bool automatic)
 {
+    diagnostic_count = 0;
     callback_context = malloc(sizeof(*callback_context));
     assert(callback_context != NULL);
     callback_context->magic = 0xcafef00d;
@@ -233,7 +297,10 @@ static void race_dispatch(enum pause_point point)
     assert(pthread_join(dispatch, NULL) == 0);
     assert(atomic_load(&close_count) == 0);
     if (point == ICE || point == FAILURE || point == REPLY) assert(atomic_load(&connected_count) == 0);
-    if (point == HTTP) assert(atomic_load(&answer_count) == 0);
+    if (point == HTTP) {
+        assert(atomic_load(&answer_count) == 0);
+        assert(diagnostic_has("answer_callback", "canceled", 0, 0));
+    }
     if (point == REPLY && reply_ok) {
         assert(atomic_load(&ice_count) == 0);
         assert(strcmp(close_voice, "voice-a") == 0);
@@ -335,32 +402,93 @@ static void admission_race(void)
 struct esp_http_client { esp_http_client_config_t config; };
 esp_http_client_handle_t esp_http_client_init(const esp_http_client_config_t *config)
 {
+    if (strcmp(http_case, "http_init") == 0) return NULL;
     esp_http_client_handle_t client = malloc(sizeof(*client));
     assert(client != NULL);
     client->config = *config;
     return client;
 }
 esp_err_t esp_http_client_set_header(esp_http_client_handle_t client, const char *key, const char *value)
-{ (void)client; (void)key; (void)value; return ESP_OK; }
+{
+    (void)client; (void)value;
+    ++http_headers;
+    return strcmp(http_case, "http_content_type") == 0 && strcmp(key, "Content-Type") == 0 ? ESP_FAIL : ESP_OK;
+}
 esp_err_t esp_http_client_set_post_field(esp_http_client_handle_t client, const char *data, int length)
-{ (void)client; (void)data; (void)length; return ESP_OK; }
+{
+    (void)client;
+    assert(data != NULL && length > 0);
+    ++http_posts;
+    return strcmp(http_case, "http_post") == 0 ? ESP_FAIL : ESP_OK;
+}
 esp_err_t esp_http_client_perform(esp_http_client_handle_t client)
 {
+    ++http_performs;
     pause_here(HTTP);
+    if (strcmp(http_case, "http_perform") == 0) return ESP_FAIL;
+    if (strcmp(http_case, "response_missing") == 0) return ESP_OK;
+    const char *body = strcmp(http_case, "response_malformed") == 0 ? "SDP_CANARY" :
+        strcmp(http_case, "response_short") == 0 ? "v=" : "v=0";
     esp_http_client_event_t event = {
-        .event_id = HTTP_EVENT_ON_DATA, .user_data = client->config.user_data, .data = "v=0", .data_len = 3,
+        .event_id = HTTP_EVENT_ON_DATA, .user_data = client->config.user_data,
+        .data = (char *)body, .data_len = (int)strlen(body),
     };
+    if (strcmp(http_case, "response_size") == 0) event.data_len = MAX_SDP_RESPONSE_BYTES + 1;
     return client->config.event_handler(&event);
 }
 int esp_http_client_get_status_code(esp_http_client_handle_t client)
-{ (void)client; return 200; }
+{ (void)client; return strcmp(http_case, "http_status") == 0 ? 503 : 200; }
 esp_err_t esp_http_client_cleanup(esp_http_client_handle_t client)
-{ free(client); return ESP_OK; }
+{ ++http_cleanups; free(client); return ESP_FAIL; }
+
+static void http_diagnostic_case(const char *name)
+{
+    http_case = name;
+    prepare(false);
+    assert(start() == ESP_PEER_ERR_NONE);
+    reply_thread(NULL);
+    if (strcmp(name, "answer_callback") == 0) answer_result = -7;
+    esp_peer_signaling_msg_t msg = {
+        .type = ESP_PEER_SIGNALING_MSG_SDP, .data = (uint8_t *)"v=0\r\nSDP_CANARY", .size = 15,
+    };
+    int result = implementation->send_msg(signaling, &msg);
+    bool ignored = strcmp(name, "http_content_type") == 0 || strcmp(name, "http_post") == 0;
+    bool init = strcmp(name, "http_init") == 0;
+    bool callback = strcmp(name, "answer_callback") == 0;
+    assert(result == (init ? ESP_PEER_ERR_NO_MEM : callback ? -7 : ignored ? 0 : ESP_PEER_ERR_FAIL));
+    int error = init ? ESP_PEER_ERR_NO_MEM : callback ? -7 :
+        strcmp(name, "response_alloc") == 0 ? ESP_ERR_NO_MEM :
+        ignored || strcmp(name, "http_perform") == 0 || strcmp(name, "response_size") == 0 ? ESP_FAIL : ESP_PEER_ERR_FAIL;
+    assert(diagnostic_has(name, "end", error, 1));
+    unsigned first_count = 0;
+    for (size_t i = 0; i < diagnostic_count; ++i) first_count += diagnostic_records[i].first != 0;
+    assert(first_count == 1);
+    assert(http_headers == (init ? 0U : 2U));
+    assert(http_posts == (init ? 0U : 1U) && http_performs == http_posts && http_cleanups == http_posts);
+    assert(atomic_load(&answer_count) == (ignored || callback ? 1U : 0U));
+    close_thread(NULL);
+}
+
+static void callback_diagnostics(void)
+{
+    prepare(false);
+    assert(start() == ESP_PEER_ERR_NONE);
+    ice_result = -5;
+    connected_result = -6;
+    reply_thread(NULL);
+    assert(atomic_load(&ice_count) == 1 && atomic_load(&connected_count) == 1);
+    assert(atomic_load(&failure_count) == 0);
+    assert(diagnostic_has("ice_callback", "end", -5, 1));
+    assert(diagnostic_has("signaling_callback", "end", -6, 0));
+    close_thread(NULL);
+}
 
 int main(int argc, char **argv)
 {
     assert(argc == 2);
-    if (strcmp(argv[1], "ice-drain") == 0) race_dispatch(ICE);
+    if (strcmp(argv[1], "callback-diagnostics") == 0) callback_diagnostics();
+    else if (strncmp(argv[1], "diagnostic-", 11) == 0) http_diagnostic_case(argv[1] + 11);
+    else if (strcmp(argv[1], "ice-drain") == 0) race_dispatch(ICE);
     else if (strcmp(argv[1], "connected-drain") == 0) race_dispatch(CONNECTED);
     else if (strcmp(argv[1], "failure-drain") == 0) race_dispatch(FAILURE);
     else if (strcmp(argv[1], "answer-drain") == 0) race_dispatch(ANSWER);

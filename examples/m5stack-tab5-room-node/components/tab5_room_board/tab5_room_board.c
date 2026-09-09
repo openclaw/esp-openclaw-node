@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
@@ -716,17 +717,34 @@ static void close_camera_frame(camera_frame_t *camera)
 static esp_err_t capture_rgb565_frame(int delay_ms, camera_frame_t *camera)
 {
     static bool camera_started;
+    const char *stage = "bsp_start";
+    const char *domain = "errno";
+    int failure_error = 0;
+    esp_err_t result = ESP_FAIL;
+    bool needs_cleanup = false;
     if (!camera_started) {
-        ESP_RETURN_ON_ERROR(bsp_camera_start(NULL), TAG, "camera start");
+        esp_err_t start_result = bsp_camera_start(NULL);
+        if (start_result != ESP_OK) {
+            failure_error = start_result;
+            domain = "esp";
+            result = start_result;
+            goto fail;
+        }
         camera_started = true;
     }
     memset(camera, 0, sizeof(*camera));
     camera->fd = open(BSP_CAMERA_DEVICE, O_RDONLY);
-    if (camera->fd < 0) return ESP_FAIL;
+    if (camera->fd < 0) {
+        failure_error = errno;
+        stage = "open";
+        goto fail;
+    }
+    needs_cleanup = true;
 
     struct v4l2_format format = {.type = V4L2_BUF_TYPE_VIDEO_CAPTURE};
     if (ioctl(camera->fd, VIDIOC_G_FMT, &format) != 0) {
-        ESP_LOGE(TAG, "VIDIOC_G_FMT failed");
+        failure_error = errno;
+        stage = "g_fmt_initial";
         goto fail;
     }
     if (format.fmt.pix.width != CAMERA_SENSOR_WIDTH ||
@@ -738,6 +756,8 @@ static esp_err_t capture_rgb565_frame(int delay_ms, camera_frame_t *camera)
             (unsigned long)format.fmt.pix.height,
             CAMERA_SENSOR_WIDTH,
             CAMERA_SENSOR_HEIGHT);
+        stage = "validate_default";
+        domain = "validation";
         goto fail;
     }
     /* maxWidth constrains the post-rotation JPEG, never the SC202CS mode. */
@@ -750,13 +770,15 @@ static esp_err_t capture_rgb565_frame(int delay_ms, camera_frame_t *camera)
         },
     };
     if (ioctl(camera->fd, VIDIOC_S_FMT, &requested) != 0) {
-        ESP_LOGE(TAG, "VIDIOC_S_FMT RGB565 %ux%u failed", CAMERA_SENSOR_WIDTH, CAMERA_SENSOR_HEIGHT);
+        failure_error = errno;
+        stage = "s_fmt_rgb565";
         goto fail;
     }
     memset(&format, 0, sizeof(format));
     format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     if (ioctl(camera->fd, VIDIOC_G_FMT, &format) != 0) {
-        ESP_LOGE(TAG, "VIDIOC_G_FMT after RGB565 negotiation failed");
+        failure_error = errno;
+        stage = "g_fmt_rgb565";
         goto fail;
     }
     uint32_t expected_stride = CAMERA_SENSOR_WIDTH * sizeof(uint16_t);
@@ -776,6 +798,8 @@ static esp_err_t capture_rgb565_frame(int delay_ms, camera_frame_t *camera)
             CAMERA_SENSOR_WIDTH,
             CAMERA_SENSOR_HEIGHT,
             (unsigned long)expected_stride);
+        stage = "validate_format";
+        domain = "validation";
         goto fail;
     }
     camera->width = format.fmt.pix.width;
@@ -789,42 +813,78 @@ static esp_err_t capture_rgb565_frame(int delay_ms, camera_frame_t *camera)
         .type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
         .memory = V4L2_MEMORY_MMAP,
     };
-    if (ioctl(camera->fd, VIDIOC_REQBUFS, &request) != 0 || request.count < 2) goto fail;
+    if (ioctl(camera->fd, VIDIOC_REQBUFS, &request) != 0) {
+        failure_error = errno;
+        stage = "reqbufs";
+        goto fail;
+    }
+    if (request.count < 2) {
+        stage = "validate_count";
+        domain = "validation";
+        goto fail;
+    }
     for (uint32_t i = 0; i < 2; ++i) {
         struct v4l2_buffer buffer = {
             .type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
             .memory = V4L2_MEMORY_MMAP,
             .index = i,
         };
-        if (ioctl(camera->fd, VIDIOC_QUERYBUF, &buffer) != 0) goto fail;
+        if (ioctl(camera->fd, VIDIOC_QUERYBUF, &buffer) != 0) {
+            failure_error = errno;
+            stage = "querybuf";
+            goto fail;
+        }
         if (buffer.length < (size_t)camera->stride * camera->height) {
             ESP_LOGE(TAG, "camera MMAP buffer is too short: %lu", (unsigned long)buffer.length);
+            stage = "validate_buffer_length";
+            domain = "validation";
             goto fail;
         }
         camera->lengths[i] = buffer.length;
         camera->buffers[i] = mmap(NULL, buffer.length, PROT_READ | PROT_WRITE, MAP_SHARED, camera->fd, buffer.m.offset);
         if (camera->buffers[i] == MAP_FAILED) {
+            failure_error = errno;
+            stage = "mmap";
             camera->buffers[i] = NULL;
             goto fail;
         }
-        if (ioctl(camera->fd, VIDIOC_QBUF, &buffer) != 0) goto fail;
+        if (ioctl(camera->fd, VIDIOC_QBUF, &buffer) != 0) {
+            failure_error = errno;
+            stage = "qbuf";
+            goto fail;
+        }
     }
     int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    if (ioctl(camera->fd, VIDIOC_STREAMON, &type) != 0) goto fail;
+    if (ioctl(camera->fd, VIDIOC_STREAMON, &type) != 0) {
+        failure_error = errno;
+        stage = "streamon";
+        goto fail;
+    }
+    ESP_LOGI(TAG, "camera_capture_diag stage=dqbuf_begin domain=none error=0");
     int64_t deadline_us = esp_timer_get_time() + (int64_t)delay_ms * 1000;
     for (;;) {
         camera->frame = (struct v4l2_buffer){
             .type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
             .memory = V4L2_MEMORY_MMAP,
         };
-        if (ioctl(camera->fd, VIDIOC_DQBUF, &camera->frame) != 0 ||
-            camera->frame.index >= 2) {
+        if (ioctl(camera->fd, VIDIOC_DQBUF, &camera->frame) != 0) {
+            failure_error = errno;
+            stage = "dqbuf";
+            goto fail;
+        }
+        if (camera->frame.index >= 2) {
+            stage = "validate_index";
+            domain = "validation";
             goto fail;
         }
         if (esp_timer_get_time() >= deadline_us) break;
         /* Keep the two-buffer pipeline moving while delayMs elapses. Sleeping
          * here lets both buffers fill and stalls the sensor before capture. */
-        if (ioctl(camera->fd, VIDIOC_QBUF, &camera->frame) != 0) goto fail;
+        if (ioctl(camera->fd, VIDIOC_QBUF, &camera->frame) != 0) {
+            failure_error = errno;
+            stage = "requeue";
+            goto fail;
+        }
     }
     size_t frame_size = (size_t)camera->stride * camera->height;
     if (camera->frame.bytesused != 0 && camera->frame.bytesused < frame_size) {
@@ -833,12 +893,15 @@ static esp_err_t capture_rgb565_frame(int delay_ms, camera_frame_t *camera)
             "camera frame is too short: %lu bytes (expected at least %lu)",
             (unsigned long)camera->frame.bytesused,
             (unsigned long)frame_size);
+        stage = "validate_frame_length";
+        domain = "validation";
         goto fail;
     }
     return ESP_OK;
 fail:
-    close_camera_frame(camera);
-    return ESP_FAIL;
+    ESP_LOGE(TAG, "camera_capture_diag stage=%s domain=%s error=%d", stage, domain, failure_error);
+    if (needs_cleanup) close_camera_frame(camera);
+    return result;
 }
 
 typedef struct {

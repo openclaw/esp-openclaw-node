@@ -58,13 +58,30 @@ typedef struct esp_openclaw_talk_call {
     bool stopped;
     bool close_notified;
     bool gateway_owned;
+    bool diagnostic_failure_seen;
 } talk_signaling_t;
 
 typedef struct {
     char *data;
     size_t len;
     bool failed;
+    const char *failure_stage;
+    esp_err_t failure_error;
 } http_response_t;
+
+/* Stage and phase are local literals only. Never pass broker or SDP fields. */
+static void talk_diag(talk_signaling_t *talk, const char *stage, const char *phase, int error)
+{
+    bool first = false;
+    if (error != 0) {
+        portENTER_CRITICAL(&talk->state_lock);
+        first = !talk->diagnostic_failure_seen;
+        talk->diagnostic_failure_seen = true;
+        portEXIT_CRITICAL(&talk->state_lock);
+    }
+    ESP_LOGI(TAG, "talk_rtc_diag stage=%s phase=%s error=%d first_failure=%d",
+        stage, phase, error, first);
+}
 
 static char *duplicate_optional(const char *value)
 {
@@ -409,9 +426,7 @@ static bool has_gateway_control_descriptor(cJSON *payload)
 
 static void signal_failed(
     talk_signaling_t *talk,
-    esp_openclaw_talk_setup_result_t result,
-    const char *message,
-    const char *code)
+    esp_openclaw_talk_setup_result_t result)
 {
     if (!dispatch_enter(talk)) return;
     bool notify = false;
@@ -422,8 +437,7 @@ static void signal_failed(
     }
     portEXIT_CRITICAL(&talk->state_lock);
     if (notify) {
-        /* Error codes are bounded; provider/configuration payloads stay private. */
-        ESP_LOGE(TAG, "%s%s%.32s", message, code != NULL ? ": " : "", code != NULL ? code : "");
+        ESP_LOGE(TAG, "Talk setup failed: result=%d", (int)result);
         if (talk->setup_failed_cb != NULL) {
             talk->setup_failed_cb(result, talk->setup_failed_ctx);
         }
@@ -444,6 +458,7 @@ static void handle_talk_create(
 {
     (void)node;
     talk_signaling_t *talk = user_ctx;
+    talk_diag(talk, "create_callback", "begin", 0);
     cJSON *payload = result->ok && result->payload_json != NULL
         ? cJSON_Parse(result->payload_json)
         : NULL;
@@ -470,6 +485,12 @@ static void handle_talk_create(
                  offer_url->valuestring[0] == '/' &&
                  cJSON_IsString(client_secret) &&
                  session_id != NULL;
+    ESP_LOGI(TAG,
+        "talk_rtc_descriptor rpc_ok=%d payload_object=%d gateway_control=%d transport_valid=%d offer_present=%d secret_present=%d session_valid=%d",
+        result->ok, cJSON_IsObject(payload), gateway_control,
+        cJSON_IsString(transport) && strcmp(transport->valuestring, "webrtc") == 0,
+        cJSON_IsString(offer_url), cJSON_IsString(client_secret), session_id != NULL);
+    talk_diag(talk, "create_descriptor", "end", valid ? 0 : ESP_FAIL);
     if (valid) {
         talk->offer_url = resolve_offer_url(
             talk->gateway_http_base_url,
@@ -477,6 +498,7 @@ static void handle_talk_create(
         talk->client_secret = duplicate_optional(client_secret->valuestring);
         valid = talk->offer_url != NULL && talk->client_secret != NULL &&
                 copy_offer_headers(talk, offer_headers);
+        talk_diag(talk, "create_material", "end", valid ? 0 : ESP_FAIL);
     }
     cJSON_Delete(payload);
     if (!valid) {
@@ -493,9 +515,8 @@ static void handle_talk_create(
             talk,
             upgrade_required
                 ? ESP_OPENCLAW_TALK_GATEWAY_UPGRADE_REQUIRED
-                : ESP_OPENCLAW_TALK_SETUP_FAILED,
-            upgrade_required ? "Gateway upgrade required" : "Talk setup failed",
-            result->ok ? NULL : result->error_code);
+                : ESP_OPENCLAW_TALK_SETUP_FAILED);
+        talk_diag(talk, "create_callback", "end", ESP_FAIL);
         release_talk_signaling(talk);
         return;
     }
@@ -508,6 +529,7 @@ static void handle_talk_create(
     }
     portEXIT_CRITICAL(&talk->state_lock);
     if (stopped) {
+        talk_diag(talk, "create_callback", "canceled", 0);
         close_voice_session(talk->operator_node, talk->session_key, talk->voice_session_id);
         release_talk_signaling(talk);
         return;
@@ -516,19 +538,27 @@ static void handle_talk_create(
     esp_peer_signaling_ice_info_t ice_info = {.is_initiator = true};
     if (dispatch_enter(talk)) {
         if (talk->signaling.on_ice_info != NULL) {
-            talk->signaling.on_ice_info(&ice_info, talk->signaling.ctx);
-        }
+            talk_diag(talk, "ice_callback", "begin", 0);
+            int result = talk->signaling.on_ice_info(&ice_info, talk->signaling.ctx);
+            talk_diag(talk, "ice_callback", "end", result);
+        } else talk_diag(talk, "ice_callback", "absent", 0);
         dispatch_exit(talk);
-    }
+    } else talk_diag(talk, "ice_callback", "canceled", 0);
     if (dispatch_enter(talk)) {
-        if (talk->signaling.on_connected != NULL) talk->signaling.on_connected(talk->signaling.ctx);
+        if (talk->signaling.on_connected != NULL) {
+            talk_diag(talk, "signaling_callback", "begin", 0);
+            int result = talk->signaling.on_connected(talk->signaling.ctx);
+            talk_diag(talk, "signaling_callback", "end", result);
+        } else talk_diag(talk, "signaling_callback", "absent", 0);
         dispatch_exit(talk);
-    }
+    } else talk_diag(talk, "signaling_callback", "canceled", 0);
+    talk_diag(talk, "create_callback", "end", 0);
     release_talk_signaling(talk);
 }
 
 static esp_err_t request_talk_create(talk_signaling_t *talk)
 {
+    talk_diag(talk, "create_rpc", "begin", 0);
     cJSON *params = cJSON_CreateObject();
     cJSON_AddStringToObject(params, "mode", "realtime");
     cJSON_AddStringToObject(params, "transport", "webrtc");
@@ -555,12 +585,17 @@ static esp_err_t request_talk_create(talk_signaling_t *talk)
         !cJSON_AddItemToArray(capabilities, gateway_control)) {
         cJSON_Delete(gateway_control);
         cJSON_Delete(params);
+        talk_diag(talk, "create_rpc", "end", ESP_ERR_NO_MEM);
         return ESP_ERR_NO_MEM;
     }
     char *params_json = cJSON_PrintUnformatted(params);
     cJSON_Delete(params);
-    if (params_json == NULL) return ESP_ERR_NO_MEM;
+    if (params_json == NULL) {
+        talk_diag(talk, "create_rpc", "end", ESP_ERR_NO_MEM);
+        return ESP_ERR_NO_MEM;
+    }
     esp_err_t err = request_talk_rpc(talk, "talk.client.create", params_json, handle_talk_create);
+    talk_diag(talk, "create_rpc", "end", err);
     free(params_json);
     return err;
 }
@@ -572,30 +607,35 @@ static void handle_talk_config(
 {
     (void)node;
     talk_signaling_t *talk = user_ctx;
+    int diagnostic_result = 0;
     portENTER_CRITICAL(&talk->state_lock);
     bool stopped = talk->stopped;
     portEXIT_CRITICAL(&talk->state_lock);
+    talk_diag(talk, "config_callback", stopped ? "canceled" : "begin", 0);
     if (stopped) goto done;
     if (!result->ok) {
-        signal_failed(talk, ESP_OPENCLAW_TALK_SETUP_FAILED,
-            "Talk configuration lookup failed", result->error_code);
+        diagnostic_result = ESP_FAIL;
+        talk_diag(talk, "config_rpc", "end", ESP_FAIL);
+        signal_failed(talk, ESP_OPENCLAW_TALK_SETUP_FAILED);
         goto done;
     }
     /* Freeze the selected key before create; close must not rediscover
      * a new owner after configuration changes or cancellation. */
     talk->session_key = resolve_default_session_key(result->payload_json);
     if (talk->session_key == NULL) {
-        signal_failed(talk, ESP_OPENCLAW_TALK_SETUP_FAILED,
-            "Talk routing configuration is invalid", NULL);
+        diagnostic_result = ESP_FAIL;
+        talk_diag(talk, "config_routing", "end", ESP_FAIL);
+        signal_failed(talk, ESP_OPENCLAW_TALK_SETUP_FAILED);
         goto done;
     }
     esp_err_t err = request_talk_create(talk);
     if (err != ESP_OK) {
-        signal_failed(talk, ESP_OPENCLAW_TALK_SETUP_FAILED,
-            "Talk create request failed", esp_err_to_name(err));
+        diagnostic_result = err;
+        signal_failed(talk, ESP_OPENCLAW_TALK_SETUP_FAILED);
     }
 
 done:
+    talk_diag(talk, "config_callback", stopped ? "canceled" : "end", diagnostic_result);
     release_talk_signaling(talk);
 }
 
@@ -662,9 +702,11 @@ static int start_prepared(talk_signaling_t *talk, esp_peer_signaling_cfg_t *cfg,
     portEXIT_CRITICAL(&talk->state_lock);
     if (!valid) return ESP_PEER_ERR_FAIL;
 
+    talk_diag(talk, "signaling_start", "begin", 0);
     esp_err_t err = talk->session_key != NULL
         ? request_talk_create(talk)
         : request_talk_rpc(talk, "talk.config", "{\"includeSecrets\":false}", handle_talk_config);
+    talk_diag(talk, "signaling_start", "end", err);
     if (err != ESP_OK) {
         release_talk_signaling(talk);
         return ESP_PEER_ERR_FAIL;
@@ -747,11 +789,15 @@ static esp_err_t http_event_handler(esp_http_client_event_t *event)
     }
     if (response->len + (size_t)event->data_len > MAX_SDP_RESPONSE_BYTES) {
         response->failed = true;
+        response->failure_stage = "response_size";
+        response->failure_error = ESP_FAIL;
         return ESP_FAIL;
     }
     char *resized = realloc(response->data, response->len + (size_t)event->data_len + 1U);
     if (resized == NULL) {
         response->failed = true;
+        response->failure_stage = "response_alloc";
+        response->failure_error = ESP_ERR_NO_MEM;
         return ESP_ERR_NO_MEM;
     }
     response->data = resized;
@@ -790,34 +836,53 @@ static int exchange_sdp(talk_signaling_t *talk, const char *sdp)
         .crt_bundle_attach = esp_crt_bundle_attach,
 #endif
     };
+    talk_diag(talk, "http_init", "begin", 0);
     esp_http_client_handle_t client = esp_http_client_init(&config);
+    talk_diag(talk, "http_init", "end", client != NULL ? 0 : ESP_PEER_ERR_NO_MEM);
     if (client == NULL) {
         return ESP_PEER_ERR_NO_MEM;
     }
-    esp_http_client_set_header(client, "Content-Type", "application/sdp");
+    esp_err_t header_error = esp_http_client_set_header(client, "Content-Type", "application/sdp");
+    talk_diag(talk, "http_content_type", "end", header_error);
     size_t auth_len = strlen("Bearer ") + strlen(talk->client_secret) + 1U;
     char *authorization = malloc(auth_len);
     if (authorization == NULL) {
+        talk_diag(talk, "http_auth_alloc", "end", ESP_PEER_ERR_NO_MEM);
         esp_http_client_cleanup(client);
         return ESP_PEER_ERR_NO_MEM;
     }
     snprintf(authorization, auth_len, "Bearer %s", talk->client_secret);
-    esp_http_client_set_header(client, "Authorization", authorization);
+    header_error = esp_http_client_set_header(client, "Authorization", authorization);
+    talk_diag(talk, "http_authorization", "end", header_error);
+    header_error = ESP_OK;
     for (size_t i = 0; i < talk->offer_header_count; ++i) {
-        esp_http_client_set_header(
+        esp_err_t result = esp_http_client_set_header(
             client,
             talk->offer_headers[i].name,
             talk->offer_headers[i].value);
+        if (header_error == ESP_OK) header_error = result;
     }
-    esp_http_client_set_post_field(client, sdp, (int)strlen(sdp));
+    talk_diag(talk, "http_offer_headers", "end", header_error);
+    esp_err_t post_error = esp_http_client_set_post_field(client, sdp, (int)strlen(sdp));
+    talk_diag(talk, "http_post", "end", post_error);
+    talk_diag(talk, "http_perform", "begin", 0);
     esp_err_t err = esp_http_client_perform(client);
+    if (response.failed) talk_diag(talk, response.failure_stage, "end", response.failure_error);
+    talk_diag(talk, "http_perform", "end", err);
     int status = esp_http_client_get_status_code(client);
+    ESP_LOGI(TAG, "talk_rtc_http status=%d response_failed=%d response_present=%d",
+        status, response.failed, response.data != NULL);
     free(authorization);
     esp_http_client_cleanup(client);
     if (err != ESP_OK || response.failed || status < 200 || status >= 300 ||
         response.data == NULL || response.len < 3 ||
         strncmp(response.data, "v=0", 3) != 0) {
-        ESP_LOGE(TAG, "SDP exchange failed: status=%d err=%s", status, esp_err_to_name(err));
+        const char *stage = err != ESP_OK ? "http_perform" :
+            response.failed ? response.failure_stage :
+            status < 200 || status >= 300 ? "http_status" :
+            response.data == NULL ? "response_missing" :
+            response.len < 3 ? "response_short" : "response_malformed";
+        talk_diag(talk, stage, "end", ESP_PEER_ERR_FAIL);
         free(response.data);
         return ESP_PEER_ERR_FAIL;
     }
@@ -829,9 +894,13 @@ static int exchange_sdp(talk_signaling_t *talk, const char *sdp)
     };
     int callback_result = ESP_PEER_ERR_NONE;
     if (dispatch_enter(talk)) {
-        if (talk->signaling.on_msg != NULL) callback_result = talk->signaling.on_msg(&answer, talk->signaling.ctx);
+        if (talk->signaling.on_msg != NULL) {
+            talk_diag(talk, "answer_callback", "begin", 0);
+            callback_result = talk->signaling.on_msg(&answer, talk->signaling.ctx);
+            talk_diag(talk, "answer_callback", "end", callback_result);
+        } else talk_diag(talk, "answer_callback", "absent", 0);
         dispatch_exit(talk);
-    }
+    } else talk_diag(talk, "answer_callback", "canceled", 0);
     free(response.data);
     return callback_result;
 }

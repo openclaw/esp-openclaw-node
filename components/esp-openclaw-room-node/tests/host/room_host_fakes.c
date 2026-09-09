@@ -76,12 +76,41 @@ void host_require(bool condition, const char *message)
 
 void host_log(const char *tag, const char *format, ...)
 {
+    char line[1024];
     va_list args;
     va_start(args, format);
-    fprintf(stderr, "[%s] ", tag);
-    vfprintf(stderr, format, args);
-    fputc('\n', stderr);
+    int length = vsnprintf(line, sizeof(line), format, args);
     va_end(args);
+    host_require(length >= 0 && (size_t)length < sizeof(line), "bounded fixture log");
+    bool diagnostic = strncmp(line, "room_talk_", 10) == 0 || strncmp(line, "talk_rtc_", 9) == 0;
+    if (diagnostic) {
+        host_require(mutex_depth == 0 && host.critical_depth == 0, "media diagnostic outside locks");
+        host_require(strstr(line, "voice-a") == NULL && strstr(line, "synthetic") == NULL &&
+            strstr(line, "gateway.example") == NULL && strstr(line, "agent:fixture") == NULL,
+            "media diagnostics exclude secret canaries");
+        if (host.capture_diagnostics) {
+            size_t offset = strlen(host.diagnostics);
+            host_require(offset + (size_t)length + 2 < sizeof(host.diagnostics), "fixture diagnostic capacity");
+            memcpy(host.diagnostics + offset, line, (size_t)length);
+            host.diagnostics[offset + (size_t)length] = '\n';
+            host.diagnostics[offset + (size_t)length + 1] = '\0';
+        }
+    }
+    fprintf(stderr, "[%s] %s\n", tag, line);
+}
+
+void esp_log_level_set(const char *tag, esp_log_level_t level)
+{
+    host_require(mutex_depth == 0 && host.critical_depth == 0, "log policy outside locks");
+    host_require(strcmp(tag, "webrtc") == 0 && level == ESP_LOG_WARN, "only unsafe SDK SDP INFO suppressed");
+    if (!host.fail_log_policy) host.sdk_log_suppressed = true;
+}
+
+esp_log_level_t esp_log_level_get(const char *tag)
+{
+    host_require(mutex_depth == 0 && host.critical_depth == 0, "log policy readback outside locks");
+    host_require(strcmp(tag, "webrtc") == 0, "only SDK SDP tag read back");
+    return host.sdk_log_suppressed ? ESP_LOG_WARN : ESP_LOG_INFO;
 }
 
 int esp_rom_printf(const char *format, ...)
@@ -531,6 +560,7 @@ static int signal_message(esp_peer_signaling_msg_t *message, void *ctx)
 { (void)message; (void)ctx; host_require(false, "no SDP exchange in this suite"); return -1; }
 int esp_webrtc_start(esp_webrtc_handle_t session)
 {
+    host_require(host.sdk_log_suppressed, "SDK SDP INFO suppressed before negotiation");
     if (host.fail_start) return -1;
     fake_rtc_t *rtc = session;
     esp_peer_signaling_cfg_t config = {
@@ -646,7 +676,15 @@ esp_err_t room_diagnostics_request_open(void)
 esp_err_t room_diagnostics_request_close(void)
 { unsupported_boundary(__func__); }
 void room_diagnostics_audio_get(room_audio_diagnostics_snapshot_t *snapshot)
-{ (void)snapshot; unsupported_boundary(__func__); }
+{
+    host_require(mutex_depth == 0 && host.critical_depth == 0, "audio snapshot outside locks");
+    ++host.audio_snapshots;
+    *snapshot = (room_audio_diagnostics_snapshot_t){
+        .capture_read_successes = 11, .capture_read_errors = 2,
+        .feed_successes = 13, .feed_errors = 3, .fetch_successes = 17,
+        .fetch_errors = 5, .renderer_accepted = 19, .renderer_errors = 7,
+    };
+}
 esp_err_t room_media_request_test_tone(room_media_talk_busy_cb_t busy_cb, void *ctx)
 { (void)busy_cb; (void)ctx; unsupported_boundary(__func__); }
 void room_media_get_tone_snapshot(room_media_tone_snapshot_t *snapshot)

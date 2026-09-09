@@ -71,6 +71,7 @@ jobs:
           python3 -m unittest discover -s scripts/tests -p 'test_package_firmware.py' -v
           python3 -m unittest discover -s scripts/tests -p 'test_idf_tab5_compat.py' -v
           python3 -m unittest discover -s scripts/tests -p 'test_nvs_diagnostics.py' -v
+          python3 -m unittest discover -s scripts/tests -p 'test_tab5_camera_diagnostics.py' -v
 
       - name: Build
         uses: espressif/esp-idf-ci-action@v1

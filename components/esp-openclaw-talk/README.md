@@ -29,6 +29,28 @@ default.
 
 The ESP WebRTC source is pinned as the repository submodule at `third_party/esp-webrtc-solution`; clone this repository with submodules enabled.
 
+## Stage diagnostics
+
+`talk_rtc_diag` records local stage/phase, numeric result and a
+`first_failure` flag claimed once per call. A `begin` without its matching
+`end` is unfinished, not a reported failure. RPC submission completion is not
+remote completion. `absent` and `canceled` distinguish an unconfigured callback
+from one skipped after cancellation. Header, post-field and ICE/signaling
+callback errors are observed without changing their existing ignored-return
+policy. Descriptor and HTTP records contain only validation flags and HTTP
+status; SDP, URLs, identity fields, headers and remote error text are excluded.
+
+Room examples emit `room_talk_diag` with the existing local generation around
+startup, peer events and teardown. Its `result` preserves each stage's native
+convention: timer `pdPASS=1` is success and peer enum values are not errors;
+nonzero does not generically mean failure. `room_talk_audio` snapshots existing
+cumulative capture/AFE/renderer counters at those boundaries only. These
+counters do not prove network delivery or audible output. The application sets
+the pinned SDK's `webrtc` tag to WARN before negotiation because its INFO
+output includes outbound SDP. It reads the tag level back and refuses to open
+WebRTC if suppression failed. Do not enable that tag's INFO/DEBUG output in
+captures intended for sharing. These diagnostics do not qualify RTC or audio.
+
 ## Prepared-call lifetime
 
 Owners that close WebRTC asynchronously should prepare a call before scheduling

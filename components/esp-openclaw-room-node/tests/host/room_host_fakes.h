@@ -34,6 +34,9 @@ typedef struct {
     bool fail_config_submit, fail_create_submit, fail_open, fail_provider, fail_start, fail_timer;
     const char *node_uri;
     const char *create_voice;
+    bool sdk_log_suppressed, fail_log_policy, capture_diagnostics;
+    unsigned audio_snapshots;
+    char diagnostics[16384];
 } room_host_observations_t;
 extern room_host_observations_t host;
 

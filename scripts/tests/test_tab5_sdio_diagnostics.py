@@ -19,6 +19,7 @@ import tab5_sdio_diagnostics as sdio
 HAS_MANAGER = importlib.util.find_spec("idf_component_tools") is not None
 ORIGINAL = b"/* Synthetic component fixture, not a transport simulator. */\nint fixture;\n"
 PATCHED = ORIGINAL + b"/* Diagnostic fixture change. */\n"
+PSRAM_PATCHED = PATCHED + b"/* Streaming RX PSRAM fixture change. */\n"
 REGISTRY_SOURCE = {
     "type": "service",
     "registry_url": "https://components.espressif.com/",
@@ -55,11 +56,19 @@ def component_fixture(project, build, dependencies):
     (component / ".component_hash").write_text(original_hash)
     source.write_bytes(PATCHED)
     patched_hash = directory_hash(component)
+    source.write_bytes(PSRAM_PATCHED)
+    psram_hash = directory_hash(component)
     source.write_bytes(ORIGINAL)
     patch_file = build / "fixture.patch"
     patch_file.write_text("".join(difflib.unified_diff(
         ORIGINAL.decode().splitlines(keepends=True),
         PATCHED.decode().splitlines(keepends=True),
+        fromfile="a/" + sdio.SOURCE_PATH, tofile="b/" + sdio.SOURCE_PATH,
+    )))
+    psram_patch_file = build / "psram-fixture.patch"
+    psram_patch_file.write_text("".join(difflib.unified_diff(
+        PATCHED.decode().splitlines(keepends=True),
+        PSRAM_PATCHED.decode().splitlines(keepends=True),
         fromfile="a/" + sdio.SOURCE_PATH, tofile="b/" + sdio.SOURCE_PATH,
     )))
     (build / "compile_commands.json").write_text(json.dumps([{
@@ -75,6 +84,9 @@ def component_fixture(project, build, dependencies):
         MANIFEST_SHA256=sdio.digest(manifest.read_bytes()),
         ORIGINAL_SHA256=sdio.digest(ORIGINAL), PATCHED_SHA256=sdio.digest(PATCHED),
         PATCH_PATH=patch_file, PATCH_SHA256=sdio.digest(patch_file.read_bytes()),
+        PSRAM_PATCH_PATH=psram_patch_file,
+        PSRAM_PATCH_SHA256=sdio.digest(psram_patch_file.read_bytes()),
+        PSRAM_SHA256=sdio.digest(PSRAM_PATCHED), PSRAM_COMPONENT_HASH=psram_hash,
     ):
         yield component
 
@@ -96,9 +108,9 @@ class SdioPatchTests(unittest.TestCase):
         self.addCleanup(context.__exit__, None, None, None)
         self.source = self.component / sdio.SOURCE_PATH
 
-    def apply(self):
+    def apply(self, psram_rx=False):
         return sdio.apply_component_patch(
-            self.project, self.component, self.build, self.dependencies,
+            self.project, self.component, self.build, self.dependencies, psram_rx=psram_rx,
         )
 
     def verify(self, patched=True):
@@ -220,6 +232,38 @@ class SdioPatchTests(unittest.TestCase):
             with self.subTest(entries=len(entries)), self.assertRaises(ValueError):
                 self.apply()
             self.assertEqual(self.source.read_bytes(), ORIGINAL)
+
+    def test_psram_patch_chain_idempotence_and_final_provenance(self):
+        metadata = self.apply(psram_rx=True)
+        self.assertEqual(self.source.read_bytes(), PSRAM_PATCHED)
+        self.assertEqual(metadata["patched_source_sha256"], sdio.digest(PSRAM_PATCHED))
+        self.assertEqual(metadata["patched_component_hash"], directory_hash(self.component))
+        self.assertEqual([p["output_source_sha256"] for p in metadata["patches"]],
+                         [sdio.digest(PATCHED), sdio.digest(PSRAM_PATCHED)])
+        self.assertEqual(metadata["patches"][1]["input_source_sha256"], sdio.digest(PATCHED))
+        self.assertEqual(self.apply(psram_rx=True), metadata)
+        with self.assertRaises(ValueError):
+            self.verify()
+        with self.assertRaises(ValueError):
+            sdio.verify_component_patch(self.project, self.component, self.build,
+                                        self.dependencies, patched=False, psram_rx=True)
+
+    def test_psram_tampering_refuses_before_applying_diagnostic_patch(self):
+        with patch.object(sdio, "PSRAM_PATCH_SHA256", "0" * 64), self.assertRaises(ValueError):
+            self.apply(psram_rx=True)
+        self.assertEqual(self.source.read_bytes(), ORIGINAL)
+
+    def test_psram_transition_requires_exact_diagnostic_component(self):
+        self.apply()
+        other = self.component / "other.c"
+        original = other.read_bytes()
+        other.write_bytes(b"/* unrelated edit */\n")
+        with self.assertRaises(ValueError):
+            self.apply(psram_rx=True)
+        self.assertEqual(self.source.read_bytes(), PATCHED)
+        other.write_bytes(original)
+        self.apply(psram_rx=True)
+        self.assertEqual(self.source.read_bytes(), PSRAM_PATCHED)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Apply or verify the pinned Tab5 SDIO probe after IDF configuration."""
+"""Apply or verify the pinned Tab5 SDIO patches after IDF configuration."""
 
 import argparse
 import hashlib
@@ -20,13 +20,18 @@ PATCHED_SHA256 = "5d3772ff65d6aeb837019adc4f03513ed766e045101d1b225cb80d17d66cc9
 PATCH_RELATIVE = "patches/esp-hosted/tab5-sdio-first-allocation-failure.patch"
 PATCH_PATH = Path(__file__).resolve().parents[1] / PATCH_RELATIVE
 PATCH_SHA256 = "430b99399fc6ab7d9d624855c1dd80ef3f8c3739776480ceae2dedeb1cc91f84"
+PSRAM_PATCH_RELATIVE = "patches/esp-hosted/tab5-sdio-streaming-rx-psram.patch"
+PSRAM_PATCH_PATH = Path(__file__).resolve().parents[1] / PSRAM_PATCH_RELATIVE
+PSRAM_PATCH_SHA256 = "ce511b5747d847a8913c4f4de37a98600422137e09210ee1ff4b24a033b2f768"
+PSRAM_SHA256 = "60d7a83b15ca883539744da370aa0267060ab605a822ec50a9c47b67d94dc78e"
+PSRAM_COMPONENT_HASH = "62132bdfd0d1710eb954bd0d2ce6e6ed54dd33aad0cbe5d86e3dc76e54ed74a9"
 
 
 def digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def inspect_component(project, component, build, dependencies):
+def inspect_component(project, component, build, dependencies, psram_rx=False):
     project = Path(project).resolve(strict=True)
     component = Path(component).absolute()
     build = Path(build).resolve(strict=True)
@@ -56,6 +61,9 @@ def inspect_component(project, component, build, dependencies):
     if (PATCH_PATH.is_symlink()
             or digest(PATCH_PATH.read_bytes()) != PATCH_SHA256):
         raise ValueError("Tracked SDIO patch has unexpected contents")
+    if psram_rx and (PSRAM_PATCH_PATH.is_symlink()
+                     or digest(PSRAM_PATCH_PATH.read_bytes()) != PSRAM_PATCH_SHA256):
+        raise ValueError("Tracked streaming RX PSRAM patch has unexpected contents")
     commands = json.loads((build / "compile_commands.json").read_text())
     compiled_sources = []
     for command in commands:
@@ -82,39 +90,63 @@ def validate_component_hash(component, expected):
         raise ValueError("Managed component bytes do not match the selected profile") from error
 
 
-def verify_component_patch(project, component, build, dependencies, patched=True):
-    component, source_hash = inspect_component(project, component, build, dependencies)
+def verify_component_patch(project, component, build, dependencies, patched=True, psram_rx=False):
+    if psram_rx and not patched:
+        raise ValueError("Streaming RX PSRAM requires the diagnostic patch first")
+    component, source_hash = inspect_component(project, component, build, dependencies, psram_rx)
     expected_source = PATCHED_SHA256 if patched else ORIGINAL_SHA256
     expected_component = PATCHED_COMPONENT_HASH if patched else COMPONENT_HASH
+    if psram_rx:
+        expected_source, expected_component = PSRAM_SHA256, PSRAM_COMPONENT_HASH
     if source_hash != expected_source:
         raise ValueError("SDIO source does not match the explicitly selected profile")
     validate_component_hash(component, expected_component)
     if not patched:
         return {"component": COMPONENT, "version": VERSION, "modified": False}
-    return {
+    result = {
         "component": COMPONENT,
         "version": VERSION,
         "registry_revision": REVISION,
         "registry_path": ".",
         "original_component_hash": COMPONENT_HASH,
         "modified": patched,
-        "patch": PATCH_RELATIVE,
-        "patch_sha256": PATCH_SHA256,
         "source": SOURCE_PATH,
         "original_source_sha256": ORIGINAL_SHA256,
         "patched_source_sha256": source_hash,
         "patched_component_hash": expected_component,
     }
+    if psram_rx:
+        result["profile"] = "streaming-rx-psram-with-diagnostics"
+        result["patches"] = [
+            {
+                "patch": PATCH_RELATIVE, "patch_sha256": PATCH_SHA256,
+                "input_source_sha256": ORIGINAL_SHA256,
+                "output_source_sha256": PATCHED_SHA256,
+            },
+            {
+                "patch": PSRAM_PATCH_RELATIVE, "patch_sha256": PSRAM_PATCH_SHA256,
+                "input_source_sha256": PATCHED_SHA256,
+                "output_source_sha256": PSRAM_SHA256,
+            },
+        ]
+    else:
+        result.update(patch=PATCH_RELATIVE, patch_sha256=PATCH_SHA256)
+    return result
 
 
-def apply_component_patch(project, component, build, dependencies):
-    component, source_hash = inspect_component(project, component, build, dependencies)
-    if source_hash == PATCHED_SHA256:
-        return verify_component_patch(project, component, build, dependencies)
-    verify_component_patch(project, component, build, dependencies, patched=False)
-    subprocess.run(["git", "apply", "--check", str(PATCH_PATH)], cwd=component, check=True)
-    subprocess.run(["git", "apply", str(PATCH_PATH)], cwd=component, check=True)
-    return verify_component_patch(project, component, build, dependencies)
+def apply_component_patch(project, component, build, dependencies, psram_rx=False):
+    component, source_hash = inspect_component(project, component, build, dependencies, psram_rx)
+    if psram_rx and source_hash == PSRAM_SHA256:
+        return verify_component_patch(project, component, build, dependencies, psram_rx=True)
+    if source_hash != PATCHED_SHA256:
+        verify_component_patch(project, component, build, dependencies, patched=False)
+        subprocess.run(["git", "apply", "--check", str(PATCH_PATH)], cwd=component, check=True)
+        subprocess.run(["git", "apply", str(PATCH_PATH)], cwd=component, check=True)
+    verify_component_patch(project, component, build, dependencies)
+    if psram_rx:
+        subprocess.run(["git", "apply", "--check", str(PSRAM_PATCH_PATH)], cwd=component, check=True)
+        subprocess.run(["git", "apply", str(PSRAM_PATCH_PATH)], cwd=component, check=True)
+    return verify_component_patch(project, component, build, dependencies, psram_rx=psram_rx)
 
 
 def main():
@@ -123,6 +155,7 @@ def main():
     parser.add_argument("--component-path", type=Path, required=True)
     parser.add_argument("--build-path", type=Path, required=True)
     parser.add_argument("--verify-only", action="store_true")
+    parser.add_argument("--psram-rx", action="store_true")
     args = parser.parse_args()
     try:
         from ruamel.yaml import YAML
@@ -134,7 +167,8 @@ def main():
             (args.project_path / "dependencies.lock").read_text()
         )
         operation = verify_component_patch if args.verify_only else apply_component_patch
-        result = operation(args.project_path, args.component_path, args.build_path, dependencies)
+        result = operation(args.project_path, args.component_path, args.build_path,
+                           dependencies, psram_rx=args.psram_rx)
     except (ValueError, TypeError, KeyError, OSError, ImportError,
             YAMLError, subprocess.CalledProcessError):
         parser.exit(1, "SDIO diagnostic patch refused: verify the pinned component and build inputs.\n")

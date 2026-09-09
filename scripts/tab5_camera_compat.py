@@ -32,6 +32,35 @@ PROFILE = {
     "CONFIG_ESP32P4_REV_MAX_FULL": "199",
 }
 
+# Only these exact static refusals may cross the CLI boundary.
+REFUSAL_CODES = {
+    "Select the configured Tab5 project and its managed esp_video": "project_path",
+    "Managed component must not contain symbolic links": "component_symlink",
+    "Dependency lock must contain a dependency mapping": "dependency_mapping",
+    "Resolved camera component must have a registry source": "registry_source",
+    "Resolved esp_video identity differs from the approved 2.4.1 component": "component_identity",
+    "Camera component manifest or registry revision differs": "component_manifest",
+    "Tracked camera patch has unexpected contents": "tracked_patch",
+    "Camera build does not select the explicit SDK and project": "build_identity",
+    "Camera configuration is outside the selected project": "config_path",
+    "Camera compatibility requires the unchanged early-P4 Tab5 profile": "early_p4_profile",
+    "SDK CSI source does not match the approved backported contract": "sdk_csi_contract",
+    "Build must compile exactly one camera format mapper": "mapper_count",
+    "Build selects a different camera format mapper": "mapper_path",
+    "Camera compiler invocation selects a different source": "compiler_source",
+    "Camera compile command must identify its output object": "compiler_output",
+    "Camera object must be inside the selected build": "object_path",
+    "Camera component bytes do not match the selected profile": "component_integrity",
+    "Camera source does not match the explicitly selected profile": "source_profile",
+    "Camera mapper needs a current ELF32 RISC-V relocatable object": "compiled_object",
+    "Select the SDK repository root explicitly": "sdk_root",
+    "SDK is not at the approved compatibility-patch base": "sdk_base",
+    "Tracked SDK patch has unexpected contents": "sdk_patch_bytes",
+    "SDK base source does not match the approved whole-file hash": "sdk_base_source",
+    "SDK source must be a regular file at the approved path": "sdk_source_path",
+    "SDK is not modified by exactly the selected Tab5 patches": "sdk_patch_state",
+}
+
 
 def digest(data):
     return hashlib.sha256(data).hexdigest()
@@ -185,7 +214,8 @@ def main():
                            args.idf_path, dependencies)
     except (ValueError, TypeError, KeyError, OSError, ImportError,
             YAMLError, subprocess.CalledProcessError) as error:
-        parser.exit(1, f"Camera compatibility patch refused: {type(error).__name__}. Check the pinned profile and build inputs.\n")
+        code = REFUSAL_CODES.get(str(error), "unclassified") if type(error) is ValueError else "unclassified"
+        parser.exit(1, f"Camera compatibility patch refused: guard={code}. Check the pinned profile and build inputs.\n")
     print(json.dumps(result, indent=2))
 
 

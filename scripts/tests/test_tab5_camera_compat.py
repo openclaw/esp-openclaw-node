@@ -1,8 +1,9 @@
 """Exercise exact component guards and the real upstream camera format mapper."""
 
-from contextlib import contextmanager
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 import copy
 import difflib
+import io
 import json
 import os
 from pathlib import Path
@@ -130,6 +131,63 @@ class CameraPatchTests(unittest.TestCase):
     def verify(self, **options):
         return camera.verify_component_patch(
             self.project, self.component, self.build, self.idf, self.dependencies, **options)
+
+    def assert_cli_refusal(self, code, canary):
+        (self.project / "dependencies.lock").write_text(json.dumps(self.dependencies))
+        before = {p: p.read_bytes() for p in self.component.rglob("*") if p.is_file()}
+        sdk_before = sdk.git(self.idf, "diff")
+        sdk_status = sdk.git(self.idf, "status", "--porcelain=v1")
+        stdout, stderr = io.StringIO(), io.StringIO()
+        arguments = [
+            "tab5_camera_compat.py", "--project-path", str(self.project),
+            "--component-path", str(self.component), "--build-path", str(self.build),
+            "--idf-path", str(self.idf),
+        ]
+        with patch.object(sys, "argv", arguments), redirect_stdout(stdout), redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as result:
+                camera.main()
+        self.assertEqual(result.exception.code, 1)
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertIn(f"guard={code}", stderr.getvalue())
+        for value in (canary, str(self.root), "Traceback"):
+            self.assertNotIn(value, stdout.getvalue() + stderr.getvalue())
+        self.assertEqual(
+            {p: p.read_bytes() for p in self.component.rglob("*") if p.is_file()}, before)
+        self.assertEqual(sdk.git(self.idf, "diff"), sdk_before)
+        self.assertEqual(sdk.git(self.idf, "status", "--porcelain=v1"), sdk_status)
+
+    def test_cli_classifies_real_camera_and_sdk_guards_before_apply(self):
+        canary = "synthetic-private-value-must-not-print"
+        self.dependencies["dependencies"][camera.COMPONENT]["version"] = canary
+        self.assert_cli_refusal("component_identity", canary)
+        self.dependencies["dependencies"][camera.COMPONENT]["version"] = camera.VERSION
+        config = self.config.read_text()
+        self.config.write_text(config.replace('CONFIG_IDF_TARGET="esp32p4"',
+                                              f'CONFIG_IDF_TARGET="{canary}"'))
+        self.assert_cli_refusal("early_p4_profile", canary)
+        self.config.write_text(config)
+        for module, name, code in (
+            (camera, "MANIFEST_SHA256", "component_manifest"),
+            (camera, "SDK_SOURCE_SHA256", "sdk_csi_contract"),
+            (sdk, "BASE_COMMIT", "sdk_base"),
+            (sdk, "PATCH_SHA256", "sdk_patch_bytes"),
+            (sdk, "ORIGINAL_SHA256", "sdk_base_source"),
+            (sdk, "PATCHED_SHA256", "sdk_patch_state"),
+        ):
+            with self.subTest(code=code), patch.object(module, name, canary):
+                self.assert_cli_refusal(code, canary)
+
+    def test_cli_unknown_errors_have_a_fixed_nonleaking_fallback(self):
+        canary = "synthetic-private-value-must-not-print"
+        for error in (
+            ValueError(canary),
+            ValueError("Build must compile exactly one camera format mapper " + canary),
+            OSError(5, canary, str(self.root / canary)),
+            subprocess.CalledProcessError(1, [canary], output=canary, stderr=canary),
+        ):
+            with self.subTest(error=type(error).__name__), patch.object(
+                    camera, "apply_component_patch", side_effect=error):
+                self.assert_cli_refusal("unclassified", canary)
 
     def test_exact_application_idempotence_integrity_markers_and_metadata(self):
         before = {p: p.read_bytes() for p in self.component.rglob("*") if p.is_file()}

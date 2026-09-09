@@ -67,10 +67,12 @@ def camera_fixture(project, build, idf, dependencies):
     patched_hash = directory_hash(component)
     source.write_bytes(ORIGINAL)
     patch_file = build / "camera-fixture.patch"
-    patch_file.write_text("".join(difflib.unified_diff(
-        ORIGINAL.decode().splitlines(keepends=True), PATCHED.decode().splitlines(keepends=True),
-        fromfile="a/" + camera.SOURCE_PATH, tofile="b/" + camera.SOURCE_PATH,
-    )))
+    patch_file.write_text(
+        f"diff --git a/{camera.SOURCE_PATH} b/{camera.SOURCE_PATH}\n"
+        + "".join(difflib.unified_diff(
+            ORIGINAL.decode().splitlines(keepends=True), PATCHED.decode().splitlines(keepends=True),
+            fromfile="a/" + camera.SOURCE_PATH, tofile="b/" + camera.SOURCE_PATH,
+        )))
     commands_file = build / "compile_commands.json"
     commands = json.loads(commands_file.read_text()) if commands_file.exists() else []
     commands.append({
@@ -190,6 +192,13 @@ class CameraPatchTests(unittest.TestCase):
                 self.assert_cli_refusal("unclassified", canary)
 
     def test_exact_application_idempotence_integrity_markers_and_metadata(self):
+        tracked = self.root / "tracked.txt"
+        tracked.write_text("Original caller-owned file.\n")
+        sdk.git(self.root, "add", "tracked.txt")
+        sdk.git(self.root, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.com",
+                "-c", "commit.gpgsign=false", "commit", "-qm", "Caller-owned file")
+        tracked.write_text("Preserve this caller edit.\n")
+        root_before = sdk.git(self.root, "diff", "--binary")
         before = {p: p.read_bytes() for p in self.component.rglob("*") if p.is_file()}
         sdk_before = sdk.git(self.idf, "diff")
         expected = self.apply()
@@ -199,12 +208,46 @@ class CameraPatchTests(unittest.TestCase):
             if path != self.source:
                 self.assertEqual(path.read_bytes(), data)
         self.assertEqual(sdk.git(self.idf, "diff"), sdk_before)
+        self.assertEqual(sdk.git(self.root, "diff", "--binary"), root_before)
         output = write_object(self.build, self.source)
         verified = self.verify()
         self.assertEqual(verified["sdk_base_commit"], self.base)
         self.assertEqual(verified["patched_component_hash"], directory_hash(self.component))
         self.assertEqual(verified["patched_source_sha256"], camera.digest(PATCHED))
         self.assertEqual(verified["compiled_object"]["sha256"], camera.digest(output.read_bytes()))
+
+    def test_standalone_application_preserves_bytes_and_idempotence(self):
+        (self.root / ".git").rename(self.root / "saved-git-metadata")
+        before = {p: p.read_bytes() for p in self.component.rglob("*") if p.is_file()}
+        sdk_before = sdk.git(self.idf, "diff")
+        result = self.apply()
+        self.assertEqual(self.apply(), result)
+        self.assertEqual(self.source.read_bytes(), PATCHED)
+        for path, data in before.items():
+            if path != self.source:
+                self.assertEqual(path.read_bytes(), data)
+        self.assertEqual(sdk.git(self.idf, "diff"), sdk_before)
+
+    def test_cli_rejects_invalid_owner_config_instead_of_standalone_fallback(self):
+        canary = "synthetic-private-value-must-not-print"
+        (self.root / ".git/config").write_text(f"[invalid\n{canary}\n")
+        self.assert_cli_refusal("component_worktree", canary)
+
+    def test_cli_rejects_bare_repository_instead_of_standalone_fallback(self):
+        (self.root / ".git").rename(self.root / "saved-git-metadata")
+        sdk.git(self.root, "init", "--bare", "-q")
+        self.assert_cli_refusal("component_worktree", "synthetic-private-value-must-not-print")
+
+    def test_cli_rejects_broken_git_marker_instead_of_standalone_fallback(self):
+        (self.root / ".git").rename(self.root / "saved-git-metadata")
+        (self.root / ".git").mkdir()
+        self.assert_cli_refusal("component_worktree", "synthetic-private-value-must-not-print")
+
+    def test_cli_requires_component_containment_in_discovered_worktree(self):
+        outside = self.root / "other-worktree"
+        outside.mkdir()
+        sdk.git(self.root, "config", "core.worktree", str(outside))
+        self.assert_cli_refusal("component_worktree_path", "synthetic-private-value-must-not-print")
 
     def test_verification_never_mutates_and_requires_native_current_object(self):
         with self.assertRaises(ValueError):

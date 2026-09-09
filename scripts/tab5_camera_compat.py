@@ -4,6 +4,7 @@
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import shlex
 import subprocess
@@ -59,6 +60,8 @@ REFUSAL_CODES = {
     "SDK base source does not match the approved whole-file hash": "sdk_base_source",
     "SDK source must be a regular file at the approved path": "sdk_source_path",
     "SDK is not modified by exactly the selected Tab5 patches": "sdk_patch_state",
+    "Cannot determine the camera component Git worktree": "component_worktree",
+    "Camera component is outside its Git worktree": "component_worktree_path",
 }
 
 
@@ -191,8 +194,26 @@ def apply_component_patch(project, component, build, idf, dependencies):
     if digest((component / SOURCE_PATH).read_bytes()) != PATCHED_SHA256:
         verify_component_patch(project, component, build, idf, dependencies,
                                patched=False, compiled=False)
-        subprocess.run(["git", "apply", "--check", str(PATCH_PATH)], cwd=component, check=True)
-        subprocess.run(["git", "apply", str(PATCH_PATH)], cwd=component, check=True)
+        discovery = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"], cwd=component,
+            capture_output=True, text=True, env={**os.environ, "LC_ALL": "C"},
+        )
+        root, directory = component, []
+        if discovery.returncode == 0:
+            root = Path(discovery.stdout.strip()).resolve(strict=True)
+            if not component.is_relative_to(root):
+                raise ValueError("Camera component is outside its Git worktree")
+            directory = ["--directory=" + component.relative_to(root).as_posix()]
+        elif (discovery.returncode != 128
+              or discovery.stderr.strip()
+              != "fatal: not a git repository (or any of the parent directories): .git"
+              or any((parent / ".git").exists() or (parent / ".git").is_symlink()
+                     for parent in (component, *component.parents))):
+            raise ValueError("Cannot determine the camera component Git worktree")
+        # Git-style patch headers are filtered by the current repository prefix.
+        subprocess.run(["git", "apply", "--check", *directory, str(PATCH_PATH)],
+                       cwd=root, check=True)
+        subprocess.run(["git", "apply", *directory, str(PATCH_PATH)], cwd=root, check=True)
     return verify_component_patch(project, component, build, idf, dependencies, compiled=False)
 
 

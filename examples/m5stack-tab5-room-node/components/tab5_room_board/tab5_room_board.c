@@ -17,6 +17,7 @@
 #include "driver/uart.h"
 #include "esp_check.h"
 #include "esp_codec_dev_defaults.h"
+#include "esp_flash_encrypt.h"
 #include "esp_heap_caps.h"
 #include "esp_io_expander_pi4ioe5v6408.h"
 #include "esp_lcd_panel_io.h"
@@ -241,6 +242,7 @@ static lv_display_t *start_st7121_display(void)
     lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
     port_cfg.task_affinity = 1;
     RETURN_NULL_ON_ERROR(lvgl_port_init(&port_cfg), "LVGL port");
+    const bool flash_encrypted = esp_flash_encryption_enabled();
     const lvgl_port_display_cfg_t display_cfg = {
         .io_handle = io,
         .panel_handle = panel,
@@ -250,8 +252,8 @@ static lv_display_t *start_st7121_display(void)
         .vres = BSP_LCD_V_RES,
         .monochrome = false,
         .rotation = {.swap_xy = false, .mirror_x = false, .mirror_y = false},
-        /* Match the other panels' PSRAM placement for draw and PPA buffers. */
-        .flags = {.buff_dma = false, .buff_spiram = true, .sw_rotate = true},
+        /* PPA SRM cannot rotate external buffers when flash encryption is active. */
+        .flags = {.buff_dma = flash_encrypted, .buff_spiram = !flash_encrypted, .sw_rotate = true},
     };
     const lvgl_port_display_dsi_cfg_t dsi_cfg = {.flags.avoid_tearing = false};
     lv_display_t *display = lvgl_port_add_disp_dsi(&display_cfg, &dsi_cfg);

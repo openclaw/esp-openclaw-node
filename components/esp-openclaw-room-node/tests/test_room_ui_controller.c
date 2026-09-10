@@ -228,6 +228,26 @@ int main(int argc, char **argv)
         assert(check_home_tree(home) == objects && lv_anim_count_running() == 0);
         snapshot(argc == 3 ? argv[2] : NULL);
 
+        const char *setup_details[] = {
+            "USB console:\ngateway setup-code",
+            "USB console:\nwifi set + setup-code",
+        };
+        for (size_t i = 0; i < sizeof(setup_details) / sizeof(*setup_details); ++i) {
+            room_ui_set(ROOM_UI_SETUP, setup_details[i]);
+            assert(visible_text(setup_details[i]) && visible_text("OpenClaw Room Node"));
+            assert(visible_text("Gateway  Connected") && visible_text("Talk  Ready"));
+            assert(check_home_tree(home) == objects);
+            lv_area_t detail_area, talk_area;
+            lv_obj_get_coords(find_text(home, setup_details[i]), &detail_area);
+            lv_obj_get_coords(find_text(home, "Talk  Ready"), &talk_area);
+            assert(detail_area.y1 > talk_area.y2 && detail_area.y2 < height);
+            room_diagnostics_open();
+            assert(!visible_text(setup_details[i]));
+            room_diagnostics_close();
+            assert(visible_text(setup_details[i]));
+            room_ui_set(ROOM_UI_IDLE, NULL);
+            assert(!visible_text(setup_details[i]) && brightness == idle);
+        }
         room_ui_set(ROOM_UI_ERROR, "Talk setup failed");
         room_ui_store_facts(&facts);
         room_ui_refresh();
@@ -244,8 +264,9 @@ int main(int argc, char **argv)
         }
         lv_obj_send_event(lv_screen_active(), LV_EVENT_CLICKED, NULL);
         assert(toggles == 1);
+        unsigned holds_before = holds;
         lv_obj_send_event(lv_screen_active(), LV_EVENT_LONG_PRESSED, NULL);
-        assert(holds == 1 && !visible_text("OpenClaw Room Node") && brightness == ROOM_CANVAS_ACTIVE_BRIGHTNESS);
+        assert(holds == holds_before + 1 && !visible_text("OpenClaw Room Node") && brightness == ROOM_CANVAS_ACTIVE_BRIGHTNESS);
         assert(!visible_text("Talk setup failed"));
         room_diagnostics_close();
         assert(visible_text("Talk setup failed"));

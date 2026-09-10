@@ -382,10 +382,34 @@ The capture owner emits one `camera_capture_diag` failure with a fixed `stage`,
 `domain` and numeric `error`. `esp` is the BSP result; `errno` is captured
 immediately after the failed syscall; `validation` uses zero rather than stale
 errno. Existing numeric format, stride and length rejection details remain.
-The single `dqbuf_begin` marker precedes the first blocking dequeue; its
-presence without a terminal record does not prove capture success or failure.
-There is no per-frame trace, new timeout, capture retry or format fallback.
-The camera RPC's existing error code and cleanup behavior are unchanged.
+The single `dqbuf_begin` marker precedes the first dequeue; its presence without
+a later record does not locate a stall or prove capture success or failure.
+Each open configures a two-second ready-buffer wait through ESP Video's
+`VIDIOC_S_DQBUF_TIMEOUT`. Configuration failure reports `dqbuf_timeout_setup`
+and aborts capture. A missing frame fails without retry, including during
+`delayMs` warm-up. Warm-up still requeues early frames and selects the first
+valid frame at or after its 0..10000 ms deadline; it does not extend the
+per-dequeue allowance.
+
+This is a finite ready-buffer wait, not a whole-command deadline. Setup,
+preprocessing, PPA, JPEG and cleanup can take additional time. Two seconds
+is a policy allowance, not a measured maximum first-frame latency.
+
+`camera_pipeline_diag stage=<token> elapsed_ms=<unsigned decimal>` uses INFO
+level and tag `tab5_room_board`. Its fixed stages are `dqbuf_first_return`,
+`capture_complete`, `transform_begin`, `transform_end`, `encode_begin`,
+`encode_end`, `cleanup_begin`, `cleanup_end`, `release_begin`, and `release_end`.
+Each appears at most once, for at most ten new records per request, regardless
+of warm-up frames or JPEG quality attempts. Elapsed milliseconds use
+`uint64_t`/`PRIu64`; begin records contain zero. First-return measures only the
+first dequeue call, including failure; capture-complete follows selected-frame
+validation and includes warm-up. Other end records time their own synchronous
+region and mean it returned, not that ignored cleanup calls succeeded, sensor
+power was removed, or an RPC completed. Records carry no request identity;
+consumers must not infer association between requests from adjacency.
+
+There is no per-frame trace, capture retry or format fallback. The existing
+RPC error codes, privacy indicator and cleanup/ownership order are preserved.
 
 Talk uses the [component's fixed-field stage diagnostics](../../components/esp-openclaw-talk/README.md#stage-diagnostics),
 with room-generation startup/peer/teardown records and existing audio-counter

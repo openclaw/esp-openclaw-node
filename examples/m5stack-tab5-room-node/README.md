@@ -152,6 +152,49 @@ normal CI still builds the real SDK. Target Unity lifecycle tests are built,
 not run by CI. Remove this temporary diagnostic patch and its explicit
 packaging mode after the observed failure is identified and qualified.
 
+### Transport-start allocation diagnostics
+
+Tab5 installs one global failed-allocation callback before board initialization.
+Two private, default-no-op transport hooks arm only the calling node/operator
+task around `client_start`. ISR and unrelated-task failures are ignored. The
+callback captures the first request size, capability mask, and SDK function
+pointer in internal RAM without dereferencing that pointer, logging, heap queries,
+allocation, or waiting. After disarm, the task maps the pinned SDK's static
+function name to a bounded allocator enum; no pointer or name is logged.
+No other failed-allocation callback may be registered in this diagnostic profile;
+the SDK registration API replaces the callback and has no getter.
+
+After the SDK returns, the task disarms capture before querying the matching
+capability heaps and logging, before existing transport-owner cleanup:
+
+```text
+alloc_diag phase=after_sdk_return_before_owner_cleanup role=<u32> sdk_err=<i32> captured=<0|1> requested=<u32> caps=<u32> allocator=<u32> origin=0 heap_sampled=<0|1> free=<u32> largest=<u32>
+```
+
+`role` is 1 node or 2 operator. `allocator` is 0 unknown, 1 `heap_caps_malloc`,
+2 `heap_caps_malloc_default`, 3 `heap_caps_calloc`, 4 `heap_caps_realloc`,
+5 `heap_caps_realloc_default`, 6 `heap_caps_malloc_prefer`,
+7 `heap_caps_calloc_prefer`, or 8 `heap_caps_realloc_prefer`. It identifies the
+reporting allocator API, **not** its caller; `origin=0` explicitly means unknown.
+`requested` is the SDK callback's byte-count argument, preserved without
+reinterpretation. In this SDK, `heap_caps_calloc_prefer` reports its element-size
+argument, so it must not be treated as independently verified total bytes.
+
+The heap samples are **after SDK return**, not fault-time heap availability.
+The SDK may already have freed resources. They do not prove alignment fit or a
+task-stack allocation cause. A failed SDK start without a matching callback
+still emits a record: `captured=0 heap_sampled=0`, and zero request/heap fields
+mean unavailable, not an empty heap. A captured allocation followed by SDK
+success is also reported; allocation capture alone does not mean start failed.
+Uncaptured success is silent. Registration failure emits only
+`alloc_diag_install err=<i32>` and does not change startup error handling.
+
+Host fixtures exercise the actual callback/start boundary; Tab5 CI also verifies
+that both final ELF hook definitions are strong. Other boards retain no-op hooks.
+These diagnostics change no stack sizes, allocator policy, SDK/dependency
+patches, retries, or cleanup. Physical allocation/reconnect proof remains a
+separate qualification gate.
+
 ### Streaming RX PSRAM and allocation diagnostics
 
 This branch also applies `patches/esp-hosted/tab5-sdio-first-allocation-failure.patch`

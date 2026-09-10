@@ -65,6 +65,10 @@ jobs:
             -lm -o /tmp/room_pcm_gain_test
           /tmp/room_pcm_gain_test
 
+      - name: Firmware packaging tests
+        if: matrix.name == 'component-test-app-build'
+        run: python3 -m unittest discover -s scripts/tests -p 'test_package_firmware.py' -v
+
       - name: Build
         uses: espressif/esp-idf-ci-action@v1
         with:
@@ -76,8 +80,28 @@ jobs:
             ninja -C build -j2 &&
             if [ "${{ matrix.name }}" = "component-test-app-build" ]; then
               python3 ../../../esp-openclaw-talk/tests/run_host_tests.py --sanitize &&
-              python3 ../../../esp-openclaw-talk/tests/run_threaded_tests.py
+              python3 ../../../esp-openclaw-talk/tests/run_threaded_tests.py &&
+              python3 -m unittest discover -s ../../../../scripts/tests -p test_package_firmware.py -k lock_reader -v
             fi &&
             if [ "${{ matrix.name }}" = "waveshare-amoled-room-node" ]; then
               python3 ../../components/esp-openclaw-room-node/tests/run_lifecycle_host_tests.py --managed-components managed_components
+            fi &&
+            if [ "${{ matrix.name }}" != "component-test-app-build" ]; then
+              python3 ../../scripts/package_firmware.py \
+                --target "${{ matrix.target }}" \
+                --repository "${{ github.repository }}" \
+                --event "${{ github.event_name }}" \
+                --event-sha "${{ github.sha }}" \
+                --pr-head-sha "${{ github.event.pull_request.head.sha }}" \
+                --run-id "${{ github.run_id }}" \
+                --run-attempt "${{ github.run_attempt }}" \
+                --idf-image "espressif/idf:release-v5.5"
             fi
+
+      - name: Upload firmware
+        if: matrix.name != 'component-test-app-build'
+        uses: actions/upload-artifact@v7
+        with:
+          name: firmware-${{ matrix.name }}-${{ matrix.target }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ matrix.path }}/build/firmware/
+          if-no-files-found: error

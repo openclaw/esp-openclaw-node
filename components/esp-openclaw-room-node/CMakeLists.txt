@@ -21,6 +21,7 @@ idf_component_register(
         "room_ui_controller.c"
     INCLUDE_DIRS "include"
     PRIV_INCLUDE_DIRS "."
+    EMBED_FILES "assets/openclaw_lobster.argb8888"
     REQUIRES
         av_render
         console

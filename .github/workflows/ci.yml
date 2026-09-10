@@ -84,7 +84,8 @@ jobs:
               python3 -m unittest discover -s ../../../../scripts/tests -p test_package_firmware.py -k lock_reader -v
             fi &&
             if [ "${{ matrix.name }}" = "waveshare-amoled-room-node" ]; then
-              python3 ../../components/esp-openclaw-room-node/tests/run_lifecycle_host_tests.py --managed-components managed_components
+              python3 ../../components/esp-openclaw-room-node/tests/run_lifecycle_host_tests.py --managed-components managed_components &&
+              python3 ../../components/esp-openclaw-room-node/tests/run_ui_host_tests.py --lvgl-dir managed_components/lvgl__lvgl
             fi &&
             if [ "${{ matrix.name }}" != "component-test-app-build" ]; then
               python3 ../../scripts/package_firmware.py \

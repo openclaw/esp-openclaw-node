@@ -33,6 +33,14 @@ target. Missing transport is shown as `Wi-Fi coprocessor unavailable`.
 
 ## Display and audio
 
+The default home shows the static OpenClaw image, board identity, independent
+Wi-Fi/Gateway/Talk status, and error details. Canvas and local Diagnostics take
+precedence. Tab5 sets `display.idle_brightness = 18`, keeping the home visible
+at a dim idle backlight at the cost of higher idle power; other boards that
+omit this field retain zero/off while idle. Explicit off requests are not
+clamped. The static home does not imply full touch, camera, network or Talk
+hardware qualification.
+
 The maintained MIPI-DSI/LVGL stack rotates to 1280x720 landscape and probes
 ILI9881C+GT911, ST7123 (touch firmware 3), and ST7121 (firmware 1). ST7123 is
 physically verified on the connected unit. ST7121 is compile-tested, not

@@ -1173,9 +1173,10 @@ esp_err_t tab5_room_board_config(esp_openclaw_room_node_config_t *config)
             .native_height = 720,
             .safe_inset = 24,
             /* The full-screen procedural face exceeds this rotated pipeline's
-             * watchdog budget; text states keep the product responsive. */
+             * watchdog budget; the static home keeps the product responsive. */
             .animated_face = false,
             .animation_frame_ms = 50,
+            .idle_brightness = 18,
         },
         .audio = {
             .open = tab5_audio_open,

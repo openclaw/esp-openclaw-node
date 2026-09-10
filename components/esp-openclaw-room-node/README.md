@@ -10,6 +10,15 @@ storage port exposes an approved file root. Codec models, pins, panel
 controllers, remote-Wi-Fi transport, and scheduler profiles remain outside
 this component.
 
+Non-animated displays use a static OpenClaw home with board identity, separate
+Wi-Fi/Gateway/Talk facts, and bounded setup guidance or error details. Canvas and Diagnostics
+cover the home without replacing those facts. The optional trailing
+`display.idle_brightness` field accepts 0-100; omitted or zero preserves idle
+display sleep, and explicit off requests remain unchanged. A nonzero value
+keeps the backlight dimly lit and consumes more idle power. The home is a
+status surface, not evidence that touch, camera, networking or Talk has been
+qualified on a particular board.
+
 The audio port's input gain override is optional. Boards that set
 `configure_input_gain` also provide `input_gain_db`; otherwise shared media
 initialization preserves the codec or board default.
@@ -31,12 +40,13 @@ by the current media stack: WakeNet only advances while its AFE fetch path is
 drained. It lives here once, alongside the shared capture orchestration, until
 the upstream capture component exposes the equivalent wake callback contract.
 The closure retains Espressif's modified-MIT notice in
-`LICENSE.ESPRESSIF-MODIFIED-MIT`; the rest of this component is Apache-2.0.
+`LICENSE.ESPRESSIF-MODIFIED-MIT`. The OpenClaw home image retains its MIT notice
+and source provenance in [assets/NOTICE.md](assets/NOTICE.md); the remaining
+component source is Apache-2.0.
 
 Long-press the status screen or an empty Canvas background to open the shared
-Diagnostics overlay. Non-animated status screens show `Hold for diagnostics`
-near the bottom; the hint is hidden on Canvas and while the modal is open. The
-overlay keeps the current screen loaded beneath a blocking, scrollable modal;
+Diagnostics overlay. The overlay keeps the current screen loaded beneath a
+blocking, scrollable modal;
 tap the large Close button (or long-press the modal) to return. Audio is shown
 first: live MIC, post-AFE, and RX/SPK PCM meters include freshness, counters,
 capture ownership, AFE/WakeNet mode, and renderer results.

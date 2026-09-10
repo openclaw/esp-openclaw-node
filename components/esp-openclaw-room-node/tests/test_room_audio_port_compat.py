@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compile a legacy board initializer against the real public room-node header."""
+"""Compile legacy board initializers against the real public room-node header."""
 
 from pathlib import Path
 import subprocess
@@ -22,6 +22,13 @@ LEGACY_BOARD = r"""
 
 static int board_context;
 
+static lv_display_t *start_display(void *ctx) { return ctx; }
+static bool lock_display(void *ctx, uint32_t timeout)
+{ return ctx == &board_context && timeout == 100; }
+static void unlock_display(void *ctx) { assert(ctx == &board_context); }
+static esp_err_t brightness(void *ctx, int percent)
+{ return ctx == &board_context ? percent : -1; }
+
 static esp_err_t open_audio(void *ctx, esp_openclaw_room_audio_handles_t *handles)
 {
     return ctx == &board_context && handles != NULL ? 0 : -1;
@@ -39,6 +46,15 @@ int main(void)
     assert(audio.playback_volume == 75);
     assert(audio.configure_input_gain && audio.input_gain_db == 30.0f);
     assert(audio.playback_gain_db == 0.0f);
+    esp_openclaw_room_display_port_t display = {
+        start_display, NULL, lock_display, unlock_display, brightness,
+        1280, 720, 24, false, 50, &board_context
+    };
+    assert(display.ctx == &board_context && display.idle_brightness == 0);
+    assert(display.start(display.ctx) == (lv_display_t *)&board_context);
+    assert(display.lock(display.ctx, 100));
+    display.unlock(display.ctx);
+    assert(display.set_brightness(display.ctx, 0) == 0);
     return 0;
 }
 """
@@ -61,7 +77,7 @@ def main():
             check=True,
         )
         subprocess.run([str(binary)], check=True)
-    print("room audio-port positional compatibility test passed")
+    print("room audio/display-port positional compatibility test passed")
 
 
 if __name__ == "__main__":

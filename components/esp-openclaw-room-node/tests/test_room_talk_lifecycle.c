@@ -27,6 +27,7 @@ static void bootstrap(void)
     host_require(xTaskCreate(talk_teardown_task, "talk_teardown", 4096, NULL, 6, NULL) == pdPASS,
         "teardown worker registered");
     media_ready = true;
+    media_initialized = true;
     host_require(start_node_client() == ESP_OK, "real node command registration");
     host_emit_node(node_client, ESP_OPENCLAW_NODE_EVENT_CONNECTED);
     host_fire_operator_timer(operator_start_timer);
@@ -59,6 +60,63 @@ static void connect_call(void)
     host_require(talk_active && !talk_dialing && host.media_owned && !host.ambient && host.ui == ROOM_UI_SPEAKING,
         "connected media precondition");
 }
+
+static void home_connection_facts(void)
+{
+    host_run_task("talk_teardown");
+    CHECK(host.home.gateway == ROOM_UI_GATEWAY_CONNECTED && host.home.talk == ROOM_UI_TALK_READY,
+        "node and operator connections independently make Gateway connected and Talk ready");
+    host.wifi.has_saved_network = true;
+    host.wifi.connected = true;
+    home_network_event(NULL, IP_EVENT, IP_EVENT_STA_GOT_IP, NULL);
+    CHECK(host.home.wifi == ROOM_UI_WIFI_CONNECTED, "IP acquisition updates Wi-Fi");
+    home_network_event(NULL, IP_EVENT, IP_EVENT_STA_LOST_IP, NULL);
+    CHECK(host.home.wifi == ROOM_UI_WIFI_OFFLINE && host.home.gateway == ROOM_UI_GATEWAY_CONNECTED,
+        "IP loss is not a node-session or operator-session claim");
+    host_emit_node(node_client, ESP_OPENCLAW_NODE_EVENT_DISCONNECTED);
+    CHECK(host.home.gateway == ROOM_UI_GATEWAY_OFFLINE && host.home.talk == ROOM_UI_TALK_READY,
+        "node disconnect does not mean unpaired or revoke the operator");
+    host_emit_node(operator_client, ESP_OPENCLAW_NODE_EVENT_DISCONNECTED);
+    host_run_task("talk_teardown");
+    CHECK(host.home.talk == ROOM_UI_TALK_WAITING, "operator disconnect waits, not missing session");
+    host.node_connect_result = ESP_ERR_NOT_FOUND;
+    CHECK(request_node_connection() == ESP_ERR_NOT_FOUND && host.home.gateway == ROOM_UI_GATEWAY_NO_SESSION,
+        "only a missing saved-session response requests node pairing");
+    host.operator_connect_result = ESP_ERR_NOT_FOUND;
+    host_fire_operator_timer(operator_start_timer);
+    host_run_task("operator_start");
+    CHECK(host.home.talk == ROOM_UI_TALK_NO_SESSION, "missing operator session is distinct from node pairing");
+    const esp_err_t rejected[] = {ESP_ERR_INVALID_STATE, ESP_FAIL};
+    for (size_t i = 0; i < sizeof(rejected) / sizeof(*rejected); ++i) {
+        host.node_connect_result = rejected[i];
+        CHECK(request_node_connection() == rejected[i] && host.home.gateway == ROOM_UI_GATEWAY_NO_SESSION,
+            "busy or failed node requests do not disprove a missing session");
+        host.operator_connect_result = rejected[i];
+        host_fire_operator_timer(operator_start_timer);
+        host_run_task("operator_start");
+        CHECK(host.home.talk == ROOM_UI_TALK_NO_SESSION,
+            "busy normalized to success and other operator failures retain the absence fact");
+        host_emit_node(operator_client, ESP_OPENCLAW_NODE_EVENT_CONNECT_FAILED);
+        host_run_task("talk_teardown");
+    }
+    host.node_connect_result = ESP_OK;
+    CHECK(request_node_connection() == ESP_OK && host.home.gateway == ROOM_UI_GATEWAY_CONNECTING,
+        "an accepted node request clears missing material, not connection readiness");
+    host.operator_connect_result = ESP_OK;
+    host_fire_operator_timer(operator_start_timer);
+    host_run_task("operator_start");
+    CHECK(host.home.talk == ROOM_UI_TALK_WAITING, "accepted operator reconnect is not Talk ready");
+    host_emit_node(node_client, ESP_OPENCLAW_NODE_EVENT_CONNECT_FAILED);
+    host_emit_node(operator_client, ESP_OPENCLAW_NODE_EVENT_CONNECT_FAILED);
+    host_run_task("talk_teardown");
+    CHECK(host.home.gateway == ROOM_UI_GATEWAY_OFFLINE && host.home.talk == ROOM_UI_TALK_WAITING,
+        "failed accepted connections do not resurrect stale missing-session facts");
+    host_emit_node(node_client, ESP_OPENCLAW_NODE_EVENT_CONNECTED);
+    host_emit_node(operator_client, ESP_OPENCLAW_NODE_EVENT_CONNECTED);
+    host_run_task("talk_teardown");
+    CHECK(host.home.gateway == ROOM_UI_GATEWAY_CONNECTED && host.home.talk == ROOM_UI_TALK_READY,
+        "authoritative connections clear prior missing-session facts");
+}
 static void drain(void) { host_run_task("talk_teardown"); }
 static void stop(void) { host_command(node_client, "talk.stop"); }
 
@@ -68,6 +126,7 @@ static void expect_open(void)
     CHECK(host.media_ends == 0 && host.media_owned && !host.ambient, "unrelated event retains media ownership");
     CHECK(webrtc != NULL && talk_active, "unrelated event retains active call");
     CHECK(host.ui == ROOM_UI_SPEAKING, "unrelated event retains speaking UI");
+    CHECK(host.home.talk == ROOM_UI_TALK_ACTIVE, "active Talk has its own home fact");
 }
 static void expect_closed(void)
 {
@@ -560,6 +619,7 @@ static void timeout_stop(void)
 }
 
 static const struct { const char *name; void (*run)(void); } cases[] = {
+    {"home-connection-facts", home_connection_facts},
     {"late-create-replacement", late_create_replacement},
     {"wake-admission-loss", wake_admission_loss},
     {"loss-before-worker", loss_before_worker},

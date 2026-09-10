@@ -17,6 +17,7 @@
 #include "esp_peer.h"
 #include "esp_peer_default.h"
 #include "esp_timer.h"
+#include "esp_wifi.h"
 #include "esp_webrtc.h"
 #include "esp_capture.h"
 #include "freertos/idf_additions.h"
@@ -50,6 +51,11 @@ static TimerHandle_t talk_timeout_timer;
 static bool operator_ready;
 static bool node_ready;
 static bool media_ready;
+static bool media_initialized;
+static bool node_session_missing;
+static bool operator_session_missing;
+static bool node_connection_pending;
+static room_ui_wifi_state_t home_wifi_state;
 static bool talk_start_in_flight;
 static bool talk_dialing;
 static bool talk_active;
@@ -74,6 +80,56 @@ static char *gateway_http_base;
 /* A one-slot wakeup has no identity or action to become stale. The durable,
  * generation-checked facts under state_lock are the only work authority. */
 typedef uint8_t talk_teardown_request_t;
+
+static void refresh_home_facts(void)
+{
+    xSemaphoreTake(state_lock, portMAX_DELAY);
+    const room_ui_facts_t facts = {
+        .wifi = home_wifi_state,
+        .gateway = node_client == NULL ? ROOM_UI_GATEWAY_STARTING
+            : node_ready ? ROOM_UI_GATEWAY_CONNECTED
+            : node_session_missing ? ROOM_UI_GATEWAY_NO_SESSION
+            : node_connection_pending ? ROOM_UI_GATEWAY_CONNECTING : ROOM_UI_GATEWAY_OFFLINE,
+        .talk = !media_initialized ? ROOM_UI_TALK_STARTING
+            : !media_ready ? ROOM_UI_TALK_UNAVAILABLE
+            : talk_call != NULL && (talk_cancel_requested || talk_closing) ? ROOM_UI_TALK_STOPPING
+            : talk_active ? ROOM_UI_TALK_ACTIVE
+            : talk_call != NULL ? ROOM_UI_TALK_CONNECTING
+            : operator_ready ? ROOM_UI_TALK_READY
+            : operator_session_missing ? ROOM_UI_TALK_NO_SESSION : ROOM_UI_TALK_WAITING,
+    };
+    /* Store while the owner is locked, but never wait for LVGL under that lock. */
+    room_ui_store_facts(&facts);
+    xSemaphoreGive(state_lock);
+    room_ui_refresh();
+}
+
+static void refresh_wifi_facts(esp_event_base_t base, int32_t event_id)
+{
+    esp_openclaw_node_wifi_status_t wifi = {0};
+    esp_openclaw_node_wifi_get_status(&wifi);
+    bool offline = (base == WIFI_EVENT &&
+        (event_id == WIFI_EVENT_STA_DISCONNECTED || event_id == WIFI_EVENT_STA_STOP)) ||
+        (base == IP_EVENT && event_id == IP_EVENT_STA_LOST_IP);
+    xSemaphoreTake(state_lock, portMAX_DELAY);
+    home_wifi_state = wifi.connected && !offline ? ROOM_UI_WIFI_CONNECTED
+        : !wifi.has_saved_network ? ROOM_UI_WIFI_UNCONFIGURED
+        : offline ? ROOM_UI_WIFI_OFFLINE : ROOM_UI_WIFI_CONNECTING;
+    xSemaphoreGive(state_lock);
+    refresh_home_facts();
+}
+
+static void home_network_event(void *arg, esp_event_base_t base, int32_t event_id, void *data)
+{
+    (void)arg;
+    (void)data;
+    if ((base == WIFI_EVENT && (event_id == WIFI_EVENT_STA_START ||
+         event_id == WIFI_EVENT_STA_CONNECTED || event_id == WIFI_EVENT_STA_DISCONNECTED ||
+         event_id == WIFI_EVENT_STA_STOP)) ||
+        (base == IP_EVENT && (event_id == IP_EVENT_STA_GOT_IP || event_id == IP_EVENT_STA_LOST_IP))) {
+        refresh_wifi_facts(base, event_id);
+    }
+}
 
 static void media_scheduler(const char *name, media_lib_thread_cfg_t *cfg)
 {
@@ -280,6 +336,7 @@ static void talk_teardown_task(void *arg)
         esp_openclaw_talk_call_handle_t call = talk_call;
         const char *message = talk_cancel_message;
         xSemaphoreGive(state_lock);
+        refresh_home_facts();
         /* One worker serializes call/operator UI. A delayed callback never
          * paints over a replacement call's newer connecting/speaking state. */
         if (speaking) room_ui_set(ROOM_UI_SPEAKING, NULL);
@@ -318,6 +375,7 @@ static void talk_teardown_task(void *arg)
         talk_closing = false;
         xSemaphoreGive(state_lock);
         esp_openclaw_talk_call_release(call);
+        refresh_home_facts();
     }
 }
 
@@ -513,6 +571,7 @@ static void operator_event(
     if (current) {
         operator_ready = connected;
         if (connected) {
+            operator_session_missing = false;
             ++operator_incarnation;
             if (client == talk_operator && talk_operator_incarnation != operator_incarnation) {
                 request_talk_stop_locked(talk_generation, NULL);
@@ -535,6 +594,14 @@ static void operator_event(
     }
 }
 
+static void record_operator_session_result(esp_err_t err)
+{
+    if (err != ESP_OK && err != ESP_ERR_NOT_FOUND) return;
+    xSemaphoreTake(state_lock, portMAX_DELAY);
+    operator_session_missing = err == ESP_ERR_NOT_FOUND;
+    xSemaphoreGive(state_lock);
+}
+
 static esp_err_t start_operator_client(void)
 {
     xSemaphoreTake(state_lock, portMAX_DELAY);
@@ -549,6 +616,7 @@ static esp_err_t start_operator_client(void)
             .source = ESP_OPENCLAW_NODE_CONNECT_SOURCE_SAVED_SESSION,
         };
         esp_err_t err = esp_openclaw_node_request_connect(existing, &reconnect);
+        record_operator_session_result(err);
         return err == ESP_ERR_INVALID_STATE ? ESP_OK : err;
     }
 
@@ -576,7 +644,9 @@ static esp_err_t start_operator_client(void)
     xSemaphoreGive(state_lock);
     /* The canvas keep-warm refresh needs operator scope. */
     room_canvas_set_refresh_client(created);
-    return esp_openclaw_node_request_connect(created, &request);
+    err = esp_openclaw_node_request_connect(created, &request);
+    record_operator_session_result(err);
+    return err;
 }
 
 static void operator_start_task(void *arg)
@@ -588,6 +658,7 @@ static void operator_start_task(void *arg)
     operator_start_scheduled = false;
     xSemaphoreGive(state_lock);
     esp_err_t err = start_operator_client();
+    refresh_home_facts();
     if (err != ESP_OK) {
         // Every retry logs: the display alone cannot say WHY the operator
         // session is down, and a silent loop here cost a debugging session.
@@ -609,15 +680,17 @@ static esp_err_t request_node_connection(void)
         .source = ESP_OPENCLAW_NODE_CONNECT_SOURCE_SAVED_SESSION,
     };
     esp_err_t err = esp_openclaw_node_request_connect(node_client, &request);
-    if (err != ESP_ERR_NOT_FOUND) {
-        return err;
+    if (err == ESP_ERR_NOT_FOUND && CONFIG_OPENCLAW_ROOM_SETUP_CODE[0] != '\0') {
+        request.source = ESP_OPENCLAW_NODE_CONNECT_SOURCE_SETUP_CODE;
+        request.value = CONFIG_OPENCLAW_ROOM_SETUP_CODE;
+        err = esp_openclaw_node_request_connect(node_client, &request);
     }
-    if (CONFIG_OPENCLAW_ROOM_SETUP_CODE[0] == '\0') {
-        return ESP_ERR_NOT_FOUND;
-    }
-    request.source = ESP_OPENCLAW_NODE_CONNECT_SOURCE_SETUP_CODE;
-    request.value = CONFIG_OPENCLAW_ROOM_SETUP_CODE;
-    return esp_openclaw_node_request_connect(node_client, &request);
+    xSemaphoreTake(state_lock, portMAX_DELAY);
+    if (err == ESP_OK || err == ESP_ERR_NOT_FOUND) node_session_missing = err == ESP_ERR_NOT_FOUND;
+    node_connection_pending = err == ESP_OK;
+    xSemaphoreGive(state_lock);
+    refresh_home_facts();
+    return err;
 }
 
 static void schedule_node_reconnect(uint32_t delay_ms);
@@ -676,7 +749,10 @@ static void node_event(
     (void)ctx;
     xSemaphoreTake(state_lock, portMAX_DELAY);
     node_ready = event == ESP_OPENCLAW_NODE_EVENT_CONNECTED;
+    node_connection_pending = false;
+    if (node_ready) node_session_missing = false;
     xSemaphoreGive(state_lock);
+    refresh_home_facts();
     if (event == ESP_OPENCLAW_NODE_EVENT_CONNECTED) {
         /*
          * The session URI lands in NVS only after the first hello-ok, so the
@@ -733,6 +809,7 @@ static void node_event(
             host += 6;
         }
         room_ui_set_gateway(host);
+        refresh_home_facts();
         free(gateway_uri);
         /* The timer path retries task creation itself, so scheduling only
          * fails on timer-create OOM at boot; retry through the same path. */
@@ -1237,11 +1314,18 @@ esp_err_t esp_openclaw_room_node_start(const esp_openclaw_room_node_config_t *co
     if (config->services.prepare_network != NULL) {
         esp_err_t network_err = config->services.prepare_network(config->services.ctx);
         if (network_err != ESP_OK) {
+            xSemaphoreTake(state_lock, portMAX_DELAY);
+            home_wifi_state = ROOM_UI_WIFI_UNAVAILABLE;
+            xSemaphoreGive(state_lock);
+            refresh_home_facts();
             room_ui_set(ROOM_UI_ERROR, "Wi-Fi coprocessor unavailable");
             return network_err;
         }
     }
     ESP_ERROR_CHECK(esp_openclaw_node_wifi_start());
+    /* Register after the station helper so its status reflects each event first. */
+    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, home_network_event, NULL));
+    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, ESP_EVENT_ANY_ID, home_network_event, NULL));
     ESP_LOGI(TAG, "Wi-Fi runtime started");
     seed_wifi_credentials_from_kconfig();
     esp_openclaw_node_wifi_status_t wifi_status = {0};
@@ -1255,6 +1339,7 @@ esp_err_t esp_openclaw_room_node_start(const esp_openclaw_room_node_config_t *co
         !esp_openclaw_node_wifi_wait_for_connection(pdMS_TO_TICKS(30000))) {
         ESP_LOGW(TAG, "Wi-Fi did not connect within 30 s; fix credentials over the USB console");
     }
+    refresh_wifi_facts(NULL, 0);
 
     ESP_LOGI(TAG, "initializing room media");
     esp_err_t media_err = room_media_init(on_wake, NULL);
@@ -1265,9 +1350,12 @@ esp_err_t esp_openclaw_room_node_start(const esp_openclaw_room_node_config_t *co
             TAG,
             "room media init failed: %s; Talk wake is disabled",
             esp_err_to_name(media_err));
-    } else {
-        media_ready = true;
     }
+    xSemaphoreTake(state_lock, portMAX_DELAY);
+    media_ready = media_err == ESP_OK;
+    media_initialized = true;
+    xSemaphoreGive(state_lock);
+    refresh_home_facts();
 
     ESP_ERROR_CHECK(start_node_client());
     ESP_ERROR_CHECK(esp_openclaw_node_example_repl_start(node_client));

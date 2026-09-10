@@ -9,6 +9,7 @@
 #include "freertos/semphr.h"
 #include "freertos/timers.h"
 #include "room_ui_controller.h"
+#include "esp_openclaw_node_wifi.h"
 
 /* Single-threaded schedule points, not a model of the controller. */
 typedef struct {
@@ -18,6 +19,9 @@ typedef struct {
     unsigned critical_depth, callback_depth;
     bool media_owned, ambient, inside_start;
     room_ui_state_t ui;
+    room_ui_facts_t home;
+    esp_openclaw_node_wifi_status_t wifi;
+    esp_err_t node_connect_result, operator_connect_result;
     char close_voice[129], close_key[257];
     esp_openclaw_node_handle_t close_node;
     void (*at_media_begin)(void);

@@ -96,6 +96,21 @@ def camera_fixture(project, build, idf, dependencies):
         yield component
 
 
+def resolve_alternate_camera(component, build, dependencies):
+    """A clean synthetic registry revision with a changed mapper layout."""
+    (component / camera.SOURCE_PATH).rename(component / "replacement_mapper.c")
+    manifest = component / "idf_component.yml"
+    data = json.loads(manifest.read_text())
+    data["version"] = "2.4.2"
+    manifest.write_text(json.dumps(data))
+    (build / "compile_commands.json").write_text("[]")
+    component_hash = directory_hash(component)
+    (component / ".component_hash").write_text(component_hash)
+    dependencies["dependencies"][camera.COMPONENT].update(
+        version=data["version"], component_hash=component_hash,
+    )
+
+
 @unittest.skipUnless(HAS_MANAGER, "requires the real IDF component-manager environment")
 class CameraPatchTests(unittest.TestCase):
     def setUp(self):
@@ -133,6 +148,54 @@ class CameraPatchTests(unittest.TestCase):
     def verify(self, **options):
         return camera.verify_component_patch(
             self.project, self.component, self.build, self.idf, self.dependencies, **options)
+
+    def verify_unpatched(self):
+        camera.verify_unpatched_component(self.project, self.component, self.dependencies)
+
+    def test_ordinary_integrity_rejects_changed_bytes_markers_and_lock_hashes(self):
+        self.verify_unpatched()
+        original = copy.deepcopy(self.dependencies)
+        marker = self.component / ".component_hash"
+        for source_bytes, marker_hash, lock_hash in (
+            (PATCHED, camera.COMPONENT_HASH, camera.COMPONENT_HASH),
+            (ORIGINAL, "0" * 64, camera.COMPONENT_HASH),
+            (ORIGINAL, camera.COMPONENT_HASH, "0" * 64),
+            (PATCHED, camera.PATCHED_COMPONENT_HASH, camera.COMPONENT_HASH),
+            (ORIGINAL, "0" * 64, "0" * 64),
+        ):
+            with self.subTest(source=source_bytes, marker=marker_hash, lock=lock_hash):
+                self.dependencies = copy.deepcopy(original)
+                self.dependencies["dependencies"][camera.COMPONENT]["component_hash"] = lock_hash
+                self.source.write_bytes(source_bytes)
+                marker.write_text(marker_hash)
+                with self.assertRaisesRegex(ValueError, "component bytes"):
+                    self.verify_unpatched()
+
+    def test_ordinary_identity_and_path_checks_remain_required(self):
+        original = copy.deepcopy(self.dependencies)
+        for key, value in (
+            ("version", ""), ("version", "2.4.2"), ("component_hash", "../not-a-hash"),
+            ("source", {"type": "local", "path": "."}),
+            ("source", {"type": "service", "service_url": REGISTRY_SOURCE["registry_url"]}),
+        ):
+            with self.subTest(key=key, value=value):
+                self.dependencies = copy.deepcopy(original)
+                self.dependencies["dependencies"][camera.COMPONENT][key] = value
+                with self.assertRaises(ValueError):
+                    self.verify_unpatched()
+        self.dependencies = original
+        for bad in (None, {"dependencies": []}, {"dependencies": {}}):
+            with self.subTest(lock=bad), self.assertRaises(ValueError):
+                camera.verify_unpatched_component(self.project, self.component, bad)
+        link = self.component / "alias.c"
+        link.symlink_to(self.source)
+        with self.assertRaisesRegex(ValueError, "symbolic links"):
+            self.verify_unpatched()
+        link.unlink()
+        self.component.rename(self.project / "external-video")
+        self.component.symlink_to(self.project / "external-video")
+        with self.assertRaisesRegex(ValueError, "managed esp_video"):
+            self.verify_unpatched()
 
     def assert_cli_refusal(self, code, canary):
         (self.project / "dependencies.lock").write_text(json.dumps(self.dependencies))

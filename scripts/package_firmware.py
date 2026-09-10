@@ -17,7 +17,11 @@ from urllib.parse import urlsplit
 
 from idf_tab5_compat import verify_sdk_patch
 from tab5_sdio_diagnostics import COMPONENT as SDIO_COMPONENT, verify_component_patch
-from tab5_camera_compat import COMPONENT as CAMERA_COMPONENT, verify_component_patch as verify_camera_patch
+from tab5_camera_compat import (
+    COMPONENT as CAMERA_COMPONENT,
+    verify_component_patch as verify_camera_patch,
+    verify_unpatched_component as verify_camera_component,
+)
 
 
 EXAMPLES = {
@@ -222,12 +226,15 @@ def package_firmware(project, build, output, target, provenance, dependencies,
     camera_patch = None
     if camera_compat and (project.name != "m5stack-tab5-room-node" or not nvs_diagnostics):
         raise ValueError("Camera compatibility requires the explicitly patched Tab5 SDK")
-    if camera_compat or (
-            project.name == "m5stack-tab5-room-node"
-            and CAMERA_COMPONENT in dependencies["dependencies"]):
+    if camera_compat:
         camera_patch = verify_camera_patch(
             project, project / "managed_components/espressif__esp_video",
-            build, idf, dependencies, patched=camera_compat, compiled=camera_compat,
+            build, idf, dependencies,
+        )
+    elif (project.name == "m5stack-tab5-room-node"
+          and CAMERA_COMPONENT in dependencies["dependencies"]):
+        verify_camera_component(
+            project, project / "managed_components/espressif__esp_video", dependencies,
         )
     normalize = [(build, "<build>"), (project, "<project>"), (repo, "<repository>"), (idf, "<idf>")]
     lock_file = checked_file(project / "dependencies.lock", roots)

@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import subprocess
 
@@ -69,18 +70,24 @@ def digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def inspect_component(project, component, build, idf, dependencies, patched):
+def managed_component_path(project, component):
     project = Path(project).resolve(strict=True)
     component = Path(component).absolute()
-    build = Path(build).resolve(strict=True)
-    idf = Path(idf).resolve(strict=True)
     expected = project / "managed_components/espressif__esp_video"
     if (project.name != "m5stack-tab5-room-node" or project.parent.name != "examples"
-            or component != expected or component.resolve(strict=True) != expected
-            or not build.is_relative_to(project)):
+            or component != expected or component.resolve(strict=True) != expected):
         raise ValueError("Select the configured Tab5 project and its managed esp_video")
     if any(path.is_symlink() for path in component.rglob("*")):
         raise ValueError("Managed component must not contain symbolic links")
+    return project, component
+
+
+def inspect_component(project, component, build, idf, dependencies, patched):
+    project, component = managed_component_path(project, component)
+    build = Path(build).resolve(strict=True)
+    idf = Path(idf).resolve(strict=True)
+    if not build.is_relative_to(project):
+        raise ValueError("Select the configured Tab5 project and its managed esp_video")
     if (not isinstance(dependencies, dict)
             or not isinstance(dependencies.get("dependencies"), dict)):
         raise ValueError("Dependency lock must contain a dependency mapping")
@@ -142,7 +149,7 @@ def inspect_component(project, component, build, idf, dependencies, patched):
     return component, output
 
 
-def validate_component_hash(component, expected):
+def validate_component_hash(component, expected, stored_hash=None):
     from idf_component_tools.errors import ProcessingError
     from idf_component_tools.hash_tools.errors import ValidatingHashError
     from idf_component_tools.hash_tools.validate import (
@@ -150,10 +157,39 @@ def validate_component_hash(component, expected):
         validate_hash_eq_hashfile,
     )
     try:
-        validate_hash_eq_hashfile(component, COMPONENT_HASH)
+        validate_hash_eq_hashfile(component, COMPONENT_HASH if stored_hash is None else stored_hash)
         validate_hash_eq_hashdir(component, expected)
     except (ProcessingError, ValidatingHashError) as error:
         raise ValueError("Camera component bytes do not match the selected profile") from error
+
+
+def verify_unpatched_component(project, component, dependencies):
+    """Ordinary builds follow their resolved lock, not the opt-in repair pins."""
+    from ruamel.yaml import YAML
+    from ruamel.yaml.error import YAMLError
+
+    _, component = managed_component_path(project, component)
+    if (not isinstance(dependencies, dict)
+            or not isinstance(dependencies.get("dependencies"), dict)):
+        raise ValueError("Dependency lock must contain a dependency mapping")
+    dependency = dependencies["dependencies"].get(COMPONENT)
+    if not isinstance(dependency, dict) or not isinstance(dependency.get("source"), dict):
+        raise ValueError("Resolved camera component must have a registry source")
+    source = dependency["source"]
+    version, expected = dependency.get("version"), dependency.get("component_hash")
+    if (dependencies.get("target") != "esp32p4"
+            or not isinstance(version, str) or not version
+            or not isinstance(expected, str) or re.fullmatch(r"[0-9a-f]{64}", expected) is None
+            or source.get("type") != "service"
+            or not isinstance(source.get("registry_url"), str) or not source["registry_url"]):
+        raise ValueError("Resolved camera component has an invalid lock identity")
+    validate_component_hash(component, expected, stored_hash=expected)
+    try:
+        manifest = YAML(typ="safe").load((component / "idf_component.yml").read_text())
+    except YAMLError as error:
+        raise ValueError("Camera component manifest is invalid") from error
+    if not isinstance(manifest, dict) or manifest.get("version") != version:
+        raise ValueError("Camera component manifest version differs from the lock")
 
 
 def verify_component_patch(project, component, build, idf, dependencies,

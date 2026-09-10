@@ -115,6 +115,7 @@ jobs:
             if [ "${{ matrix.name }}" = "component-test-app-build" ]; then
               python3 ../../../esp-openclaw-talk/tests/run_host_tests.py --sanitize &&
               python3 ../../../esp-openclaw-talk/tests/run_threaded_tests.py &&
+              python3 -m unittest discover -s ../../../../scripts/tests -p test_node_reply_diagnostics.py -v &&
               python3 -m unittest discover -s ../../../../scripts/tests -p test_package_firmware.py -k lock_reader -v
             fi &&
             if [ "${{ matrix.name }}" = "waveshare-amoled-room-node" ]; then

@@ -26,19 +26,88 @@ static const char *connect_diagnostic_role(esp_openclaw_node_handle_t node)
     return "other";
 }
 
-static bool websocket_send_json(esp_openclaw_node_handle_t node, cJSON *root)
+typedef enum {
+    REPLY_COMMAND_NONE = 0,
+    REPLY_COMMAND_CAMERA = 1,
+    REPLY_COMMAND_DEVICE_INFO = 2,
+} invoke_reply_command_t;
+
+typedef enum {
+    REPLY_HANDLER_BEGIN = 1,
+    REPLY_HANDLER_END,
+    REPLY_ENVELOPE_BEGIN,
+    REPLY_ENVELOPE_END,
+    REPLY_SERIALIZE_BEGIN,
+    REPLY_SERIALIZE_END,
+    REPLY_SEND_BEGIN,
+    REPLY_SEND_END,
+    REPLY_COMPLETE,
+} invoke_reply_stage_t;
+
+typedef struct {
+    invoke_reply_command_t command;
+    esp_err_t rc;
+    bool payload_present;
+    bool alloc_failed;
+    size_t bytes;
+    int requested;
+    int returned;
+} invoke_reply_diagnostic_t;
+
+static void log_invoke_reply(
+    const invoke_reply_diagnostic_t *diagnostic,
+    invoke_reply_stage_t stage,
+    int64_t started_us)
 {
+    if (diagnostic == NULL) {
+        return;
+    }
+    uint64_t elapsed_ms = started_us == 0
+        ? 0 : (uint64_t)(esp_timer_get_time() - started_us) / 1000U;
+    ESP_LOGI(
+        ESP_OPENCLAW_NODE_TAG,
+        "invoke_reply_diag command=%u stage=%u rc=%d payload_present=%u "
+        "alloc_failed=%u bytes=%" PRIu64 " requested=%d returned=%d elapsed_ms=%" PRIu64,
+        (unsigned)diagnostic->command, (unsigned)stage, (int)diagnostic->rc,
+        (unsigned)diagnostic->payload_present, (unsigned)diagnostic->alloc_failed,
+        (uint64_t)diagnostic->bytes, diagnostic->requested, diagnostic->returned,
+        elapsed_ms);
+}
+
+static bool websocket_send_json(
+    esp_openclaw_node_handle_t node,
+    cJSON *root,
+    invoke_reply_diagnostic_t *diagnostic)
+{
+    int64_t started_us = diagnostic != NULL ? esp_timer_get_time() : 0;
+    log_invoke_reply(diagnostic, REPLY_SERIALIZE_BEGIN, 0);
     char *json = cJSON_PrintUnformatted(root);
+    if (diagnostic != NULL) {
+        diagnostic->alloc_failed = json == NULL;
+        diagnostic->bytes = json != NULL ? strlen(json) : 0;
+    }
+    log_invoke_reply(diagnostic, REPLY_SERIALIZE_END, started_us);
     if (json == NULL) {
         return false;
     }
+    size_t length = diagnostic != NULL ? diagnostic->bytes : strlen(json);
+    int requested = (int)length;
+    if (diagnostic != NULL) {
+        diagnostic->requested = requested;
+    }
+    started_us = diagnostic != NULL ? esp_timer_get_time() : 0;
+    log_invoke_reply(diagnostic, REPLY_SEND_BEGIN, 0);
     int written = node->websocket_client_ops->send_text(
         node->ws,
         json,
-        (int)strlen(json),
+        requested,
         pdMS_TO_TICKS(5000));
+    if (diagnostic != NULL) {
+        diagnostic->returned = written;
+    }
+    log_invoke_reply(diagnostic, REPLY_SEND_END, started_us);
     free(json);
-    return written >= 0;
+    return written > 0 && (size_t)written == length;
 }
 
 static void invoke_gateway_callback(
@@ -131,7 +200,7 @@ void esp_openclaw_node_send_gateway_request(
     cJSON_AddStringToObject(root, "id", request_id);
     cJSON_AddStringToObject(root, "method", method);
     cJSON_AddItemToObject(root, "params", params);
-    if (!websocket_send_json(node, root)) {
+    if (!websocket_send_json(node, root, NULL)) {
         esp_openclaw_node_lock_state(node);
         memset(&node->pending_requests[slot_index], 0, sizeof(node->pending_requests[slot_index]));
         esp_openclaw_node_unlock_state(node);
@@ -386,7 +455,7 @@ static bool send_connect_request(
         return false;
     }
 
-    bool ok = websocket_send_json(node, root);
+    bool ok = websocket_send_json(node, root, NULL);
     cJSON_Delete(root);
     if (!ok) {
         esp_openclaw_node_lock_state(node);
@@ -411,8 +480,11 @@ static void send_invoke_result(
     bool ok,
     const char *payload_json,
     const char *error_code,
-    const char *error_message)
+    const char *error_message,
+    invoke_reply_diagnostic_t *diagnostic)
 {
+    int64_t started_us = diagnostic != NULL ? esp_timer_get_time() : 0;
+    log_invoke_reply(diagnostic, REPLY_ENVELOPE_BEGIN, 0);
     cJSON *root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "type", "req");
 
@@ -448,7 +520,8 @@ static void send_invoke_result(
     }
 
     cJSON_AddItemToObject(root, "params", params);
-    if (!websocket_send_json(node, root)) {
+    log_invoke_reply(diagnostic, REPLY_ENVELOPE_END, started_us);
+    if (!websocket_send_json(node, root, diagnostic)) {
         ESP_LOGW(ESP_OPENCLAW_NODE_TAG, "failed sending invoke result");
     }
     cJSON_Delete(root);
@@ -855,7 +928,8 @@ static void handle_invoke_request(
             false,
             NULL,
             "INVALID_REQUEST",
-            "sessionKey must be 1..256 printable ASCII bytes");
+            "sessionKey must be 1..256 printable ASCII bytes",
+            NULL);
         return;
     }
 
@@ -873,6 +947,15 @@ static void handle_invoke_request(
     const esp_openclaw_node_command_invocation_t invocation = {
         .session_key = session_key != NULL ? session_key->valuestring : NULL,
     };
+    invoke_reply_diagnostic_t diagnostic = {
+        .command = strcmp(command->valuestring, "camera.snap") == 0 ? REPLY_COMMAND_CAMERA
+            : strcmp(command->valuestring, "device.info") == 0 ? REPLY_COMMAND_DEVICE_INFO
+            : REPLY_COMMAND_NONE,
+    };
+    invoke_reply_diagnostic_t *selected =
+        diagnostic.command != REPLY_COMMAND_NONE ? &diagnostic : NULL;
+    int64_t started_us = selected != NULL ? esp_timer_get_time() : 0;
+    log_invoke_reply(selected, REPLY_HANDLER_BEGIN, 0);
     esp_err_t err = esp_openclaw_node_dispatch_command(
         node,
         command->valuestring,
@@ -882,6 +965,9 @@ static void handle_invoke_request(
         &result_json,
         &error_code,
         &error_message);
+    diagnostic.rc = err;
+    diagnostic.payload_present = result_json != NULL;
+    log_invoke_reply(selected, REPLY_HANDLER_END, started_us);
     if (err == ESP_OK) {
         send_invoke_result(
             node,
@@ -890,7 +976,8 @@ static void handle_invoke_request(
             true,
             result_json,
             NULL,
-            NULL);
+            NULL,
+            selected);
     } else {
         send_invoke_result(
             node,
@@ -899,10 +986,12 @@ static void handle_invoke_request(
             false,
             NULL,
             error_code,
-            error_message);
+            error_message,
+            selected);
     }
 
     free(result_json);
+    log_invoke_reply(selected, REPLY_COMPLETE, started_us);
 }
 
 static bool handle_gateway_response(

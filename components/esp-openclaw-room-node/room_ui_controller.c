@@ -33,7 +33,7 @@ static lv_obj_t *home;
 static lv_obj_t *home_wifi;
 static lv_obj_t *home_gateway;
 static lv_obj_t *home_talk;
-static lv_obj_t *home_error;
+static lv_obj_t *home_detail;
 static lv_obj_t *talk_pill;
 static lv_obj_t *talk_pill_label;
 static lv_obj_t *camera_indicator;
@@ -115,8 +115,8 @@ static void home_create(lv_display_t *display, const esp_openclaw_room_node_conf
     home_wifi = home_label("Wi-Fi  Starting", font, 0x9aabaa);
     home_gateway = home_label("Gateway  Starting", font, 0x9aabaa);
     home_talk = home_label("Talk  Starting", font, 0x9aabaa);
-    home_error = home_label("", &lv_font_montserrat_14, 0xff8383);
-    lv_obj_set_height(home_error, 48);
+    home_detail = home_label("", &lv_font_montserrat_14, 0x9aabaa);
+    lv_obj_set_height(home_detail, 48);
 }
 
 static void home_render(const room_ui_facts_t *facts, room_ui_state_t state, const char *detail)
@@ -147,9 +147,12 @@ static void home_render(const room_ui_facts_t *facts, room_ui_state_t state, con
     lv_obj_set_style_text_color(home_talk,
         lv_color_hex(facts->talk == ROOM_UI_TALK_ACTIVE ? 0xf4c16b
             : facts->talk == ROOM_UI_TALK_READY ? 0x54d6af : 0x9aabaa), 0);
-    const char *error = state == ROOM_UI_ERROR ? (detail[0] != '\0' ? detail : "Error") : "";
-    if (strcmp(lv_label_get_text(home_error), error) != 0) {
-        lv_label_set_text(home_error, error);
+    const char *text = state == ROOM_UI_ERROR ? (detail[0] != '\0' ? detail : "Error")
+        : state == ROOM_UI_SETUP ? detail : "";
+    lv_obj_set_style_text_color(home_detail,
+        lv_color_hex(state == ROOM_UI_ERROR ? 0xff8383 : 0x9aabaa), 0);
+    if (strcmp(lv_label_get_text(home_detail), text) != 0) {
+        lv_label_set_text(home_detail, text);
     }
 }
 

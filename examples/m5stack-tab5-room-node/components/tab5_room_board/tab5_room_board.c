@@ -250,7 +250,8 @@ static lv_display_t *start_st7121_display(void)
         .vres = BSP_LCD_V_RES,
         .monochrome = false,
         .rotation = {.swap_xy = false, .mirror_x = false, .mirror_y = false},
-        .flags = {.buff_dma = true, .buff_spiram = false, .sw_rotate = true},
+        /* Match the other panels' PSRAM placement for draw and PPA buffers. */
+        .flags = {.buff_dma = false, .buff_spiram = true, .sw_rotate = true},
     };
     const lvgl_port_display_dsi_cfg_t dsi_cfg = {.flags.avoid_tearing = false};
     lv_display_t *display = lvgl_port_add_disp_dsi(&display_cfg, &dsi_cfg);

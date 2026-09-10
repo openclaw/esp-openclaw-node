@@ -313,12 +313,20 @@ clamped. The static home does not imply full touch, camera, network or Talk
 hardware qualification.
 
 The maintained MIPI-DSI/LVGL stack rotates to 1280x720 landscape and probes
-ILI9881C+GT911, ST7123 (touch firmware 3), and ST7121 (firmware 1). ST7123 is
-physically verified on the connected unit. ST7121 is compile-tested, not
-hardware-proven here, and uses only the isolated Apache-2.0 panel extension
+ILI9881C+GT911, ST7123 (touch firmware 3), and ST7121 (firmware 1). The upstream
+August 7, 2026 report records physical verification of ST7123. The September
+2026 test campaign instead recorded touch firmware revision 1, selecting
+ST7121, with panel initialization and LVGL startup observed. This is not full
+display or touch qualification. ST7121 uses the isolated Apache-2.0 panel extension
 adapted from M5Stack's official `M5Tab5-UserDemo` commit
 `68b19d37fbf9cefd5f256992f5dca34794c62ab4`; touch remains on the maintained
 ST7123-compatible API. No S3 bounce-buffer workaround is present.
+
+ST7121 explicitly places its two 720x40 RGB565 draw buffers and PPA rotation
+buffer in PSRAM, matching the other panel path. Their configured payload totals
+172,800 bytes, excluding allocation overhead; this is not a measured gain in
+internal heap or proof of working voice. Buffer dimensions, double buffering,
+rotation, cache handling, task stacks, and global allocation policy are unchanged.
 
 The board adapter keeps the official four-slot TDM order: MIC-L, speaker
 reference, MIC-R, headset mic. Shared AEC/WakeNet consume MIC-L plus the

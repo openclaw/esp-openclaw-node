@@ -105,7 +105,7 @@ jobs:
             if [ "${{ matrix.name }}" = "m5stack-tab5-room-node" ]; then
               for hook in esp_openclaw_node_transport_start_begin esp_openclaw_node_transport_start_end; do
                 riscv32-esp-elf-nm --defined-only build/openclaw_m5stack_tab5_room_node.elf |
-                  awk -v hook="$hook" '$3 == hook && $2 == "T" { found = 1 } END { exit !found }' || exit 1
+                  grep -E "^[[:xdigit:]]+ T ${hook}$" >/dev/null || exit 1
               done
             fi &&
             if [ "${{ matrix.name }}" = "m5stack-tab5-room-node" ]; then

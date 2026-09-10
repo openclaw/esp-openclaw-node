@@ -112,7 +112,7 @@ approved dirty SDK paths, with separate `compatibility_patch` and
 `diagnostic_patch` manifest records. The symbol artifact retains that same
 manifest.
 
-The following unprefixed ROM-output records contain fixed numeric fields only.
+The following unprefixed records contain fixed numeric fields only.
 Capture them before filtering for normal I/W/E log prefixes:
 
 | Record | Fields |
@@ -121,6 +121,11 @@ Capture them before filtering for normal I/W/E log prefixes:
 | `nvs_session_diag` | `role`, `stage`, `err`, `presence` |
 | `nvs_connect_diag` | `role`, `cached`, `fresh_known`, `fresh`, `err` |
 | `nvs_init_diag` | `err`; initial initialization failure before existing recovery |
+
+Runtime session/connect records use one `printf` call after the NVS operation,
+outside the node state lock, sharing stdio serialization with normal logs.
+Their bare grammar is unchanged. Initial NVS and low-level I/O records retain
+ROM output; concurrent ROM writers can still interleave with console output.
 
 `op`: 1 read_raw, 2 read, 3 write_raw, 4 write, 5 erase_range.
 Read/write alignment errors retain their original return and perform no I/O,

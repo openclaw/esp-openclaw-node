@@ -8,13 +8,12 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "esp_attr.h"
 #include "esp_check.h"
 #include "esp_log.h"
-#include "esp_rom_sys.h"
 #include "nvs.h"
 
 static const char *TAG = "esp_openclaw_node_session";
@@ -57,8 +56,8 @@ enum {
 static void log_session_load(
     unsigned role, unsigned stage, esp_err_t err, unsigned presence)
 {
-    esp_rom_printf(
-        DRAM_STR("nvs_session_diag role=%u stage=%u err=%d presence=%u\n"),
+    printf(
+        "nvs_session_diag role=%u stage=%u err=%d presence=%u\n",
         role, stage, (int)err, presence);
 }
 

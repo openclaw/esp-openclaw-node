@@ -104,6 +104,7 @@ class NvsDiagnosticsTests(unittest.TestCase):
                         "-o", str(cls.root / "partition")], check=True)
         node = ROOT / "components/esp-openclaw-node"
         subprocess.run([os.environ.get("CC", "cc"), "-std=c11", "-D_POSIX_C_SOURCE=200809L",
+                        "-pthread", "-Dprintf=host_diagnostic_printf",
                         *common, "-I", str(node / "private_include"),
                         str(node / "src/esp_openclaw_node_persisted_session.c"),
                         str(FIXTURES / "test_nvs_session.c"),
@@ -117,6 +118,10 @@ class NvsDiagnosticsTests(unittest.TestCase):
 
     def test_session_original_errors_presence_clear_and_canary_privacy(self):
         subprocess.run([str(self.root / "session")], check=True)
+
+    def test_runtime_session_record_does_not_split_stdout_log(self):
+        subprocess.run([str(self.root / "session"), "--stdio-contention"],
+                       check=True, timeout=15)
 
 
 if __name__ == "__main__":

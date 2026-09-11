@@ -376,6 +376,11 @@ PPA output pitch use the same dimensions, while the allocation retains its
 cache-line alignment. This geometry correction does not qualify color,
 exposure, warm-up or the complete camera pipeline.
 
+PPA's RGB888 memory order is B,G,R, while `esp_new_jpeg` expects R,G,B.
+The camera transform swaps red and blue for that encoder boundary. This
+corrects channel ordering; it does not establish the cause of an observed
+color cast or qualify sensor exposure and white balance.
+
 ### Media stage diagnostics
 
 The capture owner emits one `camera_capture_diag` failure with a fixed `stage`,

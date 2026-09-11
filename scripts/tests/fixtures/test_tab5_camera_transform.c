@@ -25,6 +25,7 @@ typedef struct {
     picture_t in, out;
     ppa_srm_rotation_angle_t rotation_angle;
     float scale_x, scale_y;
+    bool rgb_swap;
     int mode;
 } ppa_srm_oper_config_t;
 typedef struct {

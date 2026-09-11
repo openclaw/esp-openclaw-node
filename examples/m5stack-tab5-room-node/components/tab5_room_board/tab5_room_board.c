@@ -1021,6 +1021,8 @@ static esp_err_t transform_camera_frame(
         .rotation_angle = rotation,
         .scale_x = scale,
         .scale_y = scale,
+        /* PPA RGB888 is B,G,R in memory; esp_new_jpeg expects R,G,B. */
+        .rgb_swap = true,
         .mode = PPA_TRANS_MODE_BLOCKING,
     };
     esp_err_t result = ppa_do_scale_rotate_mirror(camera_ppa_srm, &config);

@@ -664,7 +664,7 @@ const esp_openclaw_room_node_config_t *room_board_config(void)
 }
 
 /* GCC ASan retains the console callback table through global registration even
- * when board startup is collected. These external boundaries must never run. */
+ * when board startup is collected. Only explicit console cases enable snapshots. */
 static _Noreturn void unsupported_boundary(const char *name)
 {
     fprintf(stderr, "HARNESS/SETUP FAILURE: unsupported boundary %s\n", name);
@@ -688,27 +688,69 @@ void room_diagnostics_audio_get(room_audio_diagnostics_snapshot_t *snapshot)
 esp_err_t room_media_request_test_tone(room_media_talk_busy_cb_t busy_cb, void *ctx)
 { (void)busy_cb; (void)ctx; unsupported_boundary(__func__); }
 void room_media_get_tone_snapshot(room_media_tone_snapshot_t *snapshot)
-{ (void)snapshot; unsupported_boundary(__func__); }
+{
+    if (!host.console_snapshots) unsupported_boundary(__func__);
+    *snapshot = host.console_tone;
+}
 const char *room_media_tone_state_name(room_media_tone_state_t state)
-{ (void)state; unsupported_boundary(__func__); }
+{
+    if (!host.console_snapshots) unsupported_boundary(__func__);
+    host_require(state == host.console_tone.state, "tone state comes from snapshot");
+    return host.console_tone_state_name;
+}
 const char *room_media_tone_error_name(room_media_tone_error_t error)
-{ (void)error; unsupported_boundary(__func__); }
+{
+    if (!host.console_snapshots) unsupported_boundary(__func__);
+    host_require(error == host.console_tone.error, "tone error comes from snapshot");
+    ++host.console_tone_error_name_calls;
+    return host.console_tone_error_name;
+}
 void room_ui_get_diagnostics(room_ui_diagnostics_snapshot_t *snapshot)
-{ (void)snapshot; unsupported_boundary(__func__); }
+{
+    if (!host.console_snapshots) unsupported_boundary(__func__);
+    *snapshot = (room_ui_diagnostics_snapshot_t){.state = host.ui};
+}
 const char *room_ui_state_name(room_ui_state_t state)
-{ (void)state; unsupported_boundary(__func__); }
+{
+    if (!host.console_snapshots) unsupported_boundary(__func__);
+    host_require(state == host.ui, "UI state comes from snapshot");
+    return "synthetic";
+}
 void room_canvas_get_diagnostics(room_canvas_diagnostics_snapshot_t *snapshot)
-{ (void)snapshot; unsupported_boundary(__func__); }
+{
+    if (!host.console_snapshots) unsupported_boundary(__func__);
+    *snapshot = (room_canvas_diagnostics_snapshot_t){0};
+}
 void esp_openclaw_node_wifi_get_status(esp_openclaw_node_wifi_status_t *snapshot)
 { *snapshot = host.wifi; }
 size_t heap_caps_get_free_size(uint32_t caps)
-{ (void)caps; unsupported_boundary(__func__); }
+{
+    if (!host.console_snapshots) unsupported_boundary(__func__);
+    host_require(caps == MALLOC_CAP_INTERNAL || caps == MALLOC_CAP_SPIRAM, "diagnostic heap capability");
+    return caps == MALLOC_CAP_INTERNAL ? 40000 : 8000000;
+}
 size_t heap_caps_get_largest_free_block(uint32_t caps)
-{ (void)caps; unsupported_boundary(__func__); }
+{
+    if (!host.console_snapshots) unsupported_boundary(__func__);
+    host_require(caps == MALLOC_CAP_INTERNAL, "diagnostic largest internal block");
+    return 16000;
+}
 int64_t esp_timer_get_time(void)
-{ unsupported_boundary(__func__); }
+{
+    if (!host.console_snapshots) unsupported_boundary(__func__);
+    return 123000000;
+}
 size_t strlcpy(char *destination, const char *source, size_t capacity)
-{ (void)destination; (void)source; (void)capacity; unsupported_boundary(__func__); }
+{
+    if (!host.console_snapshots) unsupported_boundary(__func__);
+    size_t length = strlen(source);
+    if (capacity > 0) {
+        size_t copied = length < capacity - 1 ? length : capacity - 1;
+        memcpy(destination, source, copied);
+        destination[copied] = '\0';
+    }
+    return length;
+}
 
 /* Real HTTP header, intentionally no implementation capable of networking. */
 esp_http_client_handle_t esp_http_client_init(const esp_http_client_config_t *config)

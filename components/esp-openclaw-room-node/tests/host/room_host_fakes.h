@@ -9,6 +9,7 @@
 #include "freertos/semphr.h"
 #include "freertos/timers.h"
 #include "room_ui_controller.h"
+#include "room_media.h"
 #include "esp_openclaw_node_wifi.h"
 
 /* Single-threaded schedule points, not a model of the controller. */
@@ -37,6 +38,10 @@ typedef struct {
     bool sdk_log_suppressed, fail_log_policy, capture_diagnostics;
     unsigned audio_snapshots;
     char diagnostics[16384];
+    bool console_snapshots;
+    room_media_tone_snapshot_t console_tone;
+    const char *console_tone_state_name, *console_tone_error_name;
+    unsigned console_tone_error_name_calls;
 } room_host_observations_t;
 extern room_host_observations_t host;
 
@@ -54,5 +59,5 @@ void host_fire_operator_timer(esp_timer_handle_t timer);
 bool host_timer_active(TimerHandle_t timer);
 
 /* strlcpy is not in POSIX C (including Darwin with strict feature macros).
- * Only the unsupported room diagnostics path needs this declaration. */
+ * The room diagnostics snapshot needs this declaration. */
 size_t strlcpy(char *destination, const char *source, size_t capacity);

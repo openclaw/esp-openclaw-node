@@ -53,6 +53,53 @@ The separate ELF/map artifact copies that same firmware manifest unchanged.
 Retire the patch, helper and packaging exception together only after an
 upstream SDK fix is selected and qualified on affected hardware.
 
+### Camera CSI compatibility
+
+Tab5 CI additionally applies `patches/esp-video/tab5-csi-post-isp-format.patch`
+to the published `esp_video` 2.4.1 component at revision
+`67a555a517b7aa4753836432453659abfaca393a`. That component's IDF<6 mapping asks
+CSI to convert the sensor's RAW8 format to RGB565. The exact SDK above has
+backported the post-ISP CSI contract: on P4 revisions below 3, CSI input and
+output must match. The captured revision-1.3 failure was at `VIDIOC_STREAMON`,
+errno 3, which this video component maps from `ESP_ERR_NOT_SUPPORTED`.
+See [esp-video-components issue 98](https://github.com/espressif/esp-video-components/issues/98)
+for a related report; its different board/sensor is not Tab5 qualification.
+
+The patch keeps ISP conversion RAW8 to RGB565, then passes RGB565 to RGB565
+through CSI. This preserves 16-bit output and DMA sizing; it does not pass
+RAW8 through while claiming RGB565 buffers. Raw bypass, unsupported-format
+checks, SDK guards, allocation, sensor settings, and chip-revision selections
+are unchanged.
+
+Use only the isolated SDK and diagnostic profile described on this page.
+After SDK patching and `idf.py reconfigure`, apply the camera patch alongside
+the SDIO patches below, then build with normal Ninja:
+
+```sh
+python3 ../../scripts/tab5_camera_compat.py --idf-path "$IDF_PATH" \
+  --project-path . --component-path managed_components/espressif__esp_video --build-path build
+ninja -C build -j2
+python3 ../../scripts/tab5_camera_compat.py --idf-path "$IDF_PATH" \
+  --project-path . --component-path managed_components/espressif__esp_video --build-path build --verify-only
+```
+
+Application is gated by the exact SDK commit and CSI source hash, unchanged
+early-P4 profile, registry lock/manifest, original whole-component/source hashes,
+and tracked patch hash. Another SDK is refused without modifying it; no version
+macro is spoofed. After Ninja, verification checks the configured mapper path,
+current RISC-V object, and final patched component/source hashes. Component-manager
+integrity markers are never rewritten; stop if reconfiguration rejects a modified
+component rather than bypassing its checks.
+
+Packaging requires `--camera-compat` in addition to this branch's SDK/SDIO flags.
+Its additive `camera_compatibility_patch` record retains SDK and SDIO provenance
+unchanged, and the separate symbols artifact receives the same manifest. Host
+tests execute the complete upstream mapper, including original-failure/patched-pass,
+raw bypass, sibling outputs and rejection cases; they do not execute CSI DMA or
+capture a frame. A successful native build is not physical camera qualification.
+Retire this patch and its explicit packaging mode together after selecting and
+qualifying an upstream component that matches the actual SDK contract.
+
 ### NVS diagnostic build
 
 This diagnostic branch additionally applies

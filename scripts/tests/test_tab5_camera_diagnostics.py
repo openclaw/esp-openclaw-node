@@ -23,6 +23,9 @@ class CameraCaptureDiagnosticsTests(unittest.TestCase):
         cls.addClassCleanup(temporary.cleanup)
         directory = Path(temporary.name)
         (directory / "camera_capture_under_test.inc").write_text(source[start:end])
+        handler_start = source.index("static esp_err_t camera_snap(")
+        handler_end = source.index("\nstatic esp_err_t storage_metrics(", handler_start)
+        (directory / "camera_handler_under_test.inc").write_text(source[handler_start:handler_end])
         cls.binary = directory / "camera-capture"
         subprocess.run([
             os.environ.get("CC", "cc"), "-std=c11", "-Wall", "-Wextra", "-Werror",
@@ -54,6 +57,19 @@ class CameraCaptureDiagnosticsTests(unittest.TestCase):
         for scenario in ("bsp-retry", "open-cache", "success-cache"):
             with self.subTest(scenario=scenario):
                 self.run_case(scenario)
+
+    def test_missing_frame_and_timeout_setup_fail_closed(self):
+        for scenario in ("missing-frame", "timeout-setup"):
+            with self.subTest(scenario=scenario):
+                self.run_case("handler-" + scenario)
+
+    def test_warmup_and_handler_stage_cleanup(self):
+        for scenario in (
+            "success", "warmup-max", "warmup-starved", "transform-failure",
+            "encode-failure", "quality-retry",
+        ):
+            with self.subTest(scenario=scenario):
+                self.run_case("handler-" + scenario)
 
 
 class CameraTransformTests(unittest.TestCase):

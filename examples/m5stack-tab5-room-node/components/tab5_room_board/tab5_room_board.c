@@ -5,8 +5,10 @@
 #include <string.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <inttypes.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <sys/time.h>
 #include <time.h>
 
 #include "bsp/esp-bsp.h"
@@ -32,6 +34,7 @@
 #include "esp_timer.h"
 #include "esp_video_init.h"
 #include "esp_video_device.h"
+#include "esp_video_ioctl.h"
 #include "esp_vfs_fat.h"
 #include "linux/videodev2.h"
 #include "mbedtls/base64.h"
@@ -701,9 +704,19 @@ typedef struct {
     struct v4l2_buffer frame;
 } camera_frame_t;
 
+static void camera_pipeline_elapsed(const char *stage, int64_t started_us)
+{
+    uint64_t elapsed_ms = (uint64_t)(esp_timer_get_time() - started_us) / 1000U;
+    ESP_LOGI(TAG, "camera_pipeline_diag stage=%s elapsed_ms=%" PRIu64, stage, elapsed_ms);
+}
+
 static void close_camera_frame(camera_frame_t *camera)
 {
-    if (camera->fd >= 0) {
+    bool opened = camera->fd >= 0;
+    int64_t started_us = 0;
+    if (opened) {
+        ESP_LOGI(TAG, "camera_pipeline_diag stage=cleanup_begin elapsed_ms=0");
+        started_us = esp_timer_get_time();
         int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         (void)ioctl(camera->fd, VIDIOC_STREAMOFF, &type);
         for (size_t i = 0; i < 2; ++i) {
@@ -715,6 +728,7 @@ static void close_camera_frame(camera_frame_t *camera)
     }
     memset(camera, 0, sizeof(*camera));
     camera->fd = -1;
+    if (opened) camera_pipeline_elapsed("cleanup_end", started_us);
 }
 
 static esp_err_t capture_rgb565_frame(int delay_ms, camera_frame_t *camera)
@@ -743,6 +757,14 @@ static esp_err_t capture_rgb565_frame(int delay_ms, camera_frame_t *camera)
         goto fail;
     }
     needs_cleanup = true;
+
+    /* Bound each ready-buffer wait, not setup, warm-up, processing, or teardown. */
+    const struct timeval dequeue_timeout = {.tv_sec = 2, .tv_usec = 0};
+    if (ioctl(camera->fd, VIDIOC_S_DQBUF_TIMEOUT, &dequeue_timeout) != 0) {
+        failure_error = errno;
+        stage = "dqbuf_timeout_setup";
+        goto fail;
+    }
 
     struct v4l2_format format = {.type = V4L2_BUF_TYPE_VIDEO_CAPTURE};
     if (ioctl(camera->fd, VIDIOC_G_FMT, &format) != 0) {
@@ -864,14 +886,22 @@ static esp_err_t capture_rgb565_frame(int delay_ms, camera_frame_t *camera)
         goto fail;
     }
     ESP_LOGI(TAG, "camera_capture_diag stage=dqbuf_begin domain=none error=0");
-    int64_t deadline_us = esp_timer_get_time() + (int64_t)delay_ms * 1000;
+    int64_t capture_started_us = esp_timer_get_time();
+    int64_t deadline_us = capture_started_us + (int64_t)delay_ms * 1000;
+    bool first_dequeue = true;
     for (;;) {
         camera->frame = (struct v4l2_buffer){
             .type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
             .memory = V4L2_MEMORY_MMAP,
         };
-        if (ioctl(camera->fd, VIDIOC_DQBUF, &camera->frame) != 0) {
-            failure_error = errno;
+        int64_t dequeue_started_us = first_dequeue ? esp_timer_get_time() : 0;
+        int dequeue_result = ioctl(camera->fd, VIDIOC_DQBUF, &camera->frame);
+        if (dequeue_result != 0) failure_error = errno;
+        if (first_dequeue) {
+            camera_pipeline_elapsed("dqbuf_first_return", dequeue_started_us);
+            first_dequeue = false;
+        }
+        if (dequeue_result != 0) {
             stage = "dqbuf";
             goto fail;
         }
@@ -900,6 +930,7 @@ static esp_err_t capture_rgb565_frame(int delay_ms, camera_frame_t *camera)
         domain = "validation";
         goto fail;
     }
+    camera_pipeline_elapsed("capture_complete", capture_started_us);
     return ESP_OK;
 fail:
     ESP_LOGE(TAG, "camera_capture_diag stage=%s domain=%s error=%d", stage, domain, failure_error);
@@ -1069,7 +1100,10 @@ static esp_err_t camera_snap(
 
     esp_err_t indicator_err = esp_openclaw_room_node_camera_indicator_begin();
     if (indicator_err != ESP_OK) {
+        ESP_LOGI(TAG, "camera_pipeline_diag stage=release_begin elapsed_ms=0");
+        int64_t release_started_us = esp_timer_get_time();
         esp_openclaw_room_node_release_camera();
+        camera_pipeline_elapsed("release_end", release_started_us);
         cJSON_Delete(params);
         error->code = "PRIVACY_INDICATOR_UNAVAILABLE";
         error->message = "capture refused because the visible camera indicator could not be armed";
@@ -1078,19 +1112,28 @@ static esp_err_t camera_snap(
     camera_frame_t camera = {.fd = -1};
     esp_err_t result = capture_rgb565_frame(delay_ms, &camera);
     if (result != ESP_OK) {
+        ESP_LOGI(TAG, "camera_pipeline_diag stage=release_begin elapsed_ms=0");
+        int64_t release_started_us = esp_timer_get_time();
         esp_openclaw_room_node_camera_indicator_end();
         esp_openclaw_room_node_release_camera();
+        camera_pipeline_elapsed("release_end", release_started_us);
         cJSON_Delete(params);
         error->code = "UNAVAILABLE";
         error->message = "Tab5 camera or V4L2 pipeline is unavailable";
         return result;
     }
     camera_transformed_frame_t transformed;
+    ESP_LOGI(TAG, "camera_pipeline_diag stage=transform_begin elapsed_ms=0");
+    int64_t stage_started_us = esp_timer_get_time();
     result = transform_camera_frame(&camera, max_width, &transformed);
+    camera_pipeline_elapsed("transform_end", stage_started_us);
     if (result != ESP_OK) {
         close_camera_frame(&camera);
+        ESP_LOGI(TAG, "camera_pipeline_diag stage=release_begin elapsed_ms=0");
+        stage_started_us = esp_timer_get_time();
         esp_openclaw_room_node_camera_indicator_end();
         esp_openclaw_room_node_release_camera();
+        camera_pipeline_elapsed("release_end", stage_started_us);
         cJSON_Delete(params);
         error->code = "UNAVAILABLE";
         error->message = "Tab5 camera PPA rotation/downscale is unavailable";
@@ -1101,6 +1144,8 @@ static esp_err_t camera_snap(
     int jpeg_size = 0;
     esp_err_t jpeg_result = ESP_OK;
     const char *jpeg_failure_message = NULL;
+    ESP_LOGI(TAG, "camera_pipeline_diag stage=encode_begin elapsed_ms=0");
+    stage_started_us = esp_timer_get_time();
     while (quality_percent >= 1) {
         jpeg_enc_config_t cfg = DEFAULT_JPEG_ENC_CONFIG();
         cfg.width = (int)transformed.width;
@@ -1147,12 +1192,16 @@ static esp_err_t camera_snap(
         jpeg_size = 0;
         quality_percent = quality_percent > 15 ? quality_percent - 15 : 0;
     }
+    camera_pipeline_elapsed("encode_end", stage_started_us);
     uint32_t captured_width = transformed.width;
     uint32_t captured_height = transformed.height;
     heap_caps_free(transformed.data);
     close_camera_frame(&camera);
+    ESP_LOGI(TAG, "camera_pipeline_diag stage=release_begin elapsed_ms=0");
+    stage_started_us = esp_timer_get_time();
     esp_openclaw_room_node_camera_indicator_end();
     esp_openclaw_room_node_release_camera();
+    camera_pipeline_elapsed("release_end", stage_started_us);
     cJSON_Delete(params);
     if (jpeg_result != ESP_OK) {
         error->code = "INTERNAL";

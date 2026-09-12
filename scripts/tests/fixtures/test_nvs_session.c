@@ -1,7 +1,10 @@
 #include <assert.h>
+#include <pthread.h>
+#include <stdbool.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 #include "esp_openclaw_node_persisted_session.h"
 #include "nvs.h"
 
@@ -11,23 +14,60 @@ static unsigned record_count, string_calls, erase_calls, commit_calls, close_cal
 static int open_error, version_error, size_error[2], value_error[2], clear_error;
 static uint8_t version;
 static const char *values[2];
+static bool contention, emitter_entered;
+static pthread_mutex_t emitter_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t emitter_ready = PTHREAD_COND_INITIALIZER;
 
-int esp_rom_printf(const char *format, ...)
+static int capture_record(const char *format, va_list args)
 {
     assert(record_count < 16);
     record_t *r = &records[record_count++];
-    va_list args;
-    va_start(args, format);
     r->role = va_arg(args, unsigned);
     r->stage = va_arg(args, unsigned);
     r->err = va_arg(args, int);
     r->presence = va_arg(args, unsigned);
-    va_end(args);
     char text[160];
     snprintf(text, sizeof(text), format, r->role, r->stage, r->err, r->presence);
     assert(strstr(text, "canary") == NULL);
     assert(strstr(text, "://") == NULL);
     return 0;
+}
+
+static void signal_emitter(void)
+{
+    assert(pthread_mutex_lock(&emitter_lock) == 0);
+    emitter_entered = true;
+    assert(pthread_cond_signal(&emitter_ready) == 0);
+    assert(pthread_mutex_unlock(&emitter_lock) == 0);
+}
+
+int host_diagnostic_printf(const char *format, ...)
+{
+    va_list args;
+    va_start(args, format);
+    if (contention) signal_emitter();
+    int result = contention ? vprintf(format, args) : capture_record(format, args);
+    va_end(args);
+    return result;
+}
+
+int esp_rom_printf(const char *format, ...)
+{
+    va_list args;
+    va_start(args, format);
+    int result;
+    if (contention) {
+        /* Model ROM's separate output path, which does not take stdout's lock. */
+        char text[160];
+        result = vsnprintf(text, sizeof(text), format, args);
+        assert(result > 0 && (size_t)result < sizeof(text));
+        assert(write(STDOUT_FILENO, text, (size_t)result) == result);
+        signal_emitter();
+    } else {
+        result = capture_record(format, args);
+    }
+    va_end(args);
+    return result;
 }
 
 esp_err_t nvs_open(const char *name, int mode, nvs_handle_t *handle)
@@ -84,8 +124,63 @@ static void expect(unsigned index, unsigned role, unsigned stage, int err, unsig
     assert(r.role == role && r.stage == stage && r.err == err && r.presence == presence);
 }
 
-int main(void)
+static void *load_session_during_log(void *arg)
 {
+    (void)arg;
+    esp_openclaw_node_persisted_session_t session;
+    assert(esp_openclaw_node_persisted_session_load("operator", &session) == 4363);
+    return NULL;
+}
+
+static void test_stdio_contention(void)
+{
+    reset();
+    open_error = 4363;
+    contention = true;
+    FILE *capture = tmpfile();
+    assert(capture != NULL);
+    assert(fflush(stdout) == 0);
+    int saved_stdout = dup(STDOUT_FILENO);
+    assert(saved_stdout >= 0);
+    assert(dup2(fileno(capture), STDOUT_FILENO) == STDOUT_FILENO);
+
+    flockfile(stdout);
+    assert(fputs("I ", stdout) >= 0);
+    assert(fflush(stdout) == 0);
+    pthread_t worker;
+    assert(pthread_create(&worker, NULL, load_session_during_log, NULL) == 0);
+    assert(pthread_mutex_lock(&emitter_lock) == 0);
+    while (!emitter_entered) {
+        assert(pthread_cond_wait(&emitter_ready, &emitter_lock) == 0);
+    }
+    assert(pthread_mutex_unlock(&emitter_lock) == 0);
+    assert(fputs("(1) synthetic: complete\n", stdout) >= 0);
+    assert(fflush(stdout) == 0);
+    funlockfile(stdout);
+    assert(pthread_join(worker, NULL) == 0);
+    assert(fflush(stdout) == 0);
+    assert(dup2(saved_stdout, STDOUT_FILENO) == STDOUT_FILENO);
+    assert(close(saved_stdout) == 0);
+
+    rewind(capture);
+    char output[256] = {0};
+    size_t length = fread(output, 1, sizeof(output) - 1, capture);
+    assert(!ferror(capture) && feof(capture));
+    const char *expected =
+        "I (1) synthetic: complete\n"
+        "nvs_session_diag role=2 stage=1 err=4363 presence=0\n";
+    assert(length == strlen(expected) && strcmp(output, expected) == 0);
+    assert(fclose(capture) == 0);
+    puts("runtime diagnostic preserved stdout log framing");
+}
+
+int main(int argc, char **argv)
+{
+    if (argc == 2 && strcmp(argv[1], "--stdio-contention") == 0) {
+        test_stdio_contention();
+        return 0;
+    }
+    assert(argc == 1);
     const char *roles[] = {"node", "operator"};
     for (unsigned role = 1; role <= 2; role++) {
         esp_openclaw_node_persisted_session_t session;

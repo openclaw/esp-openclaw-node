@@ -6,13 +6,12 @@
 
 #include "esp_openclaw_node_internal.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "esp_app_desc.h"
-#include "esp_attr.h"
 #include "esp_check.h"
-#include "esp_rom_sys.h"
 
 static const char *DEFAULT_PLATFORM = "esp32";
 static const char *DEFAULT_DEVICE_FAMILY = "ESP32";
@@ -597,8 +596,8 @@ esp_err_t esp_openclaw_node_request_connect(
         }
         unsigned role = node->config.role != NULL && strcmp(node->config.role, "node") == 0
             ? 1 : node->config.role != NULL && strcmp(node->config.role, "operator") == 0 ? 2 : 0;
-        esp_rom_printf(
-            DRAM_STR("nvs_connect_diag role=%u cached=%u fresh_known=%u fresh=%u err=%d\n"),
+        printf(
+            "nvs_connect_diag role=%u cached=%u fresh_known=%u fresh=%u err=%d\n",
             role, (unsigned)cached_present, (unsigned)(load_err == ESP_OK),
             (unsigned)fresh_present, (int)load_err);
     }

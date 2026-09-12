@@ -13,6 +13,46 @@ idf.py reconfigure
 idf.py build
 ```
 
+### Isolated SDK compatibility patch
+
+Tab5 CI applies `patches/esp-idf/tab5-spm-stack-sanity.patch` to SDK commit
+`362a1776ec212788fda95f75b733bfdde3a0c394` before configuring the build. This is
+ESP-IDF plus a tracked compatibility patch, not pristine ESP-IDF 5.5.5.
+
+On ESP32-P4 v1.3, internal SPM can hold an ordinary task stack but is omitted
+from this SDK's flash-operation stack-sanity predicate. See
+[ESP-IDF issue 19020](https://github.com/espressif/esp-idf/issues/19020).
+The patch adds only the `SOC_MEM_SPM_SUPPORTED`-guarded `esp_ptr_in_spm(sp)`
+case. It retains the assertion and existing DRAM/RTC checks; it does not make
+PSRAM stacks safe for flash access or change allocation policy.
+
+The connected qualification board is ESP32-P4 v1.3. The existing profile sets
+`CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y`; inspected image headers have minimum
+revision 0 and maximum revision 199. This is not evidence that the same binary
+supports revision 3 or newer silicon. Other P4 revisions remain physically
+unqualified, and this patch does not change chip-revision selections.
+
+For manual reproduction, use a dedicated SDK checkout at the exact commit,
+never a shared SDK installation. From this example directory, explicitly
+apply the patch before `idf.py reconfigure` or `idf.py build`:
+
+```sh
+python3 ../../scripts/idf_tab5_compat.py --idf-path "$IDF_PATH"
+python3 ../../scripts/idf_tab5_compat.py --idf-path "$IDF_PATH" --verify-only
+```
+
+The helper rejects another SDK base, unrelated tracked/untracked changes,
+changed patch bytes, or an unexpected complete source file. An already-applied
+exact patch is verified without reapplying it. CMake never edits the SDK.
+CI uses only its isolated SDK container and does not change shared checkouts.
+
+Firmware packaging independently verifies the actual SDK source delta, not a
+marker file. Its manifest records the dirty SDK state, base commit, patch
+SHA256, and patched-source SHA256; other examples still reject dirty SDKs.
+The separate ELF/map artifact copies that same firmware manifest unchanged.
+Retire the patch, helper and packaging exception together only after an
+upstream SDK fix is selected and qualified on affected hardware.
+
 The official BSP manifest pins `esp_video ~2.0`, while P4-capable
 `esp_capture` requires `esp_video ^2.1`. The source-only BSP build bridge uses
 exact inspected commit `f0ef9497efce684997ce391edd19733483e250a5` without

@@ -9,12 +9,17 @@ from pathlib import Path
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "package_firmware.py"
+sys.path.insert(0, str(SCRIPT.parent))
+from test_idf_tab5_compat import fixture_profile, seed_sdk
+import idf_tab5_compat as compat
+
 SPEC = importlib.util.spec_from_file_location("package_firmware", SCRIPT)
 firmware = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(firmware)
@@ -167,6 +172,8 @@ class FirmwareBundleTests(unittest.TestCase):
         self.assertEqual(manifest["source"]["commit"], self.git(self.repo, "rev-parse", "HEAD"))
         self.assertEqual(manifest["idf"]["commit"], self.git(self.idf, "rev-parse", "HEAD"))
         self.assertEqual(manifest["idf"]["build_revision"], "v5.5.5")
+        self.assertFalse(manifest["idf"]["dirty"])
+        self.assertNotIn("compatibility_patch", manifest["idf"])
         self.assertEqual(manifest["ci"]["pr_head_sha"], "2" * 40)
         self.assertEqual(manifest["ci"]["event_sha"], "1" * 40)
         inputs = manifest["configuration_inputs"]
@@ -291,7 +298,7 @@ class FirmwareBundleTests(unittest.TestCase):
             {"path": "third_party/sdk", "commit": self.git(self.idf, "rev-parse", "HEAD")}
         ])
 
-    def test_tab5_records_upstream_and_local_bridge_identity(self):
+    def configure_tab5(self):
         destination = self.repo / "examples/m5stack-tab5-room-node"
         self.project.rename(destination)
         self.project = destination
@@ -317,6 +324,10 @@ class FirmwareBundleTests(unittest.TestCase):
             f" URL_HASH SHA256={'b' * 64})\n"
         )
         (self.build / "CMakeCache.txt").write_text("OPENCLAW_TAB5_BSP_LOCAL_PATH:PATH=\n")
+        return bridge
+
+    def test_tab5_records_upstream_and_local_bridge_identity(self):
+        bridge = self.configure_tab5()
         self.package()
         manifest = json.loads((self.output / "manifest.json").read_text())
         self.assertEqual(manifest["tab5_bsp"]["upstream_commit"], "a" * 40)
@@ -325,8 +336,54 @@ class FirmwareBundleTests(unittest.TestCase):
         self.assertIn("not an unmodified upstream", manifest["tab5_bsp"]["integration"])
         self.assertEqual(manifest["configuration_inputs"][-1], {
             "kind": "partition_table", "path": "<project>/partitions.csv",
-            "sha256": firmware.sha256(destination / "partitions.csv"),
+            "sha256": firmware.sha256(self.project / "partitions.csv"),
         })
+
+    def test_verified_tab5_sdk_patch_records_actual_dirty_source_identity(self):
+        self.configure_tab5()
+        base = seed_sdk(self.idf)
+        with fixture_profile(base):
+            expected = compat.apply_sdk_patch(self.idf)
+            self.description["git_revision"] = "v5.5.5-fixture-dirty"
+            self.package()
+        metadata = json.loads((self.output / "manifest.json").read_text())["idf"]
+        self.assertTrue(metadata["dirty"])
+        self.assertEqual(metadata["commit"], base)
+        self.assertEqual(metadata["compatibility_patch"], expected)
+        self.assertEqual(
+            metadata["compatibility_patch"]["patched_source_sha256"],
+            firmware.sha256(self.idf / compat.SOURCE_PATH),
+        )
+        self.assertEqual(metadata["build_revision"], "v5.5.5-fixture-dirty")
+
+    def test_tab5_rejects_post_patch_source_tampering_without_output(self):
+        self.configure_tab5()
+        base = seed_sdk(self.idf)
+        with fixture_profile(base):
+            compat.apply_sdk_patch(self.idf)
+            source = self.idf / compat.SOURCE_PATH
+            source.write_bytes(source.read_bytes() + b"/* unrelated modification */\n")
+            with self.assertRaises(ValueError):
+                self.package()
+        self.assertFalse(self.output.exists())
+
+    def test_tab5_rejects_unrelated_sdk_dirt_without_output(self):
+        self.configure_tab5()
+        base = seed_sdk(self.idf)
+        with fixture_profile(base):
+            compat.apply_sdk_patch(self.idf)
+            (self.idf / "other.c").write_text("unrelated modification\n")
+            with self.assertRaises(ValueError):
+                self.package()
+        self.assertFalse(self.output.exists())
+
+    def test_other_examples_reject_even_the_verified_sdk_patch(self):
+        base = seed_sdk(self.idf)
+        with fixture_profile(base):
+            compat.apply_sdk_patch(self.idf)
+            with self.assertRaisesRegex(ValueError, "IDF contains modified source"):
+                self.package()
+        self.assertFalse(self.output.exists())
 
 
 if __name__ == "__main__":

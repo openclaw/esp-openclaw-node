@@ -31,6 +31,8 @@ jobs:
           - name: m5stack-tab5-room-node
             path: examples/m5stack-tab5-room-node
             target: esp32p4
+            # Keep the image qualified with the exact Tab5 SDK patches.
+            idf_version: release-v5.5@sha256:b05ef8f0e05ba8128668fce03a5798ea175ca94829d6bc4cf15f744895fd8482
 
     name: ${{ matrix.name }} (${{ matrix.target }})
     steps:
@@ -75,7 +77,7 @@ jobs:
       - name: Build
         uses: espressif/esp-idf-ci-action@v1
         with:
-          esp_idf_version: release-v5.5
+          esp_idf_version: ${{ matrix.idf_version || 'release-v5.5' }}
           target: ${{ matrix.target }}
           path: ${{ matrix.path }}
           command: |
@@ -113,7 +115,7 @@ jobs:
                 --pr-head-sha "${{ github.event.pull_request.head.sha }}" \
                 --run-id "${{ github.run_id }}" \
                 --run-attempt "${{ github.run_attempt }}" \
-                --idf-image "espressif/idf:release-v5.5" \
+                --idf-image "espressif/idf:${{ matrix.idf_version || 'release-v5.5' }}" \
                 $nvs_diagnostics $sdio_diagnostics
             fi
 

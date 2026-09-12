@@ -1,22 +1,83 @@
-name: Push esp-openclaw-node to IDF Component Registry
+name: Release esp-openclaw-node to IDF Component Registry
 
 on:
-  push:
-    branches:
-      - main
+  pull_request:
+    paths:
+      - ".github/workflows/upload_component.yml"
+      - "scripts/check_component_release.py"
+      - "scripts/tests/test_check_component_release.py"
+      - "docs/component-releases.md"
+  workflow_dispatch:
+    inputs:
+      expected_version:
+        description: Component manifest version to release (must not already exist)
+        required: true
+        type: string
+
+permissions: {}
 
 jobs:
-  upload_components:
+  validate:
     permissions:
-      id-token: write
+      contents: read
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
         with:
-          submodules: "recursive"
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Test release checker
+        run: |
+          python3 -m venv "$RUNNER_TEMP/component-release-check"
+          "$RUNNER_TEMP/component-release-check/bin/python" -m pip install \
+            --disable-pip-version-check "PyYAML==6.0.3"
+          "$RUNNER_TEMP/component-release-check/bin/python" -B -m unittest discover \
+            -s scripts/tests -p 'test_check_component_release.py' -v
+
+  upload_components:
+    needs: validate
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    concurrency:
+      group: esp-openclaw-node-component-release
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      EXPECTED_VERSION: ${{ inputs.expected_version }}
+      RELEASE_SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Prepare isolated release checker
+        run: |
+          python3 -m venv "$RUNNER_TEMP/component-release-check"
+          "$RUNNER_TEMP/component-release-check/bin/python" -m pip install \
+            --disable-pip-version-check "PyYAML==6.0.3"
+
+      - name: Check source version and refuse existing releases
+        run: |
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          "$RUNNER_TEMP/component-release-check/bin/python" scripts/check_component_release.py \
+            preflight --expected-version "$EXPECTED_VERSION"
 
       - name: Upload esp-openclaw-node to IDF Component Registry
         uses: espressif/upload-components-ci-action@v2
         with:
           components: "esp-openclaw-node:components/esp-openclaw-node"
           namespace: "espressif"
+          repository_url: "https://github.com/openclaw/esp-openclaw-node.git"
+          commit_sha: ${{ github.sha }}
+
+      - name: Verify registry artifact identity
+        run: |
+          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
+          "$RUNNER_TEMP/component-release-check/bin/python" scripts/check_component_release.py \
+            verify --expected-version "$EXPECTED_VERSION" --commit-sha "$RELEASE_SHA"

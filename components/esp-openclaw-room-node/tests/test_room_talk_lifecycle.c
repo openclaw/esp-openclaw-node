@@ -674,7 +674,44 @@ static void sdk_log_policy_failure(void)
     CHECK(strstr(host.diagnostics, "stage=sdk_open") == NULL, "no SDK open marker after privacy refusal");
 }
 
+static void sdk_log_policy_level(esp_log_level_t level)
+{
+    host.capture_diagnostics = true;
+    host.global_log_level = level;
+    host.sdk_log_level = level;
+    bool can_set_tag = CONFIG_LOG_DYNAMIC_LEVEL_CONTROL && !CONFIG_LOG_TAG_LEVEL_IMPL_NONE;
+    bool allowed = CONFIG_LOG_DYNAMIC_LEVEL_CONTROL
+        ? (can_set_tag || level <= ESP_LOG_WARN)
+        : (level <= ESP_LOG_WARN && CONFIG_LOG_MAXIMUM_LEVEL < ESP_LOG_INFO);
+    admit();
+    host_run_task("talk_start");
+    CHECK(host.global_log_level == level, "Talk must not mutate global logging");
+    CHECK(host.log_set_calls == (unsigned)(can_set_tag && level > ESP_LOG_WARN),
+        "set only a supported tag that needs lowering; never raise a quieter policy");
+    CHECK(esp_log_level_get("webrtc") == (can_set_tag && level > ESP_LOG_WARN ? ESP_LOG_WARN : level),
+        "effective policy matches the selected SDK logging mode");
+    CHECK(host.opens == (unsigned)allowed && host.config_requests == (unsigned)allowed,
+        "unsafe unsupported logging refuses before SDK open or negotiation");
+    if (!allowed) {
+        drain();
+        CHECK(host.closes == 0 && host.media_ends == 1 && host.ambient && talk_call == NULL,
+            "unsupported unsafe logging follows local setup cleanup");
+        CHECK(strstr(host.diagnostics, "stage=sdk_log_policy phase=end result=-1") != NULL &&
+            strstr(host.diagnostics, "stage=sdk_open") == NULL, "refusal retains fixed diagnostic");
+    }
+    if (host.config_requests != 0) {
+        host_reply_config();
+        host_reply_create(true);
+    }
+}
+static void sdk_log_policy_info(void) { sdk_log_policy_level(ESP_LOG_INFO); }
+static void sdk_log_policy_warn(void) { sdk_log_policy_level(ESP_LOG_WARN); }
+static void sdk_log_policy_error(void) { sdk_log_policy_level(ESP_LOG_ERROR); }
+
 static const struct { const char *name; void (*run)(void); } cases[] = {
+    {"sdk-log-policy-info", sdk_log_policy_info},
+    {"sdk-log-policy-warn", sdk_log_policy_warn},
+    {"sdk-log-policy-error", sdk_log_policy_error},
     {"sdk-log-policy-failure", sdk_log_policy_failure},
     {"diagnostic-boundaries", diagnostic_boundaries},
     {"home-connection-facts", home_connection_facts},

@@ -398,17 +398,19 @@ static bool valid_sha256(const char *value)
 
 static bool make_parents_safely(char *parent)
 {
-    size_t root_len = strlen(configured_root);
-    for (char *p = parent + root_len + 1; *p != '\0'; ++p) {
-        if (*p != '/') continue;
-        *p = '\0';
-        struct stat st;
-        if (room_lstat(parent, &st) != 0) {
-            if (mkdir(parent, 0755) != 0) return false;
-        } else if (!S_ISDIR(st.st_mode) || S_ISLNK(st.st_mode)) {
-            return false;
+    char *walk = room_file_parent_walk_start(parent, configured_root);
+    if (walk != NULL) {
+        for (char *p = walk; *p != '\0'; ++p) {
+            if (*p != '/') continue;
+            *p = '\0';
+            struct stat st;
+            if (room_lstat(parent, &st) != 0) {
+                if (mkdir(parent, 0755) != 0) return false;
+            } else if (!S_ISDIR(st.st_mode) || S_ISLNK(st.st_mode)) {
+                return false;
+            }
+            *p = '/';
         }
-        *p = '/';
     }
     struct stat st;
     if (room_lstat(parent, &st) != 0) return mkdir(parent, 0755) == 0;

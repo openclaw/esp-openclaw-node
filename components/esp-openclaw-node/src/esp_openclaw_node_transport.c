@@ -5,6 +5,7 @@
  */
 
 #include "esp_openclaw_node_internal.h"
+#include "esp_openclaw_node_transport_diag.h"
 
 #include <inttypes.h>
 #include <stdlib.h>
@@ -15,6 +16,17 @@
 #endif
 #include "esp_check.h"
 #include "esp_log.h"
+
+__attribute__((weak)) void esp_openclaw_node_transport_start_begin(const char *role)
+{
+    (void)role;
+}
+
+__attribute__((weak)) void esp_openclaw_node_transport_start_end(const char *role, esp_err_t result)
+{
+    (void)role;
+    (void)result;
+}
 
 static void websocket_event_handler(
     void *handler_args,
@@ -222,7 +234,9 @@ esp_err_t esp_openclaw_node_start_transport_for_active_source(
         return err;
     }
 
+    esp_openclaw_node_transport_start_begin(node->config.role);
     err = node->websocket_client_ops->client_start(ws);
+    esp_openclaw_node_transport_start_end(node->config.role, err);
     if (err != ESP_OK) {
         esp_openclaw_node_cleanup_transport_instance(node, false);
         return err;

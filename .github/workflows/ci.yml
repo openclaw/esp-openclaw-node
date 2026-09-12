@@ -74,6 +74,7 @@ jobs:
           python3 -m unittest discover -s scripts/tests -p 'test_idf_tab5_compat.py' -v
           python3 -m unittest discover -s scripts/tests -p 'test_nvs_diagnostics.py' -v
           python3 -m unittest discover -s scripts/tests -p 'test_tab5_camera_diagnostics.py' -v
+          python3 -m unittest discover -s scripts/tests -p 'test_tab5_allocation_diagnostics.py' -v
 
       - name: Build
         uses: espressif/esp-idf-ci-action@v1
@@ -103,6 +104,12 @@ jobs:
               python3 -m unittest discover -s ../../scripts/tests -p test_package_firmware.py -v
             fi &&
             ninja -C build -j2 &&
+            if [ "${{ matrix.name }}" = "m5stack-tab5-room-node" ]; then
+              for hook in esp_openclaw_node_transport_start_begin esp_openclaw_node_transport_start_end; do
+                riscv32-esp-elf-nm --defined-only build/openclaw_m5stack_tab5_room_node.elf |
+                  grep -E "^[[:xdigit:]]+ T ${hook}$" >/dev/null || exit 1
+              done
+            fi &&
             if [ "${{ matrix.name }}" = "m5stack-tab5-room-node" ]; then
               python3 ../../scripts/tab5_camera_compat.py --idf-path "$IDF_PATH" \
                 --project-path . --component-path managed_components/espressif__esp_video --build-path build --verify-only

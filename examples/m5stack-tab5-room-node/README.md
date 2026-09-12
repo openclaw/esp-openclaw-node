@@ -105,34 +105,45 @@ normal CI still builds the real SDK. Target Unity lifecycle tests are built,
 not run by CI. Remove this temporary diagnostic patch and its explicit
 packaging mode after the observed failure is identified and qualified.
 
-### SDIO allocation diagnostic build
+### Streaming RX PSRAM and allocation diagnostics
 
 This branch also applies `patches/esp-hosted/tab5-sdio-first-allocation-failure.patch`
 to the registry `esp_hosted` 1.4.0 component at revision
 `6040085eefe908de68fcd3438bf10b8ecd6de0c6`. It observes the streaming RX buffer's
-first failed allocation; it is not a repair for the receive-buffer assertion.
-The allocator remains `esp_dma_capable_malloc` with 64-byte alignment and DMA
-capabilities. Existing assertions, block reads, counter advancement, task
-stacks, mempools, SDK patches and allocation configuration are unchanged.
+first failed allocation. A second patch,
+`patches/esp-hosted/tab5-sdio-streaming-rx-psram.patch`, places only the two
+growable streaming RX buffers in PSRAM when PSRAM and SDMMC PSRAM DMA support
+are enabled. It uses `esp_dma_capable_malloc` with explicit SPIRAM/8-bit
+capabilities and the existing 64-byte DMA alignment; the SDK also accounts
+for cache alignment. Other targets retain the original DMA allocation.
+
+This addresses a captured 6,144-byte streaming allocation failure with only
+a 3,072-byte largest DMA block. TX, register buffers, packet pools, assertions,
+512-byte padding, reads, counters, task stacks, SDK patches, and configuration
+are unchanged. It is not a claim that all SDIO allocation failures are resolved;
+this profile still needs physical qualification.
 
 In an isolated configured project, explicitly apply the component patch
 after `idf.py reconfigure` and before normal Ninja:
 
 ```sh
-python3 ../../scripts/tab5_sdio_diagnostics.py \
+python3 ../../scripts/tab5_sdio_diagnostics.py --psram-rx \
   --project-path . --component-path managed_components/espressif__esp_hosted --build-path build
 ninja -C build -j2
-python3 ../../scripts/tab5_sdio_diagnostics.py \
+python3 ../../scripts/tab5_sdio_diagnostics.py --psram-rx \
   --project-path . --component-path managed_components/espressif__esp_hosted --build-path build --verify-only
 ```
 
 The helper requires the pinned lock identity, manifest/revision, whole component
 and source hashes, patch hash, and configured compile input. Verification checks
-actual bytes and permits exactly the selected patch, not arbitrary local edits.
+actual bytes and permits exactly the selected patch sequence, not arbitrary local edits.
 Do not rewrite component-manager integrity metadata or bypass a reconfiguration
-failure. Packaging additionally requires `--sdio-diagnostics` alongside
-`--nvs-diagnostics`; the separate `component_diagnostic_patch` manifest record
-identifies the modified component. The symbol artifact retains that same manifest.
+failure. Packaging requires `--sdio-psram-rx --sdio-diagnostics` alongside
+`--nvs-diagnostics`. The `component_compatibility_patch` manifest record lists
+both ordered patches, their intermediate source hashes, and the final source
+and whole-component hashes. The symbol artifact retains that same manifest.
+Omit `--psram-rx` and `--sdio-psram-rx` only for the original diagnostic-only
+profile, whose manifest retains `component_diagnostic_patch`.
 
 One unprefixed ROM line has this exact field order, with decimal integers and
 no trailing period:
@@ -143,8 +154,10 @@ sdio_alloc_diag requested=%u padded=%u buffer_index=%d old_size=%u dma_free=%u d
 
 `requested` and `padded` describe the current allocation before/after existing
 block padding. `buffer_index` and `old_size` describe the previous write buffer.
-`dma_free` and `dma_largest` are DMA heap samples after allocation failure,
-not a proof that an aligned allocation would fit. `reg_raw`, `reg_masked`,
+`dma_free` and `dma_largest` remain `MALLOC_CAP_DMA` heap samples after allocation
+failure. They are not PSRAM-heap measurements, even when the failed streaming
+allocation targeted PSRAM, nor proof that an aligned allocation would fit.
+`reg_raw`, `reg_masked`,
 and `rx_count` are the current packet-length register, its masked value,
 and local RX byte counter.
 
@@ -163,7 +176,10 @@ successful frames. The RX owner retains its existing driver mutex, samples
 heap information after allocation returns, and prints after heap queries
 release their locks. Absence of a record is not evidence of healthy transport.
 Helper and packaging tests exercise real component hashing and rejection
-boundaries. CI builds the actual driver but does not execute an SDIO
+boundaries. A host C test compiles the actual streaming allocator section
+against allocation stubs, covering the observed growth, reuse, alignment,
+legacy profiles, and retained assertion. It does not execute SDMMC DMA.
+CI builds the actual driver but does not execute an SDIO
 allocation-failure fixture. Hardware failure capture remains a separate
 qualification step; remove this temporary patch and packaging mode after
 the cause is identified and a repair is qualified.

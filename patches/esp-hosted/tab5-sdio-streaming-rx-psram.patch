@@ -1,0 +1,44 @@
+--- a/host/drivers/transport/sdio/sdio_drv.c
++++ b/host/drivers/transport/sdio/sdio_drv.c
+@@ -27,6 +27,8 @@
+ #include "esp_attr.h"
+ #include "esp_heap_caps.h"
+ #include "esp_rom_sys.h"
++#include "esp_dma_utils.h"
++#include "soc/soc_caps.h"
+ 
+ static const char TAG[] = "H_SDIO_DRV";
+ 
+@@ -661,6 +663,23 @@
+ } sdio_last_failed_read;
+ static DRAM_ATTR bool sdio_alloc_reported;
+ 
++static uint8_t *sdio_streaming_rx_alloc(size_t len)
++{
++#if CONFIG_SPIRAM && SOC_SDMMC_PSRAM_DMA_CAPABLE
++	/* Only the streaming buffers use PSRAM; packet pools and registers do not. */
++	const esp_dma_mem_info_t dma_mem_info = {
++		.extra_heap_caps = MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT,
++		.dma_alignment_bytes = 64,
++	};
++	void *buffer = NULL;
++	if (esp_dma_capable_malloc(len, &dma_mem_info, &buffer, NULL) != ESP_OK)
++		return NULL;
++	return buffer;
++#else
++	return MEM_ALLOC(len);
++#endif
++}
++
+ // SDIO streaming mode
+ // return a buffer big enough to contain the data
+ static uint8_t * sdio_rx_get_buffer(uint32_t len)
+@@ -680,7 +699,7 @@
+ 			// free already allocated memory
+ 			g_h.funcs->_h_free(*buf);
+ 		}
+-		*buf = (uint8_t *)MEM_ALLOC(len);
++		*buf = sdio_streaming_rx_alloc(len);
+ 		if (!*buf && !sdio_alloc_reported) {
+ 			sdio_alloc_reported = true;
+ 			multi_heap_info_t info;

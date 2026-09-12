@@ -85,13 +85,14 @@ jobs:
             sdio_diagnostics="" &&
             if [ "${{ matrix.name }}" = "m5stack-tab5-room-node" ]; then
               nvs_diagnostics="--nvs-diagnostics" &&
-              sdio_diagnostics="--sdio-diagnostics" &&
+              sdio_diagnostics="--sdio-diagnostics --sdio-psram-rx" &&
               python3 ../../scripts/idf_tab5_compat.py --idf-path "$IDF_PATH" --nvs-diagnostics
             fi &&
             idf.py reconfigure &&
             if [ "${{ matrix.name }}" = "m5stack-tab5-room-node" ]; then
               python3 ../../scripts/tab5_sdio_diagnostics.py \
-                --project-path . --component-path managed_components/espressif__esp_hosted --build-path build &&
+                --project-path . --component-path managed_components/espressif__esp_hosted --build-path build --psram-rx &&
+              python3 -m unittest discover -s ../../scripts/tests -p test_tab5_sdio_rx_psram.py -v &&
               python3 -m unittest discover -s ../../scripts/tests -p test_tab5_sdio_diagnostics.py -v &&
               python3 -m unittest discover -s ../../scripts/tests -p test_package_firmware.py -v
             fi &&

@@ -15,6 +15,17 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 
+static const char *connect_diagnostic_role(esp_openclaw_node_handle_t node)
+{
+    if (node->config.role != NULL && strcmp(node->config.role, "node") == 0) {
+        return "node";
+    }
+    if (node->config.role != NULL && strcmp(node->config.role, "operator") == 0) {
+        return "operator";
+    }
+    return "other";
+}
+
 static bool websocket_send_json(esp_openclaw_node_handle_t node, cJSON *root)
 {
     char *json = cJSON_PrintUnformatted(root);
@@ -473,9 +484,14 @@ static esp_err_t persist_handoff_device_tokens(
         ? cJSON_GetObjectItemCaseSensitive(auth, "deviceTokens")
         : NULL;
     if (!cJSON_IsArray(device_tokens)) {
+        ESP_LOGI(
+            ESP_OPENCLAW_NODE_TAG,
+            "connect_diag stage=operator_handoff role=%s entry_present=0 store_attempted=0",
+            connect_diagnostic_role(node));
         return ESP_OK;
     }
 
+    bool operator_entry_present = false;
     cJSON *entry = NULL;
     cJSON_ArrayForEach(entry, device_tokens) {
         cJSON *role = cJSON_GetObjectItemCaseSensitive(entry, "role");
@@ -486,6 +502,13 @@ static esp_err_t persist_handoff_device_tokens(
         const char *token_text = cJSON_IsString(device_token)
             ? esp_openclaw_node_trimmed_or_null(device_token->valuestring)
             : NULL;
+        if (role_text != NULL && strcmp(role_text, "operator") == 0) {
+            operator_entry_present = true;
+            ESP_LOGI(
+                ESP_OPENCLAW_NODE_TAG,
+                "connect_diag stage=operator_handoff role=%s entry_present=1 token_present=%d store_attempted=0",
+                connect_diagnostic_role(node), token_text != NULL);
+        }
         if (role_text == NULL || token_text == NULL ||
             strcmp(role_text, node->config.role) == 0) {
             continue;
@@ -514,11 +537,23 @@ static esp_err_t persist_handoff_device_tokens(
             role_text,
             &stored,
             &update);
+        ESP_LOGI(
+            ESP_OPENCLAW_NODE_TAG,
+            "connect_diag stage=handoff_store role=%s target=%s store_attempted=1 local_err=%d(%s)",
+            connect_diagnostic_role(node),
+            strcmp(role_text, "operator") == 0 ? "operator" : "node",
+            (int)err, esp_err_to_name(err));
         esp_openclaw_node_persisted_session_free(&stored);
         esp_openclaw_node_persisted_session_free(&update);
         if (err != ESP_OK) {
             return err;
         }
+    }
+    if (!operator_entry_present) {
+        ESP_LOGI(
+            ESP_OPENCLAW_NODE_TAG,
+            "connect_diag stage=operator_handoff role=%s entry_present=0 store_attempted=0",
+            connect_diagnostic_role(node));
     }
     return ESP_OK;
 }
@@ -539,6 +574,10 @@ static connect_response_finalize_result_t finalize_connect_response_success(
     if (node->state != ESP_OPENCLAW_NODE_INTERNAL_CONNECTING ||
         node->pending_connect_id[0] == '\0') {
         esp_openclaw_node_unlock_state(node);
+        ESP_LOGI(
+            ESP_OPENCLAW_NODE_TAG,
+            "connect_diag stage=session_store role=%s store_attempted=0 stale=1",
+            connect_diagnostic_role(node));
         return result;
     }
 
@@ -561,6 +600,10 @@ static connect_response_finalize_result_t finalize_connect_response_success(
         result.outcome = CONNECT_RESPONSE_OUTCOME_CONNECTED;
     }
     esp_openclaw_node_unlock_state(node);
+    ESP_LOGI(
+        ESP_OPENCLAW_NODE_TAG,
+        "connect_diag stage=session_store role=%s store_attempted=1 local_err=%d(%s)",
+        connect_diagnostic_role(node), (int)result.err, esp_err_to_name(result.err));
     return result;
 }
 
@@ -599,6 +642,10 @@ static void handle_connect_response(
     cJSON *root)
 {
     cJSON *ok = cJSON_GetObjectItemCaseSensitive(root, "ok");
+    ESP_LOGI(
+        ESP_OPENCLAW_NODE_TAG,
+        "connect_diag stage=response_validation role=%s ok_valid=%d ok_true=%d",
+        connect_diagnostic_role(node), cJSON_IsBool(ok), cJSON_IsTrue(ok));
     if (!cJSON_IsBool(ok)) {
         return;
     }
@@ -607,8 +654,13 @@ static void handle_connect_response(
         cJSON *payload = cJSON_GetObjectItemCaseSensitive(root, "payload");
         cJSON *type =
             payload ? cJSON_GetObjectItemCaseSensitive(payload, "type") : NULL;
-        if (!cJSON_IsString(type) ||
-            strcmp(type->valuestring, "hello-ok") != 0) {
+        bool hello_valid = cJSON_IsString(type) &&
+            strcmp(type->valuestring, "hello-ok") == 0;
+        ESP_LOGI(
+            ESP_OPENCLAW_NODE_TAG,
+            "connect_diag stage=hello_validation role=%s hello_valid=%d",
+            connect_diagnostic_role(node), hello_valid);
+        if (!hello_valid) {
             return;
         }
 
@@ -633,6 +685,10 @@ static void handle_connect_response(
         const char *device_token_text = cJSON_IsString(device_token)
             ? esp_openclaw_node_trimmed_or_null(device_token->valuestring)
             : NULL;
+        ESP_LOGI(
+            ESP_OPENCLAW_NODE_TAG,
+            "connect_diag stage=hello_auth role=%s token_present=%d",
+            connect_diagnostic_role(node), device_token_text != NULL);
         if (device_token_text == NULL) {
             free(plugin_surface_urls_json);
             esp_openclaw_node_complete_connect_failed(
@@ -972,15 +1028,31 @@ void esp_openclaw_node_process_gateway_message(
         }
     } else if (strcmp(type->valuestring, "res") == 0) {
         cJSON *id = cJSON_GetObjectItemCaseSensitive(root, "id");
+        bool id_valid = cJSON_IsString(id) && id->valuestring != NULL;
+        bool connecting = false;
+        bool transport_connected = false;
+        bool pending = false;
+        bool id_matches = false;
         bool is_pending_connect_response = false;
-        if (cJSON_IsString(id) && id->valuestring != NULL) {
+        if (id_valid) {
             esp_openclaw_node_lock_state(node);
-            is_pending_connect_response =
-                node->transport_connected &&
-                node->state == ESP_OPENCLAW_NODE_INTERNAL_CONNECTING &&
-                node->pending_connect_id[0] != '\0' &&
-                strcmp(id->valuestring, node->pending_connect_id) == 0;
+            connecting = node->state == ESP_OPENCLAW_NODE_INTERNAL_CONNECTING;
+            transport_connected = node->transport_connected;
+            pending = node->pending_connect_id[0] != '\0';
+            id_matches = pending && strcmp(id->valuestring, node->pending_connect_id) == 0;
+            is_pending_connect_response = transport_connected && connecting && pending && id_matches;
             esp_openclaw_node_unlock_state(node);
+        } else {
+            ESP_LOGI(
+                ESP_OPENCLAW_NODE_TAG,
+                "connect_diag stage=response_invalid_id role=%s id_valid=0",
+                connect_diagnostic_role(node));
+        }
+        if (connecting) {
+            ESP_LOGI(
+                ESP_OPENCLAW_NODE_TAG,
+                "connect_diag stage=response role=%s id_valid=%d transport_connected=%d pending=%d id_matches=%d",
+                connect_diagnostic_role(node), id_valid, transport_connected, pending, id_matches);
         }
         if (is_pending_connect_response) {
             handle_connect_response(node, root);

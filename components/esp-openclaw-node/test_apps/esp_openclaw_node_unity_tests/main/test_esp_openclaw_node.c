@@ -5,12 +5,14 @@
  */
 
 #include <stdbool.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "esp_event.h"
+#include "esp_log.h"
 #include "esp_websocket_client.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -85,6 +87,81 @@ static test_transport_state_t s_transport_state;
 static int s_fake_transport_client;
 static gateway_recorder_t s_gateway_recorder;
 
+static struct {
+    char records[16][320];
+    size_t count;
+    bool overflow;
+    bool failure_seen;
+    bool failure_before_stop;
+} s_diagnostics;
+static portMUX_TYPE s_diagnostic_lock = portMUX_INITIALIZER_UNLOCKED;
+static bool s_diagnostic_capture_active;
+static vprintf_like_t s_previous_log_writer;
+
+static int capture_connect_diagnostic(const char *format, va_list args)
+{
+    /* Only the new records are under test; legacy logs can contain fixture canaries. */
+    if (strstr(format, "connect_diag ") == NULL) {
+        return 0;
+    }
+    char record[320];
+    int written = vsnprintf(record, sizeof(record), format, args);
+    portENTER_CRITICAL(&s_diagnostic_lock);
+    if (s_diagnostic_capture_active) {
+        if (written < 0 || (size_t)written >= sizeof(record) ||
+            s_diagnostics.count == 16) {
+            s_diagnostics.overflow = true;
+        } else {
+            memcpy(s_diagnostics.records[s_diagnostics.count++], record, (size_t)written + 1);
+            if (strstr(record, "stage=failed ") != NULL) {
+                s_diagnostics.failure_seen = true;
+            }
+        }
+    }
+    portEXIT_CRITICAL(&s_diagnostic_lock);
+    return written;
+}
+
+static void stop_diagnostic_capture(void)
+{
+    portENTER_CRITICAL(&s_diagnostic_lock);
+    s_diagnostic_capture_active = false;
+    portEXIT_CRITICAL(&s_diagnostic_lock);
+    if (s_previous_log_writer != NULL) {
+        esp_log_set_vprintf(s_previous_log_writer);
+        s_previous_log_writer = NULL;
+    }
+}
+
+void tearDown(void)
+{
+    stop_diagnostic_capture();
+}
+
+static const char *diagnostic_record(const char *stage)
+{
+    char field[64];
+    snprintf(field, sizeof(field), "stage=%s ", stage);
+    for (size_t i = 0; i < s_diagnostics.count; ++i) {
+        if (strstr(s_diagnostics.records[i], field) != NULL) {
+            return s_diagnostics.records[i];
+        }
+    }
+    return NULL;
+}
+
+static int diagnostic_number(const char *record, const char *field)
+{
+    TEST_ASSERT_NOT_NULL(record);
+    char key[64];
+    snprintf(key, sizeof(key), " %s=", field);
+    const char *value = strstr(record, key);
+    TEST_ASSERT_NOT_NULL(value);
+    int number = 0;
+    TEST_ASSERT_EQUAL_INT(1, sscanf(value + strlen(key), "%d", &number));
+    return number;
+}
+
 static esp_websocket_client_handle_t test_transport_client_init(const esp_websocket_client_config_t *config)
 {
     (void)config;
@@ -121,6 +198,11 @@ static esp_err_t test_transport_client_start(esp_websocket_client_handle_t clien
 static esp_err_t test_transport_client_stop(esp_websocket_client_handle_t client)
 {
     (void)client;
+    portENTER_CRITICAL(&s_diagnostic_lock);
+    if (s_diagnostic_capture_active) {
+        s_diagnostics.failure_before_stop = s_diagnostics.failure_seen;
+    }
+    portEXIT_CRITICAL(&s_diagnostic_lock);
     s_transport_state.stop_calls++;
     return ESP_OK;
 }
@@ -1690,6 +1772,146 @@ TEST_CASE("voice bootstrap persists roles and correlates gateway traffic", "[esp
     TEST_ASSERT_EQUAL_STRING("DISCONNECTED", s_gateway_recorder.request_error);
 
     TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_destroy(node));
+}
+
+TEST_CASE("connect diagnostics preserve outcomes and omit credential canaries", "[esp_openclaw_node][diagnostics]")
+{
+    const char *node_auth =
+        "\"deviceToken\":\"diagnostic-node-token-canary\"";
+    const char *handoff_auth =
+        "\"deviceToken\":\"diagnostic-node-token-canary\","
+        "\"deviceTokens\":[{\"role\":\"operator\","
+        "\"deviceToken\":\"diagnostic-operator-token-canary\"}]";
+    const char *canaries[] = {
+        "diagnostic-node-token-canary", "diagnostic-operator-token-canary",
+        "diagnostic-url-canary", "diagnostic-id-canary",
+        "diagnostic-detail-canary", "diagnostic-message-canary",
+    };
+    const struct {
+        const char *auth;
+        bool storage_available;
+        bool rejected;
+        bool connected;
+        bool handoff_present;
+        bool own_store_attempted;
+        esp_err_t expected_error;
+    } cases[] = {
+        {handoff_auth, true, false, true, true, true, ESP_OK},
+        {node_auth, true, false, true, false, true, ESP_OK},
+        {node_auth, false, false, false, false, true, ESP_ERR_NVS_NOT_INITIALIZED},
+        {handoff_auth, false, false, false, true, false, ESP_ERR_NVS_NOT_INITIALIZED},
+        {node_auth, true, true, false, false, false, ESP_OK},
+    };
+
+    for (size_t row = 0; row < sizeof(cases) / sizeof(cases[0]); ++row) {
+        reset_openclaw_storage();
+        reset_transport_state();
+        reset_event_recorder();
+        memset(&s_diagnostics, 0, sizeof(s_diagnostics));
+
+        esp_openclaw_node_config_t config = {0};
+        esp_openclaw_node_config_init_default(&config);
+        config.event_cb = test_node_event_cb;
+        esp_openclaw_node_handle_t node = NULL;
+        TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_create(&config, &node));
+
+        /* Enter the response boundary without a socket, timer or live Gateway. */
+        esp_openclaw_node_lock_state(node);
+        node->state = ESP_OPENCLAW_NODE_INTERNAL_CONNECTING;
+        node->transport_connected = true;
+        node->client_started = true;
+        node->ws = (esp_websocket_client_handle_t)&s_fake_transport_client;
+        node->transport_gateway_uri = strdup("ws://diagnostic-url-canary.example/ws");
+        snprintf(node->pending_connect_id, sizeof(node->pending_connect_id), "diagnostic-id-canary");
+        esp_openclaw_node_unlock_state(node);
+        TEST_ASSERT_NOT_NULL(node->transport_gateway_uri);
+
+        char response[768];
+        if (cases[row].rejected) {
+            snprintf(response, sizeof(response),
+                "{\"type\":\"res\",\"id\":\"diagnostic-id-canary\",\"ok\":false,"
+                "\"error\":{\"message\":\"diagnostic-message-canary\","
+                "\"details\":{\"code\":\"diagnostic-detail-canary\"}}}");
+        } else {
+            snprintf(response, sizeof(response),
+                "{\"type\":\"res\",\"id\":\"diagnostic-id-canary\",\"ok\":true,"
+                "\"payload\":{\"type\":\"hello-ok\",\"auth\":{%s}}}", cases[row].auth);
+        }
+        if (!cases[row].storage_available) {
+            TEST_ASSERT_EQUAL(ESP_OK, nvs_flash_deinit());
+        }
+        portENTER_CRITICAL(&s_diagnostic_lock);
+        s_diagnostic_capture_active = true;
+        portEXIT_CRITICAL(&s_diagnostic_lock);
+        s_previous_log_writer = esp_log_set_vprintf(capture_connect_diagnostic);
+        esp_openclaw_node_process_gateway_message(node, response);
+        stop_diagnostic_capture();
+        if (!cases[row].storage_available) {
+            TEST_ASSERT_EQUAL(ESP_OK, nvs_flash_init());
+        }
+
+        TEST_ASSERT_FALSE(s_diagnostics.overflow);
+        TEST_ASSERT_GREATER_THAN(0, s_diagnostics.count);
+        for (size_t i = 0; i < s_diagnostics.count; ++i) {
+            for (size_t j = 0; j < sizeof(canaries) / sizeof(canaries[0]); ++j) {
+                TEST_ASSERT_NULL(strstr(s_diagnostics.records[i], canaries[j]));
+            }
+        }
+        TEST_ASSERT_EQUAL_INT(1, diagnostic_number(diagnostic_record("response"), "id_matches"));
+        TEST_ASSERT_EQUAL_INT(cases[row].connected, s_event_recorder.connected_count);
+        TEST_ASSERT_EQUAL_INT(!cases[row].connected, s_event_recorder.connect_failed_count);
+        TEST_ASSERT_EQUAL_INT(0, s_event_recorder.disconnected_count);
+        TEST_ASSERT_EQUAL(cases[row].expected_error, s_event_recorder.local_err);
+        TEST_ASSERT_EQUAL(cases[row].connected, esp_openclaw_node_has_saved_session(node));
+
+        if (!cases[row].connected) {
+            TEST_ASSERT_TRUE(s_diagnostics.failure_before_stop);
+            TEST_ASSERT_EQUAL(
+                cases[row].rejected ? ESP_OPENCLAW_NODE_CONNECT_FAILURE_AUTH_REJECTED
+                                    : ESP_OPENCLAW_NODE_CONNECT_FAILURE_SESSION_FINALIZATION_FAILED,
+                s_event_recorder.connect_failed_reason);
+            TEST_ASSERT_EQUAL_INT(s_event_recorder.connect_failed_reason,
+                diagnostic_number(diagnostic_record("failed"), "reason"));
+            TEST_ASSERT_EQUAL(cases[row].expected_error,
+                diagnostic_number(diagnostic_record("failed"), "local_err"));
+        }
+        if (!cases[row].rejected) {
+            TEST_ASSERT_EQUAL_INT(1, diagnostic_number(diagnostic_record("hello_validation"), "hello_valid"));
+            const char *handoff = diagnostic_record("operator_handoff");
+            TEST_ASSERT_EQUAL_INT(cases[row].handoff_present, diagnostic_number(handoff, "entry_present"));
+            TEST_ASSERT_EQUAL_INT(0, diagnostic_number(handoff, "store_attempted"));
+            TEST_ASSERT_NULL(strstr(handoff, "local_err="));
+            if (cases[row].handoff_present && cases[row].storage_available) {
+                TEST_ASSERT_EQUAL_INT(1, diagnostic_number(diagnostic_record("handoff_store"), "store_attempted"));
+                TEST_ASSERT_EQUAL(ESP_OK, diagnostic_number(diagnostic_record("handoff_store"), "local_err"));
+            } else {
+                TEST_ASSERT_NULL(diagnostic_record("handoff_store"));
+            }
+        }
+        if (cases[row].own_store_attempted) {
+            TEST_ASSERT_EQUAL_INT(1, diagnostic_number(diagnostic_record("session_store"), "store_attempted"));
+            TEST_ASSERT_EQUAL(cases[row].expected_error,
+                diagnostic_number(diagnostic_record("session_store"), "local_err"));
+        } else {
+            TEST_ASSERT_NULL(diagnostic_record("session_store"));
+        }
+
+        esp_openclaw_node_persisted_session_t saved = {0};
+        TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_persisted_session_load("node", &saved));
+        TEST_ASSERT_EQUAL(cases[row].connected, esp_openclaw_node_persisted_session_is_present(&saved));
+        if (cases[row].connected) {
+            TEST_ASSERT_EQUAL_STRING("diagnostic-node-token-canary", saved.device_token);
+        }
+        esp_openclaw_node_persisted_session_free(&saved);
+        TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_persisted_session_load("operator", &saved));
+        TEST_ASSERT_EQUAL(cases[row].connected && cases[row].handoff_present,
+            esp_openclaw_node_persisted_session_is_present(&saved));
+        if (cases[row].connected && cases[row].handoff_present) {
+            TEST_ASSERT_EQUAL_STRING("diagnostic-operator-token-canary", saved.device_token);
+        }
+        esp_openclaw_node_persisted_session_free(&saved);
+        TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_destroy(node));
+    }
 }
 
 void app_main(void)

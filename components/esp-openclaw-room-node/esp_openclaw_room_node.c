@@ -7,9 +7,11 @@
 #include "esp_console.h"
 #include "esp_event.h"
 #include "esp_check.h"
+#include "esp_attr.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_rom_sys.h"
 #include "esp_openclaw_node.h"
 #include "esp_openclaw_node_example_repl.h"
 #include "esp_openclaw_node_wifi.h"
@@ -1251,6 +1253,9 @@ esp_err_t esp_openclaw_room_node_start(const esp_openclaw_room_node_config_t *co
 {
     ESP_RETURN_ON_ERROR(room_board_bind(config), TAG, "invalid board contract");
     esp_err_t nvs_err = nvs_flash_init();
+    if (nvs_err != ESP_OK) {
+        esp_rom_printf(DRAM_STR("nvs_init_diag err=%d\n"), (int)nvs_err);
+    }
     if (nvs_err == ESP_ERR_NVS_NO_FREE_PAGES || nvs_err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
         nvs_err = nvs_flash_init();

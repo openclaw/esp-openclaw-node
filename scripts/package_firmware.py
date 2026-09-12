@@ -162,7 +162,7 @@ def tab5_provenance(project, build):
     }
 
 
-def package_firmware(project, build, output, target, provenance, dependencies):
+def package_firmware(project, build, output, target, provenance, dependencies, nvs_diagnostics=False):
     project, build, output = project.resolve(), build.resolve(), output.resolve()
     repo = Path(git(project, "rev-parse", "--show-toplevel")).resolve()
     if project.parent != repo / "examples" or EXAMPLES.get(project.name) != target:
@@ -193,10 +193,12 @@ def package_firmware(project, build, output, target, provenance, dependencies):
         raise ValueError("Repository contains modified source")
     idf_dirty = bool(git(idf, "status", "--porcelain", "--untracked-files=all"))
     idf_compatibility = None
+    if nvs_diagnostics and (project.name != "m5stack-tab5-room-node" or not idf_dirty):
+        raise ValueError("NVS diagnostics require the explicitly patched Tab5 SDK")
     if idf_dirty:
         if project.name != "m5stack-tab5-room-node":
             raise ValueError("IDF contains modified source")
-        idf_compatibility = verify_sdk_patch(idf)
+        idf_compatibility = verify_sdk_patch(idf, nvs_diagnostics)
     if not dependencies.get("dependencies"):
         raise ValueError("Resolved dependency lock is empty")
     normalize = [(build, "<build>"), (project, "<project>"), (repo, "<repository>"), (idf, "<idf>")]
@@ -231,7 +233,7 @@ def package_firmware(project, build, output, target, provenance, dependencies):
         },
     }
     if idf_compatibility is not None:
-        manifest["idf"]["compatibility_patch"] = idf_compatibility
+        manifest["idf"].update(idf_compatibility)
     if project.name == "m5stack-tab5-room-node":
         manifest["tab5_bsp"] = tab5_provenance(project, build)
     extra = flash["extra_esptool_args"]
@@ -338,9 +340,11 @@ def main():
     for name in ("repository", "event", "event-sha", "run-id", "run-attempt", "idf-image"):
         parser.add_argument("--" + name, required=True)
     parser.add_argument("--pr-head-sha", default="")
+    parser.add_argument("--nvs-diagnostics", action="store_true")
     args = parser.parse_args()
     provenance = vars(args).copy()
     provenance.pop("target")
+    provenance.pop("nvs_diagnostics")
     project = Path.cwd()
     # ruamel.yaml is already part of ESP-IDF's component-manager environment.
     try:
@@ -351,7 +355,7 @@ def main():
         dependencies = read_dependency_lock(project / "dependencies.lock")
         output = package_firmware(
             project, project / "build", project / "build/firmware",
-            args.target, provenance, dependencies,
+            args.target, provenance, dependencies, args.nvs_diagnostics,
         )
     except ValueError as error:
         parser.exit(1, f"Firmware packaging failed: {error}\n")

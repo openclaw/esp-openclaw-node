@@ -36,6 +36,9 @@ def seed_sdk(idf):
     source = idf / compat.SOURCE_PATH
     source.parent.mkdir(parents=True, exist_ok=True)
     source.write_bytes(ORIGINAL)
+    diagnostic = idf / compat.DIAGNOSTIC_SOURCE_PATH
+    diagnostic.parent.mkdir(parents=True, exist_ok=True)
+    diagnostic.write_bytes((Path(__file__).parent / "fixtures/nvs_partition.cpp").read_bytes())
     (idf / "other.c").write_text("/* unchanged SDK fixture */\n")
     compat.git(idf, "add", ".")
     compat.git(
@@ -75,9 +78,9 @@ class SdkCompatibilityTests(unittest.TestCase):
         metadata = compat.apply_sdk_patch(self.idf)
         self.assertEqual(self.source.read_bytes(), PATCHED)
         self.assertEqual(compat.git(self.idf, "status", "--porcelain=v1", "-z"), compat.PATCHED_STATUS)
-        self.assertEqual(metadata["base_commit"], self.base)
-        self.assertEqual(metadata["patch_sha256"], compat.digest(compat.PATCH_PATH.read_bytes()))
-        self.assertEqual(metadata["patched_source_sha256"], compat.digest(self.source.read_bytes()))
+        self.assertEqual(metadata["compatibility_patch"]["base_commit"], self.base)
+        self.assertEqual(metadata["compatibility_patch"]["patch_sha256"], compat.digest(compat.PATCH_PATH.read_bytes()))
+        self.assertEqual(metadata["compatibility_patch"]["patched_source_sha256"], compat.digest(self.source.read_bytes()))
         self.assertEqual(compat.apply_sdk_patch(self.idf), metadata)
         self.assertEqual(compat.verify_sdk_patch(self.idf), metadata)
         self.assertEqual(self.source.read_bytes(), PATCHED)
@@ -139,6 +142,39 @@ class SdkCompatibilityTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             compat.apply_sdk_patch(self.source.parent)
         self.assertEqual(self.source.read_bytes(), ORIGINAL)
+
+    def test_diagnostics_apply_from_clean_or_compatibility_only_and_are_idempotent(self):
+        compat.apply_sdk_patch(self.idf)
+        metadata = compat.apply_sdk_patch(self.idf, nvs_diagnostics=True)
+        self.assertEqual(compat.git(self.idf, "status", "--porcelain=v1", "-z"), compat.DIAGNOSTIC_STATUS)
+        self.assertEqual(metadata["diagnostic_patch"]["patched_source_sha256"],
+                         compat.digest((self.idf / compat.DIAGNOSTIC_SOURCE_PATH).read_bytes()))
+        self.assertEqual(compat.apply_sdk_patch(self.idf, nvs_diagnostics=True), metadata)
+        self.assertEqual(compat.verify_sdk_patch(self.idf, nvs_diagnostics=True), metadata)
+        with self.assertRaises(ValueError):
+            compat.verify_sdk_patch(self.idf)
+
+    def test_diagnostics_reject_wrong_base_dirt_and_tampering_before_mutation(self):
+        source = self.idf / compat.DIAGNOSTIC_SOURCE_PATH
+        original = source.read_bytes()
+        with patch.object(compat, "BASE_COMMIT", "0" * 40), self.assertRaises(ValueError):
+            compat.apply_sdk_patch(self.idf, nvs_diagnostics=True)
+        with patch.object(compat, "DIAGNOSTIC_PATCH_SHA256", "0" * 64), self.assertRaises(ValueError):
+            compat.apply_sdk_patch(self.idf, nvs_diagnostics=True)
+        source.write_bytes(original + b"\n")
+        with self.assertRaises(ValueError):
+            compat.apply_sdk_patch(self.idf, nvs_diagnostics=True)
+        self.assertEqual(self.source.read_bytes(), ORIGINAL)
+        source.write_bytes(original)
+        metadata = compat.apply_sdk_patch(self.idf, nvs_diagnostics=True)
+        self.assertEqual(metadata["diagnostic_patch"]["base_commit"], self.base)
+        source.write_bytes(source.read_bytes() + b"\n")
+        for operation in (compat.apply_sdk_patch, compat.verify_sdk_patch):
+            with self.subTest(operation=operation.__name__), self.assertRaises(ValueError):
+                operation(self.idf, nvs_diagnostics=True)
+        (self.idf / "other.c").write_text("unrelated\n")
+        with self.assertRaises(ValueError):
+            compat.verify_sdk_patch(self.idf, nvs_diagnostics=True)
 
 
 if __name__ == "__main__":

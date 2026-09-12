@@ -952,6 +952,37 @@ TEST_CASE("setup code rejects invalid or ambiguous auth shapes", "[esp_openclaw_
     TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_destroy(node));
 }
 
+TEST_CASE("saved reconnect retains cached session when NVS reload fails", "[esp_openclaw_node][session]")
+{
+    reset_openclaw_storage();
+    reset_transport_state();
+    char saved_uri[] = "wss://saved.example/ws";
+    char saved_token[] = "synthetic-saved-token";
+    esp_openclaw_node_persisted_session_t session = {0};
+    const esp_openclaw_node_persisted_session_t update = {
+        .version = 1,
+        .gateway_uri = saved_uri,
+        .device_token = saved_token,
+    };
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_persisted_session_store("node", &session, &update));
+    esp_openclaw_node_persisted_session_free(&session);
+
+    esp_openclaw_node_config_t config = {0};
+    esp_openclaw_node_config_init_default(&config);
+    esp_openclaw_node_handle_t node = NULL;
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_create(&config, &node));
+    TEST_ASSERT_TRUE(esp_openclaw_node_has_saved_session(node));
+    TEST_ASSERT_EQUAL(ESP_OK, nvs_flash_deinit());
+    TEST_ASSERT_EQUAL(ESP_OK, request_connect_saved_session(node));
+    TEST_ASSERT_TRUE(wait_for_int_value(&s_transport_state.start_calls, 1, pdMS_TO_TICKS(1000)));
+    TEST_ASSERT_TRUE(esp_openclaw_node_has_saved_session(node));
+    char *uri = esp_openclaw_node_dup_gateway_uri(node);
+    TEST_ASSERT_EQUAL_STRING("wss://saved.example/ws", uri);
+    free(uri);
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_destroy(node));
+    TEST_ASSERT_EQUAL(ESP_OK, nvs_flash_init());
+}
+
 TEST_CASE("explicit connect request validates psk and no-auth arguments", "[esp_openclaw_node][api]")
 {
     reset_openclaw_storage();

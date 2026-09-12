@@ -312,6 +312,14 @@ mislabeling the front image.
 openclaw nodes camera snap --node <tab5-node> --facing front
 ```
 
+`maxWidth` is an upper bound, not an exact JPEG width. Rotation and downscaling
+use one uniform PPA scale rounded down to a multiple of 1/16, without upscaling.
+For the 90/270-degree orientation, `maxWidth: 640` produces 630x1120 pixels;
+the JPEG and response report those actual dimensions. Packed RGB length and
+PPA output pitch use the same dimensions, while the allocation retains its
+cache-line alignment. This geometry correction does not qualify color,
+exposure, warm-up or the complete camera pipeline.
+
 ### Media stage diagnostics
 
 The capture owner emits one `camera_capture_diag` failure with a fixed `stage`,

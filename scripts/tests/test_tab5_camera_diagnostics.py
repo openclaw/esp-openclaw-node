@@ -1,4 +1,4 @@
-"""Execute the real capture owner against bounded V4L2 and logging stubs."""
+"""Execute the real capture and transform owners against bounded SDK stubs."""
 
 import os
 from pathlib import Path
@@ -10,6 +10,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / "examples/m5stack-tab5-room-node/components/tab5_room_board/tab5_room_board.c"
 FIXTURE = Path(__file__).parent / "fixtures/test_tab5_camera_capture.c"
+TRANSFORM_FIXTURE = Path(__file__).parent / "fixtures/test_tab5_camera_transform.c"
 
 
 class CameraCaptureDiagnosticsTests(unittest.TestCase):
@@ -51,6 +52,44 @@ class CameraCaptureDiagnosticsTests(unittest.TestCase):
 
     def test_existing_initialization_cache_policy(self):
         for scenario in ("bsp-retry", "open-cache", "success-cache"):
+            with self.subTest(scenario=scenario):
+                self.run_case(scenario)
+
+
+class CameraTransformTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        source = Path(os.environ.get("TAB5_CAMERA_SOURCE", SOURCE)).read_text()
+        start = source.index("typedef struct {\n    uint8_t *data;\n    size_t data_size;")
+        end = source.index("\nstatic esp_err_t camera_snap(", start)
+        constants = "\n".join(
+            line for line in source.splitlines() if line.startswith("#define CAMERA_")
+        )
+        temporary = tempfile.TemporaryDirectory(prefix="tab5-camera-transform-")
+        cls.addClassCleanup(temporary.cleanup)
+        directory = Path(temporary.name)
+        (directory / "camera_transform_under_test.inc").write_text(
+            constants + "\n" + source[start:end]
+        )
+        cls.binary = directory / "camera-transform"
+        subprocess.run([
+            os.environ.get("CC", "cc"), "-std=c11", "-Wall", "-Wextra", "-Werror",
+            "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
+            "-I", str(directory), str(TRANSFORM_FIXTURE), "-o", str(cls.binary),
+        ], check=True)
+
+    def run_case(self, scenario):
+        result = subprocess.run([str(self.binary), scenario], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_requested_640_matches_written_extent(self):
+        self.run_case("requested-640")
+
+    def test_native_minimum_scale_rotations_and_size_bounds(self):
+        self.run_case("geometry")
+
+    def test_allocation_and_ppa_failure_cleanup(self):
+        for scenario in ("allocation-failure", "ppa-failure"):
             with self.subTest(scenario=scenario):
                 self.run_case(scenario)
 

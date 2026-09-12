@@ -106,3 +106,35 @@ jobs:
           name: firmware-${{ matrix.name }}-${{ matrix.target }}-${{ github.sha }}-${{ github.run_attempt }}
           path: ${{ matrix.path }}/build/firmware/
           if-no-files-found: error
+
+      - name: Stage Tab5 build symbols
+        if: matrix.name == 'm5stack-tab5-room-node'
+        working-directory: ${{ matrix.path }}
+        run: |
+          for file in \
+            build/openclaw_m5stack_tab5_room_node.elf \
+            build/openclaw_m5stack_tab5_room_node.map \
+            build/firmware/manifest.json; do
+            test -s "$file" || { echo "::error::Missing or empty $file"; exit 1; }
+          done
+          # The container-owned build directory is not writable by the host runner.
+          symbols="$RUNNER_TEMP/tab5-build-symbols"
+          mkdir "$symbols"
+          cp \
+            build/openclaw_m5stack_tab5_room_node.elf \
+            build/openclaw_m5stack_tab5_room_node.map \
+            build/firmware/manifest.json \
+            "$symbols/"
+          cd "$symbols"
+          sha256sum \
+            openclaw_m5stack_tab5_room_node.elf \
+            openclaw_m5stack_tab5_room_node.map \
+            manifest.json > SHA256SUMS
+
+      - name: Upload Tab5 build symbols
+        if: matrix.name == 'm5stack-tab5-room-node'
+        uses: actions/upload-artifact@v7
+        with:
+          name: symbols-${{ matrix.name }}-${{ matrix.target }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/tab5-build-symbols/
+          if-no-files-found: error

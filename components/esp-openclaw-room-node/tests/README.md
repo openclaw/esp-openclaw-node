@@ -1,5 +1,64 @@
 # Talk lifetime source proofs
 
+## Console header framing
+
+The lifecycle runner's `console-diagnostics-bytes` and
+`console-diagnostics-contention` cases execute the actual `diagnostics status`
+handler with synthetic snapshots. They preserve normal tone output, `error/none`,
+spaced error labels, counters, newline and subsequent lines. The contention
+case schedules another normal stdio record after the first completed print
+call: the original split header fails intact-line checks; the single-call
+header passes without changing output bytes.
+
+The fixture uses real stdio calls on a temporary stream and a deterministic
+between-call schedule, not hardware concurrency. This protects the header
+against normal writers using the same stdio stream; it does not make the
+multi-line report atomic or serialize ROM output. It does not establish the
+cause of a prior observation whose raw header was not retained.
+
+## Media diagnostic regressions
+
+The Talk pthread suite now captures the actual adapter's fixed-field records,
+injects HTTP initialization/transport/status/body failures and callback return
+errors, and checks first-failure retention, ignored-return behavior, late
+cancellation and secret exclusion. The room lifecycle fixture checks actual
+startup failure short circuits, ordered teardown stages, SDK log suppression
+before negotiation, and existing audio-counter snapshots outside locks.
+
+`python3 -m unittest discover -s scripts/tests -p test_tab5_camera_diagnostics.py -v`
+compiles the actual Tab5 capture/cleanup functions with narrow synthetic V4L2
+boundaries under ASan/UBSan. It covers immediate errno retention across logging
+and failing cleanup, stale errno on validation, partial mappings, initialization
+caching, RGB565 variants and bounded dequeue-loop records. This is not V4L2 ABI,
+DMA, sensor or physical frame proof. `TAB5_CAMERA_SOURCE` can select a trusted
+baseline source file for a red comparison without editing the worktree.
+
+## Static home UI
+
+The UI host runner compiles the real UI controller and board binding with LVGL 9,
+ASan and UBSan. Display, timer, Canvas, diagnostics and animated-face boundaries
+are synthetic; it does not access a device, network, Gateway or provider.
+
+```sh
+python3 components/esp-openclaw-room-node/tests/run_ui_host_tests.py --lvgl-dir "$LVGL"
+```
+
+`LVGL` points to existing LVGL 9 sources, such as a configured room example's
+`managed_components/lvgl__lvgl`. Optional `--snapshot home.ppm` writes the
+synthetic Tab5 framebuffer. CI uses the existing Waveshare build's dependency.
+The three cases cover Tab5 idle brightness, zero-default display sleep and the
+animated-board path. They check independent connection text, retained facts
+after paint lock failure, noninteractive bounded home content, tap/hold
+dispatch, Canvas/diagnostics visibility, camera-indicator priority and
+brightness, hint expiry, explicit off requests and a nonblank rendered mascot.
+Error details remain visible alongside ready connection facts, yield to
+Diagnostics, and clear on a later non-error state.
+The lifecycle runner also checks real node/operator/network event handling for
+the home facts, including missing-session results versus ordinary disconnects,
+raw busy/failure results, accepted reconnects and later connection failures.
+
+## Talk lifecycle
+
 These tests compile the real room controller and Talk adapter against synthetic
 Node, WebRTC, media, UI and scheduling boundaries. They do not operate hardware
 or connect to a Gateway/provider. Production deployment delta is **ZERO**.
@@ -133,10 +192,10 @@ capture, renderer, codec, LVGL, SAL, ESP error, console, timer and HTTP headers.
 It also uses the real ESP-IDF heap header. Unreferenced board startup and physical
 media code are omitted by linker section collection, but GCC ASan global
 registration retains the static console command table and its diagnostic
-callbacks. Those callbacks' external diagnostics, tone, Wi-Fi, heap, clock and
-`strlcpy` boundaries have correctly typed stubs that abort with the symbol name
-if executed. The real controller and Talk lifecycle remain linked and exercised.
-All fixtures use synthetic identities and data.
+callbacks. The console cases explicitly enable typed tone, UI, Canvas, heap,
+clock and `strlcpy` snapshot fakes; unsupported calls still abort with the symbol
+name outside those cases. The real controller and Talk lifecycle remain linked
+and exercised. All fixtures use synthetic identities and data.
 
 The room runner also checks its queue fixture before running the 36 lifecycle
 cases. Allocation dimensions, item counts and byte arithmetic use `size_t`;

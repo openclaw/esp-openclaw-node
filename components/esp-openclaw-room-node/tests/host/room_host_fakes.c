@@ -12,6 +12,7 @@
 #include "esp_openclaw_node_wifi.h"
 #include "esp_openclaw_talk.h"
 #include "esp_peer_default.h"
+#include "esp_rom_sys.h"
 #include "room_board.h"
 #include "room_canvas.h"
 #include "room_canvas_node_cmd.h"
@@ -22,7 +23,9 @@
 #include "room_files.h"
 #include "room_media.h"
 
-room_host_observations_t host = {.ambient = true};
+room_host_observations_t host = {
+    .ambient = true, .global_log_level = ESP_LOG_INFO, .sdk_log_level = ESP_LOG_INFO,
+};
 struct host_mutex { bool held; bool binary; bool available; };
 struct host_queue { size_t capacity, size, count, storage_size; unsigned char *data; };
 struct host_timer { bool active; void *id; void (*callback)(TimerHandle_t); };
@@ -75,12 +78,65 @@ void host_require(bool condition, const char *message)
 
 void host_log(const char *tag, const char *format, ...)
 {
+    char line[1024];
     va_list args;
     va_start(args, format);
-    fprintf(stderr, "[%s] ", tag);
-    vfprintf(stderr, format, args);
-    fputc('\n', stderr);
+    int length = vsnprintf(line, sizeof(line), format, args);
     va_end(args);
+    host_require(length >= 0 && (size_t)length < sizeof(line), "bounded fixture log");
+    bool diagnostic = strncmp(line, "room_talk_", 10) == 0 || strncmp(line, "talk_rtc_", 9) == 0;
+    if (diagnostic) {
+        host_require(mutex_depth == 0 && host.critical_depth == 0, "media diagnostic outside locks");
+        host_require(strstr(line, "voice-a") == NULL && strstr(line, "synthetic") == NULL &&
+            strstr(line, "gateway.example") == NULL && strstr(line, "agent:fixture") == NULL,
+            "media diagnostics exclude secret canaries");
+        if (host.capture_diagnostics) {
+            size_t offset = strlen(host.diagnostics);
+            host_require(offset + (size_t)length + 2 < sizeof(host.diagnostics), "fixture diagnostic capacity");
+            memcpy(host.diagnostics + offset, line, (size_t)length);
+            host.diagnostics[offset + (size_t)length] = '\n';
+            host.diagnostics[offset + (size_t)length + 1] = '\0';
+        }
+    }
+    fprintf(stderr, "[%s] %s\n", tag, line);
+}
+
+void esp_log_level_set(const char *tag, esp_log_level_t level)
+{
+    host_require(mutex_depth == 0 && host.critical_depth == 0, "log policy outside locks");
+    host_require(strcmp(tag, "webrtc") == 0 && level == ESP_LOG_WARN, "only unsafe SDK SDP INFO suppressed");
+    ++host.log_set_calls;
+#if CONFIG_LOG_DYNAMIC_LEVEL_CONTROL
+    if (!host.fail_log_policy) {
+#if CONFIG_LOG_TAG_LEVEL_IMPL_NONE
+        host.global_log_level = level;
+#else
+        host.sdk_log_level = level;
+#endif
+    }
+#endif
+}
+
+esp_log_level_t esp_log_level_get(const char *tag)
+{
+    host_require(mutex_depth == 0 && host.critical_depth == 0, "log policy readback outside locks");
+    host_require(strcmp(tag, "webrtc") == 0, "only SDK SDP tag read back");
+#if CONFIG_LOG_DYNAMIC_LEVEL_CONTROL && !CONFIG_LOG_TAG_LEVEL_IMPL_NONE
+    return host.sdk_log_level;
+#elif CONFIG_LOG_DYNAMIC_LEVEL_CONTROL
+    return host.global_log_level;
+#else
+    return CONFIG_LOG_DEFAULT_LEVEL;
+#endif
+}
+
+int esp_rom_printf(const char *format, ...)
+{
+    va_list args;
+    va_start(args, format);
+    int written = vfprintf(stderr, format, args);
+    va_end(args);
+    return written;
 }
 
 const char *esp_err_to_name(esp_err_t code)
@@ -340,10 +396,9 @@ esp_err_t esp_openclaw_node_register_command(esp_openclaw_node_handle_t node,
 esp_err_t esp_openclaw_node_request_connect(esp_openclaw_node_handle_t node,
     const esp_openclaw_node_connect_request_t *request)
 {
-    (void)node;
     host_require(request->source == ESP_OPENCLAW_NODE_CONNECT_SOURCE_SAVED_SESSION,
         "synthetic saved-session connect only; no credentials accessed");
-    return ESP_OK;
+    return strcmp(node->config.role, "node") == 0 ? host.node_connect_result : host.operator_connect_result;
 }
 esp_err_t esp_openclaw_node_request_disconnect(esp_openclaw_node_handle_t node)
 { (void)node; return ESP_OK; }
@@ -356,10 +411,15 @@ void host_emit_node(esp_openclaw_node_handle_t node, esp_openclaw_node_event_t e
     const esp_openclaw_node_disconnected_event_t disconnected = {
         .reason = ESP_OPENCLAW_NODE_DISCONNECTED_REASON_CONNECTION_LOST,
     };
+    const esp_openclaw_node_connect_failed_event_t failed = {
+        .reason = ESP_OPENCLAW_NODE_CONNECT_FAILURE_TRANSPORT_START_FAILED,
+        .local_err = ESP_FAIL,
+    };
     host_require(node->config.event_cb != NULL, "registered Node event callback");
     ++host.callback_depth;
     node->config.event_cb(node, event,
-        event == ESP_OPENCLAW_NODE_EVENT_DISCONNECTED ? &disconnected : NULL,
+        event == ESP_OPENCLAW_NODE_EVENT_DISCONNECTED ? (const void *)&disconnected
+            : event == ESP_OPENCLAW_NODE_EVENT_CONNECT_FAILED ? (const void *)&failed : NULL,
         node->config.event_user_ctx);
     --host.callback_depth;
 }
@@ -517,6 +577,7 @@ static int signal_message(esp_peer_signaling_msg_t *message, void *ctx)
 { (void)message; (void)ctx; host_require(false, "no SDP exchange in this suite"); return -1; }
 int esp_webrtc_start(esp_webrtc_handle_t session)
 {
+    host_require(esp_log_level_get("webrtc") <= ESP_LOG_WARN, "SDK SDP INFO suppressed before negotiation");
     if (host.fail_start) return -1;
     fake_rtc_t *rtc = session;
     esp_peer_signaling_cfg_t config = {
@@ -595,6 +656,10 @@ esp_err_t room_media_get_webrtc_provider(esp_webrtc_media_provider_t *provider)
 }
 void room_ui_set(room_ui_state_t state, const char *detail)
 { (void)detail; host.ui = state; }
+void room_ui_store_facts(const room_ui_facts_t *facts) { host.home = *facts; }
+void room_ui_refresh(void) {}
+const char *WIFI_EVENT = "wifi";
+const char *IP_EVENT = "ip";
 void room_ui_show_face_hint(uint32_t ms) { (void)ms; }
 void room_ui_set_gateway(const char *gateway) { (void)gateway; }
 bool room_ui_talk_face_active(void) { return host.ui == ROOM_UI_SPEAKING; }
@@ -616,7 +681,7 @@ const esp_openclaw_room_node_config_t *room_board_config(void)
 }
 
 /* GCC ASan retains the console callback table through global registration even
- * when board startup is collected. These external boundaries must never run. */
+ * when board startup is collected. Only explicit console cases enable snapshots. */
 static _Noreturn void unsupported_boundary(const char *name)
 {
     fprintf(stderr, "HARNESS/SETUP FAILURE: unsupported boundary %s\n", name);
@@ -628,31 +693,81 @@ esp_err_t room_diagnostics_request_open(void)
 esp_err_t room_diagnostics_request_close(void)
 { unsupported_boundary(__func__); }
 void room_diagnostics_audio_get(room_audio_diagnostics_snapshot_t *snapshot)
-{ (void)snapshot; unsupported_boundary(__func__); }
+{
+    host_require(mutex_depth == 0 && host.critical_depth == 0, "audio snapshot outside locks");
+    ++host.audio_snapshots;
+    *snapshot = (room_audio_diagnostics_snapshot_t){
+        .capture_read_successes = 11, .capture_read_errors = 2,
+        .feed_successes = 13, .feed_errors = 3, .fetch_successes = 17,
+        .fetch_errors = 5, .renderer_accepted = 19, .renderer_errors = 7,
+    };
+}
 esp_err_t room_media_request_test_tone(room_media_talk_busy_cb_t busy_cb, void *ctx)
 { (void)busy_cb; (void)ctx; unsupported_boundary(__func__); }
 void room_media_get_tone_snapshot(room_media_tone_snapshot_t *snapshot)
-{ (void)snapshot; unsupported_boundary(__func__); }
+{
+    if (!host.console_snapshots) unsupported_boundary(__func__);
+    *snapshot = host.console_tone;
+}
 const char *room_media_tone_state_name(room_media_tone_state_t state)
-{ (void)state; unsupported_boundary(__func__); }
+{
+    if (!host.console_snapshots) unsupported_boundary(__func__);
+    host_require(state == host.console_tone.state, "tone state comes from snapshot");
+    return host.console_tone_state_name;
+}
 const char *room_media_tone_error_name(room_media_tone_error_t error)
-{ (void)error; unsupported_boundary(__func__); }
+{
+    if (!host.console_snapshots) unsupported_boundary(__func__);
+    host_require(error == host.console_tone.error, "tone error comes from snapshot");
+    ++host.console_tone_error_name_calls;
+    return host.console_tone_error_name;
+}
 void room_ui_get_diagnostics(room_ui_diagnostics_snapshot_t *snapshot)
-{ (void)snapshot; unsupported_boundary(__func__); }
+{
+    if (!host.console_snapshots) unsupported_boundary(__func__);
+    *snapshot = (room_ui_diagnostics_snapshot_t){.state = host.ui};
+}
 const char *room_ui_state_name(room_ui_state_t state)
-{ (void)state; unsupported_boundary(__func__); }
+{
+    if (!host.console_snapshots) unsupported_boundary(__func__);
+    host_require(state == host.ui, "UI state comes from snapshot");
+    return "synthetic";
+}
 void room_canvas_get_diagnostics(room_canvas_diagnostics_snapshot_t *snapshot)
-{ (void)snapshot; unsupported_boundary(__func__); }
+{
+    if (!host.console_snapshots) unsupported_boundary(__func__);
+    *snapshot = (room_canvas_diagnostics_snapshot_t){0};
+}
 void esp_openclaw_node_wifi_get_status(esp_openclaw_node_wifi_status_t *snapshot)
-{ (void)snapshot; unsupported_boundary(__func__); }
+{ *snapshot = host.wifi; }
 size_t heap_caps_get_free_size(uint32_t caps)
-{ (void)caps; unsupported_boundary(__func__); }
+{
+    if (!host.console_snapshots) unsupported_boundary(__func__);
+    host_require(caps == MALLOC_CAP_INTERNAL || caps == MALLOC_CAP_SPIRAM, "diagnostic heap capability");
+    return caps == MALLOC_CAP_INTERNAL ? 40000 : 8000000;
+}
 size_t heap_caps_get_largest_free_block(uint32_t caps)
-{ (void)caps; unsupported_boundary(__func__); }
+{
+    if (!host.console_snapshots) unsupported_boundary(__func__);
+    host_require(caps == MALLOC_CAP_INTERNAL, "diagnostic largest internal block");
+    return 16000;
+}
 int64_t esp_timer_get_time(void)
-{ unsupported_boundary(__func__); }
+{
+    if (!host.console_snapshots) unsupported_boundary(__func__);
+    return 123000000;
+}
 size_t strlcpy(char *destination, const char *source, size_t capacity)
-{ (void)destination; (void)source; (void)capacity; unsupported_boundary(__func__); }
+{
+    if (!host.console_snapshots) unsupported_boundary(__func__);
+    size_t length = strlen(source);
+    if (capacity > 0) {
+        size_t copied = length < capacity - 1 ? length : capacity - 1;
+        memcpy(destination, source, copied);
+        destination[copied] = '\0';
+    }
+    return length;
+}
 
 /* Real HTTP header, intentionally no implementation capable of networking. */
 esp_http_client_handle_t esp_http_client_init(const esp_http_client_config_t *config)

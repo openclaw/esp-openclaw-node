@@ -3,9 +3,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 #include <fcntl.h>
+#include <inttypes.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <sys/time.h>
 #include <time.h>
 
 #include "bsp/esp-bsp.h"
@@ -16,6 +19,7 @@
 #include "driver/uart.h"
 #include "esp_check.h"
 #include "esp_codec_dev_defaults.h"
+#include "esp_flash_encrypt.h"
 #include "esp_heap_caps.h"
 #include "esp_io_expander_pi4ioe5v6408.h"
 #include "esp_lcd_panel_io.h"
@@ -30,6 +34,7 @@
 #include "esp_timer.h"
 #include "esp_video_init.h"
 #include "esp_video_device.h"
+#include "esp_video_ioctl.h"
 #include "esp_vfs_fat.h"
 #include "linux/videodev2.h"
 #include "mbedtls/base64.h"
@@ -45,7 +50,7 @@
 #define CAMERA_SENSOR_WIDTH 1280U
 #define CAMERA_SENSOR_HEIGHT 720U
 #define CAMERA_MAX_PIXELS (1024U * 1024U)
-#define CAMERA_DIMENSION_ALIGNMENT 8U
+#define CAMERA_SCALE_DENOMINATOR 16U
 #define CAMERA_ALIGN_UP(value, alignment) (((value) + (alignment) - 1) & ~((alignment) - 1))
 
 _Static_assert(
@@ -240,6 +245,7 @@ static lv_display_t *start_st7121_display(void)
     lvgl_port_cfg_t port_cfg = ESP_LVGL_PORT_INIT_CONFIG();
     port_cfg.task_affinity = 1;
     RETURN_NULL_ON_ERROR(lvgl_port_init(&port_cfg), "LVGL port");
+    const bool flash_encrypted = esp_flash_encryption_enabled();
     const lvgl_port_display_cfg_t display_cfg = {
         .io_handle = io,
         .panel_handle = panel,
@@ -249,7 +255,8 @@ static lv_display_t *start_st7121_display(void)
         .vres = BSP_LCD_V_RES,
         .monochrome = false,
         .rotation = {.swap_xy = false, .mirror_x = false, .mirror_y = false},
-        .flags = {.buff_dma = true, .buff_spiram = false, .sw_rotate = true},
+        /* PPA SRM cannot rotate external buffers when flash encryption is active. */
+        .flags = {.buff_dma = flash_encrypted, .buff_spiram = !flash_encrypted, .sw_rotate = true},
     };
     const lvgl_port_display_dsi_cfg_t dsi_cfg = {.flags.avoid_tearing = false};
     lv_display_t *display = lvgl_port_add_disp_dsi(&display_cfg, &dsi_cfg);
@@ -697,9 +704,19 @@ typedef struct {
     struct v4l2_buffer frame;
 } camera_frame_t;
 
+static void camera_pipeline_elapsed(const char *stage, int64_t started_us)
+{
+    uint64_t elapsed_ms = (uint64_t)(esp_timer_get_time() - started_us) / 1000U;
+    ESP_LOGI(TAG, "camera_pipeline_diag stage=%s elapsed_ms=%" PRIu64, stage, elapsed_ms);
+}
+
 static void close_camera_frame(camera_frame_t *camera)
 {
-    if (camera->fd >= 0) {
+    bool opened = camera->fd >= 0;
+    int64_t started_us = 0;
+    if (opened) {
+        ESP_LOGI(TAG, "camera_pipeline_diag stage=cleanup_begin elapsed_ms=0");
+        started_us = esp_timer_get_time();
         int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         (void)ioctl(camera->fd, VIDIOC_STREAMOFF, &type);
         for (size_t i = 0; i < 2; ++i) {
@@ -711,22 +728,48 @@ static void close_camera_frame(camera_frame_t *camera)
     }
     memset(camera, 0, sizeof(*camera));
     camera->fd = -1;
+    if (opened) camera_pipeline_elapsed("cleanup_end", started_us);
 }
 
 static esp_err_t capture_rgb565_frame(int delay_ms, camera_frame_t *camera)
 {
     static bool camera_started;
+    const char *stage = "bsp_start";
+    const char *domain = "errno";
+    int failure_error = 0;
+    esp_err_t result = ESP_FAIL;
+    bool needs_cleanup = false;
     if (!camera_started) {
-        ESP_RETURN_ON_ERROR(bsp_camera_start(NULL), TAG, "camera start");
+        esp_err_t start_result = bsp_camera_start(NULL);
+        if (start_result != ESP_OK) {
+            failure_error = start_result;
+            domain = "esp";
+            result = start_result;
+            goto fail;
+        }
         camera_started = true;
     }
     memset(camera, 0, sizeof(*camera));
     camera->fd = open(BSP_CAMERA_DEVICE, O_RDONLY);
-    if (camera->fd < 0) return ESP_FAIL;
+    if (camera->fd < 0) {
+        failure_error = errno;
+        stage = "open";
+        goto fail;
+    }
+    needs_cleanup = true;
+
+    /* Bound each ready-buffer wait, not setup, warm-up, processing, or teardown. */
+    const struct timeval dequeue_timeout = {.tv_sec = 2, .tv_usec = 0};
+    if (ioctl(camera->fd, VIDIOC_S_DQBUF_TIMEOUT, &dequeue_timeout) != 0) {
+        failure_error = errno;
+        stage = "dqbuf_timeout_setup";
+        goto fail;
+    }
 
     struct v4l2_format format = {.type = V4L2_BUF_TYPE_VIDEO_CAPTURE};
     if (ioctl(camera->fd, VIDIOC_G_FMT, &format) != 0) {
-        ESP_LOGE(TAG, "VIDIOC_G_FMT failed");
+        failure_error = errno;
+        stage = "g_fmt_initial";
         goto fail;
     }
     if (format.fmt.pix.width != CAMERA_SENSOR_WIDTH ||
@@ -738,6 +781,8 @@ static esp_err_t capture_rgb565_frame(int delay_ms, camera_frame_t *camera)
             (unsigned long)format.fmt.pix.height,
             CAMERA_SENSOR_WIDTH,
             CAMERA_SENSOR_HEIGHT);
+        stage = "validate_default";
+        domain = "validation";
         goto fail;
     }
     /* maxWidth constrains the post-rotation JPEG, never the SC202CS mode. */
@@ -750,13 +795,15 @@ static esp_err_t capture_rgb565_frame(int delay_ms, camera_frame_t *camera)
         },
     };
     if (ioctl(camera->fd, VIDIOC_S_FMT, &requested) != 0) {
-        ESP_LOGE(TAG, "VIDIOC_S_FMT RGB565 %ux%u failed", CAMERA_SENSOR_WIDTH, CAMERA_SENSOR_HEIGHT);
+        failure_error = errno;
+        stage = "s_fmt_rgb565";
         goto fail;
     }
     memset(&format, 0, sizeof(format));
     format.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     if (ioctl(camera->fd, VIDIOC_G_FMT, &format) != 0) {
-        ESP_LOGE(TAG, "VIDIOC_G_FMT after RGB565 negotiation failed");
+        failure_error = errno;
+        stage = "g_fmt_rgb565";
         goto fail;
     }
     uint32_t expected_stride = CAMERA_SENSOR_WIDTH * sizeof(uint16_t);
@@ -776,6 +823,8 @@ static esp_err_t capture_rgb565_frame(int delay_ms, camera_frame_t *camera)
             CAMERA_SENSOR_WIDTH,
             CAMERA_SENSOR_HEIGHT,
             (unsigned long)expected_stride);
+        stage = "validate_format";
+        domain = "validation";
         goto fail;
     }
     camera->width = format.fmt.pix.width;
@@ -789,42 +838,86 @@ static esp_err_t capture_rgb565_frame(int delay_ms, camera_frame_t *camera)
         .type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
         .memory = V4L2_MEMORY_MMAP,
     };
-    if (ioctl(camera->fd, VIDIOC_REQBUFS, &request) != 0 || request.count < 2) goto fail;
+    if (ioctl(camera->fd, VIDIOC_REQBUFS, &request) != 0) {
+        failure_error = errno;
+        stage = "reqbufs";
+        goto fail;
+    }
+    if (request.count < 2) {
+        stage = "validate_count";
+        domain = "validation";
+        goto fail;
+    }
     for (uint32_t i = 0; i < 2; ++i) {
         struct v4l2_buffer buffer = {
             .type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
             .memory = V4L2_MEMORY_MMAP,
             .index = i,
         };
-        if (ioctl(camera->fd, VIDIOC_QUERYBUF, &buffer) != 0) goto fail;
+        if (ioctl(camera->fd, VIDIOC_QUERYBUF, &buffer) != 0) {
+            failure_error = errno;
+            stage = "querybuf";
+            goto fail;
+        }
         if (buffer.length < (size_t)camera->stride * camera->height) {
             ESP_LOGE(TAG, "camera MMAP buffer is too short: %lu", (unsigned long)buffer.length);
+            stage = "validate_buffer_length";
+            domain = "validation";
             goto fail;
         }
         camera->lengths[i] = buffer.length;
         camera->buffers[i] = mmap(NULL, buffer.length, PROT_READ | PROT_WRITE, MAP_SHARED, camera->fd, buffer.m.offset);
         if (camera->buffers[i] == MAP_FAILED) {
+            failure_error = errno;
+            stage = "mmap";
             camera->buffers[i] = NULL;
             goto fail;
         }
-        if (ioctl(camera->fd, VIDIOC_QBUF, &buffer) != 0) goto fail;
+        if (ioctl(camera->fd, VIDIOC_QBUF, &buffer) != 0) {
+            failure_error = errno;
+            stage = "qbuf";
+            goto fail;
+        }
     }
     int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-    if (ioctl(camera->fd, VIDIOC_STREAMON, &type) != 0) goto fail;
-    int64_t deadline_us = esp_timer_get_time() + (int64_t)delay_ms * 1000;
+    if (ioctl(camera->fd, VIDIOC_STREAMON, &type) != 0) {
+        failure_error = errno;
+        stage = "streamon";
+        goto fail;
+    }
+    ESP_LOGI(TAG, "camera_capture_diag stage=dqbuf_begin domain=none error=0");
+    int64_t capture_started_us = esp_timer_get_time();
+    int64_t deadline_us = capture_started_us + (int64_t)delay_ms * 1000;
+    bool first_dequeue = true;
     for (;;) {
         camera->frame = (struct v4l2_buffer){
             .type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
             .memory = V4L2_MEMORY_MMAP,
         };
-        if (ioctl(camera->fd, VIDIOC_DQBUF, &camera->frame) != 0 ||
-            camera->frame.index >= 2) {
+        int64_t dequeue_started_us = first_dequeue ? esp_timer_get_time() : 0;
+        int dequeue_result = ioctl(camera->fd, VIDIOC_DQBUF, &camera->frame);
+        if (dequeue_result != 0) failure_error = errno;
+        if (first_dequeue) {
+            camera_pipeline_elapsed("dqbuf_first_return", dequeue_started_us);
+            first_dequeue = false;
+        }
+        if (dequeue_result != 0) {
+            stage = "dqbuf";
+            goto fail;
+        }
+        if (camera->frame.index >= 2) {
+            stage = "validate_index";
+            domain = "validation";
             goto fail;
         }
         if (esp_timer_get_time() >= deadline_us) break;
         /* Keep the two-buffer pipeline moving while delayMs elapses. Sleeping
          * here lets both buffers fill and stalls the sensor before capture. */
-        if (ioctl(camera->fd, VIDIOC_QBUF, &camera->frame) != 0) goto fail;
+        if (ioctl(camera->fd, VIDIOC_QBUF, &camera->frame) != 0) {
+            failure_error = errno;
+            stage = "requeue";
+            goto fail;
+        }
     }
     size_t frame_size = (size_t)camera->stride * camera->height;
     if (camera->frame.bytesused != 0 && camera->frame.bytesused < frame_size) {
@@ -833,12 +926,16 @@ static esp_err_t capture_rgb565_frame(int delay_ms, camera_frame_t *camera)
             "camera frame is too short: %lu bytes (expected at least %lu)",
             (unsigned long)camera->frame.bytesused,
             (unsigned long)frame_size);
+        stage = "validate_frame_length";
+        domain = "validation";
         goto fail;
     }
+    camera_pipeline_elapsed("capture_complete", capture_started_us);
     return ESP_OK;
 fail:
-    close_camera_frame(camera);
-    return ESP_FAIL;
+    ESP_LOGE(TAG, "camera_capture_diag stage=%s domain=%s error=%d", stage, domain, failure_error);
+    if (needs_cleanup) close_camera_frame(camera);
+    return result;
 }
 
 typedef struct {
@@ -878,17 +975,18 @@ static esp_err_t transform_camera_frame(
     uint32_t natural_width = swaps_dimensions ? camera->height : camera->width;
     uint32_t natural_height = swaps_dimensions ? camera->width : camera->height;
     ESP_RETURN_ON_FALSE(
+        natural_width != 0 && natural_height != 0 &&
         (uint64_t)natural_width * natural_height <= CAMERA_MAX_PIXELS,
         ESP_ERR_NOT_SUPPORTED,
         TAG,
         "rotated camera frame exceeds one megapixel");
 
-    uint32_t output_width = natural_width;
-    if ((uint32_t)max_width < output_width) output_width = (uint32_t)max_width;
-    output_width &= ~(CAMERA_DIMENSION_ALIGNMENT - 1U);
-    uint32_t output_height = (uint32_t)(
-        ((uint64_t)natural_height * output_width / natural_width) &
-        ~(uint64_t)(CAMERA_DIMENSION_ALIGNMENT - 1U));
+    uint32_t width_limit = natural_width;
+    if ((uint32_t)max_width < width_limit) width_limit = (uint32_t)max_width;
+    /* PPA truncates scales to 1/16; geometry and DMA pitch must use that same scale. */
+    uint32_t scale_steps = (uint64_t)width_limit * CAMERA_SCALE_DENOMINATOR / natural_width;
+    uint32_t output_width = (uint64_t)natural_width * scale_steps / CAMERA_SCALE_DENOMINATOR;
+    uint32_t output_height = (uint64_t)natural_height * scale_steps / CAMERA_SCALE_DENOMINATOR;
     ESP_RETURN_ON_FALSE(
         output_width != 0 && output_height != 0 &&
         (uint64_t)output_width * output_height <= CAMERA_MAX_PIXELS,
@@ -905,12 +1003,7 @@ static esp_err_t transform_camera_frame(
         MALLOC_CAP_SPIRAM);
     ESP_RETURN_ON_FALSE(output != NULL, ESP_ERR_NO_MEM, TAG, "camera transform buffer allocation failed");
 
-    float scale_x = (float)output_width / camera->width;
-    float scale_y = (float)output_height / camera->height;
-    if (swaps_dimensions) {
-        scale_x = (float)output_height / camera->width;
-        scale_y = (float)output_width / camera->height;
-    }
+    float scale = (float)scale_steps / CAMERA_SCALE_DENOMINATOR;
     const ppa_srm_oper_config_t config = {
         .in = {
             .buffer = camera->buffers[camera->frame.index],
@@ -928,8 +1021,8 @@ static esp_err_t transform_camera_frame(
             .srm_cm = PPA_SRM_COLOR_MODE_RGB888,
         },
         .rotation_angle = rotation,
-        .scale_x = scale_x,
-        .scale_y = scale_y,
+        .scale_x = scale,
+        .scale_y = scale,
         .mode = PPA_TRANS_MODE_BLOCKING,
     };
     esp_err_t result = ppa_do_scale_rotate_mirror(camera_ppa_srm, &config);
@@ -1007,7 +1100,10 @@ static esp_err_t camera_snap(
 
     esp_err_t indicator_err = esp_openclaw_room_node_camera_indicator_begin();
     if (indicator_err != ESP_OK) {
+        ESP_LOGI(TAG, "camera_pipeline_diag stage=release_begin elapsed_ms=0");
+        int64_t release_started_us = esp_timer_get_time();
         esp_openclaw_room_node_release_camera();
+        camera_pipeline_elapsed("release_end", release_started_us);
         cJSON_Delete(params);
         error->code = "PRIVACY_INDICATOR_UNAVAILABLE";
         error->message = "capture refused because the visible camera indicator could not be armed";
@@ -1016,19 +1112,28 @@ static esp_err_t camera_snap(
     camera_frame_t camera = {.fd = -1};
     esp_err_t result = capture_rgb565_frame(delay_ms, &camera);
     if (result != ESP_OK) {
+        ESP_LOGI(TAG, "camera_pipeline_diag stage=release_begin elapsed_ms=0");
+        int64_t release_started_us = esp_timer_get_time();
         esp_openclaw_room_node_camera_indicator_end();
         esp_openclaw_room_node_release_camera();
+        camera_pipeline_elapsed("release_end", release_started_us);
         cJSON_Delete(params);
         error->code = "UNAVAILABLE";
         error->message = "Tab5 camera or V4L2 pipeline is unavailable";
         return result;
     }
     camera_transformed_frame_t transformed;
+    ESP_LOGI(TAG, "camera_pipeline_diag stage=transform_begin elapsed_ms=0");
+    int64_t stage_started_us = esp_timer_get_time();
     result = transform_camera_frame(&camera, max_width, &transformed);
+    camera_pipeline_elapsed("transform_end", stage_started_us);
     if (result != ESP_OK) {
         close_camera_frame(&camera);
+        ESP_LOGI(TAG, "camera_pipeline_diag stage=release_begin elapsed_ms=0");
+        stage_started_us = esp_timer_get_time();
         esp_openclaw_room_node_camera_indicator_end();
         esp_openclaw_room_node_release_camera();
+        camera_pipeline_elapsed("release_end", stage_started_us);
         cJSON_Delete(params);
         error->code = "UNAVAILABLE";
         error->message = "Tab5 camera PPA rotation/downscale is unavailable";
@@ -1039,6 +1144,8 @@ static esp_err_t camera_snap(
     int jpeg_size = 0;
     esp_err_t jpeg_result = ESP_OK;
     const char *jpeg_failure_message = NULL;
+    ESP_LOGI(TAG, "camera_pipeline_diag stage=encode_begin elapsed_ms=0");
+    stage_started_us = esp_timer_get_time();
     while (quality_percent >= 1) {
         jpeg_enc_config_t cfg = DEFAULT_JPEG_ENC_CONFIG();
         cfg.width = (int)transformed.width;
@@ -1085,12 +1192,16 @@ static esp_err_t camera_snap(
         jpeg_size = 0;
         quality_percent = quality_percent > 15 ? quality_percent - 15 : 0;
     }
+    camera_pipeline_elapsed("encode_end", stage_started_us);
     uint32_t captured_width = transformed.width;
     uint32_t captured_height = transformed.height;
     heap_caps_free(transformed.data);
     close_camera_frame(&camera);
+    ESP_LOGI(TAG, "camera_pipeline_diag stage=release_begin elapsed_ms=0");
+    stage_started_us = esp_timer_get_time();
     esp_openclaw_room_node_camera_indicator_end();
     esp_openclaw_room_node_release_camera();
+    camera_pipeline_elapsed("release_end", stage_started_us);
     cJSON_Delete(params);
     if (jpeg_result != ESP_OK) {
         error->code = "INTERNAL";
@@ -1173,9 +1284,10 @@ esp_err_t tab5_room_board_config(esp_openclaw_room_node_config_t *config)
             .native_height = 720,
             .safe_inset = 24,
             /* The full-screen procedural face exceeds this rotated pipeline's
-             * watchdog budget; text states keep the product responsive. */
+             * watchdog budget; the static home keeps the product responsive. */
             .animated_face = false,
             .animation_frame_ms = 50,
+            .idle_brightness = 18,
         },
         .audio = {
             .open = tab5_audio_open,

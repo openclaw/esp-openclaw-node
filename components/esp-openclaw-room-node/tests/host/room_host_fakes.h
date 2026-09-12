@@ -1,6 +1,7 @@
 #pragma once
 
 #include "sdkconfig.h"
+#include "esp_log.h"
 #include "esp_openclaw_node.h"
 #include "esp_webrtc.h"
 #include "esp_timer.h"
@@ -9,6 +10,8 @@
 #include "freertos/semphr.h"
 #include "freertos/timers.h"
 #include "room_ui_controller.h"
+#include "room_media.h"
+#include "esp_openclaw_node_wifi.h"
 
 /* Single-threaded schedule points, not a model of the controller. */
 typedef struct {
@@ -18,6 +21,9 @@ typedef struct {
     unsigned critical_depth, callback_depth;
     bool media_owned, ambient, inside_start;
     room_ui_state_t ui;
+    room_ui_facts_t home;
+    esp_openclaw_node_wifi_status_t wifi;
+    esp_err_t node_connect_result, operator_connect_result;
     char close_voice[129], close_key[257];
     esp_openclaw_node_handle_t close_node;
     void (*at_media_begin)(void);
@@ -30,6 +36,15 @@ typedef struct {
     bool fail_config_submit, fail_create_submit, fail_open, fail_provider, fail_start, fail_timer;
     const char *node_uri;
     const char *create_voice;
+    bool fail_log_policy, capture_diagnostics;
+    esp_log_level_t global_log_level, sdk_log_level;
+    unsigned log_set_calls;
+    unsigned audio_snapshots;
+    char diagnostics[16384];
+    bool console_snapshots;
+    room_media_tone_snapshot_t console_tone;
+    const char *console_tone_state_name, *console_tone_error_name;
+    unsigned console_tone_error_name_calls;
 } room_host_observations_t;
 extern room_host_observations_t host;
 
@@ -47,5 +62,5 @@ void host_fire_operator_timer(esp_timer_handle_t timer);
 bool host_timer_active(TimerHandle_t timer);
 
 /* strlcpy is not in POSIX C (including Darwin with strict feature macros).
- * Only the unsupported room diagnostics path needs this declaration. */
+ * The room diagnostics snapshot needs this declaration. */
 size_t strlcpy(char *destination, const char *source, size_t capacity);

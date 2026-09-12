@@ -1,0 +1,74 @@
+--- a/components/nvs_flash/src/nvs_partition.cpp
++++ b/components/nvs_flash/src/nvs_partition.cpp
+@@ -5,10 +5,28 @@
+  */
+ 
+ #include <cstdlib>
++#include "esp_attr.h"
++#include "esp_rom_sys.h"
+ #include "nvs_partition.hpp"
+ 
+ namespace nvs {
+ 
++static DRAM_ATTR uint32_t s_first_io_failure;
++static_assert(__atomic_always_lock_free(sizeof(s_first_io_failure), nullptr),
++              "NVS diagnostics require a lock-free failure claim");
++
++static esp_err_t report_io_result(unsigned operation, esp_err_t result)
++{
++    uint32_t expected = 0;
++    // Claim once per boot, outside flash I/O and without holding a logging lock.
++    if (result != ESP_OK &&
++        __atomic_compare_exchange_n(&s_first_io_failure, &expected, 1, false,
++                                    __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
++        esp_rom_printf(DRAM_STR("nvs_io_diag op=%u err=%d\n"), operation, (int)result);
++    }
++    return result;
++}
++
+ NVSPartition::NVSPartition(const esp_partition_t* partition)
+     : mESPPartition(partition)
+ {
+@@ -25,35 +43,35 @@
+ 
+ esp_err_t NVSPartition::read_raw(size_t src_offset, void* dst, size_t size)
+ {
+-    return esp_partition_read_raw(mESPPartition, src_offset, dst, size);
++    return report_io_result(1, esp_partition_read_raw(mESPPartition, src_offset, dst, size));
+ }
+ 
+ esp_err_t NVSPartition::read(size_t src_offset, void* dst, size_t size)
+ {
+     if (size % ESP_ENCRYPT_BLOCK_SIZE != 0) {
+-        return ESP_ERR_INVALID_ARG;
++        return report_io_result(2, ESP_ERR_INVALID_ARG);
+     }
+ 
+-    return esp_partition_read(mESPPartition, src_offset, dst, size);
++    return report_io_result(2, esp_partition_read(mESPPartition, src_offset, dst, size));
+ }
+ 
+ esp_err_t NVSPartition::write_raw(size_t dst_offset, const void* src, size_t size)
+ {
+-    return esp_partition_write_raw(mESPPartition, dst_offset, src, size);
++    return report_io_result(3, esp_partition_write_raw(mESPPartition, dst_offset, src, size));
+ }
+ 
+ esp_err_t NVSPartition::write(size_t dst_offset, const void* src, size_t size)
+ {
+     if (size % ESP_ENCRYPT_BLOCK_SIZE != 0) {
+-        return ESP_ERR_INVALID_ARG;
++        return report_io_result(4, ESP_ERR_INVALID_ARG);
+     }
+ 
+-    return esp_partition_write(mESPPartition, dst_offset, src, size);
++    return report_io_result(4, esp_partition_write(mESPPartition, dst_offset, src, size));
+ }
+ 
+ esp_err_t NVSPartition::erase_range(size_t dst_offset, size_t size)
+ {
+-    return esp_partition_erase_range(mESPPartition, dst_offset, size);
++    return report_io_result(5, esp_partition_erase_range(mESPPartition, dst_offset, size));
+ }
+ 
+ uint32_t NVSPartition::get_address()

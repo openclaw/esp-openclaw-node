@@ -6,7 +6,9 @@ Use this guide to connect an ESP32 board from this repository to an existing Ope
 
 - OpenClaw installed and `openclaw` available on `PATH`
 - An OpenClaw gateway the board can reach
-- The ESP-IDF version required by your chosen example; Tab5 requires exactly `5.5.5`
+- The ESP-IDF revision and patch set required by your chosen example; follow
+  the [Tab5 SDK compatibility procedure](../examples/m5stack-tab5-room-node/README.md)
+  rather than selecting an unmodified release tag
 - An ESP32 board with Wi-Fi
 - A serial connection or board-specific flashing path, depending on the example
 
@@ -19,11 +21,14 @@ Commands below assume the default OpenClaw install. If you use a named profile, 
 - [Waveshare AMOLED Room Node](../examples/waveshare-esp32-s3-touch-amoled-2.06-room-node/README.md): ESP32-S3 room client with Talk, ambient wake, and an A2UI/image Canvas.
 - [M5Stack Tab5 Room Node](../examples/m5stack-tab5-room-node/README.md): ESP32-P4 room client with C6 remote Wi-Fi, Talk, Canvas, camera, and hardware status.
 
-The [recorded room-node source builds](../components/esp-openclaw-room-node/tests/README.md#source-only-firmware-build)
-used ESP-IDF `5.5.5`; the [Tab5 manifest](../examples/m5stack-tab5-room-node/main/idf_component.yml)
-requires that exact version. Other examples retain their own dependency
-requirements. A dependency's accepted SDK range is not evidence that every
-version in that range has been qualified on hardware.
+The [historical room-node source-build record](../components/esp-openclaw-room-node/tests/README.md#source-only-firmware-build)
+reports ESP-IDF `5.5.5`. The [Tab5 manifest](../examples/m5stack-tab5-room-node/main/idf_component.yml)
+still requires that version value, but the current compatibility procedure also
+requires SDK source `362a1776ec212788fda95f75b733bfdde3a0c394` and its tracked
+patches. Tab5 CI pins the qualified container image and records the actual SDK
+and patch identities in firmware provenance; this is not pristine release
+`5.5.5`. Other examples retain their own dependency requirements. An accepted
+SDK version or successful build does not establish hardware qualification.
 
 ## Choose A Delivery Source
 

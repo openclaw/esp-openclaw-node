@@ -46,6 +46,7 @@ closes only the affected transport and reports `ESP_ERR_INVALID_SIZE` through
   - [Events](#events)
   - [Stored State](#stored-state)
 - [Reference](#reference)
+  - [Invoke Reply Diagnostics](#invoke-reply-diagnostics)
   - [TLS](#tls)
   - [Examples and Reconnect Policy](#examples-and-reconnect-policy)
   - [Component Tests](#component-tests)
@@ -654,6 +655,57 @@ Error `node.invoke.result` from the node:
 ```
 
 </details>
+
+### Invoke Reply Diagnostics
+
+The shared JSON sender accepts success only when the SDK reports the full,
+nonempty serialized byte count. Negative, zero, and short returns follow the
+existing send-failure paths. This corrects zero/short success classification;
+it does not identify the cause of any particular camera RPC timeout.
+
+Validated `camera.snap` and `device.info` invocations emit at most nine INFO
+records under the existing `esp_openclaw_node` tag:
+
+```text
+invoke_reply_diag command=<u> stage=<u> rc=<d> payload_present=<u> alloc_failed=<u> bytes=<u64> requested=<d> returned=<d> elapsed_ms=<u64>
+```
+
+Command `1` is `camera.snap`; `2` is `device.info`. Other commands and
+non-invoke uses of the shared sender emit no new diagnostic records.
+Existing compiled and runtime log-level controls apply; no verbosity or
+WebRTC logging setting is changed.
+
+| Stage | Boundary |
+| --- | --- |
+| 1, 2 | Handler entry and return |
+| 3, 4 | Result-envelope construction entry and return |
+| 5, 6 | JSON serialization entry and return |
+| 7, 8 | SDK `send_text` entry and return |
+| 9 | Local completion after envelope, serialized-buffer, and handler-payload frees |
+
+`rc` is the handler's native result, and `payload_present` reports a non-null
+handler output pointer, both available from stage 2 onward. At stage 6,
+`bytes` is the serialized length excluding NUL; `alloc_failed=1` means
+`cJSON_PrintUnformatted` returned NULL. This flag identifies an absent
+serialized buffer, not an independently localized heap failure. Envelope
+construction returning does not certify that every child allocation succeeded.
+Serialization failure omits stages 7 and 8.
+
+`requested` is the actual signed integer length passed to the SDK, available
+from stage 7; `returned` is the unmodified SDK return, available from stage 8.
+Both and `rc` are signed 32-bit values. Boolean fields are 0/1; byte counts
+and elapsed milliseconds use unsigned 64-bit decimal. Fields initialize to
+zero before their owning stage, so a zero without that stage is not an outcome.
+
+Begin stages use `elapsed_ms=0`; paired end stages measure their synchronous
+region, while stage 9 measures elapsed time since handler entry. Return
+records precede cleanup; stage 9 follows cleanup. SDK acceptance and local
+completion are not Gateway acknowledgement or camera delivery. The existing
+SDK timeout is unchanged and is not an aggregate RPC deadline.
+
+Records contain no request IDs, payloads, dynamic command names, session
+material, or remote error text. Do not infer request association from adjacent
+records or diagnose a failure from an absent record when INFO is disabled.
 
 ### TLS
 

@@ -29,11 +29,16 @@ static const char *TAG = "room_ui";
 #define ROOM_UI_CAMERA_MIN_BRIGHTNESS 40
 static lv_obj_t *status_label;
 static lv_obj_t *gateway_label;
-static lv_obj_t *diagnostics_hint_label;
+static lv_obj_t *home;
+static lv_obj_t *home_wifi;
+static lv_obj_t *home_gateway;
+static lv_obj_t *home_talk;
+static lv_obj_t *home_detail;
 static lv_obj_t *talk_pill;
 static lv_obj_t *talk_pill_label;
 static lv_obj_t *camera_indicator;
 static bool animated_face_enabled;
+static uint8_t idle_brightness;
 /* Guarded by state_mux like the state/detail facts. */
 static char gateway_text[64];
 /* Last state/detail survive canvas mode so leaving it restores the live Talk
@@ -46,7 +51,110 @@ static room_ui_state_t current_state = ROOM_UI_IDLE;
 static char current_detail[48];
 static bool diagnostics_open;
 static bool text_hint_active;
+static bool camera_indicator_active;
+static room_ui_facts_t current_facts;
 static esp_timer_handle_t text_hint_timer;
+
+extern const uint8_t home_lobster_pixels[] asm("_binary_openclaw_lobster_argb8888_start");
+static const lv_image_dsc_t home_lobster = {
+    .header = {
+        .magic = LV_IMAGE_HEADER_MAGIC,
+        .cf = LV_COLOR_FORMAT_ARGB8888,
+        .w = 180,
+        .h = 180,
+        .stride = 180 * 4,
+    },
+    .data_size = 180 * 180 * 4,
+    .data = home_lobster_pixels,
+};
+
+static lv_obj_t *home_label(const char *text, const lv_font_t *font, uint32_t color)
+{
+    lv_obj_t *label = lv_label_create(home);
+    lv_obj_set_width(label, LV_PCT(100));
+    lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+    lv_label_set_text_static(label, text);
+    lv_obj_set_style_text_font(label, font, 0);
+    lv_obj_set_style_text_color(label, lv_color_hex(color), 0);
+    lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_clear_flag(label, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    return label;
+}
+
+static void home_create(lv_display_t *display, const esp_openclaw_room_node_config_t *board)
+{
+    int width = lv_display_get_horizontal_resolution(display) - 2 * board->display.safe_inset;
+    home = lv_obj_create(lv_screen_active());
+    lv_obj_set_width(home, width < 600 ? width : 600);
+    lv_obj_set_height(home, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(home, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(home, 0, 0);
+    lv_obj_set_style_radius(home, 0, 0);
+    lv_obj_set_style_pad_all(home, 0, 0);
+    lv_obj_set_style_pad_row(home, 12, 0);
+    lv_obj_set_flex_flow(home, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(home, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_clear_flag(home, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_center(home);
+
+    lv_obj_t *image = lv_image_create(home);
+    lv_image_set_src(image, &home_lobster);
+    lv_obj_clear_flag(image, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+#if LV_FONT_MONTSERRAT_28
+    home_label("OpenClaw Room Node", &lv_font_montserrat_28, 0xffffff);
+#else
+    home_label("OpenClaw Room Node", &lv_font_montserrat_14, 0xffffff);
+#endif
+    home_label(board->display_name != NULL ? board->display_name : "Room node",
+        &lv_font_montserrat_14, 0x9aabaa);
+#if LV_FONT_MONTSERRAT_20
+    const lv_font_t *font = &lv_font_montserrat_20;
+#else
+    const lv_font_t *font = &lv_font_montserrat_14;
+#endif
+    home_wifi = home_label("Wi-Fi  Starting", font, 0x9aabaa);
+    home_gateway = home_label("Gateway  Starting", font, 0x9aabaa);
+    home_talk = home_label("Talk  Starting", font, 0x9aabaa);
+    home_detail = home_label("", &lv_font_montserrat_14, 0x9aabaa);
+    lv_obj_set_height(home_detail, 48);
+}
+
+static void home_render(const room_ui_facts_t *facts, room_ui_state_t state, const char *detail)
+{
+    static const char *wifi[] = {
+        "Wi-Fi  Starting", "Wi-Fi  Not configured", "Wi-Fi  Connecting",
+        "Wi-Fi  Connected", "Wi-Fi  Offline", "Wi-Fi  Unavailable",
+    };
+    static const char *gateway[] = {
+        "Gateway  Starting", "Gateway  Connecting", "Gateway  Connected",
+        "Gateway  Offline", "Gateway  Pairing required",
+    };
+    static const char *talk[] = {
+        "Talk  Starting", "Talk  Unavailable", "Talk  Waiting for operator",
+        "Talk  Operator session required", "Talk  Ready", "Talk  Connecting",
+        "Talk  Active", "Talk  Stopping",
+    };
+    lv_label_set_text_static(home_wifi,
+        (unsigned)facts->wifi < sizeof(wifi) / sizeof(*wifi) ? wifi[facts->wifi] : "Wi-Fi  Unknown");
+    lv_label_set_text_static(home_gateway,
+        (unsigned)facts->gateway < sizeof(gateway) / sizeof(*gateway) ? gateway[facts->gateway] : "Gateway  Unknown");
+    lv_label_set_text_static(home_talk,
+        (unsigned)facts->talk < sizeof(talk) / sizeof(*talk) ? talk[facts->talk] : "Talk  Unknown");
+    lv_obj_set_style_text_color(home_wifi,
+        lv_color_hex(facts->wifi == ROOM_UI_WIFI_CONNECTED ? 0x54d6af : 0x9aabaa), 0);
+    lv_obj_set_style_text_color(home_gateway,
+        lv_color_hex(facts->gateway == ROOM_UI_GATEWAY_CONNECTED ? 0x54d6af : 0x9aabaa), 0);
+    lv_obj_set_style_text_color(home_talk,
+        lv_color_hex(facts->talk == ROOM_UI_TALK_ACTIVE ? 0xf4c16b
+            : facts->talk == ROOM_UI_TALK_READY ? 0x54d6af : 0x9aabaa), 0);
+    const char *text = state == ROOM_UI_ERROR ? (detail[0] != '\0' ? detail : "Error")
+        : state == ROOM_UI_SETUP ? detail : "";
+    lv_obj_set_style_text_color(home_detail,
+        lv_color_hex(state == ROOM_UI_ERROR ? 0xff8383 : 0x9aabaa), 0);
+    if (strcmp(lv_label_get_text(home_detail), text) != 0) {
+        lv_label_set_text(home_detail, text);
+    }
+}
 
 static void repaint_retry_expired(void *arg);
 
@@ -144,21 +252,15 @@ void room_ui_init(void)
         NULL);
     const esp_openclaw_room_node_config_t *board = room_board_config();
     bool board_has_animated_face = board != NULL && board->display.animated_face;
+    idle_brightness = board != NULL ? board->display.idle_brightness : 0;
     animated_face_enabled = board_has_animated_face;
     if (animated_face_enabled && room_face_create(lv_screen_active()) != ESP_OK) {
         animated_face_enabled = false;
         ESP_LOGW(TAG, "face unavailable; talk states fall back to text");
     }
-    if (!board_has_animated_face) {
-        diagnostics_hint_label = lv_label_create(lv_screen_active());
-        lv_obj_set_style_text_color(diagnostics_hint_label, lv_color_hex(0x707070), 0);
-        lv_obj_set_style_text_font(diagnostics_hint_label, &lv_font_montserrat_14, 0);
-        lv_obj_set_style_text_align(diagnostics_hint_label, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_align(diagnostics_hint_label, LV_ALIGN_BOTTOM_MID, 0, -24);
-        lv_label_set_text(diagnostics_hint_label, "Hold for diagnostics");
-    }
+    if (board != NULL && !board_has_animated_face) home_create(display, board);
     room_board_display_unlock();
-    room_board_display_brightness_set(0);
+    room_ui_refresh();
 }
 
 /* Talk-driven states render as the animated face; text is for setup/errors. */
@@ -174,11 +276,13 @@ static int room_ui_target_brightness(room_ui_state_t state, bool canvas_active)
     taskENTER_CRITICAL(&state_mux);
     bool overlay = diagnostics_open;
     bool text_hint = text_hint_active;
+    bool camera = camera_indicator_active;
     taskEXIT_CRITICAL(&state_mux);
-    if (overlay) return ROOM_CANVAS_ACTIVE_BRIGHTNESS;
-    if (canvas_active) return ROOM_CANVAS_ACTIVE_BRIGHTNESS;
-    if (state == ROOM_UI_IDLE) return text_hint ? 18 : 0;
-    return room_ui_state_uses_face(state) ? 40 : 18;
+    int brightness = overlay || canvas_active ? ROOM_CANVAS_ACTIVE_BRIGHTNESS
+        : state == ROOM_UI_IDLE ? (text_hint ? 18 : idle_brightness)
+        : room_ui_state_uses_face(state) ? 40 : 18;
+    return camera && brightness < ROOM_UI_CAMERA_MIN_BRIGHTNESS
+        ? ROOM_UI_CAMERA_MIN_BRIGHTNESS : brightness;
 }
 
 /* Paints `current_state`/`current_detail` with the display lock held. Returns
@@ -194,25 +298,27 @@ static bool room_ui_render_locked(void)
     char gateway[sizeof(gateway_text)];
     memcpy(gateway, gateway_text, sizeof(gateway));
     bool overlay = diagnostics_open;
+    room_ui_facts_t facts = current_facts;
     taskEXIT_CRITICAL(&state_mux);
     bool canvas_active = room_canvas_is_active();
     if (gateway_label != NULL) {
         /* The gateway line rides along with every non-canvas view. */
         lv_label_set_text(gateway_label, gateway);
-        if (canvas_active || gateway[0] == '\0') {
+        if (home != NULL || canvas_active || overlay || gateway[0] == '\0') {
             lv_obj_add_flag(gateway_label, LV_OBJ_FLAG_HIDDEN);
         } else {
             lv_obj_clear_flag(gateway_label, LV_OBJ_FLAG_HIDDEN);
             lv_obj_move_foreground(gateway_label);
         }
     }
-    if (diagnostics_hint_label != NULL) {
+    if (home != NULL) {
         if (canvas_active || overlay) {
-            lv_obj_add_flag(diagnostics_hint_label, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(home, LV_OBJ_FLAG_HIDDEN);
         } else {
-            lv_obj_clear_flag(diagnostics_hint_label, LV_OBJ_FLAG_HIDDEN);
-            lv_obj_move_foreground(diagnostics_hint_label);
+            home_render(&facts, state, detail);
+            lv_obj_clear_flag(home, LV_OBJ_FLAG_HIDDEN);
         }
+        if (camera_indicator != NULL) lv_obj_move_foreground(camera_indicator);
     }
     if (canvas_active) {
         room_face_hide();
@@ -245,12 +351,19 @@ static bool room_ui_render_locked(void)
             /* The rounded glass clips the corners; top-center stays visible. */
             lv_obj_align(talk_pill, LV_ALIGN_TOP_MID, 0, 14);
         }
+        if (camera_indicator != NULL) lv_obj_move_foreground(camera_indicator);
         return true;
     }
     if (talk_pill != NULL) {
         lv_obj_delete(talk_pill);
         talk_pill = NULL;
         talk_pill_label = NULL;
+    }
+    if (home != NULL) {
+        room_face_hide();
+        room_face_reset_mood();
+        lv_obj_add_flag(status_label, LV_OBJ_FLAG_HIDDEN);
+        return true;
     }
     if (room_ui_state_uses_face(state)) {
         room_face_show(
@@ -326,6 +439,14 @@ void room_ui_set(room_ui_state_t state, const char *detail)
     room_ui_paint_and_unlock();
 }
 
+void room_ui_store_facts(const room_ui_facts_t *facts)
+{
+    if (facts == NULL) return;
+    taskENTER_CRITICAL(&state_mux);
+    current_facts = *facts;
+    taskEXIT_CRITICAL(&state_mux);
+}
+
 void room_ui_set_gateway(const char *gateway_host)
 {
     taskENTER_CRITICAL(&state_mux);
@@ -395,7 +516,7 @@ void room_ui_show_face_hint(uint32_t show_ms)
             text_hint_active = false;
             taskEXIT_CRITICAL(&state_mux);
         }
-        room_board_display_brightness_set(timer_started ? 18 : 0);
+        room_ui_refresh();
     }
 }
 
@@ -434,6 +555,9 @@ esp_err_t room_ui_camera_indicator_begin(void)
     lv_obj_align(camera_indicator, LV_ALIGN_TOP_RIGHT, -18, 18);
     lv_obj_clear_flag(camera_indicator, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(camera_indicator);
+    taskENTER_CRITICAL(&state_mux);
+    camera_indicator_active = true;
+    taskEXIT_CRITICAL(&state_mux);
     lv_refr_now(lv_display_get_default());
     room_board_display_unlock();
     taskENTER_CRITICAL(&state_mux);
@@ -456,6 +580,9 @@ void room_ui_camera_indicator_end(void)
         if (camera_indicator != NULL) {
             lv_obj_delete(camera_indicator);
             camera_indicator = NULL;
+            taskENTER_CRITICAL(&state_mux);
+            camera_indicator_active = false;
+            taskEXIT_CRITICAL(&state_mux);
             lv_refr_now(lv_display_get_default());
         }
         room_board_display_unlock();
@@ -489,9 +616,7 @@ void room_ui_set_diagnostics_open(bool open)
     diagnostics_open = open;
     taskEXIT_CRITICAL(&state_mux);
     if (open) {
-        if (diagnostics_hint_label != NULL) {
-            lv_obj_add_flag(diagnostics_hint_label, LV_OBJ_FLAG_HIDDEN);
-        }
+        if (home != NULL) lv_obj_add_flag(home, LV_OBJ_FLAG_HIDDEN);
         if (camera_indicator != NULL) lv_obj_move_foreground(camera_indicator);
         room_board_display_brightness_set(ROOM_CANVAS_ACTIVE_BRIGHTNESS);
     } else {

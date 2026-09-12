@@ -1,0 +1,114 @@
+"""Execute the real capture and transform owners against bounded SDK stubs."""
+
+import os
+from pathlib import Path
+import subprocess
+import tempfile
+import unittest
+
+
+ROOT = Path(__file__).resolve().parents[2]
+SOURCE = ROOT / "examples/m5stack-tab5-room-node/components/tab5_room_board/tab5_room_board.c"
+FIXTURE = Path(__file__).parent / "fixtures/test_tab5_camera_capture.c"
+TRANSFORM_FIXTURE = Path(__file__).parent / "fixtures/test_tab5_camera_transform.c"
+
+
+class CameraCaptureDiagnosticsTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        source = Path(os.environ.get("TAB5_CAMERA_SOURCE", SOURCE)).read_text()
+        start = source.index("typedef struct {\n    int fd;")
+        end = source.index("\ntypedef struct {", start + 1)
+        temporary = tempfile.TemporaryDirectory(prefix="tab5-camera-capture-")
+        cls.addClassCleanup(temporary.cleanup)
+        directory = Path(temporary.name)
+        (directory / "camera_capture_under_test.inc").write_text(source[start:end])
+        handler_start = source.index("static esp_err_t camera_snap(")
+        handler_end = source.index("\nstatic esp_err_t storage_metrics(", handler_start)
+        (directory / "camera_handler_under_test.inc").write_text(source[handler_start:handler_end])
+        cls.binary = directory / "camera-capture"
+        subprocess.run([
+            os.environ.get("CC", "cc"), "-std=c11", "-Wall", "-Wextra", "-Werror",
+            "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
+            "-I", str(directory), str(FIXTURE), "-o", str(cls.binary),
+        ], check=True)
+
+    def run_case(self, scenario):
+        result = subprocess.run([str(self.binary), scenario], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_failure_stage_errno_domain_and_partial_cleanup(self):
+        for scenario in (
+            "bsp", "open", "gfmt", "default-size", "sfmt", "gfmt-after",
+            "negotiated-size", "negotiated-format", "negotiated-stride",
+            "reqbufs", "buffer-count", "query0", "query1", "buffer-length",
+            "mmap0", "mmap1", "qbuf0", "qbuf1", "streamon", "dqbuf",
+            "frame-index", "requeue", "frame-length",
+        ):
+            with self.subTest(scenario=scenario):
+                self.run_case(scenario)
+
+    def test_success_formats_stride_and_bounded_loop_marker(self):
+        for scenario in ("success", "rgb565x", "explicit-stride", "zero-bytesused", "delayed"):
+            with self.subTest(scenario=scenario):
+                self.run_case(scenario)
+
+    def test_existing_initialization_cache_policy(self):
+        for scenario in ("bsp-retry", "open-cache", "success-cache"):
+            with self.subTest(scenario=scenario):
+                self.run_case(scenario)
+
+    def test_missing_frame_and_timeout_setup_fail_closed(self):
+        for scenario in ("missing-frame", "timeout-setup"):
+            with self.subTest(scenario=scenario):
+                self.run_case("handler-" + scenario)
+
+    def test_warmup_and_handler_stage_cleanup(self):
+        for scenario in (
+            "success", "warmup-max", "warmup-starved", "transform-failure",
+            "encode-failure", "quality-retry",
+        ):
+            with self.subTest(scenario=scenario):
+                self.run_case("handler-" + scenario)
+
+
+class CameraTransformTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        source = Path(os.environ.get("TAB5_CAMERA_SOURCE", SOURCE)).read_text()
+        start = source.index("typedef struct {\n    uint8_t *data;\n    size_t data_size;")
+        end = source.index("\nstatic esp_err_t camera_snap(", start)
+        constants = "\n".join(
+            line for line in source.splitlines() if line.startswith("#define CAMERA_")
+        )
+        temporary = tempfile.TemporaryDirectory(prefix="tab5-camera-transform-")
+        cls.addClassCleanup(temporary.cleanup)
+        directory = Path(temporary.name)
+        (directory / "camera_transform_under_test.inc").write_text(
+            constants + "\n" + source[start:end]
+        )
+        cls.binary = directory / "camera-transform"
+        subprocess.run([
+            os.environ.get("CC", "cc"), "-std=c11", "-Wall", "-Wextra", "-Werror",
+            "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
+            "-I", str(directory), str(TRANSFORM_FIXTURE), "-o", str(cls.binary),
+        ], check=True)
+
+    def run_case(self, scenario):
+        result = subprocess.run([str(self.binary), scenario], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_requested_640_matches_written_extent(self):
+        self.run_case("requested-640")
+
+    def test_native_minimum_scale_rotations_and_size_bounds(self):
+        self.run_case("geometry")
+
+    def test_allocation_and_ppa_failure_cleanup(self):
+        for scenario in ("allocation-failure", "ppa-failure"):
+            with self.subTest(scenario=scenario):
+                self.run_case(scenario)
+
+
+if __name__ == "__main__":
+    unittest.main()

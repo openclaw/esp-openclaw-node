@@ -31,6 +31,8 @@ jobs:
           - name: m5stack-tab5-room-node
             path: examples/m5stack-tab5-room-node
             target: esp32p4
+            # Keep the image qualified with the exact Tab5 SDK patches.
+            idf_version: release-v5.5@sha256:b05ef8f0e05ba8128668fce03a5798ea175ca94829d6bc4cf15f744895fd8482
 
     name: ${{ matrix.name }} (${{ matrix.target }})
     steps:
@@ -65,19 +67,113 @@ jobs:
             -lm -o /tmp/room_pcm_gain_test
           /tmp/room_pcm_gain_test
 
+      - name: Firmware packaging tests
+        if: matrix.name == 'component-test-app-build'
+        run: |
+          python3 -m unittest discover -s scripts/tests -p 'test_package_firmware.py' -v
+          python3 -m unittest discover -s scripts/tests -p 'test_idf_tab5_compat.py' -v
+          python3 -m unittest discover -s scripts/tests -p 'test_nvs_diagnostics.py' -v
+          python3 -m unittest discover -s scripts/tests -p 'test_tab5_camera_diagnostics.py' -v
+          python3 -m unittest discover -s scripts/tests -p 'test_tab5_display_allocation.py' -v
+          python3 -m unittest discover -s scripts/tests -p 'test_tab5_allocation_diagnostics.py' -v
+
       - name: Build
         uses: espressif/esp-idf-ci-action@v1
         with:
-          esp_idf_version: release-v5.5
+          esp_idf_version: ${{ matrix.idf_version || 'release-v5.5' }}
           target: ${{ matrix.target }}
           path: ${{ matrix.path }}
           command: |
+            nvs_diagnostics="" &&
+            sdio_diagnostics="" &&
+            camera_compat="" &&
+            if [ "${{ matrix.name }}" = "m5stack-tab5-room-node" ]; then
+              nvs_diagnostics="--nvs-diagnostics" &&
+              sdio_diagnostics="--sdio-diagnostics --sdio-psram-rx" &&
+              camera_compat="--camera-compat" &&
+              python3 ../../scripts/idf_tab5_compat.py --idf-path "$IDF_PATH" --nvs-diagnostics
+            fi &&
             idf.py reconfigure &&
+            if [ "${{ matrix.name }}" = "m5stack-tab5-room-node" ]; then
+              python3 ../../scripts/tab5_sdio_diagnostics.py \
+                --project-path . --component-path managed_components/espressif__esp_hosted --build-path build --psram-rx &&
+              python3 ../../scripts/tab5_camera_compat.py --idf-path "$IDF_PATH" \
+                --project-path . --component-path managed_components/espressif__esp_video --build-path build &&
+              python3 -m unittest discover -s ../../scripts/tests -p test_tab5_sdio_rx_psram.py -v &&
+              python3 -m unittest discover -s ../../scripts/tests -p test_tab5_sdio_diagnostics.py -v &&
+              python3 -m unittest discover -s ../../scripts/tests -p test_tab5_camera_compat.py -v &&
+              python3 -m unittest discover -s ../../scripts/tests -p test_package_firmware.py -v
+            fi &&
             ninja -C build -j2 &&
+            if [ "${{ matrix.name }}" = "m5stack-tab5-room-node" ]; then
+              for hook in esp_openclaw_node_transport_start_begin esp_openclaw_node_transport_start_end; do
+                riscv32-esp-elf-nm --defined-only build/openclaw_m5stack_tab5_room_node.elf |
+                  grep -E "^[[:xdigit:]]+ T ${hook}$" >/dev/null || exit 1
+              done
+            fi &&
+            if [ "${{ matrix.name }}" = "m5stack-tab5-room-node" ]; then
+              python3 ../../scripts/tab5_camera_compat.py --idf-path "$IDF_PATH" \
+                --project-path . --component-path managed_components/espressif__esp_video --build-path build --verify-only
+            fi &&
             if [ "${{ matrix.name }}" = "component-test-app-build" ]; then
               python3 ../../../esp-openclaw-talk/tests/run_host_tests.py --sanitize &&
-              python3 ../../../esp-openclaw-talk/tests/run_threaded_tests.py
+              python3 ../../../esp-openclaw-talk/tests/run_threaded_tests.py &&
+              python3 -m unittest discover -s ../../../../scripts/tests -p test_node_reply_diagnostics.py -v &&
+              python3 -m unittest discover -s ../../../../scripts/tests -p test_package_firmware.py -k lock_reader -v
             fi &&
             if [ "${{ matrix.name }}" = "waveshare-amoled-room-node" ]; then
-              python3 ../../components/esp-openclaw-room-node/tests/run_lifecycle_host_tests.py --managed-components managed_components
+              python3 ../../components/esp-openclaw-room-node/tests/run_lifecycle_host_tests.py --managed-components managed_components &&
+              python3 ../../components/esp-openclaw-room-node/tests/run_ui_host_tests.py --lvgl-dir managed_components/lvgl__lvgl
+            fi &&
+            if [ "${{ matrix.name }}" != "component-test-app-build" ]; then
+              python3 ../../scripts/package_firmware.py \
+                --target "${{ matrix.target }}" \
+                --repository "${{ github.repository }}" \
+                --event "${{ github.event_name }}" \
+                --event-sha "${{ github.sha }}" \
+                --pr-head-sha "${{ github.event.pull_request.head.sha }}" \
+                --run-id "${{ github.run_id }}" \
+                --run-attempt "${{ github.run_attempt }}" \
+                --idf-image "espressif/idf:${{ matrix.idf_version || 'release-v5.5' }}" \
+                $nvs_diagnostics $sdio_diagnostics $camera_compat
             fi
+
+      - name: Upload firmware
+        if: matrix.name != 'component-test-app-build'
+        uses: actions/upload-artifact@v7
+        with:
+          name: firmware-${{ matrix.name }}-${{ matrix.target }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ matrix.path }}/build/firmware/
+          if-no-files-found: error
+
+      - name: Stage Tab5 build symbols
+        if: matrix.name == 'm5stack-tab5-room-node'
+        working-directory: ${{ matrix.path }}
+        run: |
+          for file in \
+            build/openclaw_m5stack_tab5_room_node.elf \
+            build/openclaw_m5stack_tab5_room_node.map \
+            build/firmware/manifest.json; do
+            test -s "$file" || { echo "::error::Missing or empty $file"; exit 1; }
+          done
+          # The container-owned build directory is not writable by the host runner.
+          symbols="$RUNNER_TEMP/tab5-build-symbols"
+          mkdir "$symbols"
+          cp \
+            build/openclaw_m5stack_tab5_room_node.elf \
+            build/openclaw_m5stack_tab5_room_node.map \
+            build/firmware/manifest.json \
+            "$symbols/"
+          cd "$symbols"
+          sha256sum \
+            openclaw_m5stack_tab5_room_node.elf \
+            openclaw_m5stack_tab5_room_node.map \
+            manifest.json > SHA256SUMS
+
+      - name: Upload Tab5 build symbols
+        if: matrix.name == 'm5stack-tab5-room-node'
+        uses: actions/upload-artifact@v7
+        with:
+          name: symbols-${{ matrix.name }}-${{ matrix.target }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/tab5-build-symbols/
+          if-no-files-found: error

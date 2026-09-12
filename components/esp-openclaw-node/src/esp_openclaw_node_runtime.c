@@ -20,6 +20,14 @@ void esp_openclaw_node_complete_connect_failed(
     const char *gateway_detail_code,
     bool stop_client)
 {
+    const char *role = node->config.role != NULL && strcmp(node->config.role, "node") == 0
+        ? "node"
+        : node->config.role != NULL && strcmp(node->config.role, "operator") == 0
+            ? "operator" : "other";
+    ESP_LOGW(
+        ESP_OPENCLAW_NODE_TAG,
+        "connect_diag stage=failed role=%s reason=%d local_err=%d(%s)",
+        role, (int)reason, (int)local_err, esp_err_to_name(local_err));
     esp_openclaw_node_cleanup_transport_instance(node, stop_client);
     esp_openclaw_node_lock_state(node);
     node->state = ESP_OPENCLAW_NODE_INTERNAL_IDLE;

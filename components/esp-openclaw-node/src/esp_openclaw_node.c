@@ -6,6 +6,7 @@
 
 #include "esp_openclaw_node_internal.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -578,17 +579,27 @@ esp_err_t esp_openclaw_node_request_connect(
         esp_err_t load_err = esp_openclaw_node_persisted_session_load(
             node->config.role,
             &fresh);
+        bool fresh_present = esp_openclaw_node_persisted_session_is_present(&fresh);
+        bool cached_present;
         if (load_err == ESP_OK) {
             esp_openclaw_node_lock_state(node);
+            cached_present = esp_openclaw_node_saved_session_is_present_locked(node);
             esp_openclaw_node_persisted_session_free(&node->persisted_session);
             node->persisted_session = fresh;
             esp_openclaw_node_unlock_state(node);
         } else {
+            cached_present = esp_openclaw_node_has_saved_session(node);
             ESP_LOGW(
                 ESP_OPENCLAW_NODE_TAG,
                 "saved-session reload from NVS failed, using in-memory copy: %s",
                 esp_err_to_name(load_err));
         }
+        unsigned role = node->config.role != NULL && strcmp(node->config.role, "node") == 0
+            ? 1 : node->config.role != NULL && strcmp(node->config.role, "operator") == 0 ? 2 : 0;
+        printf(
+            "nvs_connect_diag role=%u cached=%u fresh_known=%u fresh=%u err=%d\n",
+            role, (unsigned)cached_present, (unsigned)(load_err == ESP_OK),
+            (unsigned)fresh_present, (int)load_err);
     }
 
     esp_openclaw_node_connect_request_source_t connect_source = {0};

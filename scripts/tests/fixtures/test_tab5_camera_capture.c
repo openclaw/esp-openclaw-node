@@ -14,8 +14,10 @@
 #define ESP_FAIL -1
 #define ESP_ERR_INVALID_ARG 0x102
 #define ESP_ERR_INVALID_STATE 0x103
+#define ESP_ERR_INVALID_STATE 0x103
 #define ESP_ERR_NO_MEM 0x101
 #define ESP_ERR_INVALID_SIZE 0x104
+#define ESP_ERR_NOT_SUPPORTED 0x106
 #define BSP_FAILURE 0x105
 #define TAG "camera-fixture"
 #define CAMERA_SENSOR_WIDTH 1280U
@@ -100,6 +102,9 @@ static void capture_log(const char *format, ...)
 #define ESP_RETURN_ON_ERROR(call, tag, ...) do { \
     esp_err_t error = (call); \
     if (error != ESP_OK) { ESP_LOGE(tag, __VA_ARGS__); return error; } \
+} while (0)
+#define ESP_RETURN_ON_FALSE(condition, error, tag, ...) do { \
+    if (!(condition)) return (error); \
 } while (0)
 
 static esp_err_t bsp_camera_start(const void *config)
@@ -310,25 +315,95 @@ static void esp_openclaw_room_node_release_camera(void)
     ++releases;
     clock_us += 3000;
 }
+enum { MALLOC_CAP_SPIRAM = 1, PPA_SRM_COLOR_MODE_RGB565,
+       PPA_SRM_COLOR_MODE_RGB888, PPA_TRANS_MODE_BLOCKING };
+typedef enum {
+    PPA_SRM_ROTATION_ANGLE_0, PPA_SRM_ROTATION_ANGLE_90,
+    PPA_SRM_ROTATION_ANGLE_180, PPA_SRM_ROTATION_ANGLE_270,
+} ppa_srm_rotation_angle_t;
 typedef struct {
-    uint8_t *data;
-    size_t data_size;
-    uint32_t width, height;
-} camera_transformed_frame_t;
-static esp_err_t transform_camera_frame(const camera_frame_t *camera, int width,
-                                        camera_transformed_frame_t *output)
+    void *buffer;
+    size_t buffer_size;
+    uint32_t pic_w, pic_h, block_w, block_h;
+    int srm_cm;
+} picture_t;
+typedef struct {
+    picture_t in, out;
+    ppa_srm_rotation_angle_t rotation_angle;
+    float scale_x, scale_y;
+    bool rgb_swap;
+    int mode;
+} ppa_srm_oper_config_t;
+#define BSP_CAMERA_ROTATION 0
+static int ppa_token;
+static void *camera_ppa_srm = &ppa_token;
+static size_t camera_ppa_alignment = 64;
+static void *transform_allocation;
+static unsigned transform_allocations, transform_frees;
+typedef struct {
+    const char *name;
+    uint16_t rgb565;
+    uint8_t rgb888[3];
+} color_case_t;
+static const color_case_t colors[] = {
+    {"color-red", 0xf800, {255, 0, 0}},
+    {"color-green", 0x07e0, {0, 255, 0}},
+    {"color-blue", 0x001f, {0, 0, 255}},
+    {"color-gray", 0x8410, {132, 130, 132}},
+};
+static const color_case_t *color_case;
+static void *heap_caps_aligned_calloc(size_t alignment, size_t count, size_t size, int caps)
 {
-    assert(camera->fd == 7 && camera->frame.index < 2 && width == 1024);
+    assert(alignment == 64 && count == 1 && size % alignment == 0 && caps == MALLOC_CAP_SPIRAM);
+    assert(transform_allocation == NULL);
+    transform_allocation = aligned_alloc(alignment, size);
+    assert(transform_allocation != NULL);
+    memset(transform_allocation, 0, size);
+    ++transform_allocations;
+    return transform_allocation;
+}
+static void heap_caps_free(void *memory)
+{
+    assert(memory != NULL && memory == transform_allocation);
+    free(memory);
+    transform_allocation = NULL;
+    ++transform_frees;
+}
+static const char *esp_err_to_name(esp_err_t error) { (void)error; return "synthetic-ppa-error"; }
+static esp_err_t ppa_do_scale_rotate_mirror(void *client, const ppa_srm_oper_config_t *config)
+{
+    assert(client == camera_ppa_srm && config->mode == PPA_TRANS_MODE_BLOCKING);
+    assert(config->in.srm_cm == PPA_SRM_COLOR_MODE_RGB565);
+    assert(config->out.srm_cm == PPA_SRM_COLOR_MODE_RGB888);
+    assert(config->rotation_angle == PPA_SRM_ROTATION_ANGLE_0);
+    assert(config->out.pic_w == 960 && config->out.pic_h == 540);
+    assert(config->out.buffer == transform_allocation);
     assert(lease_held && indicator_active && unmaps == 0);
     ++transforms;
     clock_us += 7000;
     if (is("transform-failure")) return ESP_FAIL;
-    *output = (camera_transformed_frame_t){.width = 800, .height = 800, .data_size = 800 * 800 * 3};
-    output->data = malloc(output->data_size);
-    assert(output->data != NULL);
+
+    const uint8_t *source = config->in.buffer;
+    uint16_t pixel = (uint16_t)source[0] | ((uint16_t)source[1] << 8);
+    uint8_t r5 = (pixel >> 11) & 31, g6 = (pixel >> 5) & 63, b5 = pixel & 31;
+    uint8_t r = (r5 << 3) | (r5 >> 2), g = (g6 << 2) | (g6 >> 4), b = (b5 << 3) | (b5 >> 2);
+    /* Model input R/B swap, then the pinned PPA's B,G,R output memory order. */
+    if (config->rgb_swap) {
+        uint8_t swap = r;
+        r = b;
+        b = swap;
+    }
+    uint8_t *output = config->out.buffer;
+    size_t size = (size_t)config->out.pic_w * config->out.pic_h * 3;
+    assert(size <= config->out.buffer_size);
+    for (size_t i = 0; i < size; i += 3) {
+        output[i] = b;
+        output[i + 1] = g;
+        output[i + 2] = r;
+    }
     return ESP_OK;
 }
-static void heap_caps_free(void *memory) { free(memory); }
+#include "camera_transform_under_test.inc"
 typedef struct {
     int width, height, src_type, subsampling;
     uint8_t quality;
@@ -343,7 +418,7 @@ typedef int jpeg_error_t;
 static int encoder_token;
 static jpeg_error_t jpeg_enc_open(const jpeg_enc_config_t *config, jpeg_enc_handle_t *encoder)
 {
-    assert(config->width == 800 && config->height == 800 && !config->task_enable);
+    assert(config->width == 960 && config->height == 540 && !config->task_enable);
     assert(config->src_type == JPEG_PIXEL_FORMAT_RGB888 && config->subsampling == JPEG_SUBSAMPLE_420);
     *encoder = &encoder_token;
     return JPEG_ERR_OK;
@@ -352,8 +427,18 @@ static jpeg_error_t jpeg_enc_process(jpeg_enc_handle_t encoder, const uint8_t *i
                                     int input_size, uint8_t *output, int capacity, int *size)
 {
     assert(encoder == &encoder_token && input != NULL && output != NULL);
-    assert(input_size == 800 * 800 * 3 && capacity == input_size + 1024);
+    assert(input == transform_allocation && input_size == 960 * 540 * 3 && capacity == input_size + 1024);
     assert(lease_held && indicator_active && unmaps == 0);
+    if (color_case != NULL) {
+        for (int i = 0; i < input_size; i += 3) {
+            if (memcmp(input + i, color_case->rgb888, 3) != 0) {
+                fprintf(stderr, "JPEG RGB888 ingress for %s: got %u,%u,%u, expected %u,%u,%u\n",
+                        color_case->name, input[i], input[i + 1], input[i + 2],
+                        color_case->rgb888[0], color_case->rgb888[1], color_case->rgb888[2]);
+                abort();
+            }
+        }
+    }
     ++encodes;
     clock_us += 2000;
     if (is("encode-failure")) return -1;
@@ -381,6 +466,18 @@ static const pipeline_record_t *pipeline(const char *stage)
 }
 static void run_handler(void)
 {
+    for (size_t i = 0; i < sizeof(colors) / sizeof(colors[0]); ++i) {
+        if (is(colors[i].name)) color_case = &colors[i];
+    }
+    if (color_case != NULL) {
+        /* Uniform frames keep color-order proof independent of resampling. */
+        for (size_t i = 0; i < sizeof(mapped) / sizeof(mapped[0]); ++i) {
+            for (size_t j = 0; j < sizeof(mapped[i]); j += 2) {
+                mapped[i][j] = (uint8_t)color_case->rgb565;
+                mapped[i][j + 1] = color_case->rgb565 >> 8;
+            }
+        }
+    }
     char *output = NULL;
     esp_openclaw_node_error_t error = {0};
     esp_err_t result = camera_snap(NULL, NULL, "{}", 2, &output, &error);
@@ -389,6 +486,7 @@ static void run_handler(void)
     assert(result == (failed ? ESP_FAIL : ESP_OK));
     assert(!lease_held && !indicator_active && releases == 1 && indicator_ends == 1);
     assert(parameter_deletes == 1 && closes == 1 && streamoffs == 1 && maps == unmaps);
+    assert(transform_allocation == NULL && transform_allocations == transform_frees);
     assert(timeout_sets == 1);
     assert(pipeline("cleanup_begin") != NULL && pipeline("cleanup_end") != NULL);
     assert(pipeline("cleanup_end")->elapsed_ms == (is("timeout-setup") ? 4U : 8U));
@@ -425,7 +523,7 @@ static void run_handler(void)
             if (is("encode-failure")) {
                 assert(strcmp(error.code, "INTERNAL") == 0 && output == NULL);
             } else {
-                assert(output != NULL && strstr(output, "\"width\":800,\"height\":800") != NULL);
+                assert(output != NULL && strstr(output, "\"width\":960,\"height\":540") != NULL);
             }
         }
     }

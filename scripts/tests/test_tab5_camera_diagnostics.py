@@ -26,6 +26,13 @@ class CameraCaptureDiagnosticsTests(unittest.TestCase):
         handler_start = source.index("static esp_err_t camera_snap(")
         handler_end = source.index("\nstatic esp_err_t storage_metrics(", handler_start)
         (directory / "camera_handler_under_test.inc").write_text(source[handler_start:handler_end])
+        transform_start = source.index("typedef struct {\n    uint8_t *data;\n    size_t data_size;")
+        constants = "\n".join(
+            line for line in source.splitlines() if line.startswith("#define CAMERA_")
+        )
+        (directory / "camera_transform_under_test.inc").write_text(
+            constants + "\n" + source[transform_start:handler_start]
+        )
         cls.binary = directory / "camera-capture"
         subprocess.run([
             os.environ.get("CC", "cc"), "-std=c11", "-Wall", "-Wextra", "-Werror",
@@ -70,6 +77,11 @@ class CameraCaptureDiagnosticsTests(unittest.TestCase):
         ):
             with self.subTest(scenario=scenario):
                 self.run_case("handler-" + scenario)
+
+    def test_rgb565_colors_reach_jpeg_as_rgb888(self):
+        for color in ("red", "green", "blue", "gray"):
+            with self.subTest(color=color):
+                self.run_case("handler-color-" + color)
 
 
 class CameraTransformTests(unittest.TestCase):

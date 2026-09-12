@@ -83,6 +83,26 @@ static char *gateway_http_base;
  * generation-checked facts under state_lock are the only work authority. */
 typedef uint8_t talk_teardown_request_t;
 
+static int talk_stage(uint32_t generation, const char *stage, const char *phase, int result)
+{
+    ESP_LOGI(TAG, "room_talk_diag generation=%" PRIu32 " stage=%s phase=%s result=%d",
+        generation, stage, phase, result);
+    return result;
+}
+
+static void talk_audio_snapshot(uint32_t generation, const char *stage)
+{
+    room_audio_diagnostics_snapshot_t audio = {0};
+    room_diagnostics_audio_get(&audio);
+    ESP_LOGI(TAG,
+        "room_talk_audio generation=%" PRIu32 " stage=%s capture_ok=%" PRIu64
+        " capture_err=%" PRIu64 " feed_ok=%" PRIu64 " feed_err=%" PRIu64
+        " fetch_ok=%" PRIu64 " fetch_err=%" PRIu64 " render_ok=%" PRIu64 " render_err=%" PRIu64,
+        generation, stage, audio.capture_read_successes, audio.capture_read_errors,
+        audio.feed_successes, audio.feed_errors, audio.fetch_successes, audio.fetch_errors,
+        audio.renderer_accepted, audio.renderer_errors);
+}
+
 static void refresh_home_facts(void)
 {
     xSemaphoreTake(state_lock, portMAX_DELAY);
@@ -313,8 +333,9 @@ static bool request_talk_stop_locked(uint32_t generation, const char *message)
 static void request_talk_teardown(uint32_t generation, const char *message)
 {
     xSemaphoreTake(state_lock, portMAX_DELAY);
-    request_talk_stop_locked(generation, message);
+    bool accepted = request_talk_stop_locked(generation, message);
     xSemaphoreGive(state_lock);
+    talk_stage(generation, "stop_request", accepted ? "accepted" : "ignored", 0);
 }
 
 static void talk_teardown_task(void *arg)
@@ -337,6 +358,7 @@ static void talk_teardown_task(void *arg)
         esp_webrtc_handle_t session = webrtc;
         esp_openclaw_talk_call_handle_t call = talk_call;
         const char *message = talk_cancel_message;
+        uint32_t generation = talk_generation;
         xSemaphoreGive(state_lock);
         refresh_home_facts();
         /* One worker serializes call/operator UI. A delayed callback never
@@ -353,18 +375,36 @@ static void talk_teardown_task(void *arg)
 
         /* The owner remains reserved until every local resource and UI update
          * is finished. Pending RPC refs may survive, but cannot dispatch. */
+        talk_stage(generation, "stop_request", "consumed", 0);
+        talk_audio_snapshot(generation, "teardown");
+        talk_stage(generation, "quiesce", "begin", 0);
         esp_openclaw_talk_call_quiesce(call);
+        talk_stage(generation, "quiesce", "end", 0);
         if (talk_timeout_timer != NULL) {
             xTimerStop(talk_timeout_timer, portMAX_DELAY);
             xTimerDelete(talk_timeout_timer, portMAX_DELAY);
             talk_timeout_timer = NULL;
         }
-        if (session != NULL) esp_webrtc_close(session);
-        if (talk_ambient_suspended && room_media_set_ambient_wake(true) != ESP_OK) {
-            ESP_LOGE(TAG, "failed to restore ambient WakeNet after Talk");
-            message = "Talk failed";
+        if (session != NULL) {
+            talk_stage(generation, "sdk_close", "begin", 0);
+            int result = esp_webrtc_close(session);
+            talk_stage(generation, "sdk_close", "end", result);
         }
-        if (talk_media_owned) room_media_end_talk(!talk_ambient_suspended);
+        if (talk_ambient_suspended) {
+            talk_stage(generation, "ambient_restore", "begin", 0);
+            esp_err_t result = room_media_set_ambient_wake(true);
+            talk_stage(generation, "ambient_restore", "end", result);
+            if (result != ESP_OK) {
+                ESP_LOGE(TAG, "failed to restore ambient WakeNet after Talk");
+                message = "Talk failed";
+            }
+        }
+        if (talk_media_owned) {
+            talk_stage(generation, "media_release", "begin", 0);
+            room_media_end_talk(!talk_ambient_suspended);
+            talk_stage(generation, "media_release", "end", 0);
+        }
+        talk_audio_snapshot(generation, "released");
         room_ui_set(message != NULL ? ROOM_UI_ERROR : ROOM_UI_IDLE, message);
         xSemaphoreTake(state_lock, portMAX_DELAY);
         webrtc = NULL;
@@ -415,6 +455,16 @@ static int webrtc_event(esp_webrtc_event_t *event, void *ctx)
             event->type == ESP_WEBRTC_EVENT_CONNECT_FAILED ? "Talk failed" : NULL);
     }
     xSemaphoreGive(state_lock);
+    const char *stage = event->type == ESP_WEBRTC_EVENT_CONNECTING ? "peer_connecting" :
+        event->type == ESP_WEBRTC_EVENT_PAIRED ? "peer_paired" :
+        event->type == ESP_WEBRTC_EVENT_CONNECTED ? "peer_connected" :
+        event->type == ESP_WEBRTC_EVENT_CONNECT_FAILED ? "peer_failed" :
+        event->type == ESP_WEBRTC_EVENT_DISCONNECTED ? "peer_disconnected" : NULL;
+    if (stage != NULL) {
+        talk_stage(generation, stage, current ? "current" : "stale",
+            (int)event->type);
+        if (current) talk_audio_snapshot(generation, stage);
+    }
     return 0;
 }
 
@@ -465,8 +515,12 @@ static void start_talk_once(void)
     bool admitted = call != NULL && talk_start_in_flight;
     xSemaphoreGive(state_lock);
     if (!admitted) return;
+    talk_stage(generation, "startup", "begin", 0);
     if (cancelled) goto done;
+    talk_stage(generation, "media_acquire", "begin", 0);
     room_media_begin_talk();
+    talk_stage(generation, "media_acquire", "end", 0);
+    talk_audio_snapshot(generation, "acquired");
     xSemaphoreTake(state_lock, portMAX_DELAY);
     talk_media_owned = true;
     cancelled = talk_cancel_requested;
@@ -487,7 +541,29 @@ static void start_talk_once(void)
         .signaling_impl = esp_openclaw_talk_call_signaling_impl(),
     };
     esp_webrtc_handle_t session = NULL;
-    if (esp_webrtc_open(&config, &session) != 0) {
+    /* No-tag setters change global logging. Only lower a supported tag. */
+#if CONFIG_LOG_DYNAMIC_LEVEL_CONTROL && !CONFIG_LOG_TAG_LEVEL_IMPL_NONE
+    if (esp_log_level_get("webrtc") > ESP_LOG_WARN) {
+        esp_log_level_set("webrtc", ESP_LOG_WARN);
+    }
+#endif
+    bool sdk_log_safe = esp_log_level_get("webrtc") <= ESP_LOG_WARN;
+#if !CONFIG_LOG_DYNAMIC_LEVEL_CONTROL
+    /* Static logging uses the compiled maximum, not the getter's default. */
+#ifdef CONFIG_LOG_MAXIMUM_LEVEL
+    sdk_log_safe = sdk_log_safe && CONFIG_LOG_MAXIMUM_LEVEL < ESP_LOG_INFO;
+#else
+    sdk_log_safe = false;
+#endif
+#endif
+    if (!sdk_log_safe) {
+        talk_stage(generation, "sdk_log_policy", "end", ESP_FAIL);
+        request_talk_teardown(generation, "Talk setup failed");
+        goto done;
+    }
+    talk_stage(generation, "sdk_log_policy", "end", ESP_OK);
+    talk_stage(generation, "sdk_open", "begin", 0);
+    if (talk_stage(generation, "sdk_open", "end", esp_webrtc_open(&config, &session)) != 0) {
         request_talk_teardown(generation, "WebRTC open");
         goto done;
     }
@@ -496,10 +572,11 @@ static void start_talk_once(void)
     talk_dialing = true;
     xSemaphoreGive(state_lock);
     esp_webrtc_media_provider_t media = {0};
-    if (room_media_get_webrtc_provider(&media) != ESP_OK ||
-        esp_webrtc_set_media_provider(session, &media) != 0 ||
-        esp_webrtc_set_no_auto_capture(session, true) != 0 ||
-        esp_webrtc_set_event_handler(session, webrtc_event, (void *)(uintptr_t)generation) != 0) {
+    if (talk_stage(generation, "media_provider", "end", room_media_get_webrtc_provider(&media)) != ESP_OK ||
+        talk_stage(generation, "sdk_media_provider", "end", esp_webrtc_set_media_provider(session, &media)) != 0 ||
+        talk_stage(generation, "sdk_capture_policy", "end", esp_webrtc_set_no_auto_capture(session, true)) != 0 ||
+        talk_stage(generation, "sdk_event_handler", "end",
+            esp_webrtc_set_event_handler(session, webrtc_event, (void *)(uintptr_t)generation)) != 0) {
         request_talk_teardown(generation, "WebRTC start");
         goto done;
     }
@@ -508,8 +585,14 @@ static void start_talk_once(void)
     if (!cancelled) talk_ambient_suspended = true;
     xSemaphoreGive(state_lock);
     if (cancelled) goto done;
-    if (room_media_set_ambient_wake(false) != ESP_OK || esp_webrtc_start(session) != 0 ||
-        xTimerStart(talk_timeout_timer, 0) != pdPASS) {
+    talk_stage(generation, "ambient_suspend", "begin", 0);
+    if (talk_stage(generation, "ambient_suspend", "end", room_media_set_ambient_wake(false)) != ESP_OK) {
+        request_talk_teardown(generation, "Talk setup failed");
+        goto done;
+    }
+    talk_stage(generation, "sdk_start", "begin", 0);
+    if (talk_stage(generation, "sdk_start", "end", esp_webrtc_start(session)) != 0 ||
+        talk_stage(generation, "timer_start", "end", xTimerStart(talk_timeout_timer, 0)) != pdPASS) {
         request_talk_teardown(generation, "Talk setup failed");
     }
 
@@ -517,7 +600,9 @@ done:
     xSemaphoreTake(state_lock, portMAX_DELAY);
     talk_start_in_flight = false;
     if (talk_cancel_requested) wake_talk_teardown();
+    cancelled = talk_cancel_requested;
     xSemaphoreGive(state_lock);
+    talk_stage(generation, "startup", cancelled ? "canceled" : "end", 0);
 }
 
 static void on_wake(const char *wake_word, void *ctx)
@@ -969,8 +1054,10 @@ static esp_err_t handle_talk_stop(
         return ESP_ERR_INVALID_ARG;
     }
     xSemaphoreTake(state_lock, portMAX_DELAY);
-    bool active = request_talk_stop_locked(talk_generation, NULL);
+    uint32_t generation = talk_generation;
+    bool active = request_talk_stop_locked(generation, NULL);
     xSemaphoreGive(state_lock);
+    talk_stage(generation, "stop_request", active ? "accepted" : "ignored", 0);
     *out_payload_json = strdup(
         active ? "{\"stopped\":true}" : "{\"stopped\":false}");
     if (*out_payload_json == NULL) {

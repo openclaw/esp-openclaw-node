@@ -7,7 +7,13 @@ import subprocess
 import tempfile
 
 CASES = ["ice-drain", "connected-drain", "failure-drain", "answer-drain", "late-http",
-         "late-create", "late-config", "late-failure", "submission-failure", "canceled-start", "lifecycle-isolation", "admission-race"]
+         "late-create", "late-config", "late-failure", "submission-failure", "canceled-start", "lifecycle-isolation", "admission-race",
+         "callback-diagnostics"]
+CASES += [f"diagnostic-{stage}" for stage in (
+    "http_init", "http_content_type", "http_post", "http_perform", "http_status",
+    "response_size", "response_alloc", "response_missing", "response_short",
+    "response_malformed", "answer_callback",
+)]
 
 
 def main():

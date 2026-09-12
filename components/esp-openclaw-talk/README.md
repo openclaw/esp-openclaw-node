@@ -29,6 +29,31 @@ default.
 
 The ESP WebRTC source is pinned as the repository submodule at `third_party/esp-webrtc-solution`; clone this repository with submodules enabled.
 
+## Stage diagnostics
+
+`talk_rtc_diag` records local stage/phase, numeric result and a
+`first_failure` flag claimed once per call. A `begin` without its matching
+`end` is unfinished, not a reported failure. RPC submission completion is not
+remote completion. `absent` and `canceled` distinguish an unconfigured callback
+from one skipped after cancellation. Header, post-field and ICE/signaling
+callback errors are observed without changing their existing ignored-return
+policy. Descriptor and HTTP records contain only validation flags and HTTP
+status; SDP, URLs, identity fields, headers and remote error text are excluded.
+
+Room examples emit `room_talk_diag` with the existing local generation around
+startup, peer events and teardown. Its `result` preserves each stage's native
+convention: timer `pdPASS=1` is success and peer enum values are not errors;
+nonzero does not generically mean failure. `room_talk_audio` snapshots existing
+cumulative capture/AFE/renderer counters at those boundaries only. These
+counters do not prove network delivery or audible output. Before negotiation,
+the application lowers the pinned SDK's `webrtc` tag to WARN only when per-tag
+dynamic control is available and its level is more verbose; INFO includes
+outbound SDP. It never raises a quieter level or changes global logging.
+The effective-level readback refuses WebRTC setup if INFO remains enabled.
+Static logging also requires a compiled maximum below INFO: its default-level
+getter alone does not prove suppression. Do not enable that tag's INFO/DEBUG output in
+captures intended for sharing. These diagnostics do not qualify RTC or audio.
+
 ## Prepared-call lifetime
 
 Owners that close WebRTC asynchronously should prepare a call before scheduling

@@ -20,6 +20,8 @@ def main():
     parser.add_argument("--managed-components", type=Path, default=repo / "examples/m5stack-tab5-room-node/managed_components")
     parser.add_argument("--cjson-dir", type=Path, help="Defaults to cJSON within --managed-components")
     parser.add_argument("--case", action="append", help="Exact case name; repeat to select multiple (default: all)")
+    parser.add_argument("--log-mode", choices=("tagged", "no-tags", "static", "static-quiet"),
+                        help="Select one SDK logging mode (default: all, policy cases for alternate modes)")
     parser.add_argument("--list", action="store_true")
     parser.add_argument("--analyze", action="store_true")
     args = parser.parse_args()
@@ -81,20 +83,37 @@ def main():
             str(repo / "components/esp-openclaw-talk/src/esp_openclaw_talk.c"),
             *link, "-o", str(binary),
         ]
-        print("BUILD", shlex.join(command), flush=True)
-        result = subprocess.run(command)
-        if result.returncode:
-            return result.returncode
-        if args.list:
-            return subprocess.run([str(binary), "--list"]).returncode
-        cases = args.case or subprocess.check_output([str(binary), "--list"], text=True).splitlines()
         failed = 0
-        for case in cases:
-            print("RUN", shlex.join([str(binary), "--case", case]), flush=True)
-            result = subprocess.run([str(binary), "--case", case])
-            print(f"RESULT {case}: exit {result.returncode}", flush=True)
-            failed += result.returncode != 0
-        print(f"{len(cases)} cases, {failed} failed (failures are not inverted)", flush=True)
+        total = 0
+        modes = [args.log_mode] if args.log_mode else ["tagged", "no-tags", "static", "static-quiet"]
+        for mode in modes:
+            flags = {
+                "tagged": [],
+                "no-tags": ["-DCONFIG_LOG_TAG_LEVEL_IMPL_NONE=1"],
+                "static": ["-DCONFIG_LOG_DYNAMIC_LEVEL_CONTROL=0",
+                           "-DCONFIG_LOG_TAG_LEVEL_IMPL_NONE=1", "-DCONFIG_LOG_DEFAULT_LEVEL=2"],
+                "static-quiet": ["-DCONFIG_LOG_DYNAMIC_LEVEL_CONTROL=0",
+                                 "-DCONFIG_LOG_TAG_LEVEL_IMPL_NONE=1", "-DCONFIG_LOG_DEFAULT_LEVEL=2",
+                                 "-DCONFIG_LOG_MAXIMUM_LEVEL=2"],
+            }[mode]
+            print("BUILD", mode, shlex.join(command + flags), flush=True)
+            result = subprocess.run(command + flags)
+            if result.returncode:
+                return result.returncode
+            if args.list:
+                return subprocess.run([str(binary), "--list"]).returncode
+            cases = args.case or (
+                subprocess.check_output([str(binary), "--list"], text=True).splitlines()
+                if mode == "tagged" else ["sdk-log-policy-warn"] if mode.startswith("static") else
+                ["sdk-log-policy-info", "sdk-log-policy-warn", "sdk-log-policy-error"]
+            )
+            for case in cases:
+                print("RUN", mode, shlex.join([str(binary), "--case", case]), flush=True)
+                result = subprocess.run([str(binary), "--case", case])
+                print(f"RESULT {mode}/{case}: exit {result.returncode}", flush=True)
+                failed += result.returncode != 0
+            total += len(cases)
+        print(f"{total} cases, {failed} failed (failures are not inverted)", flush=True)
         return 1 if failed else 0
 
 

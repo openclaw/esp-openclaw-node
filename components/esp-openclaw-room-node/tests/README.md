@@ -1,5 +1,22 @@
 # Talk lifetime source proofs
 
+## Media diagnostic regressions
+
+The Talk pthread suite now captures the actual adapter's fixed-field records,
+injects HTTP initialization/transport/status/body failures and callback return
+errors, and checks first-failure retention, ignored-return behavior, late
+cancellation and secret exclusion. The room lifecycle fixture checks actual
+startup failure short circuits, ordered teardown stages, SDK log suppression
+before negotiation, and existing audio-counter snapshots outside locks.
+
+`python3 -m unittest discover -s scripts/tests -p test_tab5_camera_diagnostics.py -v`
+compiles the actual Tab5 capture/cleanup functions with narrow synthetic V4L2
+boundaries under ASan/UBSan. It covers immediate errno retention across logging
+and failing cleanup, stale errno on validation, partial mappings, initialization
+caching, RGB565 variants and bounded dequeue-loop records. This is not V4L2 ABI,
+DMA, sensor or physical frame proof. `TAB5_CAMERA_SOURCE` can select a trusted
+baseline source file for a red comparison without editing the worktree.
+
 ## Static home UI
 
 The UI host runner compiles the real UI controller and board binding with LVGL 9,

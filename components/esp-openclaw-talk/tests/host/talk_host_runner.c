@@ -16,8 +16,25 @@ static size_t test_count;
 _Thread_local unsigned talk_host_critical_depth;
 unsigned talk_host_error_count;
 
+void talk_host_log_info(const char *tag, const char *format, ...)
+{
+    (void)tag;
+    TEST_ASSERT_EQUAL_MESSAGE(0, talk_host_critical_depth, "Diagnostic logging outside locks");
+    char line[1024];
+    va_list args;
+    va_start(args, format);
+    int length = vsnprintf(line, sizeof(line), format, args);
+    va_end(args);
+    TEST_ASSERT_TRUE(length >= 0 && (size_t)length < sizeof(line));
+    TEST_ASSERT_NULL(strstr(line, "broker-token"));
+    TEST_ASSERT_NULL(strstr(line, "voice-1"));
+    TEST_ASSERT_NULL(strstr(line, "gateway.example"));
+    TEST_ASSERT_NULL(strstr(line, "SECRET_ERROR_CANARY"));
+}
+
 void talk_host_log_error(const char *tag, const char *format, ...)
 {
+    TEST_ASSERT_EQUAL_MESSAGE(0, talk_host_critical_depth, "Diagnostic logging outside locks");
     ++talk_host_error_count;
     va_list args;
     va_start(args, format);

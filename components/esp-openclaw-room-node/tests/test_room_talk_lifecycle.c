@@ -577,28 +577,39 @@ static void immediate_create_failure(void)
 }
 static void open_failure(void)
 {
+    host.capture_diagnostics = true;
     host.fail_open = true;
     admit();
     host_run_task("talk_start");
     drain();
     CHECK(host.closes == 0 && host.media_ends == 1 && talk_call == NULL, "open failure releases admitted media once");
+    CHECK(strstr(host.diagnostics, "stage=sdk_open phase=end result=-1") != NULL,
+        "actual open failure classified before cleanup");
+    CHECK(strstr(host.diagnostics, "stage=sdk_start") == NULL, "failed open never starts the SDK");
 }
 static void provider_failure(void)
 {
+    host.capture_diagnostics = true;
     host.fail_provider = true;
     admit();
     host_run_task("talk_start");
     drain();
     CHECK(host.closes == 1 && host.media_ends == 1 && host.ambient_restores == 0 && talk_call == NULL,
         "pre-start failure closes with capture still ambient");
+    CHECK(strstr(host.diagnostics, "stage=sdk_media_provider phase=end result=-1") != NULL,
+        "actual provider failure classified");
+    CHECK(strstr(host.diagnostics, "stage=sdk_capture_policy") == NULL, "provider short circuit preserved");
 }
 static void start_failure(void)
 {
+    host.capture_diagnostics = true;
     host.fail_start = true;
     admit();
     host_run_task("talk_start");
     drain();
     expect_closed();
+    CHECK(strstr(host.diagnostics, "stage=sdk_start phase=end result=-1") != NULL, "actual start failure classified");
+    CHECK(strstr(host.diagnostics, "stage=timer_start") == NULL, "SDK failure still skips timer start");
 }
 static void timer_failure(void)
 {
@@ -618,7 +629,91 @@ static void timeout_stop(void)
     expect_closed();
 }
 
+static void diagnostic_boundaries(void)
+{
+    host.capture_diagnostics = true;
+    start_pending_config();
+    host_reply_config();
+    host_reply_create(true);
+    host_emit_peer(webrtc, ESP_WEBRTC_EVENT_CONNECTING);
+    host_emit_peer(webrtc, ESP_WEBRTC_EVENT_PAIRED);
+    CHECK(!talk_active, "connecting and paired are not connected");
+    host_emit_peer(webrtc, ESP_WEBRTC_EVENT_CONNECTED);
+    stop();
+    drain();
+    const char *stages[] = {"stage=peer_connecting", "stage=peer_paired", "stage=peer_connected",
+        "stage=stop_request phase=accepted", "stage=quiesce phase=begin", "stage=quiesce phase=end",
+        "stage=sdk_close phase=begin", "stage=sdk_close phase=end", "stage=ambient_restore phase=end",
+        "stage=media_release phase=end"};
+    const char *cursor = host.diagnostics;
+    for (size_t i = 0; i < sizeof(stages) / sizeof(*stages); ++i) {
+        const char *next = strstr(cursor, stages[i]);
+        CHECK(next != NULL, "actual event and teardown boundaries recorded in order");
+        if (next != NULL) cursor = next + strlen(stages[i]);
+    }
+    CHECK(strstr(host.diagnostics,
+        "capture_ok=11 capture_err=2 feed_ok=13 feed_err=3 fetch_ok=17 fetch_err=5 render_ok=19 render_err=7") != NULL,
+        "audio record uses actual existing snapshot fields, not inferred network delivery");
+    CHECK(host.audio_snapshots == 6, "audio sampled at acquire, three peer events, teardown and release only");
+    expect_closed();
+}
+
+static void sdk_log_policy_failure(void)
+{
+    host.capture_diagnostics = true;
+    host.fail_log_policy = true;
+    admit();
+    host_run_task("talk_start");
+    CHECK(host.opens == 0 && host.starts == 0 && host.config_requests == 0,
+        "failed SDK tag suppression must stop before WebRTC open or negotiation");
+    drain();
+    CHECK(host.closes == 0 && host.media_ends == 1 && host.ambient && talk_call == NULL,
+        "privacy failure uses existing local cleanup with capture still ambient");
+    CHECK(strstr(host.diagnostics, "stage=sdk_log_policy phase=end result=-1") != NULL,
+        "privacy refusal has a fixed local failure stage");
+    CHECK(strstr(host.diagnostics, "stage=sdk_open") == NULL, "no SDK open marker after privacy refusal");
+}
+
+static void sdk_log_policy_level(esp_log_level_t level)
+{
+    host.capture_diagnostics = true;
+    host.global_log_level = level;
+    host.sdk_log_level = level;
+    bool can_set_tag = CONFIG_LOG_DYNAMIC_LEVEL_CONTROL && !CONFIG_LOG_TAG_LEVEL_IMPL_NONE;
+    bool allowed = CONFIG_LOG_DYNAMIC_LEVEL_CONTROL
+        ? (can_set_tag || level <= ESP_LOG_WARN)
+        : (level <= ESP_LOG_WARN && CONFIG_LOG_MAXIMUM_LEVEL < ESP_LOG_INFO);
+    admit();
+    host_run_task("talk_start");
+    CHECK(host.global_log_level == level, "Talk must not mutate global logging");
+    CHECK(host.log_set_calls == (unsigned)(can_set_tag && level > ESP_LOG_WARN),
+        "set only a supported tag that needs lowering; never raise a quieter policy");
+    CHECK(esp_log_level_get("webrtc") == (can_set_tag && level > ESP_LOG_WARN ? ESP_LOG_WARN : level),
+        "effective policy matches the selected SDK logging mode");
+    CHECK(host.opens == (unsigned)allowed && host.config_requests == (unsigned)allowed,
+        "unsafe unsupported logging refuses before SDK open or negotiation");
+    if (!allowed) {
+        drain();
+        CHECK(host.closes == 0 && host.media_ends == 1 && host.ambient && talk_call == NULL,
+            "unsupported unsafe logging follows local setup cleanup");
+        CHECK(strstr(host.diagnostics, "stage=sdk_log_policy phase=end result=-1") != NULL &&
+            strstr(host.diagnostics, "stage=sdk_open") == NULL, "refusal retains fixed diagnostic");
+    }
+    if (host.config_requests != 0) {
+        host_reply_config();
+        host_reply_create(true);
+    }
+}
+static void sdk_log_policy_info(void) { sdk_log_policy_level(ESP_LOG_INFO); }
+static void sdk_log_policy_warn(void) { sdk_log_policy_level(ESP_LOG_WARN); }
+static void sdk_log_policy_error(void) { sdk_log_policy_level(ESP_LOG_ERROR); }
+
 static const struct { const char *name; void (*run)(void); } cases[] = {
+    {"sdk-log-policy-info", sdk_log_policy_info},
+    {"sdk-log-policy-warn", sdk_log_policy_warn},
+    {"sdk-log-policy-error", sdk_log_policy_error},
+    {"sdk-log-policy-failure", sdk_log_policy_failure},
+    {"diagnostic-boundaries", diagnostic_boundaries},
     {"home-connection-facts", home_connection_facts},
     {"late-create-replacement", late_create_replacement},
     {"wake-admission-loss", wake_admission_loss},

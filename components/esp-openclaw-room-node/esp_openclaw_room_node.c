@@ -1140,14 +1140,12 @@ static int diagnostics_status_command(void)
     room_media_tone_snapshot_t tone = {0};
     room_media_get_tone_snapshot(&tone);
 
-    printf("diagnostics=%s Talk=%s tone=%s",
+    printf("diagnostics=%s Talk=%s tone=%s%s%s (%u/%u/%u requested/queued/accepted)\n",
         runtime.diagnostics_open ? "open" : "closed",
         runtime.talk_phase,
-        room_media_tone_state_name(tone.state));
-    if (tone.state == ROOM_MEDIA_TONE_ERROR) {
-        printf("/%s", room_media_tone_error_name(tone.error));
-    }
-    printf(" (%u/%u/%u requested/queued/accepted)\n",
+        room_media_tone_state_name(tone.state),
+        tone.state == ROOM_MEDIA_TONE_ERROR ? "/" : "",
+        tone.state == ROOM_MEDIA_TONE_ERROR ? room_media_tone_error_name(tone.error) : "",
         tone.requested_frames,
         tone.enqueued_frames,
         tone.renderer_accepted_frames);

@@ -1,5 +1,21 @@
 # Talk lifetime source proofs
 
+## Console header framing
+
+The lifecycle runner's `console-diagnostics-bytes` and
+`console-diagnostics-contention` cases execute the actual `diagnostics status`
+handler with synthetic snapshots. They preserve normal tone output, `error/none`,
+spaced error labels, counters, newline and subsequent lines. The contention
+case schedules another normal stdio record after the first completed print
+call: the original split header fails intact-line checks; the single-call
+header passes without changing output bytes.
+
+The fixture uses real stdio calls on a temporary stream and a deterministic
+between-call schedule, not hardware concurrency. This protects the header
+against normal writers using the same stdio stream; it does not make the
+multi-line report atomic or serialize ROM output. It does not establish the
+cause of a prior observation whose raw header was not retained.
+
 ## Media diagnostic regressions
 
 The Talk pthread suite now captures the actual adapter's fixed-field records,
@@ -176,10 +192,10 @@ capture, renderer, codec, LVGL, SAL, ESP error, console, timer and HTTP headers.
 It also uses the real ESP-IDF heap header. Unreferenced board startup and physical
 media code are omitted by linker section collection, but GCC ASan global
 registration retains the static console command table and its diagnostic
-callbacks. Those callbacks' external diagnostics, tone, Wi-Fi, heap, clock and
-`strlcpy` boundaries have correctly typed stubs that abort with the symbol name
-if executed. The real controller and Talk lifecycle remain linked and exercised.
-All fixtures use synthetic identities and data.
+callbacks. The console cases explicitly enable typed tone, UI, Canvas, heap,
+clock and `strlcpy` snapshot fakes; unsupported calls still abort with the symbol
+name outside those cases. The real controller and Talk lifecycle remain linked
+and exercised. All fixtures use synthetic identities and data.
 
 The room runner also checks its queue fixture before running the 36 lifecycle
 cases. Allocation dimensions, item counts and byte arithmetic use `size_t`;

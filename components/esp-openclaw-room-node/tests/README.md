@@ -1,5 +1,21 @@
 # Talk lifetime source proofs
 
+## Console header framing
+
+The lifecycle runner's `console-diagnostics-bytes` and
+`console-diagnostics-contention` cases execute the actual `diagnostics status`
+handler with synthetic snapshots. They preserve normal tone output, `error/none`,
+spaced error labels, counters, newline and subsequent lines. The contention
+case schedules another normal stdio record after the first completed print
+call: the original split header fails intact-line checks; the single-call
+header passes without changing output bytes.
+
+The fixture uses real stdio calls on a temporary stream and a deterministic
+between-call schedule, not hardware concurrency. This protects the header
+against normal writers using the same stdio stream; it does not make the
+multi-line report atomic or serialize ROM output. It does not establish the
+cause of a prior observation whose raw header was not retained.
+
 ## Media diagnostic regressions
 
 The Talk pthread suite now captures the actual adapter's fixed-field records,
@@ -176,10 +192,10 @@ capture, renderer, codec, LVGL, SAL, ESP error, console, timer and HTTP headers.
 It also uses the real ESP-IDF heap header. Unreferenced board startup and physical
 media code are omitted by linker section collection, but GCC ASan global
 registration retains the static console command table and its diagnostic
-callbacks. Those callbacks' external diagnostics, tone, Wi-Fi, heap, clock and
-`strlcpy` boundaries have correctly typed stubs that abort with the symbol name
-if executed. The real controller and Talk lifecycle remain linked and exercised.
-All fixtures use synthetic identities and data.
+callbacks. The console cases explicitly enable typed tone, UI, Canvas, heap,
+clock and `strlcpy` snapshot fakes; unsupported calls still abort with the symbol
+name outside those cases. The real controller and Talk lifecycle remain linked
+and exercised. All fixtures use synthetic identities and data.
 
 The room runner also checks its queue fixture before running the 36 lifecycle
 cases. Allocation dimensions, item counts and byte arithmetic use `size_t`;
@@ -245,3 +261,73 @@ vendor checkouts remain clean. All build/config/generated dependency artifacts
 are ignored or outside the source tree. No private config, flash contents, NVS or
 recordings were copied. No hardware, USB/serial, pairing, network service tests,
 deployment, commits, pushes or publication occurred.
+
+## Hardware qualification
+
+This is a checklist for a new physical run, not additional evidence for the
+historical results above. Start every row at `not run`; change it to `pass` or
+`fail` only after observing the named outcome. Keep untested or inapplicable
+rows at `not run` with a reason. A source build, host test, successful pairing,
+or renderer acceptance alone does not qualify the device.
+
+### Record the candidate
+
+- Board model, silicon and display/touch revision; for Tab5, the C6 firmware
+  version and selected USB-host or RS-485 mode.
+- Firmware source commit and image SHA-256, example and build configuration,
+  ESP-IDF version, and submodule commits. For a registry package or prebuilt
+  image, also record its version, archive/image digest, and advertised source
+  identity; do not substitute the current checkout's identity.
+- Gateway version and source commit when available, selected role scopes and
+  command allowlist, test date, and an operator-selected non-identifying unit
+  label.
+
+Use only the assigned device and serial port with an isolated or explicitly
+approved Gateway. Get approval before power cycling, interrupting a connection,
+capturing an image, or starting a provider-backed Talk call. Preserve pairing
+state during reconnect checks; do not erase NVS or disturb other clients.
+
+### Run the checks
+
+Follow the selected [Waveshare](../../../examples/waveshare-esp32-s3-touch-amoled-2.06-room-node/README.md)
+or [Tab5](../../../examples/m5stack-tab5-room-node/README.md) build, provisioning,
+command-policy, and board-specific prerequisites first.
+
+| Check | Procedure and required observation | Result |
+| --- | --- | --- |
+| Boot and provisioning | Boot the selected image, provision through the documented console, and confirm the intended node and operator connections. Record initialization failures rather than treating a partially available node as fully qualified. | not run |
+| Saved-session reconnect | Power cycle the assigned board without clearing NVS. Confirm both roles reconnect to the intended Gateway without a new setup code; record any approval or credential failure. | not run |
+| Status commands | Run the three commands below. Confirm successful responses for the intended node and plausible device/Wi-Fi data, not merely a connected entry in `nodes status`. | not run |
+| Display and Canvas | Check orientation, touch alignment, show/hide, a bounded image, and a supported A2UI button through the documented node commands. Confirm the button reaches its owning agent session. This does not qualify HTML rendering or unsupported interactive controls. | not run |
+| Local audio | Run `diagnostics status` and `diagnostics tone` while Talk is idle. Inspect fresh microphone/capture data and have the operator confirm the tone is audible; renderer acceptance alone is insufficient. | not run |
+| Talk and recovery | Start one call with the documented `wake` console command. Confirm audible bidirectional speech and normal stop. On the approved test connection, exercise operator control loss or matching session closure; confirm playback ends, media ownership is released, and ambient capture resumes before another call. Record audible continuation or stuck ownership as failures. | not run |
+| Tab5 camera | With explicit capture consent, run the documented front-camera snap. Observe the visible capture indicator and inspect the returned image. Do not infer rear-camera, clip, or external USB-camera support. | not run |
+| Tab5 hardware status | Invoke `hardware.status` and check the installed sensors and selected interface mode. Missing peripherals must remain visibly unavailable/partial; do not infer battery percentage from INA226 telemetry. | not run |
+
+Gateway-side status checks:
+
+```sh
+openclaw nodes status --json
+openclaw nodes invoke --node <node-id> --command device.info --json
+openclaw nodes invoke --node <node-id> --command device.status --json
+openclaw nodes invoke --node <node-id> --command wifi.status --json
+```
+
+Room-node serial console checks:
+
+```text
+diagnostics status
+diagnostics tone
+wake
+```
+
+Record observations, failures, and evidence references alongside each result,
+including the duration of any sustained Talk run. Keep loudness/distortion,
+echo cancellation, wake false accepts, thermals, and long-running stability
+unqualified unless separately measured on that board and image.
+
+Before sharing evidence, remove credentials, setup codes, private URLs and
+addresses, network identifiers, personal paths, and device identifiers. Do not
+publish NVS contents or recordings as routine proof. Preserve the historical
+source-only and panel-specific caveats; a result for one unit or firmware does
+not qualify another.

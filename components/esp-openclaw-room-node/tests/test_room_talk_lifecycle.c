@@ -2,7 +2,32 @@
  * bootstrapping and observations. All call admission/event ingress uses the
  * registered production handlers. Talk is a separate real translation unit. */
 #include "host/room_host_fakes.h"
+#include <stdarg.h>
+#include <stdio.h>
+
+static int console_printf(const char *format, ...) __attribute__((format(printf, 1, 2)));
+#define printf(...) console_printf(__VA_ARGS__)
 #include "../esp_openclaw_room_node.c"
+#undef printf
+
+static FILE *console_capture;
+static bool console_competing_writer;
+static const char competing_record[] = "I (1) synthetic: competing stdout record\n";
+
+static int console_printf(const char *format, ...)
+{
+    FILE *output = console_capture != NULL ? console_capture : stdout;
+    va_list args;
+    va_start(args, format);
+    int result = vfprintf(output, format, args);
+    va_end(args);
+    if (console_capture != NULL && console_competing_writer) {
+        /* A normal writer can run after a complete stdio call, not inside it. */
+        console_competing_writer = false;
+        host_require(fputs(competing_record, output) >= 0, "competing stdio writer");
+    }
+    return result;
+}
 
 static unsigned failures;
 #define CHECK(condition, message) do { \
@@ -708,7 +733,88 @@ static void sdk_log_policy_info(void) { sdk_log_policy_level(ESP_LOG_INFO); }
 static void sdk_log_policy_warn(void) { sdk_log_policy_level(ESP_LOG_WARN); }
 static void sdk_log_policy_error(void) { sdk_log_policy_level(ESP_LOG_ERROR); }
 
+static void check_console_header(room_media_tone_state_t state, room_media_tone_error_t error,
+    const char *state_name, const char *error_name, const char *expected_tone, bool competing)
+{
+    host.console_snapshots = true;
+    host.console_tone = (room_media_tone_snapshot_t){
+        .state = state, .error = error, .requested_frames = 13,
+        .enqueued_frames = 7, .renderer_accepted_frames = 3,
+    };
+    host.console_tone_state_name = state_name;
+    host.console_tone_error_name = error_name;
+    host.console_tone_error_name_calls = 0;
+    console_capture = tmpfile();
+    host_require(console_capture != NULL, "console capture file");
+    console_competing_writer = competing;
+    char command[] = "diagnostics";
+    char subcommand[] = "status";
+    char *argv[] = {command, subcommand};
+    CHECK(diagnostics_console_command(2, argv) == 0, "diagnostic status remains successful");
+    host_require(fflush(console_capture) == 0, "flush console capture");
+    rewind(console_capture);
+    char actual[2048] = {0};
+    size_t length = fread(actual, 1, sizeof(actual) - 1, console_capture);
+    host_require(!ferror(console_capture) && feof(console_capture), "complete bounded console capture");
+    host_require(fclose(console_capture) == 0, "close console capture");
+    console_capture = NULL;
+    console_competing_writer = false;
+    host.console_snapshots = false;
+
+    char expected[2048];
+    int count = snprintf(expected, sizeof(expected),
+        "diagnostics=closed Talk=idle tone=%s (13/7/3 requested/queued/accepted)\n"
+        "%s"
+        "audio mic=0@0us afe=0@0us rx=0@0us renderer accepted/errors=19/7\n"
+        "wifi=disconnected ssid=\"\" rssi=0 dBm heap=40000/16000 B psram=8000000 B\n"
+        "Talk VAD silence=%u ms player queues=%u/%u KiB\n",
+        expected_tone, competing ? competing_record : "",
+        ROOM_TALK_VAD_SILENCE_MS, ROOM_PLAYER_RAW_FIFO_KIB, ROOM_PLAYER_RENDER_FIFO_KIB);
+    host_require(count > 0 && (size_t)count < sizeof(expected), "bounded expected console output");
+    CHECK(length == (size_t)count && strcmp(actual, expected) == 0,
+        "complete diagnostic header and following lines preserve exact bytes under the chosen writer schedule");
+    CHECK(host.console_tone_error_name_calls == (state == ROOM_MEDIA_TONE_ERROR ? 1U : 0U),
+        "error name is queried only for the error tone state");
+}
+
+static void console_diagnostics_bytes(void)
+{
+    static const struct {
+        room_media_tone_state_t state;
+        room_media_tone_error_t error;
+        const char *state_name, *error_name, *expected;
+    } tones[] = {
+        {ROOM_MEDIA_TONE_IDLE, ROOM_MEDIA_TONE_ERROR_NONE, "idle", "none", "idle"},
+        {ROOM_MEDIA_TONE_RUNNING, ROOM_MEDIA_TONE_ERROR_TASK, "running", "worker task", "running"},
+        {ROOM_MEDIA_TONE_DONE, ROOM_MEDIA_TONE_ERROR_NONE, "done", "none", "done"},
+        {ROOM_MEDIA_TONE_BUSY, ROOM_MEDIA_TONE_ERROR_NONE, "busy", "none", "busy"},
+        {ROOM_MEDIA_TONE_ERROR, ROOM_MEDIA_TONE_ERROR_NONE, "error", "none", "error/none"},
+        {ROOM_MEDIA_TONE_ERROR, ROOM_MEDIA_TONE_ERROR_UNAVAILABLE, "error", "unavailable", "error/unavailable"},
+        {ROOM_MEDIA_TONE_ERROR, ROOM_MEDIA_TONE_ERROR_TASK, "error", "worker task", "error/worker task"},
+        {ROOM_MEDIA_TONE_ERROR, ROOM_MEDIA_TONE_ERROR_RESET, "error", "player reset", "error/player reset"},
+        {ROOM_MEDIA_TONE_ERROR, ROOM_MEDIA_TONE_ERROR_STREAM, "error", "PCM stream", "error/PCM stream"},
+        {ROOM_MEDIA_TONE_ERROR, ROOM_MEDIA_TONE_ERROR_FRAME_INFO, "error", "frame format", "error/frame format"},
+        {ROOM_MEDIA_TONE_ERROR, ROOM_MEDIA_TONE_ERROR_FEED, "error", "frame enqueue", "error/frame enqueue"},
+        {ROOM_MEDIA_TONE_ERROR, ROOM_MEDIA_TONE_ERROR_EOS, "error", "EOS enqueue", "error/EOS enqueue"},
+        {ROOM_MEDIA_TONE_ERROR, ROOM_MEDIA_TONE_ERROR_RENDER_TIMEOUT, "error", "renderer timeout", "error/renderer timeout"},
+    };
+    for (size_t i = 0; i < sizeof(tones) / sizeof(*tones); ++i) {
+        check_console_header(tones[i].state, tones[i].error,
+            tones[i].state_name, tones[i].error_name, tones[i].expected, false);
+    }
+}
+
+static void console_diagnostics_contention(void)
+{
+    check_console_header(ROOM_MEDIA_TONE_IDLE, ROOM_MEDIA_TONE_ERROR_NONE,
+        "idle", "none", "idle", true);
+    check_console_header(ROOM_MEDIA_TONE_ERROR, ROOM_MEDIA_TONE_ERROR_TASK,
+        "error", "worker task", "error/worker task", true);
+}
+
 static const struct { const char *name; void (*run)(void); } cases[] = {
+    {"console-diagnostics-bytes", console_diagnostics_bytes},
+    {"console-diagnostics-contention", console_diagnostics_contention},
     {"sdk-log-policy-info", sdk_log_policy_info},
     {"sdk-log-policy-warn", sdk_log_policy_warn},
     {"sdk-log-policy-error", sdk_log_policy_error},

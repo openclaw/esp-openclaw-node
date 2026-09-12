@@ -359,8 +359,21 @@ Commands outside the Gateway's generic platform policy require an explicit
 set is:
 
 ```json
-["camera.list","camera.snap","canvas.present","canvas.navigate","canvas.hide","canvas.snapshot","canvas.a2ui.pushJSONL","canvas.a2ui.push","canvas.a2ui.reset","dir.list","file.fetch","file.write","hardware.status","face.set","face.gesture","talk.start","talk.stop"]
+["device.info","device.status","wifi.status","camera.list","camera.snap","canvas.present","canvas.navigate","canvas.hide","canvas.snapshot","canvas.a2ui.pushJSONL","canvas.a2ui.push","canvas.a2ui.reset","dir.list","file.fetch","file.write","hardware.status","face.set","face.gesture","talk.start","talk.stop"]
 ```
+
+After pairing and any required command-surface approval, check the shared
+status commands:
+
+```sh
+openclaw nodes invoke --node <tab5-node> --command device.info --json
+openclaw nodes invoke --node <tab5-node> --command device.status --json
+openclaw nodes invoke --node <tab5-node> --command wifi.status --json
+```
+
+Use the [hardware qualification checklist](../../components/esp-openclaw-room-node/tests/README.md#hardware-qualification)
+to record results for the exact board revision and firmware. Historical panel
+verification above does not qualify a different panel or a new firmware image.
 
 `camera.snap` is privacy-heavy. The firmware refuses to open the camera unless
 the UI controller has visibly armed and flushed its capture indicator, and

@@ -19,6 +19,8 @@ SCRIPT = Path(__file__).resolve().parents[1] / "package_firmware.py"
 sys.path.insert(0, str(SCRIPT.parent))
 from test_idf_tab5_compat import fixture_profile, seed_sdk
 import idf_tab5_compat as compat
+from test_tab5_sdio_diagnostics import HAS_MANAGER, component_fixture
+import tab5_sdio_diagnostics as sdio
 
 SPEC = importlib.util.spec_from_file_location("package_firmware", SCRIPT)
 firmware = importlib.util.module_from_spec(SPEC)
@@ -133,11 +135,11 @@ class FirmwareBundleTests(unittest.TestCase):
         (self.build / "project_description.json").write_text(json.dumps(self.description))
         (self.build / "flasher_args.json").write_text(json.dumps(self.flash))
 
-    def package(self, nvs_diagnostics=False):
+    def package(self, nvs_diagnostics=False, sdio_diagnostics=False):
         self.write_metadata()
         return firmware.package_firmware(
             self.project, self.build, self.output, self.description["target"],
-            self.provenance, self.dependencies, nvs_diagnostics,
+            self.provenance, self.dependencies, nvs_diagnostics, sdio_diagnostics,
         )
 
     def test_relocated_bundle_preserves_every_image_and_original_inputs(self):
@@ -411,6 +413,48 @@ class FirmwareBundleTests(unittest.TestCase):
             compat.apply_sdk_patch(self.idf)
             with self.assertRaises(ValueError):
                 self.package(nvs_diagnostics=True)
+        self.assertFalse(self.output.exists())
+
+    @unittest.skipUnless(HAS_MANAGER, "actual component hashing runs in the IDF environment")
+    def test_sdio_profile_is_explicit_and_records_actual_component_and_sdk_patches(self):
+        self.configure_tab5()
+        base = seed_sdk(self.idf)
+        with fixture_profile(base), component_fixture(
+                self.project, self.build, self.dependencies) as component:
+            compat.apply_sdk_patch(self.idf, nvs_diagnostics=True)
+            expected = sdio.apply_component_patch(
+                self.project, component, self.build, self.dependencies,
+            )
+            with self.assertRaises(ValueError):
+                self.package(nvs_diagnostics=True)
+            self.assertFalse(self.output.exists())
+            self.package(nvs_diagnostics=True, sdio_diagnostics=True)
+            manifest = json.loads((self.output / "manifest.json").read_text())
+            self.assertEqual(manifest["component_diagnostic_patch"], expected)
+            self.assertEqual(manifest["idf"]["commit"], base)
+            self.assertTrue(manifest["idf"]["dirty"])
+            self.assertIn("compatibility_patch", manifest["idf"])
+            self.assertIn("diagnostic_patch", manifest["idf"])
+
+    @unittest.skipUnless(HAS_MANAGER, "actual component hashing runs in the IDF environment")
+    def test_sdio_profile_rejects_tampered_component_without_uploadable_output(self):
+        self.configure_tab5()
+        base = seed_sdk(self.idf)
+        with fixture_profile(base), component_fixture(
+                self.project, self.build, self.dependencies) as component:
+            compat.apply_sdk_patch(self.idf, nvs_diagnostics=True)
+            sdio.apply_component_patch(self.project, component, self.build, self.dependencies)
+            (component / "other.c").write_text("/* Unexpected edit. */\n")
+            with self.assertRaises(ValueError):
+                self.package(nvs_diagnostics=True, sdio_diagnostics=True)
+            self.assertFalse(self.output.exists())
+
+    def test_sdio_mode_rejects_other_examples_and_missing_nvs_profile(self):
+        with self.assertRaises(ValueError):
+            self.package(sdio_diagnostics=True)
+        self.configure_tab5()
+        with self.assertRaises(ValueError):
+            self.package(sdio_diagnostics=True)
         self.assertFalse(self.output.exists())
 
 

@@ -1,0 +1,78 @@
+--- a/host/drivers/transport/sdio/sdio_drv.c
++++ b/host/drivers/transport/sdio/sdio_drv.c
+@@ -24,6 +24,9 @@
+ #include "hci_drv.h"
+ #include "endian.h"
+ #include "esp_hosted_transport_init.h"
++#include "esp_attr.h"
++#include "esp_heap_caps.h"
++#include "esp_rom_sys.h"
+ 
+ static const char TAG[] = "H_SDIO_DRV";
+ 
+@@ -648,10 +651,21 @@
+ 	return ESP_OK;
+ }
+ #else // H_SDIO_HOST_STREAMING_MODE
++/* Only the RX task accesses this diagnostic state, under the driver mutex. */
++static DRAM_ATTR struct {
++	bool seen;
++	int err;
++	uint32_t logical_len;
++	uint16_t transfer_arg_len;
++	uint32_t counter_before_advance;
++} sdio_last_failed_read;
++static DRAM_ATTR bool sdio_alloc_reported;
++
+ // SDIO streaming mode
+ // return a buffer big enough to contain the data
+ static uint8_t * sdio_rx_get_buffer(uint32_t len)
+ {
++	uint32_t requested_len = len;
+ #if H_SDIO_RX_BLOCK_ONLY_XFER
+ 	// we need to allocate enough memory to hold the padded data
+ 	len = ((len + ESP_BLOCK_SIZE - 1) / ESP_BLOCK_SIZE) * ESP_BLOCK_SIZE;
+@@ -667,6 +681,25 @@
+ 			g_h.funcs->_h_free(*buf);
+ 		}
+ 		*buf = (uint8_t *)MEM_ALLOC(len);
++		if (!*buf && !sdio_alloc_reported) {
++			sdio_alloc_reported = true;
++			multi_heap_info_t info;
++			uint32_t reg_raw;
++			memcpy(&reg_raw, &reg_buf[PACKET_LEN_INDEX], sizeof(reg_raw));
++			heap_caps_get_info(&info, MALLOC_CAP_DMA);
++			esp_rom_printf(DRAM_STR(
++				"sdio_alloc_diag requested=%u padded=%u buffer_index=%d old_size=%u "
++				"dma_free=%u dma_largest=%u reg_raw=%u reg_masked=%u rx_count=%u "
++				"last_seen=%u last_err=%d last_logical_len=%u last_transfer_arg_len=%u last_counter=%u\n"),
++				(unsigned)requested_len, (unsigned)len, index,
++				(unsigned)double_buf.buffer[index].buf_size,
++				(unsigned)info.total_free_bytes, (unsigned)info.largest_free_block,
++				(unsigned)reg_raw, (unsigned)(reg_raw & ESP_SLAVE_LEN_MASK),
++				(unsigned)sdio_rx_byte_count, (unsigned)sdio_last_failed_read.seen,
++				sdio_last_failed_read.err, (unsigned)sdio_last_failed_read.logical_len,
++				(unsigned)sdio_last_failed_read.transfer_arg_len,
++				(unsigned)sdio_last_failed_read.counter_before_advance);
++		}
+ 		assert(*buf);
+ 		double_buf.buffer[index].buf_size = len;
+ 		ESP_LOGD(TAG, "buf %d size: %ld", index, double_buf.buffer[index].buf_size);
+@@ -898,6 +931,17 @@
+ 					pos, len_to_read, ACQUIRE_LOCK);
+ #endif
+ 			if (ret) {
++#if H_SDIO_HOST_RX_MODE == H_SDIO_HOST_STREAMING_MODE
++				sdio_last_failed_read.seen = true;
++				sdio_last_failed_read.err = ret;
++				sdio_last_failed_read.logical_len = len_from_slave;
++#if H_SDIO_RX_BLOCK_ONLY_XFER
++				sdio_last_failed_read.transfer_arg_len = (uint16_t)block_read_len;
++#else
++				sdio_last_failed_read.transfer_arg_len = (uint16_t)len_to_read;
++#endif
++				sdio_last_failed_read.counter_before_advance = sdio_rx_byte_count;
++#endif
+ 				ESP_LOGE(TAG, "%s: Failed to read data - %d %ld %ld",
+ 					__func__, ret, len_to_read, data_left);
+ 				sdio_rx_free_buffer(rxbuff);

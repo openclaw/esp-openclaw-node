@@ -1,6 +1,7 @@
 #pragma once
 
 #include "sdkconfig.h"
+#include "esp_log.h"
 #include "esp_openclaw_node.h"
 #include "esp_webrtc.h"
 #include "esp_timer.h"
@@ -35,7 +36,9 @@ typedef struct {
     bool fail_config_submit, fail_create_submit, fail_open, fail_provider, fail_start, fail_timer;
     const char *node_uri;
     const char *create_voice;
-    bool sdk_log_suppressed, fail_log_policy, capture_diagnostics;
+    bool fail_log_policy, capture_diagnostics;
+    esp_log_level_t global_log_level, sdk_log_level;
+    unsigned log_set_calls;
     unsigned audio_snapshots;
     char diagnostics[16384];
     bool console_snapshots;

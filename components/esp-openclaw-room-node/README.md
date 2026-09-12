@@ -11,7 +11,7 @@ controllers, remote-Wi-Fi transport, and scheduler profiles remain outside
 this component.
 
 Non-animated displays use a static OpenClaw home with board identity, separate
-Wi-Fi/Gateway/Talk facts, and visible error details. Canvas and Diagnostics
+Wi-Fi/Gateway/Talk facts, and bounded setup guidance or error details. Canvas and Diagnostics
 cover the home without replacing those facts. The optional trailing
 `display.idle_brightness` field accepts 0-100; omitted or zero preserves idle
 display sleep, and explicit off requests remain unchanged. A nonzero value

@@ -23,7 +23,9 @@
 #include "room_files.h"
 #include "room_media.h"
 
-room_host_observations_t host = {.ambient = true};
+room_host_observations_t host = {
+    .ambient = true, .global_log_level = ESP_LOG_INFO, .sdk_log_level = ESP_LOG_INFO,
+};
 struct host_mutex { bool held; bool binary; bool available; };
 struct host_queue { size_t capacity, size, count, storage_size; unsigned char *data; };
 struct host_timer { bool active; void *id; void (*callback)(TimerHandle_t); };
@@ -103,14 +105,29 @@ void esp_log_level_set(const char *tag, esp_log_level_t level)
 {
     host_require(mutex_depth == 0 && host.critical_depth == 0, "log policy outside locks");
     host_require(strcmp(tag, "webrtc") == 0 && level == ESP_LOG_WARN, "only unsafe SDK SDP INFO suppressed");
-    if (!host.fail_log_policy) host.sdk_log_suppressed = true;
+    ++host.log_set_calls;
+#if CONFIG_LOG_DYNAMIC_LEVEL_CONTROL
+    if (!host.fail_log_policy) {
+#if CONFIG_LOG_TAG_LEVEL_IMPL_NONE
+        host.global_log_level = level;
+#else
+        host.sdk_log_level = level;
+#endif
+    }
+#endif
 }
 
 esp_log_level_t esp_log_level_get(const char *tag)
 {
     host_require(mutex_depth == 0 && host.critical_depth == 0, "log policy readback outside locks");
     host_require(strcmp(tag, "webrtc") == 0, "only SDK SDP tag read back");
-    return host.sdk_log_suppressed ? ESP_LOG_WARN : ESP_LOG_INFO;
+#if CONFIG_LOG_DYNAMIC_LEVEL_CONTROL && !CONFIG_LOG_TAG_LEVEL_IMPL_NONE
+    return host.sdk_log_level;
+#elif CONFIG_LOG_DYNAMIC_LEVEL_CONTROL
+    return host.global_log_level;
+#else
+    return CONFIG_LOG_DEFAULT_LEVEL;
+#endif
 }
 
 int esp_rom_printf(const char *format, ...)
@@ -560,7 +577,7 @@ static int signal_message(esp_peer_signaling_msg_t *message, void *ctx)
 { (void)message; (void)ctx; host_require(false, "no SDP exchange in this suite"); return -1; }
 int esp_webrtc_start(esp_webrtc_handle_t session)
 {
-    host_require(host.sdk_log_suppressed, "SDK SDP INFO suppressed before negotiation");
+    host_require(esp_log_level_get("webrtc") <= ESP_LOG_WARN, "SDK SDP INFO suppressed before negotiation");
     if (host.fail_start) return -1;
     fake_rtc_t *rtc = session;
     esp_peer_signaling_cfg_t config = {

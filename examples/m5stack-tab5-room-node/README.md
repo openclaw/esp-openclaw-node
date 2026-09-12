@@ -327,11 +327,15 @@ adapted from M5Stack's official `M5Tab5-UserDemo` commit
 `68b19d37fbf9cefd5f256992f5dca34794c62ab4`; touch remains on the maintained
 ST7123-compatible API. No S3 bounce-buffer workaround is present.
 
-ST7121 explicitly places its two 720x40 RGB565 draw buffers and PPA rotation
-buffer in PSRAM, matching the other panel path. Their configured payload totals
-172,800 bytes, excluding allocation overhead; this is not a measured gain in
-internal heap or proof of working voice. Buffer dimensions, double buffering,
-rotation, cache handling, task stacks, and global allocation policy are unchanged.
+When flash encryption is inactive, ST7121 explicitly places its two 720x40
+RGB565 draw buffers and PPA rotation buffer in PSRAM. With flash encryption
+active, it retains the original DMA allocation flags because the pinned PPA
+driver rejects external rotation buffers. This fallback does not qualify
+encrypted camera, media, or voice operation; public firmware bundles still
+exclude encrypted builds. The configured payload totals 172,800 bytes,
+excluding allocation overhead, not a measured gain in internal heap or proof
+of working voice. Buffer dimensions, double buffering, rotation, cache handling,
+task stacks, sibling panels, and global allocation policy are unchanged.
 
 The board adapter keeps the official four-slot TDM order: MIC-L, speaker
 reference, MIC-R, headset mic. Shared AEC/WakeNet consume MIC-L plus the

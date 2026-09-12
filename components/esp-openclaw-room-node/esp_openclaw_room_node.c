@@ -541,9 +541,22 @@ static void start_talk_once(void)
         .signaling_impl = esp_openclaw_talk_call_signaling_impl(),
     };
     esp_webrtc_handle_t session = NULL;
-    /* This SDK tag logs outbound SDP at INFO. Set before any negotiation. */
-    esp_log_level_set("webrtc", ESP_LOG_WARN);
+    /* No-tag setters change global logging. Only lower a supported tag. */
+#if CONFIG_LOG_DYNAMIC_LEVEL_CONTROL && !CONFIG_LOG_TAG_LEVEL_IMPL_NONE
     if (esp_log_level_get("webrtc") > ESP_LOG_WARN) {
+        esp_log_level_set("webrtc", ESP_LOG_WARN);
+    }
+#endif
+    bool sdk_log_safe = esp_log_level_get("webrtc") <= ESP_LOG_WARN;
+#if !CONFIG_LOG_DYNAMIC_LEVEL_CONTROL
+    /* Static logging uses the compiled maximum, not the getter's default. */
+#ifdef CONFIG_LOG_MAXIMUM_LEVEL
+    sdk_log_safe = sdk_log_safe && CONFIG_LOG_MAXIMUM_LEVEL < ESP_LOG_INFO;
+#else
+    sdk_log_safe = false;
+#endif
+#endif
+    if (!sdk_log_safe) {
         talk_stage(generation, "sdk_log_policy", "end", ESP_FAIL);
         request_talk_teardown(generation, "Talk setup failed");
         goto done;

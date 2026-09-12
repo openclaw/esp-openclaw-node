@@ -21,7 +21,7 @@ from test_idf_tab5_compat import fixture_profile, seed_sdk
 import idf_tab5_compat as compat
 from test_tab5_sdio_diagnostics import HAS_MANAGER, component_fixture
 import tab5_sdio_diagnostics as sdio
-from test_tab5_camera_compat import camera_fixture, seed_camera_sdk, write_object
+from test_tab5_camera_compat import camera_fixture, resolve_alternate_camera, seed_camera_sdk, write_object
 import tab5_camera_compat as camera
 
 SPEC = importlib.util.spec_from_file_location("package_firmware", SCRIPT)
@@ -538,6 +538,26 @@ class FirmwareBundleTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.package(camera_compat=True)
         self.assertFalse(self.output.exists())
+
+    @unittest.skipUnless(HAS_MANAGER, "actual component hashing runs in the IDF environment")
+    def test_unpatched_resolved_camera_does_not_require_the_repair_version_or_mapper(self):
+        self.configure_tab5()
+        seed_camera_sdk(self.idf)
+        self.write_metadata()
+        with camera_fixture(self.project, self.build, self.idf, self.dependencies) as component:
+            resolve_alternate_camera(component, self.build, self.dependencies)
+            before = {p: p.read_bytes() for p in component.rglob("*") if p.is_file()}
+            self.package()
+            manifest = json.loads((self.output / "manifest.json").read_text())
+            self.assertNotIn("camera_compatibility_patch", manifest)
+            self.assertFalse(manifest["idf"]["dirty"])
+            resolved = json.loads((self.output / "dependencies.lock.sanitized.json").read_text())
+            self.assertEqual(resolved["dependencies"][camera.COMPONENT],
+                             self.dependencies["dependencies"][camera.COMPONENT])
+            with self.assertRaisesRegex(ValueError, "approved 2.4.1 component"):
+                camera.apply_component_patch(
+                    self.project, component, self.build, self.idf, self.dependencies)
+            self.assertEqual({p: p.read_bytes() for p in before}, before)
 
     @unittest.skipUnless(HAS_MANAGER, "actual component hashing runs in the IDF environment")
     def test_unpatched_rev3_packages_but_camera_patch_profile_rejects_it(self):

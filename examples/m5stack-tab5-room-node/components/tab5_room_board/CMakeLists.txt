@@ -1,6 +1,7 @@
 idf_component_register(
     SRCS "tab5_room_board.c"
     INCLUDE_DIRS "include"
+    PRIV_REQUIRES bootloader_support
     REQUIRES
         esp-openclaw-node-provisioning
         esp-openclaw-room-node

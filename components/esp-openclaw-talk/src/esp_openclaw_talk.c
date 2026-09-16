@@ -832,6 +832,8 @@ static int exchange_sdp(talk_signaling_t *talk, const char *sdp)
         .user_data = &response,
         .buffer_size = 4096,
         .buffer_size_tx = 8192,
+        /* The single-use broker credential is scoped to this offer endpoint. */
+        .disable_auto_redirect = true,
 #if CONFIG_MBEDTLS_CERTIFICATE_BUNDLE
         .crt_bundle_attach = esp_crt_bundle_attach,
 #endif
@@ -842,8 +844,8 @@ static int exchange_sdp(talk_signaling_t *talk, const char *sdp)
     if (client == NULL) {
         return ESP_PEER_ERR_NO_MEM;
     }
-    esp_err_t header_error = esp_http_client_set_header(client, "Content-Type", "application/sdp");
-    talk_diag(talk, "http_content_type", "end", header_error);
+    esp_err_t content_type_error = esp_http_client_set_header(client, "Content-Type", "application/sdp");
+    talk_diag(talk, "http_content_type", "end", content_type_error);
     size_t auth_len = strlen("Bearer ") + strlen(talk->client_secret) + 1U;
     char *authorization = malloc(auth_len);
     if (authorization == NULL) {
@@ -852,9 +854,9 @@ static int exchange_sdp(talk_signaling_t *talk, const char *sdp)
         return ESP_PEER_ERR_NO_MEM;
     }
     snprintf(authorization, auth_len, "Bearer %s", talk->client_secret);
-    header_error = esp_http_client_set_header(client, "Authorization", authorization);
-    talk_diag(talk, "http_authorization", "end", header_error);
-    header_error = ESP_OK;
+    esp_err_t authorization_error = esp_http_client_set_header(client, "Authorization", authorization);
+    talk_diag(talk, "http_authorization", "end", authorization_error);
+    esp_err_t header_error = ESP_OK;
     for (size_t i = 0; i < talk->offer_header_count; ++i) {
         esp_err_t result = esp_http_client_set_header(
             client,
@@ -865,6 +867,12 @@ static int exchange_sdp(talk_signaling_t *talk, const char *sdp)
     talk_diag(talk, "http_offer_headers", "end", header_error);
     esp_err_t post_error = esp_http_client_set_post_field(client, sdp, (int)strlen(sdp));
     talk_diag(talk, "http_post", "end", post_error);
+    if (content_type_error != ESP_OK || authorization_error != ESP_OK ||
+        header_error != ESP_OK || post_error != ESP_OK) {
+        free(authorization);
+        esp_http_client_cleanup(client);
+        return ESP_PEER_ERR_FAIL;
+    }
     talk_diag(talk, "http_perform", "begin", 0);
     esp_err_t err = esp_http_client_perform(client);
     if (response.failed) talk_diag(talk, response.failure_stage, "end", response.failure_error);

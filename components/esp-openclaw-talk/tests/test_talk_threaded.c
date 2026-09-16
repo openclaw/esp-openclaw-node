@@ -452,20 +452,21 @@ static void http_diagnostic_case(const char *name)
         .type = ESP_PEER_SIGNALING_MSG_SDP, .data = (uint8_t *)"v=0\r\nSDP_CANARY", .size = 15,
     };
     int result = implementation->send_msg(signaling, &msg);
-    bool ignored = strcmp(name, "http_content_type") == 0 || strcmp(name, "http_post") == 0;
+    bool configuration_failure = strcmp(name, "http_content_type") == 0 || strcmp(name, "http_post") == 0;
     bool init = strcmp(name, "http_init") == 0;
     bool callback = strcmp(name, "answer_callback") == 0;
-    assert(result == (init ? ESP_PEER_ERR_NO_MEM : callback ? -7 : ignored ? 0 : ESP_PEER_ERR_FAIL));
+    assert(result == (init ? ESP_PEER_ERR_NO_MEM : callback ? -7 : ESP_PEER_ERR_FAIL));
     int error = init ? ESP_PEER_ERR_NO_MEM : callback ? -7 :
         strcmp(name, "response_alloc") == 0 ? ESP_ERR_NO_MEM :
-        ignored || strcmp(name, "http_perform") == 0 || strcmp(name, "response_size") == 0 ? ESP_FAIL : ESP_PEER_ERR_FAIL;
+        configuration_failure || strcmp(name, "http_perform") == 0 || strcmp(name, "response_size") == 0 ? ESP_FAIL : ESP_PEER_ERR_FAIL;
     assert(diagnostic_has(name, "end", error, 1));
     unsigned first_count = 0;
     for (size_t i = 0; i < diagnostic_count; ++i) first_count += diagnostic_records[i].first != 0;
     assert(first_count == 1);
     assert(http_headers == (init ? 0U : 2U));
-    assert(http_posts == (init ? 0U : 1U) && http_performs == http_posts && http_cleanups == http_posts);
-    assert(atomic_load(&answer_count) == (ignored || callback ? 1U : 0U));
+    assert(http_posts == (init ? 0U : 1U) && http_cleanups == http_posts);
+    assert(http_performs == (init || configuration_failure ? 0U : 1U));
+    assert(atomic_load(&answer_count) == (callback ? 1U : 0U));
     close_thread(NULL);
 }
 

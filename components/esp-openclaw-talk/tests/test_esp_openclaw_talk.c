@@ -3,7 +3,19 @@
 #include "unity.h"
 
 #define esp_openclaw_node_gateway_request test_talk_gateway_request
+#define esp_http_client_init test_http_client_init
+#define esp_http_client_set_header test_http_client_set_header
+#define esp_http_client_set_post_field test_http_client_set_post_field
+#define esp_http_client_perform test_http_client_perform
+#define esp_http_client_get_status_code test_http_client_get_status_code
+#define esp_http_client_cleanup test_http_client_cleanup
 #include "../src/esp_openclaw_talk.c"
+#undef esp_http_client_cleanup
+#undef esp_http_client_get_status_code
+#undef esp_http_client_perform
+#undef esp_http_client_set_post_field
+#undef esp_http_client_set_header
+#undef esp_http_client_init
 #undef esp_openclaw_node_gateway_request
 
 typedef struct {
@@ -34,6 +46,80 @@ typedef struct {
 
 static talk_test_state_t s_talk;
 
+static struct {
+    esp_http_client_config_t config;
+    const char *fail_header;
+    esp_err_t post_error;
+    int response_status;
+    int perform_count;
+    int cleanup_count;
+    int answer_count;
+    int header_count;
+    char authorization[64];
+    char content_type[64];
+    char offer_header[64];
+    char post_data[64];
+} s_http;
+
+static const char test_sdp[] = "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\n";
+
+esp_http_client_handle_t test_http_client_init(const esp_http_client_config_t *config)
+{
+    s_http.config = *config;
+    return (esp_http_client_handle_t)&s_http;
+}
+
+esp_err_t test_http_client_set_header(
+    esp_http_client_handle_t client, const char *key, const char *value)
+{
+    TEST_ASSERT_EQUAL_PTR(&s_http, client);
+    ++s_http.header_count;
+    if (s_http.fail_header != NULL && strcmp(key, s_http.fail_header) == 0) return ESP_FAIL;
+    if (strcmp(key, "Authorization") == 0) {
+        snprintf(s_http.authorization, sizeof(s_http.authorization), "%s", value);
+    } else if (strcmp(key, "Content-Type") == 0) {
+        snprintf(s_http.content_type, sizeof(s_http.content_type), "%s", value);
+    } else if (strcmp(key, "X-Talk") == 0) {
+        snprintf(s_http.offer_header, sizeof(s_http.offer_header), "%s", value);
+    }
+    return ESP_OK;
+}
+
+esp_err_t test_http_client_set_post_field(
+    esp_http_client_handle_t client, const char *data, int length)
+{
+    TEST_ASSERT_EQUAL_PTR(&s_http, client);
+    TEST_ASSERT_EQUAL(strlen(test_sdp), length);
+    snprintf(s_http.post_data, sizeof(s_http.post_data), "%s", data);
+    return s_http.post_error;
+}
+
+esp_err_t test_http_client_perform(esp_http_client_handle_t client)
+{
+    TEST_ASSERT_EQUAL_PTR(&s_http, client);
+    ++s_http.perform_count;
+    esp_http_client_event_t event = {
+        .event_id = HTTP_EVENT_ON_DATA,
+        .user_data = s_http.config.user_data,
+        .data = (void *)test_sdp,
+        .data_len = sizeof(test_sdp) - 1,
+    };
+    return s_http.config.event_handler(&event);
+}
+
+int test_http_client_get_status_code(esp_http_client_handle_t client)
+{
+    TEST_ASSERT_EQUAL_PTR(&s_http, client);
+    return s_http.response_status;
+}
+
+esp_err_t test_http_client_cleanup(esp_http_client_handle_t client)
+{
+    TEST_ASSERT_EQUAL_PTR(&s_http, client);
+    ++s_http.cleanup_count;
+    return ESP_OK;
+}
+
 static void assert_not_critical(void)
 {
 #ifdef OPENCLAW_TALK_HOST_TEST
@@ -45,6 +131,8 @@ static void assert_not_critical(void)
 static void reset_talk_state(void)
 {
     memset(&s_talk, 0, sizeof(s_talk));
+    memset(&s_http, 0, sizeof(s_http));
+    s_http.response_status = 200;
 #ifdef OPENCLAW_TALK_HOST_TEST
     talk_host_error_count = 0;
 #endif
@@ -112,6 +200,16 @@ static int record_close(void *ctx)
     return 0;
 }
 
+static int record_answer(esp_peer_signaling_msg_t *message, void *ctx)
+{
+    (void)ctx;
+    TEST_ASSERT_EQUAL(ESP_PEER_SIGNALING_MSG_SDP, message->type);
+    TEST_ASSERT_EQUAL(strlen(test_sdp), message->size);
+    TEST_ASSERT_EQUAL_MEMORY(test_sdp, message->data, message->size);
+    ++s_http.answer_count;
+    return 0;
+}
+
 static void record_setup_failed(esp_openclaw_talk_setup_result_t result, void *ctx)
 {
     (void)ctx;
@@ -133,6 +231,7 @@ static int begin_signaling(const char *key, esp_openclaw_node_handle_t node,
         .on_ice_info = record_ice,
         .on_connected = record_connected,
         .on_close = record_close,
+        .on_msg = record_answer,
         .extra_cfg = (void *)&extra,
     };
     return esp_openclaw_talk_signaling_impl()->start(&config, handle);
@@ -572,4 +671,84 @@ TEST_CASE("create rejection is classified accurately and a second call recovers"
     TEST_ASSERT_EQUAL(1, s_talk.connected_count);
     TEST_ASSERT_EQUAL(0, s_talk.setup_failed_count);
     stop_signaling(recovered);
+}
+
+static int send_test_sdp(esp_peer_signaling_handle_t handle)
+{
+    esp_peer_signaling_msg_t message = {
+        .type = ESP_PEER_SIGNALING_MSG_SDP,
+        .data = (uint8_t *)test_sdp,
+        .size = sizeof(test_sdp) - 1,
+    };
+    return esp_openclaw_talk_signaling_impl()->send_msg(handle, &message);
+}
+
+TEST_CASE("SDP exchange uses direct authenticated POST and delivers the answer", "[esp_openclaw_talk]")
+{
+    esp_peer_signaling_handle_t handle = start_signaling();
+    respond_to_create(true, valid_response(), NULL);
+    TEST_ASSERT_EQUAL(ESP_PEER_ERR_NONE, send_test_sdp(handle));
+    TEST_ASSERT_TRUE(s_http.config.disable_auto_redirect);
+    TEST_ASSERT_EQUAL(HTTP_METHOD_POST, s_http.config.method);
+    TEST_ASSERT_EQUAL_STRING("https://gateway.example/talk/offer", s_http.config.url);
+    TEST_ASSERT_EQUAL_STRING("Bearer broker-token", s_http.authorization);
+    TEST_ASSERT_EQUAL_STRING("application/sdp", s_http.content_type);
+    TEST_ASSERT_EQUAL_STRING("one", s_http.offer_header);
+    TEST_ASSERT_EQUAL_STRING(test_sdp, s_http.post_data);
+    TEST_ASSERT_EQUAL(1, s_http.perform_count);
+    TEST_ASSERT_EQUAL(1, s_http.answer_count);
+    TEST_ASSERT_EQUAL(1, s_http.cleanup_count);
+    stop_signaling(handle);
+}
+
+TEST_CASE("SDP exchange rejects redirects without delivering an answer", "[esp_openclaw_talk]")
+{
+    const int redirects[] = {301, 302, 303, 307, 308};
+    for (size_t i = 0; i < sizeof(redirects) / sizeof(redirects[0]); ++i) {
+        esp_peer_signaling_handle_t handle = start_signaling();
+        respond_to_create(true, valid_response(), NULL);
+        s_http.response_status = redirects[i];
+        TEST_ASSERT_EQUAL(ESP_PEER_ERR_FAIL, send_test_sdp(handle));
+        TEST_ASSERT_TRUE(s_http.config.disable_auto_redirect);
+        TEST_ASSERT_EQUAL(1, s_http.perform_count);
+        TEST_ASSERT_EQUAL(0, s_http.answer_count);
+        TEST_ASSERT_EQUAL(1, s_http.cleanup_count);
+        stop_signaling(handle);
+    }
+}
+
+TEST_CASE("SDP exchange never performs HTTP after request configuration fails", "[esp_openclaw_talk]")
+{
+    const char *headers[] = {"Content-Type", "Authorization", "X-Talk", NULL};
+    for (size_t i = 0; i < sizeof(headers) / sizeof(headers[0]); ++i) {
+        esp_peer_signaling_handle_t handle = start_signaling();
+        respond_to_create(true, valid_response(), NULL);
+        s_http.fail_header = headers[i];
+        s_http.post_error = headers[i] == NULL ? ESP_FAIL : ESP_OK;
+        TEST_ASSERT_EQUAL(ESP_PEER_ERR_FAIL, send_test_sdp(handle));
+        TEST_ASSERT_EQUAL(0, s_http.perform_count);
+        TEST_ASSERT_EQUAL(0, s_http.answer_count);
+        TEST_ASSERT_EQUAL(1, s_http.cleanup_count);
+        stop_signaling(handle);
+    }
+}
+
+TEST_CASE("SDP exchange retains an offer header failure when a later header succeeds", "[esp_openclaw_talk]")
+{
+    esp_peer_signaling_handle_t handle = start_signaling();
+    cJSON *payload = cJSON_Parse(valid_response());
+    TEST_ASSERT_NOT_NULL(payload);
+    cJSON_AddStringToObject(cJSON_GetObjectItemCaseSensitive(payload, "offerHeaders"), "X-Later", "two");
+    char *json = cJSON_PrintUnformatted(payload);
+    TEST_ASSERT_NOT_NULL(json);
+    respond_to_create(true, json, NULL);
+    free(json);
+    cJSON_Delete(payload);
+    s_http.fail_header = "X-Talk";
+    TEST_ASSERT_EQUAL(ESP_PEER_ERR_FAIL, send_test_sdp(handle));
+    TEST_ASSERT_EQUAL(4, s_http.header_count);
+    TEST_ASSERT_EQUAL(0, s_http.perform_count);
+    TEST_ASSERT_EQUAL(0, s_http.answer_count);
+    TEST_ASSERT_EQUAL(1, s_http.cleanup_count);
+    stop_signaling(handle);
 }

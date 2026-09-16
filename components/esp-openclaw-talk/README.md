@@ -1,5 +1,10 @@
 # esp-openclaw-talk
 
+Talk posts SDP and its single-use broker credential directly to the Gateway's
+`offerUrl`. HTTP redirects (including same-origin redirects) fail the exchange;
+configure the final offer URL in the Gateway or reverse proxy. Request-header
+or body configuration failures also stop the exchange before any HTTP request.
+
 `esp-openclaw-talk` adapts OpenClaw's Gateway-owned Talk API to Espressif's `esp_webrtc` signaling interface. Firmware requests `gateway-control-v1` with `talk.client.create`, then posts its local SDP to the returned Gateway offer URL with the returned single-use broker token.
 
 The response must contain the exact descriptor `clientControl: { owner: "gateway" }`. Missing or different descriptors fail before peer creation, with no fallback to client-owned tool handling. Provider credentials and the agent-consult sideband stay on the Gateway.
@@ -35,9 +40,9 @@ The ESP WebRTC source is pinned as the repository submodule at `third_party/esp-
 `first_failure` flag claimed once per call. A `begin` without its matching
 `end` is unfinished, not a reported failure. RPC submission completion is not
 remote completion. `absent` and `canceled` distinguish an unconfigured callback
-from one skipped after cancellation. Header, post-field and ICE/signaling
-callback errors are observed without changing their existing ignored-return
-policy. Descriptor and HTTP records contain only validation flags and HTTP
+from one skipped after cancellation. Header and post-field errors stop before
+HTTP transmission; ICE/signaling callback errors retain their existing
+ignored-return policy. Descriptor and HTTP records contain only validation flags and HTTP
 status; SDP, URLs, identity fields, headers and remote error text are excluded.
 
 Room examples emit `room_talk_diag` with the existing local generation around
@@ -99,3 +104,26 @@ and is not a cleanup/drain mechanism for a prepared call. Retain a call under
 the owner's lock before handing it to another event dispatcher, and release
 that reference after synchronous ingress returns. There is one teardown worker
 per owner; quiesce/SDK close/release must be serialized.
+
+## Native HTTP regression
+
+With ESP-IDF activated and the component-test app's cJSON dependency configured,
+run the real HTTP client on macOS or Linux:
+
+```sh
+python3 components/esp-openclaw-talk/tests/run_http_host_tests.py
+```
+
+The runner builds the production Talk source with ESP-IDF's native host target,
+HTTP client, TCP transport, FreeRTOS and cJSON. Two loopback HTTP servers verify
+successful direct SDP exchange, rejection of 301/302/303/307/308 redirects both
+within one origin and across ports, no credential-bearing request to a redirect
+destination, and successful direct exchange again afterward. Only the Gateway
+session response and peer answer callback are synthetic; HTTP calls use the
+actual SDK. This does not qualify TLS, Wi-Fi, WebRTC media, or physical hardware.
+Linux needs the SDK's host dependencies, including `libbsd-dev`.
+
+Use `--cjson-dir` or `--webrtc-dir` for existing dependency checkouts,
+`--build-dir` to retain a native build outside the repository, and
+`--talk-source` to reproduce the failure against an earlier production source.
+Default temporary builds are removed automatically.

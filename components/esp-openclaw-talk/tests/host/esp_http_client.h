@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include "esp_err.h"
 
 typedef struct esp_http_client *esp_http_client_handle_t;
@@ -19,6 +20,7 @@ typedef struct {
     void *user_data;
     int buffer_size;
     int buffer_size_tx;
+    bool disable_auto_redirect;
 } esp_http_client_config_t;
 
 esp_http_client_handle_t esp_http_client_init(const esp_http_client_config_t *config);

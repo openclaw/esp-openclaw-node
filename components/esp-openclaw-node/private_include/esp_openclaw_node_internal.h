@@ -27,6 +27,7 @@
 #define ESP_OPENCLAW_NODE_WS_PING_INTERVAL_SEC        5
 #define ESP_OPENCLAW_NODE_WS_PINGPONG_TIMEOUT_SEC     10
 #define ESP_OPENCLAW_NODE_TASK_POLL_TICKS             pdMS_TO_TICKS(250)
+#define ESP_OPENCLAW_NODE_DESTROY_WAIT_TICKS          pdMS_TO_TICKS(5000)
 #define ESP_OPENCLAW_NODE_WORK_QUEUE_LENGTH           CONFIG_ESP_OPENCLAW_NODE_WORK_QUEUE_LENGTH
 #define ESP_OPENCLAW_NODE_TASK_STACK_SIZE             CONFIG_ESP_OPENCLAW_NODE_TASK_STACK_SIZE
 #define ESP_OPENCLAW_NODE_TASK_PRIORITY               CONFIG_ESP_OPENCLAW_NODE_TASK_PRIORITY
@@ -159,6 +160,7 @@ struct esp_openclaw_node {
     QueueHandle_t work_queue;
     TaskHandle_t task_handle;
     SemaphoreHandle_t destroy_done;
+    bool destroy_waiter_active;
     SemaphoreHandle_t state_lock;
     const esp_openclaw_node_websocket_client_ops_t *websocket_client_ops;
     esp_openclaw_node_identity_t identity;

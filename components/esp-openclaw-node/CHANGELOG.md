@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Keep room-node Canvas builds working with LVGL 9.6 by using its private-header umbrella instead of a moved internal header.
 - Restore fresh Tab5 builds by pinning ESP Video to the 2.4.1 source required by the qualified CSI compatibility patch.
 - Keep Talk SDP credentials on the direct offer endpoint by refusing HTTP redirects, and fail before sending if request headers or body cannot be configured. Thanks @SebTardif for reporting the redirect risk. (#32)
 - Keep file parent creation inside the path when the storage root disappears, and allow side-effect-free write preflight beneath existing roots. Thanks @SebTardif for reporting the parent-walk overflow. (#31)

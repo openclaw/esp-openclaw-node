@@ -83,6 +83,8 @@ typedef struct {
 } gateway_recorder_t;
 
 static test_event_recorder_t s_event_recorder;
+static volatile bool s_reconnect_on_disconnect;
+static volatile int s_reconnect_attempts;
 static test_transport_state_t s_transport_state;
 static int s_fake_transport_client;
 static gateway_recorder_t s_gateway_recorder;
@@ -422,6 +424,20 @@ static void test_node_event_cb(
     s_event_recorder.seen = true;
 }
 
+static void reconnect_on_disconnect_cb(
+    esp_openclaw_node_handle_t node,
+    esp_openclaw_node_event_t event,
+    const void *event_data,
+    void *user_ctx)
+{
+    test_node_event_cb(node, event, event_data, user_ctx);
+    if (!s_reconnect_on_disconnect || event != ESP_OPENCLAW_NODE_EVENT_DISCONNECTED) {
+        return;
+    }
+    s_reconnect_attempts++;
+    (void)request_connect_no_auth(node, "ws://gateway.example/ws");
+}
+
 static bool wait_for_event(esp_openclaw_node_event_t expected, TickType_t timeout_ticks)
 {
     TickType_t start = xTaskGetTickCount();
@@ -608,6 +624,14 @@ static void destroy_with_pending_notification_task(void *arg)
     xTaskNotifyGive(xTaskGetCurrentTaskHandle());
     ctx->destroy_err = esp_openclaw_node_destroy(ctx->node);
     ctx->remaining_notify_count = ulTaskNotifyTake(pdTRUE, 0);
+    xTaskNotifyGive(ctx->completion_waiter);
+    vTaskDelete(NULL);
+}
+
+static void destroy_node_task(void *arg)
+{
+    destroy_task_ctx_t *ctx = (destroy_task_ctx_t *)arg;
+    ctx->destroy_err = esp_openclaw_node_destroy(ctx->node);
     xTaskNotifyGive(ctx->completion_waiter);
     vTaskDelete(NULL);
 }
@@ -1180,6 +1204,139 @@ TEST_CASE("destroy preserves the caller task notification count", "[esp_openclaw
     TEST_ASSERT_TRUE(ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(2000)) == 1);
     TEST_ASSERT_EQUAL(ESP_OK, ctx.destroy_err);
     TEST_ASSERT_EQUAL_UINT32(1, ctx.remaining_notify_count);
+}
+
+static bool wait_for_internal_state(
+    esp_openclaw_node_handle_t node,
+    esp_openclaw_node_internal_state_t expected,
+    TickType_t timeout_ticks)
+{
+    TickType_t start = xTaskGetTickCount();
+    while ((xTaskGetTickCount() - start) < timeout_ticks) {
+        if (node->state == expected) {
+            return true;
+        }
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    return node->state == expected;
+}
+
+TEST_CASE("destroy keeps teardown when a queued disconnect completes", "[esp_openclaw_node][lifecycle]")
+{
+    reset_openclaw_storage();
+    reset_transport_state();
+    s_reconnect_on_disconnect = false;
+    s_reconnect_attempts = 0;
+
+    esp_openclaw_node_config_t parked_config = {0};
+    esp_openclaw_node_config_init_default(&parked_config);
+    parked_config.event_cb = reconnect_on_disconnect_cb;
+    esp_openclaw_node_handle_t parked = NULL;
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_create(&parked_config, &parked));
+    esp_openclaw_node_lock_state(parked);
+    parked->state = ESP_OPENCLAW_NODE_INTERNAL_DESTROYING;
+    esp_openclaw_node_unlock_state(parked);
+    reset_event_recorder();
+    esp_openclaw_node_complete_connect_failed(
+        parked,
+        ESP_OPENCLAW_NODE_CONNECT_FAILURE_CANCELED,
+        ESP_OK,
+        NULL,
+        false);
+    TEST_ASSERT_EQUAL(0, s_event_recorder.connect_failed_count);
+    TEST_ASSERT_EQUAL(ESP_OPENCLAW_NODE_INTERNAL_DESTROYING, parked->state);
+    esp_openclaw_node_lock_state(parked);
+    parked->state = ESP_OPENCLAW_NODE_INTERNAL_IDLE;
+    esp_openclaw_node_unlock_state(parked);
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_destroy(parked));
+
+    esp_openclaw_node_config_t config = {0};
+    esp_openclaw_node_config_init_default(&config);
+    config.event_cb = reconnect_on_disconnect_cb;
+
+    esp_openclaw_node_handle_t node = NULL;
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_create(&config, &node));
+
+    blocking_command_ctx_t command_ctx = {
+        .entered = xSemaphoreCreateBinary(),
+        .release = xSemaphoreCreateBinary(),
+    };
+    TEST_ASSERT_NOT_NULL(command_ctx.entered);
+    TEST_ASSERT_NOT_NULL(command_ctx.release);
+
+    esp_openclaw_node_command_t command = {
+        .name = "block",
+        .handler = blocking_command_handler,
+        .context = &command_ctx,
+    };
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_register_command(node, &command));
+
+    reset_event_recorder();
+    TEST_ASSERT_EQUAL(ESP_OK, request_connect_no_auth(node, "ws://gateway.example/ws"));
+    TEST_ASSERT_TRUE(wait_for_int_value(&s_transport_state.start_calls, 1, pdMS_TO_TICKS(1000)));
+
+    emit_ws_event(WEBSOCKET_EVENT_CONNECTED, NULL, ESP_OK);
+    TEST_ASSERT_TRUE(
+        wait_for_int_value(&s_transport_state.send_with_opcode_calls, 1, pdMS_TO_TICKS(1000)));
+
+    emit_ws_event(
+        WEBSOCKET_EVENT_DATA,
+        "{\"type\":\"event\",\"event\":\"connect.challenge\",\"payload\":{\"nonce\":\"nonce-1\",\"ts\":123}}",
+        ESP_OK);
+    TEST_ASSERT_TRUE(wait_for_int_value(&s_transport_state.send_text_calls, 1, pdMS_TO_TICKS(1000)));
+
+    char *connect_id = extract_first_json_id(s_transport_state.last_sent_text);
+    TEST_ASSERT_NOT_NULL(connect_id);
+
+    char connect_response[512] = {0};
+    snprintf(
+        connect_response,
+        sizeof(connect_response),
+        "{\"type\":\"res\",\"id\":\"%s\",\"ok\":true,\"payload\":{\"type\":\"hello-ok\",\"auth\":{\"deviceToken\":\"device-token-123\"}}}",
+        connect_id);
+    free(connect_id);
+
+    emit_ws_event(WEBSOCKET_EVENT_DATA, connect_response, ESP_OK);
+    TEST_ASSERT_TRUE(wait_for_event(ESP_OPENCLAW_NODE_EVENT_CONNECTED, pdMS_TO_TICKS(1000)));
+
+    emit_ws_event(
+        WEBSOCKET_EVENT_DATA,
+        "{\"type\":\"event\",\"event\":\"node.invoke.request\",\"payload\":{\"id\":\"invoke-1\",\"nodeId\":\"node-1\",\"command\":\"block\",\"paramsJSON\":\"{}\"}}",
+        ESP_OK);
+    TEST_ASSERT_TRUE(xSemaphoreTake(command_ctx.entered, pdMS_TO_TICKS(1000)) == pdTRUE);
+
+    reset_event_recorder();
+    s_reconnect_on_disconnect = true;
+    s_reconnect_attempts = 0;
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_request_disconnect(node));
+
+    destroy_task_ctx_t destroy_ctx = {
+        .node = node,
+        .completion_waiter = xTaskGetCurrentTaskHandle(),
+        .destroy_err = ESP_FAIL,
+    };
+    uint32_t drained_notify = 0;
+    do {
+        drained_notify = ulTaskNotifyTake(pdTRUE, 0);
+    } while (drained_notify > 0);
+    TaskHandle_t destroy_task = NULL;
+    TEST_ASSERT_EQUAL(
+        pdPASS,
+        xTaskCreate(destroy_node_task, "node_destroy_test", 4096, &destroy_ctx, 5, &destroy_task));
+    TEST_ASSERT_TRUE(wait_for_internal_state(
+        node,
+        ESP_OPENCLAW_NODE_INTERNAL_DESTROYING,
+        pdMS_TO_TICKS(1000)));
+
+    TEST_ASSERT_TRUE(xSemaphoreGive(command_ctx.release) == pdTRUE);
+    TEST_ASSERT_TRUE(ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(2000)) == 1);
+    TEST_ASSERT_EQUAL(ESP_OK, destroy_ctx.destroy_err);
+    TEST_ASSERT_EQUAL(0, s_event_recorder.disconnected_count);
+    TEST_ASSERT_EQUAL(0, s_reconnect_attempts);
+
+    s_reconnect_on_disconnect = false;
+    vSemaphoreDelete(command_ctx.entered);
+    vSemaphoreDelete(command_ctx.release);
 }
 
 TEST_CASE("connect kicks challenge ping and disconnect is not dropped while busy", "[esp_openclaw_node][transport]")

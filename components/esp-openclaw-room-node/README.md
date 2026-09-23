@@ -35,6 +35,11 @@ Storage is explicitly optional. A board that supplies a canonical file root
 gets the bounded file-transfer commands and storage metrics; boards such as the
 Waveshare adapter advertise no file surface.
 
+`dir.list` page tokens track directory entries visited, including entries skipped
+because their metadata could not be read. Pass `nextPageToken` unchanged to
+continue a listing. Pagination is not a snapshot; directory changes between
+requests can still change the results.
+
 `file.write` with `createParents: true` creates missing parent directories,
 including the configured root if it disappeared after registration. Adding
 `preflightOnly: true` validates a proposed write beneath an existing safe

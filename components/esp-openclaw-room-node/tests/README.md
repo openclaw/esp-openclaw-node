@@ -9,6 +9,10 @@ handler, JSON parsing, base64 decoding, SHA-256, and host filesystem are real.
 ASan/UBSan and patterned stack initialization make the old root-loss walk
 fail deterministically. Cases cover root loss, preflight without mutation,
 nested parent creation, content/hash preservation, and symlink rejection.
+The registered `dir.list` pagination case injects metadata failures for two
+entries in a real temporary directory and checks that page sizes 1, 2 and 5
+return each readable entry exactly once. Directory iteration, JSON and the
+remaining filesystem operations use their real host implementations.
 These tests do not exercise ESP-IDF VFS or physical SD-card removal.
 
 # Talk lifetime source proofs

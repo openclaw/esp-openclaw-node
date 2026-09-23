@@ -256,7 +256,8 @@ static esp_err_t dir_list(
     cJSON_AddBoolToObject(result, "truncated", truncated);
     if (truncated) {
         char token[24];
-        snprintf(token, sizeof(token), "%ld", offset + added);
+        /* Resume before the lookahead entry, including skipped metadata failures. */
+        snprintf(token, sizeof(token), "%ld", seen - 1);
         cJSON_AddStringToObject(result, "nextPageToken", token);
     }
     return finish_result(result, params, out, error);

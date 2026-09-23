@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run registered file.write against production C and a temporary host filesystem."""
+"""Run registered file commands against production C and a temporary host filesystem."""
 
 import argparse
 import os
@@ -15,7 +15,7 @@ def main():
     parser.add_argument("--idf-path", type=Path, default=Path(os.environ.get("IDF_PATH", Path.home() / "esp-idf")))
     parser.add_argument("--mbedtls-dir", type=Path)
     parser.add_argument("--cjson-dir", type=Path, default=repo / "components/esp-openclaw-node/test_apps/esp_openclaw_node_unity_tests/managed_components/espressif__cjson/cJSON")
-    scenarios = ["root-loss", "root-loss-nested", "preflight", "boundaries"]
+    scenarios = ["root-loss", "root-loss-nested", "preflight", "boundaries", "pagination"]
     parser.add_argument("--filter", choices=scenarios)
     args = parser.parse_args()
     mbedtls = (args.mbedtls_dir or args.idf_path / "components/mbedtls/mbedtls").resolve()
@@ -48,6 +48,7 @@ typedef int esp_err_t;
 size_t strlcpy(char *, const char *, size_t);
 """)
         command = [os.environ.get("CC", "cc"), "-std=c11", "-D_DEFAULT_SOURCE", "-D_XOPEN_SOURCE=700",
+                   "-Dlstat=room_file_test_lstat",
                    "-Wall", "-Wextra", "-Werror", "-g", "-fsanitize=address,undefined",
                    "-fno-sanitize-recover=all", "-ftrivial-auto-var-init=pattern",
                    '-DMBEDTLS_CONFIG_FILE="file_crypto_config.h"',

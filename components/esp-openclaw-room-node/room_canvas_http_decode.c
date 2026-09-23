@@ -12,7 +12,7 @@
 #include "esp_jpeg_dec.h"
 #include "esp_log.h"
 #include "esp_timer.h"
-#include "src/draw/lv_image_decoder_private.h"
+#include "lvgl_private.h"
 
 #define TAG "room_canvas_http"
 #define ROOM_CANVAS_MAX_IMAGE_BYTES (2 * 1024 * 1024)

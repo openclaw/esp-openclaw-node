@@ -30,6 +30,12 @@ Manual releases must pass the same tests before the upload job can run.
    `repository_info.commit_sha` must match the intended source identity.
    Success is reported as **registry artifact verified**.
 
+After registry verification, tag that same commit as `v<version>` and publish a
+GitHub Release using the finalized changelog section verbatim. The registry
+workflow does not create a tag or GitHub Release. Keep an empty `## Unreleased`
+section above the versioned notes. The registry artifact contains the core
+component; the GitHub source tag also includes the room examples and Talk code.
+
 The upstream uploader uses `--allow-existing`. The preflight reduces accidental
 reuse, but another publisher can race between the check and upload. Verification
 therefore describes the registered artifact, never claims that this run created

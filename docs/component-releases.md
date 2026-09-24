@@ -22,9 +22,13 @@ Manual releases must pass the same tests before the upload job can run.
    show that the version does not already exist. Existing versions, including
    yanked versions, are refused. Network errors and malformed responses are not
    treated as absence.
-4. The existing `espressif/upload-components-ci-action@v2` uploads through
-   GitHub OIDC. No stored registry token is required. The repository URL and
-   dispatch commit SHA are supplied explicitly.
+4. The existing `espressif/upload-components-ci-action@v2` uploads with the
+   repository's `IDF_COMPONENT_API_TOKEN` secret. A missing secret fails before
+   the uploader runs; the workflow does not fall back to OIDC. The token needs
+   upload access to `espressif/esp-openclaw-node`. The repository URL and
+   dispatch commit SHA are supplied explicitly. No GitHub OIDC permission is
+   granted because this component has no working trusted-uploader registration
+   for the current repository.
 5. The final read-only check downloads the registered ZIP and validates its
    root `idf_component.yml`: version, repository, component path, and
    `repository_info.commit_sha` must match the intended source identity.

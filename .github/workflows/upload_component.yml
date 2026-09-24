@@ -44,7 +44,6 @@ jobs:
       cancel-in-progress: false
     permissions:
       contents: read
-      id-token: write
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -68,11 +67,21 @@ jobs:
           "$RUNNER_TEMP/component-release-check/bin/python" scripts/check_component_release.py \
             preflight --expected-version "$EXPECTED_VERSION"
 
+      - name: Require configured publication credential
+        env:
+          REGISTRY_UPLOAD_TOKEN: ${{ secrets.IDF_COMPONENT_API_TOKEN }}
+        run: |
+          if [ -z "$REGISTRY_UPLOAD_TOKEN" ]; then
+            echo "::error::IDF_COMPONENT_API_TOKEN is required for registry publication"
+            exit 1
+          fi
+
       - name: Upload esp-openclaw-node to IDF Component Registry
         uses: espressif/upload-components-ci-action@v2
         with:
           components: "esp-openclaw-node:components/esp-openclaw-node"
           namespace: "espressif"
+          api_token: ${{ secrets.IDF_COMPONENT_API_TOKEN }}
           repository_url: "https://github.com/openclaw/esp-openclaw-node.git"
           commit_sha: ${{ github.sha }}
 

@@ -296,6 +296,19 @@ class CameraPatchTests(unittest.TestCase):
         (self.root / ".git/config").write_text(f"[invalid\n{canary}\n")
         self.assert_cli_refusal("component_worktree", canary)
 
+    def test_standalone_application_across_filesystem_boundary(self):
+        mount = Path("/dev/shm")
+        if not mount.is_dir() or mount.stat().st_dev == Path("/").stat().st_dev:
+            self.skipTest("requires a separate temporary filesystem")
+        result = subprocess.run(
+            [sys.executable, "-m", "unittest", "discover", "-s", str(Path(__file__).parent),
+             "-p", "test_tab5_camera_compat.py", "-k",
+             "test_standalone_application_preserves_bytes_and_idempotence", "-v"],
+            env={**os.environ, "TMPDIR": str(mount), "GIT_DISCOVERY_ACROSS_FILESYSTEM": "0"},
+            capture_output=True, text=True, timeout=30,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_cli_rejects_bare_repository_instead_of_standalone_fallback(self):
         (self.root / ".git").rename(self.root / "saved-git-metadata")
         sdk.git(self.root, "init", "--bare", "-q")

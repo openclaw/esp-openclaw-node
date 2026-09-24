@@ -232,7 +232,8 @@ def apply_component_patch(project, component, build, idf, dependencies):
                                patched=False, compiled=False)
         discovery = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"], cwd=component,
-            capture_output=True, text=True, env={**os.environ, "LC_ALL": "C"},
+            capture_output=True, text=True,
+            env={**os.environ, "LC_ALL": "C", "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1"},
         )
         root, directory = component, []
         if discovery.returncode == 0:

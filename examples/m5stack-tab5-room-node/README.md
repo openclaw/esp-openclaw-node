@@ -91,6 +91,10 @@ current RISC-V object, and final patched component/source hashes. Component-mana
 integrity markers are never rewritten; stop if reconfiguration rejects a modified
 component rather than bypassing its checks.
 
+Component directories may live in a Git worktree or a standalone source tree,
+including on a separate filesystem. Invalid or broken Git metadata is rejected
+before patching.
+
 Packaging requires `--camera-compat` in addition to this branch's SDK/SDIO flags.
 Its additive `camera_compatibility_patch` record retains SDK and SDIO provenance
 unchanged, and the separate symbols artifact receives the same manifest. Host

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Allow the Tab5 camera compatibility patch to discover standalone source trees across filesystem boundaries while still rejecting invalid Git metadata.
 - Preserve teardown when queued disconnect or connect-failure completions run during destruction, preventing reconnect admission on a shutting-down node. Thanks @SebTardif. (#60)
 - Keep directory pagination from repeating entries after unreadable file metadata is skipped.
 - Keep room-node Canvas builds working with LVGL 9.6 by using its private-header umbrella instead of a moved internal header.

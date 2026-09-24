@@ -315,7 +315,9 @@ starts. Automatic reconnect loops must use `SAVED_SESSION` so they can never
 displace an operator-issued request.
 - `esp_openclaw_node_request_disconnect()` disconnects a ready session or
 cancels an in-flight connect attempt (`CONNECT_FAILED(CANCELED)`)
-- once destroy begins, new async requests are rejected
+- once destroy begins, new async requests are rejected; queued disconnect and
+connect-failure completions preserve teardown instead of returning the node to
+idle. Shutdown owns the remaining transport cleanup and pending-request cancellation.
 
 For each accepted connect request, wait for exactly one terminal outcome before
 submitting another control request.

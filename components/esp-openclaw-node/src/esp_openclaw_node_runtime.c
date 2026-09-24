@@ -13,6 +13,18 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 
+static bool teardown_in_progress(esp_openclaw_node_handle_t node)
+{
+    esp_openclaw_node_lock_state(node);
+    esp_openclaw_node_internal_state_t state = node->state;
+    esp_openclaw_node_unlock_state(node);
+    /* Destroy has queued shutdown and still owns the node. A terminal
+     * connect event would publish IDLE and the room node would accept
+     * another connect that the exiting worker never finishes. */
+    return state == ESP_OPENCLAW_NODE_INTERNAL_DESTROYING ||
+        state == ESP_OPENCLAW_NODE_INTERNAL_CLOSED;
+}
+
 void esp_openclaw_node_complete_connect_failed(
     esp_openclaw_node_handle_t node,
     esp_openclaw_node_connect_failure_reason_t reason,
@@ -20,6 +32,9 @@ void esp_openclaw_node_complete_connect_failed(
     const char *gateway_detail_code,
     bool stop_client)
 {
+    if (teardown_in_progress(node)) {
+        return;
+    }
     const char *role = node->config.role != NULL && strcmp(node->config.role, "node") == 0
         ? "node"
         : node->config.role != NULL && strcmp(node->config.role, "operator") == 0
@@ -30,6 +45,11 @@ void esp_openclaw_node_complete_connect_failed(
         role, (int)reason, (int)local_err, esp_err_to_name(local_err));
     esp_openclaw_node_cleanup_transport_instance(node, stop_client);
     esp_openclaw_node_lock_state(node);
+    if (node->state == ESP_OPENCLAW_NODE_INTERNAL_DESTROYING ||
+        node->state == ESP_OPENCLAW_NODE_INTERNAL_CLOSED) {
+        esp_openclaw_node_unlock_state(node);
+        return;
+    }
     node->state = ESP_OPENCLAW_NODE_INTERNAL_IDLE;
     esp_openclaw_node_clear_pending_control_locked(node);
     esp_openclaw_node_unlock_state(node);
@@ -46,8 +66,16 @@ void esp_openclaw_node_complete_disconnected(
     esp_err_t local_err,
     bool stop_client)
 {
+    if (teardown_in_progress(node)) {
+        return;
+    }
     esp_openclaw_node_cleanup_transport_instance(node, stop_client);
     esp_openclaw_node_lock_state(node);
+    if (node->state == ESP_OPENCLAW_NODE_INTERNAL_DESTROYING ||
+        node->state == ESP_OPENCLAW_NODE_INTERNAL_CLOSED) {
+        esp_openclaw_node_unlock_state(node);
+        return;
+    }
     node->state = ESP_OPENCLAW_NODE_INTERNAL_IDLE;
     esp_openclaw_node_clear_pending_control_locked(node);
     esp_openclaw_node_unlock_state(node);

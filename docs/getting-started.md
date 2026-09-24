@@ -43,11 +43,13 @@ git submodule update --init --recursive
 Registry packages and prebuilt firmware are separate delivery sources. Record
 the resolved package version and archive digest, or the firmware image digest
 and associated source commit, rather than assuming they match the checkout.
-As of September 7, 2026, the inspected registry `1.0.0` archive referenced
-`057a96`, not repository source `3294af3`; the identical component version
-string did not imply identical APIs or room-node support. Use the documentation
-shipped with the selected artifact, and verify its provenance before applying
-current-source instructions.
+The `v1.1.0` source release includes the session and surface APIs described here.
+The matching `espressif/esp-openclaw-node` registry version contains only the
+core component; use the source checkout for room examples and Talk. Verify the
+registry archive's version and embedded source identity with the
+[release checker](component-releases.md#diagnose-without-uploading).
+The historical `1.0.0` registry archive predates these APIs. Use the documentation
+shipped with the selected artifact rather than assuming it matches current source.
 
 ## Prepare The Gateway
 

@@ -1,4 +1,4 @@
-version: "1.0.0"
+version: "1.1.0"
 description: "ESP-IDF component for running OpenClaw Nodes on ESP32 devices."
 url: https://github.com/openclaw/esp-openclaw-node
 repository: https://github.com/openclaw/esp-openclaw-node.git

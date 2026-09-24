@@ -1213,12 +1213,18 @@ static bool wait_for_internal_state(
 {
     TickType_t start = xTaskGetTickCount();
     while ((xTaskGetTickCount() - start) < timeout_ticks) {
-        if (node->state == expected) {
+        esp_openclaw_node_lock_state(node);
+        bool matched = node->state == expected;
+        esp_openclaw_node_unlock_state(node);
+        if (matched) {
             return true;
         }
         vTaskDelay(pdMS_TO_TICKS(10));
     }
-    return node->state == expected;
+    esp_openclaw_node_lock_state(node);
+    bool matched = node->state == expected;
+    esp_openclaw_node_unlock_state(node);
+    return matched;
 }
 
 TEST_CASE("destroy keeps teardown when a queued disconnect completes", "[esp_openclaw_node][lifecycle]")

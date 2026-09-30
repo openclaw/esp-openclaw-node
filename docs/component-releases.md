@@ -29,7 +29,11 @@ Manual releases must pass the same tests before the upload job can run.
    dispatch commit SHA are supplied explicitly. No GitHub OIDC permission is
    granted because this component has no working trusted-uploader registration
    for the current repository.
-5. The final read-only check downloads the registered ZIP and validates its
+5. The final read-only check allows registry propagation after upload: if a
+   valid listing does not yet contain the expected version, it retries ten
+   times at 30-second intervals (up to five minutes of waiting, plus network
+   time). Network failures, malformed metadata, yanked versions, and artifact
+   identity failures still fail immediately. It downloads the registered ZIP and validates its
    root `idf_component.yml`: version, repository, component path, and
    `repository_info.commit_sha` must match the intended source identity.
    Success is reported as **registry artifact verified**.
@@ -81,3 +85,7 @@ after any registry propagation delay. Do not rerun publication to repair a
 verification error or attempt to overwrite an existing version. A matching
 embedded identity is not a substitute for clean consumer builds, firmware
 qualification, or provenance verification beyond these manifest fields.
+
+Add `--wait-for-propagation` to a read-only `verify` command to use the same
+bounded wait as the upload workflow. Without it, verification makes one attempt.
+The option is rejected for `preflight`; it cannot permit an existing release.

@@ -89,4 +89,5 @@ jobs:
         run: |
           test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
           "$RUNNER_TEMP/component-release-check/bin/python" scripts/check_component_release.py \
-            verify --expected-version "$EXPECTED_VERSION" --commit-sha "$RELEASE_SHA"
+            verify --expected-version "$EXPECTED_VERSION" --commit-sha "$RELEASE_SHA" \
+            --wait-for-propagation

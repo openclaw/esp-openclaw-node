@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import re
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -163,7 +164,9 @@ def archive_manifest(entry):
         raise ReleaseError("registry archive could not be read") from error
 
 
-def check_release(mode, manifest_path, expected_version, commit_sha=None):
+def check_release(mode, manifest_path, expected_version, commit_sha=None, wait_for_propagation=False):
+    if wait_for_propagation and mode != "verify":
+        raise ReleaseError("propagation waiting is only available for verification")
     if not expected_version or len(expected_version) > 128:
         raise ReleaseError("expected version must be a nonempty version string")
     if mode == "verify" and (
@@ -178,6 +181,17 @@ def check_release(mode, manifest_path, expected_version, commit_sha=None):
             raise ReleaseError(f"version {expected_version} already exists; refusing release")
         return f"release preflight passed: {NAMESPACE}/{COMPONENT} {expected_version} is absent"
     entry = versions.get(expected_version)
+    if entry is None and wait_for_propagation:
+        for attempt in range(10):
+            print(
+                f"expected version is not yet visible; retrying read-only verification "
+                f"in 30 seconds ({attempt + 1}/10)",
+                file=sys.stderr,
+            )
+            time.sleep(30)
+            entry = registry_versions().get(expected_version)
+            if entry is not None:
+                break
     if entry is None:
         raise ReleaseError("expected version is not visible in the registry; artifact not verified")
     if entry.get("yanked_at") is not None:
@@ -192,11 +206,18 @@ def main(argv=None):
     parser.add_argument("--expected-version", required=True)
     parser.add_argument("--commit-sha")
     parser.add_argument(
+        "--wait-for-propagation", action="store_true",
+        help="verify only: retry an absent registry version ten times at 30-second intervals",
+    )
+    parser.add_argument(
         "--manifest", type=Path, default=Path(COMPONENT_PATH) / "idf_component.yml"
     )
     args = parser.parse_args(argv)
     try:
-        print(check_release(args.mode, args.manifest, args.expected_version, args.commit_sha))
+        print(check_release(
+            args.mode, args.manifest, args.expected_version, args.commit_sha,
+            args.wait_for_propagation,
+        ))
     except (ReleaseError, OSError) as error:
         print(f"component release check failed: {error}", file=sys.stderr)
         return 1

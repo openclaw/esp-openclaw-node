@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Allow bounded registry propagation time during post-upload artifact verification instead of failing immediately after a successful component upload.
+
 ## 1.1.0 - 2026-09-24
 
 **Highlights:** Safer teardown and Talk signaling, role-aware Gateway sessions, refreshed surface URLs, and reliable room-node builds.

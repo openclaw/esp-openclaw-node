@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import call, patch
 import urllib.error
 import zipfile
 
@@ -58,11 +58,13 @@ class ReleaseCheckTests(unittest.TestCase):
         self.manifest = Path(self.directory.name) / "idf_component.yml"
         self.manifest.write_text(yaml.safe_dump(MANIFEST), encoding="utf-8")
 
-    def run_check(self, mode="preflight", expected_version=VERSION, commit_sha=SHA):
+    def run_check(self, mode="preflight", expected_version=VERSION, commit_sha=SHA, wait=False):
         stdout, stderr = io.StringIO(), io.StringIO()
         args = [mode, "--manifest", str(self.manifest), "--expected-version", expected_version]
         if mode == "verify":
             args.extend(["--commit-sha", commit_sha])
+        if wait:
+            args.append("--wait-for-propagation")
         with redirect_stdout(stdout), redirect_stderr(stderr):
             status = release.main(args)
         return status, stdout.getvalue(), stderr.getvalue()
@@ -149,6 +151,65 @@ class ReleaseCheckTests(unittest.TestCase):
         self.assertIn(SHA, output)
         self.assertNotIn("uploaded", output)
         self.assertEqual(read.call_args_list[1].args[0], ARTIFACT_URL)
+
+    def test_verify_waits_for_registry_propagation_without_uploading(self):
+        with patch.object(release, "download", side_effect=[
+            registry(), registry(), registry(version_entry()), archive_bytes(),
+        ]) as read, patch("time.sleep") as sleep:
+            status, output, error = self.run_check("verify", wait=True)
+        self.assertEqual(status, 0, error)
+        self.assertIn("registry artifact verified", output)
+        self.assertEqual(sleep.call_args_list, [call(30)] * 2)
+        self.assertEqual([entry.args[0] for entry in read.call_args_list],
+                         [release.REGISTRY_URL] * 3 + [ARTIFACT_URL])
+
+    def test_verify_propagation_wait_is_bounded(self):
+        with patch.object(release, "download", return_value=registry()) as read, \
+                patch("time.sleep") as sleep:
+            status, output, error = self.run_check("verify", wait=True)
+        self.assertEqual((status, output), (1, ""))
+        self.assertIn("artifact not verified", error)
+        self.assertEqual(read.call_count, 11)
+        self.assertEqual(sleep.call_args_list, [call(30)] * 10)
+
+    def test_verify_accepts_version_on_final_propagation_attempt(self):
+        with patch.object(release, "download", side_effect=[
+            *([registry()] * 10), registry(version_entry()), archive_bytes(),
+        ]) as read, patch("time.sleep") as sleep:
+            status, output, error = self.run_check("verify", wait=True)
+        self.assertEqual(status, 0, error)
+        self.assertIn("registry artifact verified", output)
+        self.assertEqual(read.call_count, 12)
+        self.assertEqual(sleep.call_count, 10)
+
+    def test_propagation_wait_refuses_preflight_before_network(self):
+        with patch.object(release, "download") as read, patch("time.sleep") as sleep:
+            status, output, error = self.run_check(wait=True)
+        self.assertEqual((status, output), (1, ""))
+        self.assertIn("only available for verification", error)
+        read.assert_not_called()
+        sleep.assert_not_called()
+
+    def test_verify_wait_does_not_retry_errors_or_identity_failures(self):
+        wrong_manifest = {**MANIFEST, "version": "1.0.2"}
+        failures = [
+            [release.ReleaseError("registry request failed")],
+            [b"invalid JSON"],
+            [registry(version_entry(yanked_at="2026-01-01T00:00:00Z"))],
+            [registry(version_entry(url="https://example.com/archive.zip"))],
+            [registry(version_entry()), archive_bytes(wrong_manifest)],
+        ]
+        for responses in failures:
+            for absent_first in (False, True):
+                sequence = ([registry()] if absent_first else []) + responses
+                with self.subTest(responses=responses, absent_first=absent_first), \
+                        patch.object(release, "download", side_effect=sequence) as read, \
+                        patch("time.sleep") as sleep:
+                    status, output, error = self.run_check("verify", wait=True)
+                self.assertEqual((status, output), (1, ""))
+                self.assertIn("check failed", error)
+                self.assertEqual(read.call_count, len(sequence))
+                self.assertEqual(sleep.call_count, int(absent_first))
 
     def test_verify_rejects_each_artifact_identity_mismatch(self):
         mutations = [

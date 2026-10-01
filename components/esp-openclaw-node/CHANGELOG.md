@@ -2,8 +2,14 @@
 
 ## Unreleased
 
+## 1.1.1 - 2026-10-01
+
+**Highlights:** Refreshed room-node speech dependencies, a stable CI toolchain, and reliable component publication verification.
+
 - Update both room examples to ESP-SR 2.5.2 and pin their CI toolchain to ESP-IDF 5.5.5 while preserving the qualified Tab5 SDK image. Thanks @steipete. (#34)
 - Allow bounded registry propagation time during post-upload artifact verification instead of failing immediately after a successful component upload.
+
+Qualification scope: host checks and CI firmware builds only. Publication requires all five firmware builds to pass on the release commit. No hardware flashing, on-device Unity execution, live Gateway pairing/reconnect, acoustic wake/Talk, display/Canvas, camera/DMA, SD-card removal, or C6 coprocessor qualification is claimed for this release.
 
 ## 1.1.0 - 2026-09-24
 

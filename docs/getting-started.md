@@ -43,7 +43,7 @@ git submodule update --init --recursive
 Registry packages and prebuilt firmware are separate delivery sources. Record
 the resolved package version and archive digest, or the firmware image digest
 and associated source commit, rather than assuming they match the checkout.
-The `v1.1.0` source release includes the session and surface APIs described here.
+The `v1.1.1` source release includes the session and surface APIs described here.
 The matching `espressif/esp-openclaw-node` registry version contains only the
 core component; use the source checkout for room examples and Talk. Verify the
 registry archive's version and embedded source identity with the

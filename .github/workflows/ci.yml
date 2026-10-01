@@ -81,7 +81,7 @@ jobs:
       - name: Build
         uses: espressif/esp-idf-ci-action@v1
         with:
-          esp_idf_version: ${{ matrix.idf_version || 'release-v5.5' }}
+          esp_idf_version: ${{ matrix.idf_version || 'v5.5.5' }}
           target: ${{ matrix.target }}
           path: ${{ matrix.path }}
           command: |
@@ -136,7 +136,7 @@ jobs:
                 --pr-head-sha "${{ github.event.pull_request.head.sha }}" \
                 --run-id "${{ github.run_id }}" \
                 --run-attempt "${{ github.run_attempt }}" \
-                --idf-image "espressif/idf:${{ matrix.idf_version || 'release-v5.5' }}" \
+                --idf-image "espressif/idf:${{ matrix.idf_version || 'v5.5.5' }}" \
                 $nvs_diagnostics $sdio_diagnostics $camera_compat
             fi
 

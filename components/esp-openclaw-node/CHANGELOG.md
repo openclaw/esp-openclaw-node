@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Update both room examples to ESP-SR 2.5.2 and pin their CI toolchain to ESP-IDF 5.5.5 while preserving the qualified Tab5 SDK image. Thanks @steipete. (#34)
 - Allow bounded registry propagation time during post-upload artifact verification instead of failing immediately after a successful component upload.
 
 ## 1.1.0 - 2026-09-24

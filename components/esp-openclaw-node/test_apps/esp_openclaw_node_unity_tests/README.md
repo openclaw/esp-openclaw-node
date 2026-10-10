@@ -28,6 +28,8 @@ not require a live OpenClaw gateway.
 - destroy-path notification safety
 - transport-state edge cases around challenge ping, clean close, and disconnect
   rejection while still connecting
+- the real 12-second handshake deadline after successful transport startup and
+  invalid JSON, followed by another accepted connection attempt
 - Gateway-owned Talk negotiation, strict descriptor rejection, bounded close,
   late-create cancellation, and second-call recovery
 
@@ -47,4 +49,14 @@ The suite runs automatically at boot. A passing run ends with a summary like:
 -----------------------
 18 Tests 0 Failures 0 Ignored
 OK
+```
+
+The deterministic host regression runs the production connect, transport-start,
+timeout, and worker functions with a synthetic clock and queue. It covers idle
+and continuously busy queues, an attempt starting at clock zero, terminal-event
+uniqueness, retry admission, and ready/destroying states without waiting in real
+time:
+
+```bash
+python3 -m unittest discover -s scripts/tests -p test_node_connect_timeout.py -v
 ```

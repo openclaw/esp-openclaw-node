@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Preserve the 12-second handshake deadline through transport startup and check it while draining queued messages so stalled connections can retry. Thanks @DonnieFi. (#67)
+- Update the registry WebSocket client to 1.8.0 for upstream stop/destroy race, error-handling, and close-state fixes.
+
 ## 1.1.1 - 2026-10-01
 
 **Highlights:** Refreshed room-node speech dependencies, a stable CI toolchain, and reliable component publication verification.

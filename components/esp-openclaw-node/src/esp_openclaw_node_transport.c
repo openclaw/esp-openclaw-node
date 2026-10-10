@@ -221,7 +221,8 @@ esp_err_t esp_openclaw_node_start_transport_for_active_source(
     node->ws = ws;
     node->client_started = false;
     node->transport_connected = false;
-    esp_openclaw_node_clear_session_wait_state_locked(node);
+    /* Keep the deadline established by the accepted connect request. */
+    node->pending_connect_id[0] = '\0';
     esp_openclaw_node_unlock_state(node);
 
     esp_err_t err = node->websocket_client_ops->register_events(

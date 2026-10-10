@@ -134,6 +134,7 @@ typedef struct node {
     uint32_t next_transport_id, active_transport_id;
     void *ws, *transport_ctx;
     char *transport_gateway_uri;
+    char pending_connect_id[32];
     bool client_started, transport_connected;
 } *esp_openclaw_node_handle_t;
 typedef struct { esp_openclaw_node_handle_t node; uint32_t transport_id; } esp_openclaw_node_transport_event_ctx_t;
@@ -159,8 +160,6 @@ static void esp_openclaw_node_lock_state(esp_openclaw_node_handle_t node)
 { (void)node; assert(!state_locked); state_locked = true; }
 static void esp_openclaw_node_unlock_state(esp_openclaw_node_handle_t node)
 { (void)node; assert(state_locked); state_locked = false; }
-static void esp_openclaw_node_clear_session_wait_state_locked(esp_openclaw_node_handle_t node)
-{ (void)node; assert(state_locked); }
 static const char *esp_openclaw_node_trimmed_or_null(const char *s) { return s; }
 static char *esp_openclaw_node_duplicate_string(const char *s) { return strdup(s); }
 static esp_err_t esp_openclaw_node_validate_tls_preflight(const config_t *c, const char *u)

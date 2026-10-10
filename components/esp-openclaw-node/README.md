@@ -301,6 +301,14 @@ The component performs one connection attempt at a time. It does not run an
 automatic reconnect loop and it does not choose between saved-session reconnect
 and explicit auth input on behalf of the application.
 
+An unfinished handshake times out after 12 seconds from the start of the attempt,
+including when transport startup succeeds but no valid `hello-ok` arrives. The
+worker checks this deadline while processing queued messages as well as when
+idle. It emits `CONNECT_FAILED` with reason `TRANSPORT_START_FAILED` and local
+error `ESP_ERR_TIMEOUT`, allowing the application's saved-session retry policy
+to recover. Synchronous handlers and callbacks must return before the worker can
+check the deadline.
+
 Request rules:
 
 - `ESP_OPENCLAW_NODE_CONNECT_SOURCE_SAVED_SESSION` is valid only while idle and

@@ -13,6 +13,7 @@
 
 #include "esp_event.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "esp_websocket_client.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -1345,6 +1346,40 @@ TEST_CASE("destroy keeps teardown when a queued disconnect completes", "[esp_ope
     vSemaphoreDelete(command_ctx.release);
 }
 
+TEST_CASE("accepted connect times out after transport startup and invalid JSON", "[esp_openclaw_node][transport]")
+{
+    reset_openclaw_storage();
+    reset_transport_state();
+    reset_event_recorder();
+
+    esp_openclaw_node_config_t config = {0};
+    esp_openclaw_node_config_init_default(&config);
+    config.event_cb = test_node_event_cb;
+
+    esp_openclaw_node_handle_t node = NULL;
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_create(&config, &node));
+    TEST_ASSERT_EQUAL(ESP_OK, request_connect_no_auth(node, "ws://gateway.example/ws"));
+    TEST_ASSERT_TRUE(wait_for_int_value(&s_transport_state.start_calls, 1, pdMS_TO_TICKS(1000)));
+    emit_ws_event(WEBSOCKET_EVENT_CONNECTED, NULL, ESP_OK);
+    TEST_ASSERT_TRUE(wait_for_int_value(&s_transport_state.send_with_opcode_calls, 1, pdMS_TO_TICKS(1000)));
+    emit_ws_event(WEBSOCKET_EVENT_DATA, "{invalid-json", ESP_OK);
+
+    TEST_ASSERT_TRUE(wait_for_event(
+        ESP_OPENCLAW_NODE_EVENT_CONNECT_FAILED,
+        pdMS_TO_TICKS(ESP_OPENCLAW_NODE_CONNECT_TIMEOUT_MS + 1000)));
+    TEST_ASSERT_EQUAL(ESP_OPENCLAW_NODE_CONNECT_FAILURE_TRANSPORT_START_FAILED,
+        s_event_recorder.connect_failed_reason);
+    TEST_ASSERT_EQUAL(ESP_ERR_TIMEOUT, s_event_recorder.local_err);
+    TEST_ASSERT_EQUAL(1, s_event_recorder.connect_failed_count);
+    TEST_ASSERT_EQUAL(1, s_transport_state.stop_calls);
+    TEST_ASSERT_EQUAL(1, s_transport_state.destroy_calls);
+
+    reset_event_recorder();
+    TEST_ASSERT_EQUAL(ESP_OK, request_connect_no_auth(node, "ws://gateway.example/ws"));
+    TEST_ASSERT_TRUE(wait_for_int_value(&s_transport_state.start_calls, 2, pdMS_TO_TICKS(1000)));
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_destroy(node));
+}
+
 TEST_CASE("connect kicks challenge ping and disconnect is not dropped while busy", "[esp_openclaw_node][transport]")
 {
     reset_openclaw_storage();
@@ -2009,9 +2044,10 @@ TEST_CASE("connect diagnostics preserve outcomes and omit credential canaries", 
         esp_openclaw_node_handle_t node = NULL;
         TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_create(&config, &node));
 
-        /* Enter the response boundary without a socket, timer or live Gateway. */
+        /* Enter the response boundary without a socket or live Gateway. */
         esp_openclaw_node_lock_state(node);
         node->state = ESP_OPENCLAW_NODE_INTERNAL_CONNECTING;
+        node->connect_started_ms = esp_timer_get_time() / 1000LL;
         node->transport_connected = true;
         node->client_started = true;
         node->ws = (esp_websocket_client_handle_t)&s_fake_transport_client;

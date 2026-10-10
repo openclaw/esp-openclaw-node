@@ -93,7 +93,7 @@ void esp_openclaw_node_fail_if_connect_timed_out(esp_openclaw_node_handle_t node
     int64_t connect_started_ms = node->connect_started_ms;
     esp_openclaw_node_unlock_state(node);
 
-    if (!connecting || connect_started_ms <= 0) {
+    if (!connecting) {
         return;
     }
 
@@ -509,6 +509,7 @@ void esp_openclaw_node_task(void *arg)
                 exit_node_task(node);
                 return;
             }
+            esp_openclaw_node_fail_if_connect_timed_out(node);
             memset(&message, 0, sizeof(message));
         } while (xQueueReceive(node->work_queue, &message, 0) == pdTRUE);
     }

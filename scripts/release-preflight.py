@@ -30,7 +30,7 @@ def notes_for(text, version):
 
 def main():
     dry = os.environ.get("DRY_RUN") == "true"
-    text = Path("CHANGELOG.md").read_text()
+    text = Path("components/esp-openclaw-node/CHANGELOG.md").read_text()
     version = os.environ.get("VERSION", "").removeprefix("v")
     if not version and dry:
         import yaml

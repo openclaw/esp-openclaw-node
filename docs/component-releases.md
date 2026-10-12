@@ -2,7 +2,7 @@
 
 `.github/workflows/upload_component.yml` owns the component registry and GitHub
 Release as one tag-driven pipeline. Prepare a matching string version in
-`components/esp-openclaw-node/idf_component.yml` and a dated `CHANGELOG.md`
+`components/esp-openclaw-node/idf_component.yml` and a dated `components/esp-openclaw-node/CHANGELOG.md`
 section, merge to protected main, and require green push CI on that exact commit.
 With explicit release authorization, push an annotated SSH-signed `vX.Y.Z` tag.
 The workflow verifies the allowed signer, builds the component test application,

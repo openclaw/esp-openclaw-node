@@ -1,93 +1,158 @@
-name: Release esp-openclaw-node to IDF Component Registry
+name: Release
 
 on:
-  pull_request:
-    paths:
-      - ".github/workflows/upload_component.yml"
-      - "scripts/check_component_release.py"
-      - "scripts/tests/test_check_component_release.py"
-      - "docs/component-releases.md"
+  push:
+    tags: ['v*']
   workflow_dispatch:
     inputs:
-      expected_version:
-        description: Component manifest version to release (must not already exist)
-        required: true
+      dry_run:
+        description: Validate and build without publishing
+        type: boolean
+        default: true
+      version:
+        description: Dated changelog version to verify (blank uses the latest dated section)
         type: string
+        required: false
 
 permissions: {}
+concurrency:
+  group: release-${{ github.event.inputs.version || github.ref_name }}
+  cancel-in-progress: false
 
 jobs:
-  validate:
-    permissions:
-      contents: read
+  build:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-
-      - name: Test release checker
-        run: |
-          python3 -m venv "$RUNNER_TEMP/component-release-check"
-          "$RUNNER_TEMP/component-release-check/bin/python" -m pip install \
-            --disable-pip-version-check "PyYAML==6.0.3"
-          "$RUNNER_TEMP/component-release-check/bin/python" -B -m unittest discover \
-            -s scripts/tests -p 'test_check_component_release.py' -v
-
-  upload_components:
-    needs: validate
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
-    concurrency:
-      group: esp-openclaw-node-component-release
-      cancel-in-progress: false
     permissions:
+      actions: read
       contents: read
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    env:
-      EXPECTED_VERSION: ${{ inputs.expected_version }}
-      RELEASE_SHA: ${{ github.sha }}
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      sha: ${{ steps.release.outputs.sha }}
+      tag_object: ${{ steps.release.outputs.tag_object }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          fetch-depth: 0
           persist-credentials: false
-
-      - name: Prepare isolated release checker
-        run: |
-          python3 -m venv "$RUNNER_TEMP/component-release-check"
-          "$RUNNER_TEMP/component-release-check/bin/python" -m pip install \
-            --disable-pip-version-check "PyYAML==6.0.3"
-
-      - name: Check source version and refuse existing releases
-        run: |
-          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
-          "$RUNNER_TEMP/component-release-check/bin/python" scripts/check_component_release.py \
-            preflight --expected-version "$EXPECTED_VERSION"
-
-      - name: Require configured publication credential
+      - name: Install manifest parser
+        run: python3 -m pip install --disable-pip-version-check PyYAML==6.0.3
+      - name: Test release guard
+        run: python3 -B -m unittest discover -s scripts/tests -p test_check_component_release.py -v
+      - name: Validate source, changelog, signature, and exact-commit push CI
+        id: release
         env:
-          REGISTRY_UPLOAD_TOKEN: ${{ secrets.IDF_COMPONENT_API_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version || github.ref_name }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+          CI_WORKFLOWS: ci.yml
         run: |
-          if [ -z "$REGISTRY_UPLOAD_TOKEN" ]; then
-            echo "::error::IDF_COMPONENT_API_TOKEN is required for registry publication"
-            exit 1
-          fi
-
-      - name: Upload esp-openclaw-node to IDF Component Registry
-        uses: espressif/upload-components-ci-action@v2
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ "$VERSION" = main ]; then export VERSION=; fi
+          python3 scripts/release-preflight.py
+      - name: Build component test application
+        uses: espressif/esp-idf-ci-action@9d38657f3d789ca759b2b37aaf5ceffbc42c4f0d # v1
         with:
-          components: "esp-openclaw-node:components/esp-openclaw-node"
-          namespace: "espressif"
-          api_token: ${{ secrets.IDF_COMPONENT_API_TOKEN }}
-          repository_url: "https://github.com/openclaw/esp-openclaw-node.git"
-          commit_sha: ${{ github.sha }}
-
-      - name: Verify registry artifact identity
+          esp_idf_version: v5.5.5
+          target: esp32s3
+          path: components/esp-openclaw-node/test_apps/esp_openclaw_node_unity_tests
+          command: idf.py build
+      - name: Freeze source archive and checksums
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
         run: |
-          test "$(git rev-parse HEAD)" = "$RELEASE_SHA"
-          "$RUNNER_TEMP/component-release-check/bin/python" scripts/check_component_release.py \
-            verify --expected-version "$EXPECTED_VERSION" --commit-sha "$RELEASE_SHA" \
-            --wait-for-propagation
+          set -euo pipefail
+          mkdir release-assets
+          git archive --format=tar.gz --prefix=esp-openclaw-node-${VERSION}/ HEAD > "release-assets/esp-openclaw-node-${VERSION}.tar.gz"
+          tar -tzf "release-assets/esp-openclaw-node-${VERSION}.tar.gz" > "$RUNNER_TEMP/archive-files"
+          test -s "$RUNNER_TEMP/archive-files"
+          cd release-assets
+          sha256sum *.tar.gz > SHA256SUMS
+          sha256sum -c SHA256SUMS
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-${{ github.sha }}
+          path: |
+            release-assets/
+            release-notes.md
+          if-no-files-found: error
+
+  registry:
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.build.outputs.sha }}
+          persist-credentials: false
+      - name: Prepare component verifier
+        run: python3 -m pip install --disable-pip-version-check PyYAML==6.0.3
+      - name: Refuse existing component version
+        env:
+          TAG: ${{ needs.build.outputs.tag }}
+          UPLOAD_TOKEN: ${{ secrets.IDF_COMPONENT_API_TOKEN }}
+        run: |
+          test -n "$UPLOAD_TOKEN"
+          python3 scripts/check_component_release.py preflight --expected-version "${TAG#v}"
+      - name: Upload component
+        uses: espressif/upload-components-ci-action@355b0bb4d41e94edbec03d08c0ba0c11bbc4834d # v2
+        with:
+          components: esp-openclaw-node:components/esp-openclaw-node
+          namespace: espressif
+          api_token: ${{ secrets.IDF_COMPONENT_API_TOKEN }}
+          repository_url: https://github.com/openclaw/esp-openclaw-node.git
+          commit_sha: ${{ needs.build.outputs.sha }}
+      - name: Verify registered component identity
+        env:
+          TAG: ${{ needs.build.outputs.tag }}
+          SHA: ${{ needs.build.outputs.sha }}
+        run: python3 scripts/check_component_release.py verify --expected-version "${TAG#v}" --commit-sha "$SHA" --wait-for-propagation
+
+  publish:
+    if: github.event_name == 'push'
+    needs: [build, registry]
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ needs.build.outputs.sha }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-${{ github.sha }}
+          path: payload
+      - name: Reverify immutable tag and publish exact archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.build.outputs.tag }}
+          TARGET_SHA: ${{ needs.build.outputs.sha }}
+          TAG_OBJECT: ${{ needs.build.outputs.tag_object }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "refs/tags/$TAG:refs/audit/tag"
+          test "$(git rev-parse refs/audit/tag)" = "$TAG_OBJECT"
+          test "$(git rev-parse refs/audit/tag^{})" = "$TARGET_SHA"
+          git -c gpg.format=ssh -c gpg.ssh.allowedSignersFile=.github/release-allowed-signers verify-tag refs/audit/tag
+          (cd payload/release-assets && sha256sum -c SHA256SUMS)
+          if ! latest=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name 2>"$RUNNER_TEMP/latest-error"); then
+            if grep -q '(HTTP 404)' "$RUNNER_TEMP/latest-error"; then
+              latest=
+            else
+              cat "$RUNNER_TEMP/latest-error" >&2
+              exit 1
+            fi
+          fi
+          flags=()
+          if [ -n "$latest" ] && python3 - "$TAG" "$latest" <<'PYCODE'
+          import sys
+          def stable(tag): return tuple(map(int, tag.removeprefix('v').split('-')[0].split('.')))
+          sys.exit(0 if stable(sys.argv[1]) < stable(sys.argv[2]) else 1)
+          PYCODE
+          then flags+=(--latest=false); fi
+          [[ "$TAG" != *-* ]] || flags+=(--prerelease --latest=false)
+          gh release create "$TAG" payload/release-assets/* --verify-tag --title "$TAG" --notes-file payload/release-notes.md "${flags[@]}"

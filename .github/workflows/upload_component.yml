@@ -34,6 +34,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+          submodules: recursive
       - name: Install manifest parser
         run: python3 -m pip install --disable-pip-version-check PyYAML==6.0.3
       - name: Test release guard

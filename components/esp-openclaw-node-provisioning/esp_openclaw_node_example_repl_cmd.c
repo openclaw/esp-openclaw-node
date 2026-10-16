@@ -7,6 +7,7 @@
 #include "esp_openclaw_node_example_repl_cmd.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "esp_check.h"
@@ -151,8 +152,49 @@ static int handle_status_command(int argc, char **argv)
     return 0;
 }
 
+static void print_ssid(const uint8_t *ssid)
+{
+    putchar('"');
+    for (size_t i = 0; i < 32 && ssid[i] != 0; ++i) {
+        unsigned char byte = ssid[i];
+        if (byte == '"' || byte == '\\') printf("\\%c", byte);
+        else if (byte < 0x20 || byte >= 0x7f) printf("\\x%02x", byte);
+        else putchar(byte);
+    }
+    putchar('"');
+}
+
+static int scan_wifi_from_repl(void)
+{
+    uint16_t count = ESP_OPENCLAW_NODE_WIFI_SCAN_LIMIT, total = 0;
+    wifi_ap_record_t *records = calloc(count, sizeof(*records));
+    if (records == NULL) {
+        printf("wifi scan failed: out of memory\n");
+        return 1;
+    }
+    esp_err_t err = esp_openclaw_node_wifi_scan(records, &count, &total);
+    if (err == ESP_OK) {
+        if (total == 0) printf("no networks found\n");
+        else printf("nearby networks: %u (showing %u, strongest first)\n", total, count);
+        for (uint16_t i = 0; i < count; ++i) {
+            print_ssid(records[i].ssid);
+            printf(" channel=%u rssi=%d auth=%u\n",
+                   records[i].primary, records[i].rssi, records[i].authmode);
+        }
+    } else if (err == ESP_ERR_WIFI_STATE) {
+        printf("wifi is busy; run `wifi disconnect`, then `wifi scan`\n");
+    } else {
+        printf("wifi scan failed: %s\n", esp_err_to_name(err));
+    }
+    free(records);
+    return err == ESP_OK ? 0 : 1;
+}
+
 static int handle_wifi_command(int argc, char **argv)
 {
+    if (argc == 2 && strcmp(argv[1], "scan") == 0) {
+        return scan_wifi_from_repl();
+    }
     if (argc >= 3 && strcmp(argv[1], "set") == 0) {
         const char *passphrase = argc >= 4 ? argv[3] : "";
         esp_err_t err = esp_openclaw_node_wifi_set_credentials(argv[2], passphrase);
@@ -195,6 +237,7 @@ static int handle_wifi_command(int argc, char **argv)
     printf("       wifi clear\n");
     printf("       wifi connect\n");
     printf("       wifi disconnect\n");
+    printf("       wifi scan\n");
     return 1;
 }
 
@@ -273,8 +316,8 @@ esp_err_t esp_openclaw_node_example_repl_register_commands(esp_openclaw_node_han
 
     const esp_console_cmd_t wifi_command = {
         .command = "wifi",
-        .help = "Set, clear, connect, or disconnect Wi-Fi credentials",
-        .hint = "set <ssid> [passphrase] | clear | connect | disconnect",
+        .help = "Scan networks or set, clear, connect, or disconnect Wi-Fi",
+        .hint = "scan | set <ssid> [passphrase] | clear | connect | disconnect",
         .func = handle_wifi_command,
     };
     ESP_RETURN_ON_ERROR(

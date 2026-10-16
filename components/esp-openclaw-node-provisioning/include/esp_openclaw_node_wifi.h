@@ -10,7 +10,10 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
+
+#define ESP_OPENCLAW_NODE_WIFI_SCAN_LIMIT 16
 
 /** @brief Snapshot of the example Wi-Fi station state. */
 typedef struct {
@@ -56,6 +59,17 @@ esp_err_t esp_openclaw_node_wifi_connect(void);
 
 /** @brief Disconnect the Wi-Fi station if it is currently connected. */
 esp_err_t esp_openclaw_node_wifi_disconnect(void);
+
+/**
+ * @brief Scan nearby networks while disconnected and not reconnecting.
+ *
+ * Run after startup without credentials, or after an explicit disconnect.
+ * @p count is the capacity of @p records on entry (1 to SCAN_LIMIT), and the
+ * number returned on success. @p total includes results beyond that capacity.
+ * Returns ESP_ERR_WIFI_STATE while connecting, connected, or already scanning.
+ * Credentials and reconnect policy are not changed.
+ */
+esp_err_t esp_openclaw_node_wifi_scan(wifi_ap_record_t *records, uint16_t *count, uint16_t *total);
 
 /**
  * @brief Wait for the station to connect.

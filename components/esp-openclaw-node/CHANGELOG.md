@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Add a bounded USB `wifi scan` command for provisioning disconnected nodes without changing saved credentials.
 - Keep the M5Dial encoder editable after confirmation, recognize stationary button holds, and prevent touch drags from submitting actions or returning home.
 
 - Add a Waveshare 1.8-inch watch profile with CO5300/CST816S display support and shared-ES8311 microphone/speaker lifecycles for the full room-node feature set.

@@ -51,6 +51,10 @@ symlink still fails preflight.
 by the current media stack: WakeNet only advances while its AFE fetch path is
 drained. It lives here once, alongside the shared capture orchestration, until
 the upstream capture component exposes the equivalent wake callback contract.
+AFE/model open and close operations need an 8 KiB internal task stack during
+ambient/Talk transitions. Include this headroom in the board's internal-RAM
+budget alongside both Gateway connections and playback; PSRAM cannot serve
+these stack operations.
 The closure retains Espressif's modified-MIT notice in
 `LICENSE.ESPRESSIF-MODIFIED-MIT`. The OpenClaw home image retains its MIT notice
 and source provenance in [assets/NOTICE.md](assets/NOTICE.md); the remaining

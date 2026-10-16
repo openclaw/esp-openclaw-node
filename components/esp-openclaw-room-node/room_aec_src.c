@@ -591,7 +591,7 @@ static esp_capture_err_t audio_aec_src_start(esp_capture_audio_src_if_t *h)
     }
     ret = open_afe(src);
     if (ret != 0) {
-        ESP_LOGE(TAG, "Failed to open AFE");
+        ESP_LOGE(TAG, "Failed to open AFE: %d", ret);
         return ESP_CAPTURE_ERR_NOT_SUPPORTED;
     }
     int feed_chunksize = src->afe_handle->get_feed_chunksize(src->afe_data);

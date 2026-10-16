@@ -47,9 +47,10 @@ For a live voice check, follow the shared
 The pinned Waveshare BSP 2.0.3 detects CST816S or FT5x06 touch and applies the
 CO5300 panel offset required by the CST816S revision. The adapter registers
 this QSPI panel through the LVGL SPI path; the BSP's high-level RGB display
-helper is incompatible with this controller. Two 16-row internal DMA
-buffers keep display transfers bounded while PSRAM holds the larger UI/audio
-allocations. Touch and BOOT-button input use the shared room interface; long
+helper is incompatible with this controller. Two 8-row internal DMA
+buffers keep display transfers bounded and leave room for the AFE worker and
+both Gateway connections, while PSRAM holds the larger UI/audio allocations.
+Touch and BOOT-button input use the shared room interface; long
 press opens Diagnostics.
 
 The adapter also applies the [board's documented expander reset sequence](https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-1.8/blob/78e13f852929c2ab4f9d5e0ad1c50ea378dbf2b4/examples/esp-idf/90_axp2101_pmu/components/board_variant/board_variant.c)

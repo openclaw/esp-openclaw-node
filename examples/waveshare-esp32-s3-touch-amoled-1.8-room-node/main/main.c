@@ -14,7 +14,8 @@
 #include "freertos/task.h"
 
 #define TAG "waveshare_room"
-#define WAVESHARE_DRAW_ROWS 16
+/* Leave internal RAM for AFE transitions and both Gateway connections. */
+#define WAVESHARE_DRAW_ROWS 8
 
 static void (*toggle_room_view)(void);
 

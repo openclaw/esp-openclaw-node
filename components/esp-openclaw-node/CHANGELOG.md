@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Clarify voice-node pairing for room/watch profiles and document live Talk verification without assuming an automatic greeting.
+- Reduce watch display DMA buffers to leave internal RAM for Talk capture transitions and both Gateway connections; include the error code when AFE initialization fails.
 
 ## 1.2.0 - 2026-10-16
 

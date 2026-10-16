@@ -40,7 +40,9 @@ when Wi-Fi or the Gateway changes.
 The screen is upright with the USB connector on the right. The home screen
 shows a blinking face and connection status. Turn the encoder
 or tap to open the numeric control. Turn or drag its arc to change the value;
-press to confirm. A long press on the control returns to the face.
+press the encoder or tap the center to confirm. Hold the encoder or the center
+of the screen to return to the face. Dragging the arc never confirms an action
+or triggers the home gesture. Turning continues to adjust after confirmation.
 
 `dial.configure` defines the control. Its values must be integers between
 −10000 and 10000, with a positive step and 1–1000 equal intervals. Both the
@@ -97,5 +99,12 @@ console parser; the complete command must fit its 512-byte input limit.
 CI builds this example and publishes its firmware through the normal
 [CI artifact flow](../README.md#ci-firmware-downloads). Host tests cover range
 validation, endpoint arithmetic, and preservation of the old value after invalid
-configuration. Physical qualification additionally checks boot/pair/reconnect,
+configuration. Real LVGL input tests cover turn/confirm/turn, stationary holds,
+and short/sustained touch drags. Run them after resolving the BSP dependencies:
+
+```sh
+python3 tests/run_input_host_tests.py --lvgl-dir managed_components/lvgl__lvgl
+```
+
+Physical qualification additionally checks boot/pair/reconnect,
 touch and rotary operation, screen output, and audible buzzer playback.

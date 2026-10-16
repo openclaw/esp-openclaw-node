@@ -9,6 +9,7 @@
 #include "bsp/m5dial.h"
 #include "cJSON.h"
 #include "dial_control.h"
+#include "dial_input.h"
 #include "driver/gpio.h"
 #include "driver/ledc.h"
 #include "esp_check.h"
@@ -55,7 +56,7 @@ static struct {
     int brightness;
     bool action_pending;
     lv_obj_t *arc, *title, *value, *message, *footer, *eyes[2], *mouth;
-    lv_group_t *group;
+    dial_input_t input;
 } ui;
 
 static esp_err_t invalid(esp_openclaw_node_error_t *error, const char *message)
@@ -108,8 +109,7 @@ static void show_view(dial_view_t view)
     for (int i = 0; i < 2; ++i) lv_obj_set_flag(ui.eyes[i], LV_OBJ_FLAG_HIDDEN, view != VIEW_FACE);
     lv_obj_set_flag(ui.mouth, LV_OBJ_FLAG_HIDDEN, view != VIEW_FACE);
     lv_label_set_text(ui.title, view == VIEW_MESSAGE ? ui.heading : view == VIEW_CONTROL ? ui.label : "OpenClaw");
-    lv_group_focus_obj(view == VIEW_CONTROL ? ui.arc : lv_screen_active());
-    lv_group_set_editing(ui.group, true);
+    dial_input_set_control(&ui.input, view == VIEW_CONTROL);
 }
 
 static void update_value(void)
@@ -188,35 +188,21 @@ static void commit_action(void)
     }
 }
 
-static void input_event(lv_event_t *event)
+static void input_event(dial_input_event_t event, int value, bool pointer, void *context)
 {
-    lv_event_code_t code = lv_event_get_code(event);
-    if (code == LV_EVENT_KEY && ui.view != VIEW_CONTROL) {
-        uint32_t key = lv_event_get_key(event);
-        if (key == LV_KEY_LEFT || key == LV_KEY_RIGHT) show_view(VIEW_CONTROL);
-    } else if (code == LV_EVENT_VALUE_CHANGED) {
-        if (dial_control_move(&ui.control, lv_arc_get_value(ui.arc))) {
+    (void)context;
+    if (event == DIAL_INPUT_CHANGE) {
+        if (dial_control_move(&ui.control, value)) {
             ++ui.changes;
             update_value();
         }
-    } else if (code == LV_EVENT_LONG_PRESSED) {
+    } else if (event == DIAL_INPUT_HOME) {
         show_view(VIEW_FACE);
-    } else if (code == LV_EVENT_SHORT_CLICKED) {
-        lv_indev_t *input = lv_indev_active();
-        if (input != NULL && lv_indev_get_type(input) == LV_INDEV_TYPE_POINTER) ++ui.touches;
-        if (ui.view == VIEW_CONTROL) commit_action();
+    } else {
+        if (pointer) ++ui.touches;
+        if (event == DIAL_INPUT_CONFIRM) commit_action();
         else show_view(VIEW_CONTROL);
     }
-}
-
-static void encoder_long_press(lv_event_t *event)
-{
-    (void)event;
-    /* Editable widgets consume encoder long presses before object callbacks. */
-    lv_indev_t *encoder = bsp_display_get_input_dev();
-    show_view(VIEW_FACE);
-    lv_indev_reset(encoder, NULL);
-    lv_indev_wait_release(encoder);
 }
 
 static void refresh_ui(lv_timer_t *timer)
@@ -282,19 +268,13 @@ static esp_err_t start_display(void)
     lv_obj_set_style_text_color(screen, lv_color_white(), 0);
     lv_obj_remove_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(screen, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(screen, input_event, LV_EVENT_ALL, NULL);
     ui.arc = lv_arc_create(screen);
     lv_obj_set_size(ui.arc, 218, 218);
     lv_obj_center(ui.arc);
     lv_arc_set_range(ui.arc, 0, 100);
     lv_arc_set_value(ui.arc, 50);
     lv_obj_set_style_arc_color(ui.arc, lv_color_hex(0x58d5c4), LV_PART_INDICATOR);
-    lv_obj_add_event_cb(ui.arc, input_event, LV_EVENT_ALL, NULL);
-    ui.group = lv_group_create();
-    lv_group_add_obj(ui.group, screen);
-    lv_group_add_obj(ui.group, ui.arc);
-    lv_indev_set_group(bsp_display_get_input_dev(), ui.group);
-    lv_indev_add_event_cb(bsp_display_get_input_dev(), encoder_long_press, LV_EVENT_LONG_PRESSED, NULL);
+    dial_input_init(&ui.input, bsp_display_get_input_dev(), screen, ui.arc, input_event, NULL);
     ui.title = label(screen, 158, -66, &lv_font_montserrat_16);
     ui.value = label(screen, 146, 0, &lv_font_montserrat_24);
     ui.message = label(screen, 170, 10, &lv_font_montserrat_16);

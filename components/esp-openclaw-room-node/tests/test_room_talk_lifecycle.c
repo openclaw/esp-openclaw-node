@@ -49,14 +49,14 @@ static void bootstrap(void)
     talk_teardown_queue = xQueueCreate(1, sizeof(talk_teardown_request_t));
     host_require(xTaskCreate(talk_start_worker_task, "talk_start", 8192, NULL, 7, &talk_start_worker) == pdPASS,
         "start worker registered");
-    host_require(xTaskCreate(talk_teardown_task, "talk_teardown", 4096, NULL, 6, NULL) == pdPASS,
+    host_require(xTaskCreate(talk_teardown_task, "talk_teardown", 6144, NULL, 6, NULL) == pdPASS,
         "teardown worker registered");
     media_ready = true;
     media_initialized = true;
     host_require(start_node_client() == ESP_OK, "real node command registration");
     host_emit_node(node_client, ESP_OPENCLAW_NODE_EVENT_CONNECTED);
     host_fire_operator_timer(operator_start_timer);
-    host_run_task("operator_start");
+    host_run_task("talk_teardown");
     host_emit_node(operator_client, ESP_OPENCLAW_NODE_EVENT_CONNECTED);
     host_require(operator_ready && node_ready, "fixture clients connected");
 }
@@ -109,7 +109,7 @@ static void home_connection_facts(void)
         "only a missing saved-session response requests node pairing");
     host.operator_connect_result = ESP_ERR_NOT_FOUND;
     host_fire_operator_timer(operator_start_timer);
-    host_run_task("operator_start");
+    host_run_task("talk_teardown");
     CHECK(host.home.talk == ROOM_UI_TALK_NO_SESSION, "missing operator session is distinct from node pairing");
     const esp_err_t rejected[] = {ESP_ERR_INVALID_STATE, ESP_FAIL};
     for (size_t i = 0; i < sizeof(rejected) / sizeof(*rejected); ++i) {
@@ -118,7 +118,7 @@ static void home_connection_facts(void)
             "busy or failed node requests do not disprove a missing session");
         host.operator_connect_result = rejected[i];
         host_fire_operator_timer(operator_start_timer);
-        host_run_task("operator_start");
+        host_run_task("talk_teardown");
         CHECK(host.home.talk == ROOM_UI_TALK_NO_SESSION,
             "busy normalized to success and other operator failures retain the absence fact");
         host_emit_node(operator_client, ESP_OPENCLAW_NODE_EVENT_CONNECT_FAILED);
@@ -129,7 +129,7 @@ static void home_connection_facts(void)
         "an accepted node request clears missing material, not connection readiness");
     host.operator_connect_result = ESP_OK;
     host_fire_operator_timer(operator_start_timer);
-    host_run_task("operator_start");
+    host_run_task("talk_teardown");
     CHECK(host.home.talk == ROOM_UI_TALK_WAITING, "accepted operator reconnect is not Talk ready");
     host_emit_node(node_client, ESP_OPENCLAW_NODE_EVENT_CONNECT_FAILED);
     host_emit_node(operator_client, ESP_OPENCLAW_NODE_EVENT_CONNECT_FAILED);
@@ -812,6 +812,19 @@ static void console_diagnostics_contention(void)
         "error", "worker task", "error/worker task", true);
 }
 
+static void operator_reconnect_without_task_memory(void)
+{
+    connect_call();
+    unsigned requests = host.operator_connect_requests;
+    host.reject_task_creation = true;
+    host_emit_node(operator_client, ESP_OPENCLAW_NODE_EVENT_DISCONNECTED);
+    host_fire_operator_timer(operator_start_timer);
+    drain();
+    CHECK(host.operator_connect_requests == requests + 1,
+        "operator retry proceeds without allocating another task");
+    expect_closed();
+}
+
 static const struct { const char *name; void (*run)(void); } cases[] = {
     {"console-diagnostics-bytes", console_diagnostics_bytes},
     {"console-diagnostics-contention", console_diagnostics_contention},
@@ -821,6 +834,7 @@ static const struct { const char *name; void (*run)(void); } cases[] = {
     {"sdk-log-policy-failure", sdk_log_policy_failure},
     {"diagnostic-boundaries", diagnostic_boundaries},
     {"home-connection-facts", home_connection_facts},
+    {"operator-reconnect-without-task-memory", operator_reconnect_without_task_memory},
     {"late-create-replacement", late_create_replacement},
     {"wake-admission-loss", wake_admission_loss},
     {"loss-before-worker", loss_before_worker},

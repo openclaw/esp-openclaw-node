@@ -197,12 +197,11 @@ static void capture_scheduler(const char *name, esp_capture_thread_schedule_cfg_
 static void start_talk_once(void);
 static esp_err_t register_talk_node_commands(esp_openclaw_node_handle_t node);
 static TaskHandle_t talk_start_worker;
-/* One-shot timer that (re)tries creating the transient operator-start task.
- * A permanent worker task was tried and reverted: its always-resident internal
- * stack starved the AFE open/close sync-tasks during calls (internal RAM is
- * the scarcest resource on this board). Guarded by state_lock. */
+/* Timer and queued operator work are guarded by state_lock. The existing
+ * internal-stack supervisor also performs NVS-backed operator startup. */
 static esp_timer_handle_t operator_start_timer;
 static bool operator_start_scheduled;
+static bool operator_start_pending;
 
 static void talk_start_worker_task(void *arg)
 {
@@ -239,21 +238,18 @@ static char *gateway_http_base_from_uri(const char *gateway_uri)
     return base;
 }
 
-static void operator_start_task(void *arg);
+static void start_operator_if_pending(void);
+static void wake_talk_teardown(void);
 
-/* Runs on the esp_timer task: only a task-create attempt, nothing heavy.
- * Creation can fail at the busiest boot moment (internal RAM contention with
- * Wi-Fi/TLS/audio); re-arming the timer turns that into a delay instead of a
- * silent dead-end. The task itself is transient so its internal stack is
- * returned between attempts — a permanent worker starved the AFE sync-tasks. */
+/* The timer only hands work to the supervisor. A transient startup stack
+ * competes with the SDK worker and WebSocket stacks at their allocation peak. */
 static void operator_start_timer_fired(void *arg)
 {
     (void)arg;
-    if (xTaskCreate(operator_start_task, "operator_start", 6144, NULL, 6, NULL) == pdPASS) {
-        return;
-    }
-    ESP_LOGW(TAG, "operator start task creation failed; retrying in 2s");
-    esp_timer_start_once(operator_start_timer, 2000000);
+    xSemaphoreTake(state_lock, portMAX_DELAY);
+    operator_start_pending = true;
+    xSemaphoreGive(state_lock);
+    wake_talk_teardown();
 }
 
 static bool schedule_operator_start(uint32_t delay_ms)
@@ -371,7 +367,10 @@ static void talk_teardown_task(void *arg)
             room_ui_set(ready ? ROOM_UI_IDLE : ROOM_UI_ERROR, ready ? NULL : "Operator offline");
             if (ready) room_ui_show_face_hint(8000);
         }
-        if (!close) continue;
+        if (!close) {
+            start_operator_if_pending();
+            continue;
+        }
 
         /* The owner remains reserved until every local resource and UI update
          * is finished. Pending RPC refs may survive, but cannot dispatch. */
@@ -418,6 +417,7 @@ static void talk_teardown_task(void *arg)
         xSemaphoreGive(state_lock);
         esp_openclaw_talk_call_release(call);
         refresh_home_facts();
+        start_operator_if_pending();
     }
 }
 
@@ -736,14 +736,16 @@ static esp_err_t start_operator_client(void)
     return err;
 }
 
-static void operator_start_task(void *arg)
+static void start_operator_if_pending(void)
 {
-    (void)arg;
-    /* Release the scheduled flag before the attempt so a synchronous failure
-     * can re-arm the next retry. */
     xSemaphoreTake(state_lock, portMAX_DELAY);
-    operator_start_scheduled = false;
+    bool start = operator_start_pending && talk_call == NULL;
+    if (start) {
+        operator_start_pending = false;
+        operator_start_scheduled = false;
+    }
     xSemaphoreGive(state_lock);
+    if (!start) return;
     esp_err_t err = start_operator_client();
     refresh_home_facts();
     if (err != ESP_OK) {
@@ -755,7 +757,6 @@ static void operator_start_task(void *arg)
             err == ESP_ERR_NOT_FOUND ? "No operator session\nre-pair via console" : "Operator token");
         (void)schedule_operator_start(5000);
     }
-    vTaskDelete(NULL);
 }
 
 static esp_err_t request_node_connection(void)
@@ -1370,8 +1371,8 @@ esp_err_t esp_openclaw_room_node_start(const esp_openclaw_room_node_config_t *co
         state_lock != NULL && talk_teardown_queue != NULL
             ? ESP_OK
             : ESP_ERR_NO_MEM);
-    /* Supervisor stacks live in PSRAM; internal RAM is reserved for DMA and the
-     * network/audio task stacks that genuinely require it. */
+    /* Media setup can use PSRAM; teardown and NVS-backed operator startup
+     * share one internal stack. */
     BaseType_t starter_task = xTaskCreateWithCaps(
         talk_start_worker_task,
         "talk_start",
@@ -1384,7 +1385,7 @@ esp_err_t esp_openclaw_room_node_start(const esp_openclaw_room_node_config_t *co
     BaseType_t teardown_task = xTaskCreate(
         talk_teardown_task,
         "talk_teardown",
-        4096,
+        6144,
         NULL,
         6,
         NULL);

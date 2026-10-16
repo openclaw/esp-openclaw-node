@@ -47,6 +47,7 @@ static void bootstrap(void)
      * worker entrypoints, queue capacity and timeout callback. */
     state_lock = xSemaphoreCreateMutex();
     talk_teardown_queue = xQueueCreate(1, sizeof(talk_teardown_request_t));
+    host_require(create_connection_timers() == ESP_OK, "connection retry timers registered");
     host_require(xTaskCreate(talk_start_worker_task, "talk_start", 8192, NULL, 7, &talk_start_worker) == pdPASS,
         "start worker registered");
     host_require(xTaskCreate(talk_teardown_task, "talk_teardown", 6144, NULL, 6, NULL) == pdPASS,
@@ -825,6 +826,60 @@ static void operator_reconnect_without_task_memory(void)
     expect_closed();
 }
 
+static void node_reconnect_without_task_memory(void)
+{
+    connect_call();
+    host.reject_task_creation = true;
+    host_emit_node(node_client, ESP_OPENCLAW_NODE_EVENT_DISCONNECTED);
+    CHECK(node_reconnect_scheduled, "node retry remains armed without another task");
+    unsigned requests = host.node_connect_requests;
+    host_fire_operator_timer(node_reconnect_timer);
+    drain();
+    CHECK(host.node_connect_requests == requests + 1, "node reconnect proceeds during an operator call");
+    expect_open();
+
+    host_emit_node(node_client, ESP_OPENCLAW_NODE_EVENT_CONNECT_FAILED);
+    host_emit_node(node_client, ESP_OPENCLAW_NODE_EVENT_CONNECTED);
+    host_fire_operator_timer(node_reconnect_timer);
+    drain();
+    CHECK(host.node_connect_requests == requests + 1, "completed explicit connection supersedes delayed retry");
+    expect_open();
+
+    host.node_connect_result = ESP_ERR_NOT_FOUND;
+    host_emit_node(node_client, ESP_OPENCLAW_NODE_EVENT_DISCONNECTED);
+    host_fire_operator_timer(node_reconnect_timer);
+    drain();
+    CHECK(!node_reconnect_scheduled && host.home.gateway == ROOM_UI_GATEWAY_NO_SESSION,
+        "missing node session stops retrying and remains visible in connection facts");
+    expect_open();
+}
+
+static void coalesced_connection_retries(void)
+{
+    host.reject_task_creation = true;
+    unsigned nodes = host.node_connect_requests;
+    unsigned operators = host.operator_connect_requests;
+    host_emit_node(node_client, ESP_OPENCLAW_NODE_EVENT_DISCONNECTED);
+    host_emit_node(operator_client, ESP_OPENCLAW_NODE_EVENT_DISCONNECTED);
+    host_fire_operator_timer(node_reconnect_timer);
+    host_fire_operator_timer(operator_start_timer);
+    drain();
+    CHECK(host.node_connect_requests == nodes + 1 && host.operator_connect_requests == operators + 1,
+        "one coalesced wake consumes both connection retries without allocating tasks");
+    CHECK(!node_reconnect_scheduled && !operator_start_scheduled, "both retries release their pending ownership");
+
+    host.node_connect_result = ESP_FAIL;
+    host_emit_node(node_client, ESP_OPENCLAW_NODE_EVENT_CONNECT_FAILED);
+    host_fire_operator_timer(node_reconnect_timer);
+    drain();
+    CHECK(node_reconnect_scheduled, "synchronous node failure rearms retry");
+    host.node_connect_result = ESP_OK;
+    host_fire_operator_timer(node_reconnect_timer);
+    drain();
+    CHECK(!node_reconnect_scheduled && host.node_connect_requests == nodes + 3,
+        "rearmed node retry is consumed once");
+}
+
 static const struct { const char *name; void (*run)(void); } cases[] = {
     {"console-diagnostics-bytes", console_diagnostics_bytes},
     {"console-diagnostics-contention", console_diagnostics_contention},
@@ -835,6 +890,8 @@ static const struct { const char *name; void (*run)(void); } cases[] = {
     {"diagnostic-boundaries", diagnostic_boundaries},
     {"home-connection-facts", home_connection_facts},
     {"operator-reconnect-without-task-memory", operator_reconnect_without_task_memory},
+    {"node-reconnect-without-task-memory", node_reconnect_without_task_memory},
+    {"coalesced-connection-retries", coalesced_connection_retries},
     {"late-create-replacement", late_create_replacement},
     {"wake-admission-loss", wake_admission_loss},
     {"loss-before-worker", loss_before_worker},

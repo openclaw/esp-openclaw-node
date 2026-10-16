@@ -49,6 +49,7 @@ static SemaphoreHandle_t mutex;
 static QueueHandle_t queue;
 static TimerHandle_t timeout;
 static esp_timer_handle_t operator_timer;
+static esp_timer_handle_t node_timer;
 static esp_openclaw_node_handle_t nodes[4];
 static size_t node_count;
 static unsigned mutex_depth;
@@ -351,11 +352,12 @@ void host_fire_timeout(TimerHandle_t timer) { timer->callback(timer); }
 
 esp_err_t esp_timer_create(const esp_timer_create_args_t *args, esp_timer_handle_t *out)
 {
-    host_require(operator_timer == NULL, "one operator retry timer");
-    operator_timer = calloc(1, sizeof(*operator_timer));
-    host_require(operator_timer != NULL, "operator timer allocation");
-    operator_timer->args = *args;
-    *out = operator_timer;
+    esp_timer_handle_t *slot = strcmp(args->name, "operator_start") == 0 ? &operator_timer : &node_timer;
+    host_require(*slot == NULL, "one timer per connection");
+    *slot = calloc(1, sizeof(**slot));
+    host_require(*slot != NULL, "connection timer allocation");
+    (*slot)->args = *args;
+    *out = *slot;
     return ESP_OK;
 }
 esp_err_t esp_timer_stop(esp_timer_handle_t timer)
@@ -399,7 +401,10 @@ esp_err_t esp_openclaw_node_request_connect(esp_openclaw_node_handle_t node,
 {
     host_require(request->source == ESP_OPENCLAW_NODE_CONNECT_SOURCE_SAVED_SESSION,
         "synthetic saved-session connect only; no credentials accessed");
-    if (strcmp(node->config.role, "node") == 0) return host.node_connect_result;
+    if (strcmp(node->config.role, "node") == 0) {
+        ++host.node_connect_requests;
+        return host.node_connect_result;
+    }
     ++host.operator_connect_requests;
     return host.operator_connect_result;
 }
@@ -796,5 +801,6 @@ void host_release_resources(void)
     free(mutex);
     free(timeout);
     free(operator_timer);
+    free(node_timer);
     free(recycled_rtc);
 }

@@ -58,11 +58,12 @@ playback activity has fragmented internal RAM. Include the worker in the board's
 internal-RAM budget alongside both Gateway connections and playback; PSRAM
 cannot serve these stack operations. If reservation fails, audio initialization
 returns an error instead of postponing allocation until a call.
-Operator startup and reconnect work share the existing 6 KiB internal-stack
-room supervisor with Talk teardown. The retry timer queues work without
-allocating another task; teardown releases an interrupted call before the next
-operator attempt. The supervisor must stay in internal RAM because operator
-creation and saved-session reloads access NVS.
+Node reconnects and operator startup/reconnects share the existing 6 KiB
+internal-stack room supervisor with Talk teardown. Their timers are reserved
+at startup and queue work without allocating another task. Teardown releases
+an interrupted call before the next operator attempt; node reconnects remain
+independent of active operator calls. The supervisor must stay in internal RAM
+because client creation and saved-session reloads access NVS.
 
 The closure retains Espressif's modified-MIT notice in
 `LICENSE.ESPRESSIF-MODIFIED-MIT`. The OpenClaw home image retains its MIT notice

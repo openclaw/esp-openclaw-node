@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Add an opt-in room/watch setting for voice-agent write actions, requiring separate Gateway scope approval and preserving read-only voice access by default.
+- Reuse the room supervisor for NVS-backed operator startup and reconnects, avoiding a temporary internal stack that can prevent the WebSocket task from starting.
 - Reserve the AFE worker's internal stack for the audio source lifetime so repeated Talk transitions cannot lose microphone capture to fragmented RAM.
 - Clarify voice-node pairing for room/watch profiles and document live Talk verification without assuming an automatic greeting.
 - Reduce watch display DMA buffers to leave internal RAM for Talk capture transitions and both Gateway connections; include the error code when AFE initialization fails.

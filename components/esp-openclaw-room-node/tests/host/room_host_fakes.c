@@ -273,6 +273,7 @@ BaseType_t xTaskCreate(TaskFunction_t fn, const char *name, uint32_t stack,
     void *arg, UBaseType_t priority, TaskHandle_t *out)
 {
     (void)stack; (void)priority;
+    if (host.reject_task_creation) return pdFALSE;
     host_require(task_count < sizeof(tasks) / sizeof(tasks[0]), "task capacity");
     struct host_task *task = &tasks[task_count++];
     *task = (struct host_task){.fn = fn, .name = name, .arg = arg};
@@ -423,7 +424,9 @@ esp_err_t esp_openclaw_node_request_connect(esp_openclaw_node_handle_t node,
     }
     host_require(request->source == ESP_OPENCLAW_NODE_CONNECT_SOURCE_SAVED_SESSION,
         "synthetic saved-session connect only; no credentials accessed");
-    return strcmp(node->config.role, "node") == 0 ? host.node_connect_result : host.operator_connect_result;
+    if (strcmp(node->config.role, "node") == 0) return host.node_connect_result;
+    ++host.operator_connect_requests;
+    return host.operator_connect_result;
 }
 esp_err_t esp_openclaw_node_request_disconnect(esp_openclaw_node_handle_t node)
 { (void)node; return ESP_OK; }

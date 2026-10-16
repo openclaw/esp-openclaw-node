@@ -88,6 +88,15 @@ The lifecycle runner also checks real node/operator/network event handling for
 the home facts, including missing-session results versus ordinary disconnects,
 raw busy/failure results, accepted reconnects and later connection failures.
 
+## Operator reconnect under task-memory pressure
+
+The lifecycle case `operator-reconnect-without-task-memory` disconnects an
+active call's operator, then rejects additional task allocations. The registered
+timer and existing worker must still release the call and submit the operator
+reconnect. The old transient startup task leaves that reconnect unsubmitted.
+This host proof does not model heap fragmentation or the SDK's network stacks;
+firmware and physical boot/reconnect checks cover those boundaries.
+
 ## Talk lifecycle
 
 These tests compile the real room controller and Talk adapter against synthetic

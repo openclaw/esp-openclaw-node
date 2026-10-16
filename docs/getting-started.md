@@ -18,6 +18,8 @@ Commands below assume the default OpenClaw install. If you use a named profile, 
 
 - [ESP32 Wi-Fi Node Example](../examples/esp32-node/README.md): Generic ESP32 node with Wi-Fi, GPIO, and ADC commands.
 - [ESP-BOX-3 Display Example](../examples/esp-box-3-display/README.md): ESP-BOX-3 node with Wi-Fi and display commands for the built-in screen.
+- [M5Stack Dial Node](../examples/m5stack-dial-node/README.md): Touch/rotary controller with an animated face, text display, agent actions, and buzzer.
+- [Waveshare 1.8-inch Watch Node](../examples/waveshare-esp32-s3-touch-amoled-1.8-room-node/README.md): 368×448 watch with microphone/speaker, WakeNet, Talk, animated face, and Canvas.
 - [Waveshare AMOLED Room Node](../examples/waveshare-esp32-s3-touch-amoled-2.06-room-node/README.md): ESP32-S3 room client with Talk, ambient wake, and an A2UI/image Canvas.
 - [M5Stack Tab5 Room Node](../examples/m5stack-tab5-room-node/README.md): ESP32-P4 room client with C6 remote Wi-Fi, Talk, Canvas, camera, and hardware status.
 

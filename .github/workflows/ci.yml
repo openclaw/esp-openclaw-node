@@ -25,8 +25,14 @@ jobs:
           - name: esp-box-3-display
             path: examples/esp-box-3-display
             target: esp32s3
+          - name: m5stack-dial-node
+            path: examples/m5stack-dial-node
+            target: esp32s3
           - name: waveshare-amoled-room-node
             path: examples/waveshare-esp32-s3-touch-amoled-2.06-room-node
+            target: esp32s3
+          - name: waveshare-amoled-watch-node
+            path: examples/waveshare-esp32-s3-touch-amoled-1.8-room-node
             target: esp32s3
           - name: m5stack-tab5-room-node
             path: examples/m5stack-tab5-room-node
@@ -49,6 +55,17 @@ jobs:
             components/esp-openclaw-room-node/tests/test_room_file_validation.c \
             -o /tmp/room_file_validation_test
           /tmp/room_file_validation_test
+
+      - name: Dial and reconnect host tests
+        if: matrix.name == 'component-test-app-build'
+        run: |
+          cc -std=c11 -Wall -Wextra -Werror \
+            -I examples/m5stack-dial-node/main \
+            examples/m5stack-dial-node/main/dial_control.c \
+            examples/m5stack-dial-node/tests/test_dial_control.c \
+            -lm -o /tmp/dial_control_test
+          /tmp/dial_control_test
+          python3 -m unittest discover -s scripts/tests -p test_saved_session_reconnect.py -v
 
       - name: Host room audio tests
         if: matrix.name == 'component-test-app-build'

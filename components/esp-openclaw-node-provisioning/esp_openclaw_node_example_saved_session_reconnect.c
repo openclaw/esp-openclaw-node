@@ -27,22 +27,30 @@ static void esp_openclaw_node_example_saved_session_reconnect_task(void *arg)
     for (;;) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
-        if (!esp_openclaw_node_wifi_wait_for_connection(portMAX_DELAY)) {
-            continue;
-        }
+        for (;;) {
+            if (!esp_openclaw_node_wifi_wait_for_connection(portMAX_DELAY)) {
+                break;
+            }
 
-        vTaskDelay(pdMS_TO_TICKS(1000));
+            vTaskDelay(pdMS_TO_TICKS(1000));
 
-        /* No has_saved_session precheck: it reads a possibly stale in-memory
-         * snapshot, while the component reloads NVS on every saved-session
-         * request and answers NOT_FOUND itself. */
-        esp_err_t err = esp_openclaw_node_request_connect(state->node, &request);
-        if (err == ESP_OK) {
-            ESP_LOGI(TAG, "requested saved-session reconnect");
-        } else if (err == ESP_ERR_NOT_FOUND) {
-            ESP_LOGI(TAG, "saved-session reconnect skipped because no saved session is available");
-        } else if (err != ESP_ERR_INVALID_STATE) {
-            ESP_LOGW(TAG, "saved-session reconnect request failed: %s", esp_err_to_name(err));
+            /* Reload NVS in the component: an in-memory session precheck can
+             * miss a token saved by a later console pairing. */
+            esp_err_t err = esp_openclaw_node_request_connect(state->node, &request);
+            if (err == ESP_OK) {
+                ESP_LOGI(TAG, "requested saved-session reconnect");
+                break;
+            }
+            if (err == ESP_ERR_NOT_FOUND) {
+                ESP_LOGI(TAG, "saved-session reconnect skipped because no saved session is available");
+                break;
+            }
+            if (err == ESP_ERR_INVALID_STATE) {
+                break;
+            }
+            /* Rejected admission has no terminal event to wake this worker.
+             * Keep the retry here; accepted attempts retry from their events. */
+            ESP_LOGW(TAG, "saved-session reconnect request failed: %s; retrying", esp_err_to_name(err));
         }
     }
 }

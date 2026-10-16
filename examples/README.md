@@ -6,6 +6,8 @@ This directory contains thin board applications. Reusable provisioning and room-
 
 - [ESP32 Wi-Fi Node Example](./esp32-node/README.md) A general-purpose ESP32 node with `device.*`, `wifi.status`, `gpio.*`, and `adc.read`.
 - [ESP-BOX-3 Display Example](./esp-box-3-display/README.md) An ESP-BOX-3 node with the shared device and Wi-Fi commands plus `display.show` and `display.status`.
+- [M5Stack Dial Node](./m5stack-dial-node/README.md) A touch/rotary control node with a local animated face, agent-owned actions, text display, and buzzer.
+- [Waveshare 1.8-inch Watch Node](./waveshare-esp32-s3-touch-amoled-1.8-room-node/README.md) A 368×448 watch client with single-codec microphone/speaker, WakeNet, Talk, animated face, and Canvas.
 - [Waveshare AMOLED Room Node](./waveshare-esp32-s3-touch-amoled-2.06-room-node/README.md) An always-on room client with WakeNet, device AEC, WebRTC Talk, an A2UI/image Canvas, separate node/operator sessions, and an AMOLED-off idle state.
 - [M5Stack Tab5 Room Node](./m5stack-tab5-room-node/README.md) An ESP32-P4 room client using the Tab5 display revisions, C6 remote Wi-Fi, four-slot TDM audio, camera, sensors, SD, and USB-host/RS-485 status.
 
@@ -66,6 +68,8 @@ not publish releases or deploy Pages.
 
 - `esp32-node/` The generic ESP32 example.
 - `esp-box-3-display/` The ESP-BOX-3 example.
+- `m5stack-dial-node/` The M5Dial example, using internal RAM without the room audio stack.
+- `waveshare-esp32-s3-touch-amoled-1.8-room-node/` The 1.8-inch watch profile with a CO5300 display and ES8311 audio.
 - `waveshare-esp32-s3-touch-amoled-2.06-room-node/` The ambient voice-room example.
 - `m5stack-tab5-room-node/` The ESP32-P4 Tab5 room-node example.
 

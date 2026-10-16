@@ -453,7 +453,7 @@ esp_err_t room_media_init(room_wake_callback_t callback, void *ctx)
         return ESP_ERR_NO_MEM;
     }
     ESP_LOGI(TAG, "ambient WakeNet detections are wired from the AFE");
-    ESP_LOGI(TAG, "16 kHz capture with device AEC is active");
+    ESP_LOGI(TAG, "16 kHz capture is active; input layout: %s", board->audio.afe_layout);
     room_diagnostics_audio_set_capture_owner(ROOM_DIAGNOSTICS_CAPTURE_AMBIENT);
     media_initialized = true;
     return ESP_OK;

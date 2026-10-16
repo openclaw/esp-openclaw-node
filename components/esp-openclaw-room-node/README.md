@@ -26,8 +26,9 @@ initialization preserves the codec or board default.
 The board-owned `playback_gain_db` is an optional 0–12 dB post-decode PCM16
 boost; zero leaves playback samples unchanged. The shared renderer applies it
 with fixed-point saturation immediately before diagnostics and I2S output.
-Compressed media is never mutated, and the boards retain their physical
-speaker-reference capture path for AEC. Samples above the remaining digital
+Compressed media is never mutated. Boards with a physical speaker-reference
+channel retain it for AEC; single-microphone boards declare `M` and do not
+provide that echo-cancellation path. Samples above the remaining digital
 headroom saturate at PCM16 full scale; this is not a limiter or a guarantee
 against analog distortion. Diagnostics shows the configured volume and boost.
 

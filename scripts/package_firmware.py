@@ -27,6 +27,8 @@ from tab5_camera_compat import (
 EXAMPLES = {
     "esp32-node": "esp32s3",
     "esp-box-3-display": "esp32s3",
+    "m5stack-dial-node": "esp32s3",
+    "waveshare-esp32-s3-touch-amoled-1.8-room-node": "esp32s3",
     "waveshare-esp32-s3-touch-amoled-2.06-room-node": "esp32s3",
     "m5stack-tab5-room-node": "esp32p4",
 }

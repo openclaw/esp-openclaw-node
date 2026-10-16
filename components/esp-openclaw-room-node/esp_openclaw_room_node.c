@@ -268,7 +268,9 @@ static bool schedule_operator_start(uint32_t delay_ms)
             .callback = operator_start_timer_fired,
             .name = "operator_start",
         };
-        if (esp_timer_create(&args, &operator_start_timer) != ESP_OK) {
+        esp_err_t err = esp_timer_create(&args, &operator_start_timer);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "operator timer creation failed: %s (%d)", esp_err_to_name(err), (int)err);
             xSemaphoreTake(state_lock, portMAX_DELAY);
             operator_start_scheduled = false;
             xSemaphoreGive(state_lock);
@@ -276,7 +278,9 @@ static bool schedule_operator_start(uint32_t delay_ms)
         }
     }
     esp_timer_stop(operator_start_timer);
-    if (esp_timer_start_once(operator_start_timer, (uint64_t)delay_ms * 1000) != ESP_OK) {
+    esp_err_t err = esp_timer_start_once(operator_start_timer, (uint64_t)delay_ms * 1000);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "operator timer start failed: %s (%d)", esp_err_to_name(err), (int)err);
         xSemaphoreTake(state_lock, portMAX_DELAY);
         operator_start_scheduled = false;
         xSemaphoreGive(state_lock);
@@ -899,8 +903,7 @@ static void node_event(
         room_ui_set_gateway(host);
         refresh_home_facts();
         free(gateway_uri);
-        /* The timer path retries task creation itself, so scheduling only
-         * fails on timer-create OOM at boot; retry through the same path. */
+        /* Retry timer allocation/arming through the same path. */
         if (!schedule_operator_start(0)) {
             ESP_LOGE(TAG, "failed scheduling operator client start; retrying in 5s");
             room_ui_set(ROOM_UI_ERROR, "Operator token");

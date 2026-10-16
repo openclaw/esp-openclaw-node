@@ -99,10 +99,57 @@ typedef struct {
     void                      (*wake_cb)(void *ctx);
     void                       *wake_ctx;
     bool                        wakenet_enabled;
+    capture_mutex_handle_t      afe_lock;
+    capture_sema_handle_t       afe_request;
+    capture_sema_handle_t       afe_done;
+    int                       (*afe_work)(void *arg);
+    int                         afe_result;
 } audio_aec_src_t;
 
 static int64_t last_wake_callback_us;
 static uint8_t get_src_channel(audio_aec_src_t *src);
+
+static void afe_worker(void *arg)
+{
+    audio_aec_src_t *src = arg;
+    for (;;) {
+        capture_sema_lock(src->afe_request, CAPTURE_MAX_LOCK_TIME);
+        src->afe_result = src->afe_work(src);
+        capture_sema_unlock(src->afe_done);
+    }
+}
+
+static bool create_afe_worker(audio_aec_src_t *src)
+{
+    capture_mutex_create(&src->afe_lock);
+    capture_sema_create(&src->afe_request);
+    capture_sema_create(&src->afe_done);
+    if (src->afe_lock != NULL && src->afe_request != NULL && src->afe_done != NULL) {
+        esp_capture_thread_schedule_cfg_t cfg = CAPTURE_DEFAULT_SCHEDULER();
+        capture_thread_get_scheduler_cfg("afe_worker", &cfg);
+        cfg.stack_in_ext = false;
+        cfg.stack_size = AFE_RUN_STACK;
+        capture_thread_handle_t worker = NULL;
+        if (capture_thread_create(&worker, "afe_worker", &cfg, afe_worker, src) == 0) {
+            return true;
+        }
+    }
+    if (src->afe_done != NULL) capture_sema_destroy(src->afe_done);
+    if (src->afe_request != NULL) capture_sema_destroy(src->afe_request);
+    if (src->afe_lock != NULL) capture_mutex_destroy(src->afe_lock);
+    return false;
+}
+
+static int run_afe_work(audio_aec_src_t *src, int (*work)(void *arg))
+{
+    capture_mutex_lock(src->afe_lock, CAPTURE_MAX_LOCK_TIME);
+    src->afe_work = work;
+    capture_sema_unlock(src->afe_request);
+    capture_sema_lock(src->afe_done, CAPTURE_MAX_LOCK_TIME);
+    int ret = src->afe_result;
+    capture_mutex_unlock(src->afe_lock);
+    return ret;
+}
 
 static size_t layout_channel_index(const audio_aec_src_t *src, char channel, size_t fallback)
 {
@@ -169,9 +216,7 @@ static int open_afe_in_ram(void *arg)
 
 static esp_capture_err_t open_afe(audio_aec_src_t *src)
 {
-    esp_capture_err_t ret = ESP_CAPTURE_ERR_OK;
-    CAPTURE_RUN_SYNC_IN_RAM("afe_open", open_afe_in_ram, src, ret, AFE_RUN_STACK);
-    return ret;
+    return run_afe_work(src, open_afe_in_ram);
 }
 
 static esp_capture_err_t audio_aec_src_open(esp_capture_audio_src_if_t *h)
@@ -741,7 +786,7 @@ static esp_capture_err_t audio_aec_src_stop(esp_capture_audio_src_if_t *h)
     }
     release_vad(src);
 
-    CAPTURE_RUN_SYNC_IN_RAM("afe_close", close_afe_in_ram, src, ret, AFE_RUN_STACK);
+    ret = run_afe_work(src, close_afe_in_ram);
 
     if (src->cached_frame) {
         capture_free(src->cached_frame);
@@ -787,6 +832,13 @@ esp_capture_audio_src_if_t *room_capture_new_audio_aec_src(room_capture_audio_ae
         src->mic_layout = "MR";
     } else {
         src->mic_layout = cfg->mic_layout;
+    }
+    /* The source lives for the device lifetime. Keep its internal stack across
+     * stop/close: a later Talk transition may have no contiguous 8 KiB block. */
+    if (!create_afe_worker(src)) {
+        ESP_LOGE(TAG, "Failed to reserve AFE worker");
+        capture_free(src);
+        return NULL;
     }
     return &src->base;
 }

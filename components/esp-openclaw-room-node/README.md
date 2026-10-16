@@ -51,10 +51,13 @@ symlink still fails preflight.
 by the current media stack: WakeNet only advances while its AFE fetch path is
 drained. It lives here once, alongside the shared capture orchestration, until
 the upstream capture component exposes the equivalent wake callback contract.
-AFE/model open and close operations need an 8 KiB internal task stack during
-ambient/Talk transitions. Include this headroom in the board's internal-RAM
-budget alongside both Gateway connections and playback; PSRAM cannot serve
-these stack operations.
+AFE/model open and close operations run on one 8 KiB internal-stack worker,
+reserved when the audio source is created and retained across ambient/Talk
+transitions. This avoids allocating a fresh contiguous stack after network and
+playback activity has fragmented internal RAM. Include the worker in the board's
+internal-RAM budget alongside both Gateway connections and playback; PSRAM
+cannot serve these stack operations. If reservation fails, audio initialization
+returns an error instead of postponing allocation until a call.
 The closure retains Espressif's modified-MIT notice in
 `LICENSE.ESPRESSIF-MODIFIED-MIT`. The OpenClaw home image retains its MIT notice
 and source provenance in [assets/NOTICE.md](assets/NOTICE.md); the remaining

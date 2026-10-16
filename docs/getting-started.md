@@ -49,7 +49,7 @@ The `v1.1.1` source release includes the session and surface APIs described here
 The matching `espressif/esp-openclaw-node` registry version contains only the
 core component; use the source checkout for room examples and Talk. Verify the
 registry archive's version and embedded source identity with the
-[release checker](component-releases.md#diagnose-without-uploading).
+[release checker](component-releases.md).
 The historical `1.0.0` registry archive predates these APIs. Use the documentation
 shipped with the selected artifact rather than assuming it matches current source.
 
@@ -106,6 +106,11 @@ eyJ1cmwiOiJ3czovLzE5Mi4xNjguMS4xMDoxODc4OSIsImJvb3RzdHJhcFRva2VuIjoib2NfYm9vdHN0
 ```
 
 If the installed gateway already resolves the correct LAN URL, you can omit `--url`. 
+
+For a room or watch profile with Talk, add `--voice-node` to the QR command.
+That pairing profile grants the node's separate operator connection the
+`operator.read` and `operator.talk` scopes needed to configure and start calls.
+Generate a separate setup code for each device.
 
 After flashing, open the serial console for the board and use the REPL:
 

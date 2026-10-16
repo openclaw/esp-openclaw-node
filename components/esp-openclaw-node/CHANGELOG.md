@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Clarify voice-node pairing for room/watch profiles and document live Talk verification without assuming an automatic greeting.
+
 ## 1.2.0 - 2026-10-16
 
 **Highlights:** New Waveshare watch and M5Dial profiles, USB Wi-Fi discovery, reliable dial gestures, and resilient connection recovery.

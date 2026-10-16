@@ -20,7 +20,13 @@ idf.py build
 idf.py -p <watch-serial-port> flash monitor
 ```
 
-Generate a setup code on a reachable Gateway, then use the USB console:
+Generate a voice-node setup code on a reachable Gateway:
+
+```sh
+openclaw qr --url ws://<gateway-host>:<gateway-port> --voice-node --setup-code-only
+```
+
+Use the USB console to provision the watch:
 
 ```text
 openclaw> wifi set <ssid> <passphrase>
@@ -32,6 +38,9 @@ Follow [Getting Started](../../docs/getting-started.md) for Gateway reachability
 and command allowlists. This board uses the same room-node commands described
 in the [shared command reference](../waveshare-esp32-s3-touch-amoled-2.06-room-node/README.md#canvas-commands).
 Canvas coordinates use this board's **368×448** dimensions.
+
+For a live voice check, follow the shared
+[Talk verification steps](../waveshare-esp32-s3-touch-amoled-2.06-room-node/README.md#verify-talk).
 
 ## Board behavior
 

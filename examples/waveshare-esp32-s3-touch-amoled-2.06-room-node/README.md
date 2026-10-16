@@ -97,8 +97,9 @@ reports whether the face is actually on screen after the command.
 ## Bidirectional talk
 
 Both directions run the same client-owned WebRTC flow. The wake word starts a
-session from the room; `talk.start` lets the agent call the room (the device
-dials the provider and the agent greets first), and `talk.stop` ends any
+session from the room; `talk.start` starts it remotely. The device connects to
+the provider in both cases. An automatic greeting is not requested; speak
+after the connection is active. `talk.stop` ends any
 active session regardless of who started it — including one still dialing,
 which is abandoned before the microphone path goes live. `talk.start` returns
 `{"started":false,"alreadyActive":true}` instead of failing when a session is
@@ -108,6 +109,35 @@ New commands land in a pending surface the gateway must approve once:
 `openclaw nodes pending`, then `openclaw nodes approve <requestId>`. Commands
 outside the built-in platform allowlist (`face.set`, `talk.start`,
 `talk.stop`) also need `gateway.nodes.commands.allow` in the gateway config.
+
+### Verify Talk
+
+After pairing with `--voice-node` and configuring a Talk provider on the Gateway:
+
+1. Run `diagnostics tone` in the USB console and listen for the speaker test.
+   Wait for it to finish before starting a call.
+2. Start a call from the Gateway:
+
+   ```sh
+   openclaw nodes invoke --node <node-id> --command talk.start --params '{}' --json
+   ```
+
+3. Wait for `room_talk_diag ... stage=peer_connected phase=current` in the
+   USB log, then run `diagnostics status` and check for `Talk=active`.
+   A `started` response only confirms that startup was accepted.
+4. Say a distinctive short phrase and verify an audible reply. A connected
+   peer, moving microphone levels, or accepted renderer frames alone do not
+   prove a conversation. No greeting before speech is expected on this path.
+5. Stop the call:
+
+   ```sh
+   openclaw nodes invoke --node <node-id> --command talk.stop --params '{}' --json
+   ```
+
+   Check for `ambient_restore phase=end result=0` in the USB log and
+   `Talk=idle` in `diagnostics status`. Start and stop once more to verify
+   that the microphone and playback resources can be reused. The USB `wake`
+   command also starts a call, but does not verify acoustic wake-word detection.
 
 ## Canvas commands
 

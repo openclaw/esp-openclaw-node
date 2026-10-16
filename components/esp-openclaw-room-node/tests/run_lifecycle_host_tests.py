@@ -24,6 +24,7 @@ def main():
                         help="Select one SDK logging mode (default: all, policy cases for alternate modes)")
     parser.add_argument("--list", action="store_true")
     parser.add_argument("--analyze", action="store_true")
+    parser.add_argument("--voice-actions", action="store_true", help="Build with the voice-actions opt-in enabled")
     args = parser.parse_args()
     sdk = args.webrtc_dir.resolve() / "components"
     managed = args.managed_components.resolve()
@@ -53,6 +54,8 @@ def main():
             "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
             "-fno-omit-frame-pointer", "-g", "-ffunction-sections", "-fdata-sections",
         ]
+        if args.voice_actions:
+            command.append("-DCONFIG_OPENCLAW_ROOM_VOICE_ACTIONS=1")
         for include in includes:
             command += ["-I", str(include)]
         command += ["-include", str(tests / "host/room_host_fakes.h")]

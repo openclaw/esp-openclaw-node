@@ -86,6 +86,102 @@ static void connect_call(void)
         "connected media precondition");
 }
 
+static void operator_scopes(void)
+{
+    CHECK(host_node_scope_count(node_client) == 0, "node role requests no operator scopes");
+    CHECK(host_node_has_scope(operator_client, "operator.read"), "Talk routing can read configuration");
+    CHECK(host_node_has_scope(operator_client, "operator.talk"), "operator can open Talk sessions");
+#if CONFIG_OPENCLAW_ROOM_VOICE_ACTIONS
+    CHECK(host_node_scope_count(operator_client) == 3, "voice actions request only read, talk, and write");
+    CHECK(host_node_has_scope(operator_client, "operator.write"), "opt-in requests write approval");
+#else
+    CHECK(host_node_scope_count(operator_client) == 2, "default remains read and talk only");
+    CHECK(!host_node_has_scope(operator_client, "operator.write"), "default connection does not request write access");
+#endif
+}
+
+static const char *approved_scope =
+    "{\"requestId\":\"scope-a\",\"status\":\"approved\",\"deviceToken\":\"approved-test-token\","
+    "\"scopes\":[\"operator.read\",\"operator.talk\",\"operator.write\"]}";
+
+static void voice_actions_provision(void)
+{
+    char *request[] = {"voice-actions", "request"};
+    char *complete[] = {"voice-actions", "complete", "scope-a"};
+    console_capture = tmpfile();
+    host_require(console_capture != NULL, "capture credential-free console output");
+    CHECK(voice_actions_console_command(1, request) != 0, "invalid usage submits no request");
+    host_emit_node(operator_client, ESP_OPENCLAW_NODE_EVENT_DISCONNECTED);
+    CHECK(voice_actions_console_command(2, request) != 0, "disconnected operator cannot request approval");
+    host_emit_node(operator_client, ESP_OPENCLAW_NODE_EVENT_CONNECTED);
+    CHECK(host.scope_requests == 0, "invalid requests never reach the Gateway");
+    CHECK(voice_actions_console_command(2, request) == 0, "USB explicitly requests write approval");
+    CHECK(strcmp(host.scope_method, "device.scopes.requestUpgrade") == 0, "uses the identity-bound upgrade API");
+    cJSON *params = cJSON_Parse(host.scope_params);
+    cJSON *scopes = cJSON_GetObjectItemCaseSensitive(params, "scopes");
+    CHECK(cJSON_GetArraySize(scopes) == 3, "requests exactly three scopes");
+    const char *expected[] = {"operator.read", "operator.talk", "operator.write"};
+    for (int i = 0; i < 3; ++i) {
+        cJSON *scope = cJSON_GetArrayItem(scopes, i);
+        CHECK(cJSON_IsString(scope) && strcmp(scope->valuestring, expected[i]) == 0,
+            "approval preserves read/talk and adds only write");
+    }
+    cJSON_Delete(params);
+    host_reply_scope(true, "{\"requestId\":\"scope-a\"}");
+    CHECK(host.token_connects == 0, "request ID is not approval or a credential");
+    CHECK(voice_actions_console_command(3, complete) == 0, "completion waits for the exact approval");
+    CHECK(strcmp(host.scope_method, "device.scopes.waitUpgrade") == 0, "uses the identity-bound wait API");
+    params = cJSON_Parse(host.scope_params);
+    cJSON *id = cJSON_GetObjectItemCaseSensitive(params, "requestId");
+    CHECK(cJSON_IsString(id) && strcmp(id->valuestring, "scope-a") == 0, "completion carries the requested ID");
+    cJSON_Delete(params);
+    host_reply_scope(true, approved_scope);
+    CHECK(host.token_connects == 1 && host.token_node == operator_client &&
+        strcmp(host.token_value, "approved-test-token") == 0 &&
+        strcmp(host.token_uri, "wss://gateway.example") == 0,
+        "approved token enters the existing operator connection lifecycle at its original Gateway");
+    const char *invalid[] = {
+        "{}",
+        "{\"requestId\":\"scope-b\",\"status\":\"approved\",\"deviceToken\":\"wrong\"}",
+        "{\"requestId\":\"scope-a\",\"status\":\"rejected\"}",
+        "{\"requestId\":\"scope-a\",\"status\":\"approved\",\"deviceToken\":\"wrong\",\"scopes\":[\"operator.write\"]}",
+    };
+    for (size_t i = 0; i < sizeof(invalid) / sizeof(*invalid); ++i) {
+        CHECK(voice_actions_console_command(3, complete) == 0, "submit invalid-result case");
+        host_reply_scope(true, invalid[i]);
+    }
+    CHECK(voice_actions_console_command(3, complete) == 0, "submit rejected RPC case");
+    host_reply_scope(false, NULL);
+    CHECK(host.token_connects == 1, "missing, mismatched, rejected, and insufficient results cannot reconnect");
+    host.fail_scope_submit = true;
+    CHECK(voice_actions_console_command(2, request) != 0, "failed submission releases its context");
+    rewind(console_capture);
+    char output[4096] = {0};
+    size_t size = fread(output, 1, sizeof(output) - 1, console_capture);
+    CHECK(size < sizeof(output) - 1 && strstr(output, "approved-test-token") == NULL,
+        "console output never includes the replacement token");
+    fclose(console_capture);
+    console_capture = NULL;
+}
+
+static void voice_actions_stale(void)
+{
+    char *complete[] = {"voice-actions", "complete", "scope-a"};
+    CHECK(voice_actions_console_command(3, complete) == 0, "submit before reconnect");
+    host_emit_node(operator_client, ESP_OPENCLAW_NODE_EVENT_DISCONNECTED);
+    host_emit_node(operator_client, ESP_OPENCLAW_NODE_EVENT_CONNECTED);
+    host_reply_scope(true, approved_scope);
+    CHECK(host.token_connects == 0, "replacement connection invalidates outstanding approval work");
+    CHECK(voice_actions_console_command(3, complete) == 0, "submit before Gateway rebind");
+    host.operator_uri = "ws://replacement.example:18789";
+    host_reply_scope(true, approved_scope);
+    CHECK(host.token_connects == 0, "changed Gateway cannot receive the old Gateway credential");
+    CHECK(voice_actions_console_command(3, complete) == 0, "submit before Talk admission");
+    connect_call();
+    host_reply_scope(true, approved_scope);
+    CHECK(host.token_connects == 0, "approval cannot replace the operator during an admitted Talk call");
+}
+
 static void home_connection_facts(void)
 {
     host_run_task("talk_teardown");
@@ -813,6 +909,9 @@ static void console_diagnostics_contention(void)
 }
 
 static const struct { const char *name; void (*run)(void); } cases[] = {
+    {"operator-scopes", operator_scopes},
+    {"voice-actions-provision", voice_actions_provision},
+    {"voice-actions-stale", voice_actions_stale},
     {"console-diagnostics-bytes", console_diagnostics_bytes},
     {"console-diagnostics-contention", console_diagnostics_contention},
     {"sdk-log-policy-info", sdk_log_policy_info},

@@ -41,6 +41,9 @@ Canvas coordinates use this board's **368×448** dimensions.
 
 For a live voice check, follow the shared
 [Talk verification steps](../waveshare-esp32-s3-touch-amoled-2.06-room-node/README.md#verify-talk).
+Voice-agent write actions require the shared
+[opt-in and Gateway approval steps](../../components/esp-openclaw-room-node/README.md#voice-agent-actions);
+the default firmware uses read-only voice access.
 
 ## Board behavior
 

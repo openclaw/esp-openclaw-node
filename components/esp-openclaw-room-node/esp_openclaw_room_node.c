@@ -719,6 +719,11 @@ static esp_err_t start_operator_client(void)
     if (err == ESP_OK) {
         err = esp_openclaw_node_register_scope(created, "operator.talk");
     }
+#if CONFIG_OPENCLAW_ROOM_VOICE_ACTIONS
+    if (err == ESP_OK) {
+        err = esp_openclaw_node_register_scope(created, "operator.write");
+    }
+#endif
     if (err != ESP_OK) {
         esp_openclaw_node_destroy(created);
         return err;
@@ -1097,6 +1102,120 @@ static int wake_console_command(int argc, char **argv)
     return 0;
 }
 
+typedef struct {
+    uint64_t incarnation;
+    char *gateway_uri;
+    char *request_id;
+} voice_actions_request_t;
+
+static void voice_actions_request_free(voice_actions_request_t *request)
+{
+    free(request->gateway_uri);
+    free(request->request_id);
+    free(request);
+}
+
+static void voice_actions_reply(
+    esp_openclaw_node_handle_t client,
+    const esp_openclaw_node_gateway_result_t *result,
+    void *ctx)
+{
+    voice_actions_request_t *request = ctx;
+    char *gateway_uri = esp_openclaw_node_dup_gateway_uri(client);
+    xSemaphoreTake(state_lock, portMAX_DELAY);
+    bool current = client == operator_client && operator_ready &&
+        operator_incarnation == request->incarnation && talk_call == NULL;
+    xSemaphoreGive(state_lock);
+    current = current && gateway_uri != NULL && strcmp(gateway_uri, request->gateway_uri) == 0;
+    free(gateway_uri);
+    cJSON *payload = result != NULL && result->ok && result->payload_json != NULL
+        ? cJSON_Parse(result->payload_json) : NULL;
+    cJSON *id = cJSON_GetObjectItemCaseSensitive(payload, "requestId");
+    if (!current) {
+        printf("voice-actions canceled: operator connection or Talk state changed; retry from idle\n");
+    } else if (!cJSON_IsString(id) || id->valuestring[0] == '\0' || strlen(id->valuestring) > 128) {
+        printf("voice-actions failed: check Gateway support and connection, then retry\n");
+    } else if (request->request_id == NULL) {
+        printf("voice-actions approval request: %s\n", id->valuestring);
+        printf("approve this device's read/talk/write request on the Gateway, then run voice-actions complete <requestId>\n");
+    } else {
+        cJSON *status = cJSON_GetObjectItemCaseSensitive(payload, "status");
+        cJSON *token = cJSON_GetObjectItemCaseSensitive(payload, "deviceToken");
+        cJSON *scopes = cJSON_GetObjectItemCaseSensitive(payload, "scopes");
+        if (!cJSON_IsArray(scopes)) scopes = NULL;
+        bool read = false, talk = false, write = false;
+        cJSON *scope;
+        cJSON_ArrayForEach(scope, scopes) {
+            if (!cJSON_IsString(scope)) continue;
+            read |= strcmp(scope->valuestring, "operator.read") == 0;
+            talk |= strcmp(scope->valuestring, "operator.talk") == 0;
+            write |= strcmp(scope->valuestring, "operator.write") == 0;
+        }
+        if (strcmp(id->valuestring, request->request_id) != 0 ||
+            !cJSON_IsString(status) || strcmp(status->valuestring, "approved") != 0 ||
+            !cJSON_IsString(token) || token->valuestring[0] == '\0' || !read || !talk || !write) {
+            printf("voice-actions not approved with read/talk/write access; check the exact Gateway request\n");
+        } else {
+            /* The existing connect lifecycle validates and persists the replacement
+             * token before READY. Never print it or introduce a second token store. */
+            const esp_openclaw_node_connect_request_t connect = {
+                .source = ESP_OPENCLAW_NODE_CONNECT_SOURCE_DEVICE_TOKEN,
+                .gateway_uri = request->gateway_uri,
+                .value = token->valuestring,
+            };
+            esp_err_t err = esp_openclaw_node_request_connect(client, &connect);
+            printf("%s\n", err == ESP_OK
+                ? "voice-actions credential reconnect queued; wait for operator Talk session ready before flashing the enabled build"
+                : "voice-actions credential reconnect failed to queue; retry complete before restarting");
+        }
+    }
+    cJSON_Delete(payload);
+    voice_actions_request_free(request);
+}
+
+static int voice_actions_console_command(int argc, char **argv)
+{
+    bool complete = argc == 3 && strcmp(argv[1], "complete") == 0 &&
+        argv[2][0] != '\0' && strlen(argv[2]) <= 128;
+    if (!complete && !(argc == 2 && strcmp(argv[1], "request") == 0)) {
+        printf("usage: voice-actions request | voice-actions complete <requestId>\n");
+        return 1;
+    }
+    voice_actions_request_t *request = calloc(1, sizeof(*request));
+    if (request == NULL) return 1;
+    xSemaphoreTake(state_lock, portMAX_DELAY);
+    esp_openclaw_node_handle_t client = operator_client;
+    bool ready = client != NULL && operator_ready && talk_call == NULL;
+    request->incarnation = operator_incarnation;
+    xSemaphoreGive(state_lock);
+    request->gateway_uri = ready ? esp_openclaw_node_dup_gateway_uri(client) : NULL;
+    request->request_id = complete ? strdup(argv[2]) : NULL;
+    char *json = NULL;
+    if (complete) {
+        cJSON *params = cJSON_CreateObject();
+        if (request->request_id != NULL &&
+            cJSON_AddStringToObject(params, "requestId", request->request_id) != NULL) {
+            json = cJSON_PrintUnformatted(params);
+        }
+        cJSON_Delete(params);
+    } else {
+        json = strdup("{\"scopes\":[\"operator.read\",\"operator.talk\",\"operator.write\"]}");
+    }
+    esp_err_t err = request->gateway_uri != NULL && json != NULL
+        ? esp_openclaw_node_gateway_request(client,
+            complete ? "device.scopes.waitUpgrade" : "device.scopes.requestUpgrade",
+            json, voice_actions_reply, request)
+        : ESP_ERR_INVALID_STATE;
+    free(json);
+    if (err != ESP_OK) {
+        printf("voice-actions unavailable: wait for an idle, connected operator session and retry\n");
+        voice_actions_request_free(request);
+        return 1;
+    }
+    printf("voice-actions %s queued\n", complete ? "completion" : "approval request");
+    return 0;
+}
+
 static int diagnostics_display_command(bool open)
 {
     esp_err_t err = open
@@ -1198,6 +1317,12 @@ static int diagnostics_console_command(int argc, char **argv)
 static esp_err_t register_room_console_commands(void)
 {
     static const esp_console_cmd_t COMMANDS[] = {
+        {
+            .command = "voice-actions",
+            .help = "Prepare Gateway-approved voice write access before enabling the build setting",
+            .hint = "request | complete <requestId>",
+            .func = voice_actions_console_command,
+        },
         {
             .command = "wake",
             .help = "Simulate the wake word and start one Talk session",

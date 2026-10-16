@@ -128,3 +128,36 @@ The source-only [lifetime tests](tests/README.md) exercise these boundaries with
 synthetic transports. Physical operator-control-loss reproduction and acoustic
 teardown proof remain outstanding; host results do not establish audible
 continuation or hardware behavior.
+
+## Voice agent actions
+
+Default firmware requests `operator.read` and `operator.talk`. Conversation and
+the Gateway's read-only voice tools are available; spoken requests cannot run
+mutating agent tools. Receiving authorized node commands, such as Canvas or
+`talk.start`, is a separate capability.
+
+To allow voice actions, prepare the credential **before** enabling the build
+setting. Use a Gateway that supports `device.scopes.requestUpgrade` and
+`device.scopes.waitUpgrade`:
+
+1. Flash the default firmware and pair with a voice-node setup code. Wait for
+   `operator Talk session ready` and stop any active call.
+2. Run `voice-actions request` in the USB console. On the Gateway, run
+   `openclaw devices list`, verify the exact request ID and device identity,
+   and approve its `operator.read`, `operator.talk`, and `operator.write`
+   scopes with `openclaw devices approve <requestId>`.
+3. Run `voice-actions complete <requestId>` in the USB console. Wait for the
+   new `operator Talk session ready` message: queued completion alone does
+   not mean the replacement token has been saved.
+4. Enable **OpenClaw room node → Request write access for voice agent actions**
+   (`CONFIG_OPENCLAW_ROOM_VOICE_ACTIONS=y`) in `idf.py menuconfig`, rebuild,
+   and flash. Verify a real spoken action against the target device.
+
+Write access permits mutating tools available to the configured agent, including
+commands for other nodes; it is not restricted to this board's own controls.
+The build option defaults to off and never approves its own request. Approval
+rotates the old token, so keep power and connectivity until step 3 completes.
+Interrupted preparation may require re-pairing with default firmware. Flashing
+the enabled build before preparation fails authentication instead of creating
+a pending approval. To return to read-only voice access, flash a build with
+the setting disabled; the declared connection scopes then omit write access.

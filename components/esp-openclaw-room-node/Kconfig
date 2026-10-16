@@ -31,6 +31,17 @@ config OPENCLAW_ROOM_TALK_VOICE
     string "Optional Talk voice override"
     default ""
 
+config OPENCLAW_ROOM_VOICE_ACTIONS
+    bool "Request write access for voice agent actions"
+    default n
+    help
+        Request operator.write in addition to operator.read and operator.talk.
+        The Gateway must separately approve the additional scope. This permits
+        mutating tools available to the configured agent, including commands
+        for other connected nodes. Prepare an approved credential with the
+        USB voice-actions commands before enabling and flashing this setting.
+        Leave disabled for read-only voice access.
+
 config OPENCLAW_ROOM_CALL_IDLE_SECONDS
     int "Maximum call lifetime in seconds"
     range 15 1800

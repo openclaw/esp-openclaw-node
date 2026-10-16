@@ -17,6 +17,10 @@
 typedef struct {
     unsigned opens, starts, closes, media_begins, media_ends, ambient_restores;
     unsigned config_requests, create_requests, close_requests;
+    unsigned scope_requests, token_connects;
+    char scope_method[40], scope_params[256], token_value[80], token_uri[256];
+    esp_openclaw_node_handle_t token_node;
+    bool fail_scope_submit;
     unsigned ice_callbacks, signaling_connected, signaling_closed, peer_disconnects;
     unsigned critical_depth, callback_depth;
     bool media_owned, ambient, inside_start;
@@ -35,6 +39,7 @@ typedef struct {
     bool reuse_rtc, last_started;
     bool fail_config_submit, fail_create_submit, fail_open, fail_provider, fail_start, fail_timer;
     const char *node_uri;
+    const char *operator_uri;
     const char *create_voice;
     bool fail_log_policy, capture_diagnostics;
     esp_log_level_t global_log_level, sdk_log_level;
@@ -56,10 +61,13 @@ void host_emit_gateway(esp_openclaw_node_handle_t node, const char *event, const
 void host_emit_peer(esp_webrtc_handle_t session, esp_webrtc_event_type_t event);
 void host_reply_config(void);
 void host_reply_create(bool ok);
+void host_reply_scope(bool ok, const char *payload);
 void host_fire_timeout(TimerHandle_t timer);
 void host_command(esp_openclaw_node_handle_t node, const char *name);
 void host_fire_operator_timer(esp_timer_handle_t timer);
 bool host_timer_active(TimerHandle_t timer);
+unsigned host_node_scope_count(esp_openclaw_node_handle_t node);
+bool host_node_has_scope(esp_openclaw_node_handle_t node, const char *scope);
 
 /* strlcpy is not in POSIX C (including Darwin with strict feature macros).
  * The room diagnostics snapshot needs this declaration. */

@@ -40,6 +40,8 @@ struct esp_openclaw_node {
     esp_openclaw_node_config_t config;
     esp_openclaw_node_command_t commands[2];
     unsigned command_count;
+    const char *scopes[3];
+    unsigned scope_count;
 };
 static struct host_task tasks[8];
 static size_t task_count;
@@ -58,7 +60,7 @@ typedef struct {
     void *ctx;
     esp_openclaw_node_handle_t node;
 } pending_rpc_t;
-static pending_rpc_t config_rpc, create_rpc;
+static pending_rpc_t config_rpc, create_rpc, scope_rpc;
 
 typedef struct {
     esp_webrtc_cfg_t config;
@@ -383,7 +385,20 @@ esp_err_t esp_openclaw_node_create(const esp_openclaw_node_config_t *config,
 esp_err_t esp_openclaw_node_destroy(esp_openclaw_node_handle_t node)
 { (void)node; host_require(false, "unexpected Node destruction"); return ESP_FAIL; }
 esp_err_t esp_openclaw_node_register_scope(esp_openclaw_node_handle_t node, const char *scope)
-{ (void)node; (void)scope; return ESP_OK; }
+{
+    host_require(node->scope_count < 3, "room client scope capacity");
+    node->scopes[node->scope_count++] = scope;
+    return ESP_OK;
+}
+unsigned host_node_scope_count(esp_openclaw_node_handle_t node)
+{ return node->scope_count; }
+bool host_node_has_scope(esp_openclaw_node_handle_t node, const char *scope)
+{
+    for (unsigned i = 0; i < node->scope_count; ++i) {
+        if (strcmp(node->scopes[i], scope) == 0) return true;
+    }
+    return false;
+}
 esp_err_t esp_openclaw_node_register_capability(esp_openclaw_node_handle_t node, const char *capability)
 { (void)node; (void)capability; return ESP_OK; }
 esp_err_t esp_openclaw_node_register_command(esp_openclaw_node_handle_t node,
@@ -396,6 +411,16 @@ esp_err_t esp_openclaw_node_register_command(esp_openclaw_node_handle_t node,
 esp_err_t esp_openclaw_node_request_connect(esp_openclaw_node_handle_t node,
     const esp_openclaw_node_connect_request_t *request)
 {
+    if (request->source == ESP_OPENCLAW_NODE_CONNECT_SOURCE_DEVICE_TOKEN) {
+        host_require(request->value != NULL && strlen(request->value) < sizeof(host.token_value) &&
+            request->gateway_uri != NULL && strlen(request->gateway_uri) < sizeof(host.token_uri),
+            "replacement credential fits synthetic observation");
+        strcpy(host.token_value, request->value);
+        strcpy(host.token_uri, request->gateway_uri);
+        host.token_node = node;
+        ++host.token_connects;
+        return ESP_OK;
+    }
     host_require(request->source == ESP_OPENCLAW_NODE_CONNECT_SOURCE_SAVED_SESSION,
         "synthetic saved-session connect only; no credentials accessed");
     return strcmp(node->config.role, "node") == 0 ? host.node_connect_result : host.operator_connect_result;
@@ -403,8 +428,10 @@ esp_err_t esp_openclaw_node_request_connect(esp_openclaw_node_handle_t node,
 esp_err_t esp_openclaw_node_request_disconnect(esp_openclaw_node_handle_t node)
 { (void)node; return ESP_OK; }
 char *esp_openclaw_node_dup_gateway_uri(esp_openclaw_node_handle_t node)
-{ return strdup(host.node_uri != NULL && strcmp(node->config.role, "node") == 0
-    ? host.node_uri : "wss://gateway.example"); }
+{
+    const char *uri = strcmp(node->config.role, "node") == 0 ? host.node_uri : host.operator_uri;
+    return strdup(uri != NULL ? uri : "wss://gateway.example");
+}
 
 void host_emit_node(esp_openclaw_node_handle_t node, esp_openclaw_node_event_t event)
 {
@@ -458,7 +485,16 @@ esp_err_t esp_openclaw_node_gateway_request(esp_openclaw_node_handle_t node,
 {
     host_require(host.critical_depth == 0 && mutex_depth == 0, "RPC outside locks");
     pending_rpc_t request = {.callback = callback, .ctx = ctx, .node = node};
-    if (strcmp(method, "talk.config") == 0) {
+    if (strcmp(method, "device.scopes.requestUpgrade") == 0 || strcmp(method, "device.scopes.waitUpgrade") == 0) {
+        if (host.fail_scope_submit) return ESP_FAIL;
+        host_require(scope_rpc.callback == NULL, "one scope RPC outstanding");
+        host_require(strlen(method) < sizeof(host.scope_method) && strlen(params) < sizeof(host.scope_params),
+            "scope request fits synthetic observation");
+        strcpy(host.scope_method, method);
+        strcpy(host.scope_params, params);
+        scope_rpc = request;
+        ++host.scope_requests;
+    } else if (strcmp(method, "talk.config") == 0) {
         if (host.fail_config_submit) return ESP_FAIL;
         host_require(config_rpc.callback == NULL, "one config request outstanding");
         config_rpc = request;
@@ -503,6 +539,10 @@ static void reply(pending_rpc_t *slot, bool ok, const char *payload)
     request.callback(request.node, &result, request.ctx);
     --host.callback_depth;
     free(borrowed);
+}
+void host_reply_scope(bool ok, const char *payload)
+{
+    reply(&scope_rpc, ok, payload);
 }
 void host_reply_config(void)
 {
@@ -785,7 +825,8 @@ esp_err_t esp_http_client_cleanup(esp_http_client_handle_t client)
 
 void host_release_resources(void)
 {
-    host_require(config_rpc.callback == NULL && create_rpc.callback == NULL, "all real Talk RPC references drained");
+    host_require(config_rpc.callback == NULL && create_rpc.callback == NULL && scope_rpc.callback == NULL,
+        "all real RPC references drained");
     host_require(!host.media_owned && mutex_depth == 0 && host.critical_depth == 0, "fixture leaves no ownership");
     for (size_t i = 0; i < node_count; ++i) free(nodes[i]);
     free(queue->data);

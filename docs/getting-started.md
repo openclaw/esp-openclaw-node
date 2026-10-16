@@ -111,6 +111,7 @@ After flashing, open the serial console for the board and use the REPL:
 
 ```text
 openclaw> status
+openclaw> wifi scan
 openclaw> wifi set <ssid> <passphrase>
 openclaw> gateway setup-code <setup-code>
 openclaw> status
@@ -119,6 +120,9 @@ openclaw> status
 Each example README calls out the console path for that board and the commands it exposes after pairing.
 
 - Use `wifi set <ssid>` for an open network, or `wifi set <ssid> <passphrase>` for a secured network.
+- `wifi scan` lists up to 16 visible networks supported by the board. To scan
+  after connecting, run `wifi disconnect` first; `wifi connect` resumes the
+  saved connection afterward.
 - The setup code contains a short-lived `bootstrapToken`, not the gateway's
 shared token. `gateway setup-code <setup-code>` requests one explicit connect  
 attempt.

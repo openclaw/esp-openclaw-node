@@ -4,10 +4,11 @@
 
 ## 1.2.0 - 2026-10-16
 
-**Highlights:** New Waveshare watch and M5Dial profiles, reliable dial gestures, and resilient connection recovery.
+**Highlights:** New Waveshare watch and M5Dial profiles, USB Wi-Fi discovery, reliable dial gestures, and resilient connection recovery.
 
 - Add a Waveshare 1.8-inch watch profile with CO5300/CST816S display support and shared-ES8311 microphone/speaker lifecycles for the full room-node feature set.
 - Add an M5Dial example with touch/rotary controls, session-bound agent actions, an animated face, text display, and bounded buzzer playback.
+- Add a bounded USB `wifi scan` command for provisioning disconnected nodes without changing saved credentials.
 - Keep the M5Dial encoder editable after confirmation, recognize stationary button holds, and prevent touch drags from submitting actions or returning home.
 - Retry saved-session requests rejected before admission so temporary memory pressure cannot strand a node waiting for an event that will never arrive.
 - Preserve the 12-second handshake deadline through transport startup and check it while draining queued messages so stalled connections can retry. Thanks @DonnieFi. (#67)

@@ -24,6 +24,7 @@ static SemaphoreHandle_t s_wifi_lock;
 static esp_openclaw_node_wifi_status_t s_status;
 static bool s_started;
 static bool s_should_reconnect;
+static bool s_scan_in_progress;
 
 #define WIFI_CONNECTED_BIT BIT0
 
@@ -336,6 +337,49 @@ esp_err_t esp_openclaw_node_wifi_disconnect(void)
     if (err == ESP_ERR_WIFI_NOT_CONNECT) {
         err = ESP_OK;
     }
+    return err;
+}
+
+esp_err_t esp_openclaw_node_wifi_scan(wifi_ap_record_t *records, uint16_t *count, uint16_t *total)
+{
+    if (records == NULL || count == NULL || total == NULL ||
+        *count == 0 || *count > ESP_OPENCLAW_NODE_WIFI_SCAN_LIMIT) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    uint16_t capacity = *count;
+    *count = 0;
+    *total = 0;
+    if (!s_started || s_wifi_lock == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    xSemaphoreTake(s_wifi_lock, portMAX_DELAY);
+    // Provisioning scans must not compete with a live connection or its retries.
+    bool busy = s_status.connected || s_should_reconnect || s_scan_in_progress;
+    if (!busy) s_scan_in_progress = true;
+    xSemaphoreGive(s_wifi_lock);
+    if (busy) return ESP_ERR_WIFI_STATE;
+
+    const wifi_scan_config_t config = {
+        .show_hidden = false,
+        .scan_type = WIFI_SCAN_TYPE_ACTIVE,
+        .scan_time.active = {.min = 0, .max = 120},
+    };
+    esp_err_t err = esp_wifi_scan_start(&config, true);
+    if (err == ESP_OK) {
+        err = esp_wifi_scan_get_ap_num(total);
+        if (err == ESP_OK && *total > 0) {
+            uint16_t returned = capacity;
+            err = esp_wifi_scan_get_ap_records(&returned, records);
+            if (err == ESP_OK) *count = returned;
+        }
+        // get_ap_records drains the driver list; failures and empty scans don't.
+        if (err != ESP_OK || *total == 0) esp_wifi_clear_ap_list();
+    }
+
+    xSemaphoreTake(s_wifi_lock, portMAX_DELAY);
+    s_scan_in_progress = false;
+    xSemaphoreGive(s_wifi_lock);
     return err;
 }
 

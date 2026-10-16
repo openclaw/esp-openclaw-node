@@ -2,13 +2,18 @@
 
 ## Unreleased
 
-- Keep the M5Dial encoder editable after confirmation, recognize stationary button holds, and prevent touch drags from submitting actions or returning home.
+## 1.2.0 - 2026-10-16
+
+**Highlights:** New Waveshare watch and M5Dial profiles, reliable dial gestures, and resilient connection recovery.
 
 - Add a Waveshare 1.8-inch watch profile with CO5300/CST816S display support and shared-ES8311 microphone/speaker lifecycles for the full room-node feature set.
 - Add an M5Dial example with touch/rotary controls, session-bound agent actions, an animated face, text display, and bounded buzzer playback.
+- Keep the M5Dial encoder editable after confirmation, recognize stationary button holds, and prevent touch drags from submitting actions or returning home.
 - Retry saved-session requests rejected before admission so temporary memory pressure cannot strand a node waiting for an event that will never arrive.
 - Preserve the 12-second handshake deadline through transport startup and check it while draining queued messages so stalled connections can retry. Thanks @DonnieFi. (#67)
 - Update the registry WebSocket client to 1.8.0 for upstream stop/destroy race, error-handling, and close-state fixes.
+
+Qualification scope: host checks and CI firmware builds only. Publication requires all seven firmware builds to pass on the release commit. No hardware flashing, on-device Unity execution, live Gateway pairing/reconnect, acoustic wake/Talk, display/Canvas, camera/DMA, SD-card removal, or C6 coprocessor qualification is claimed for this release.
 
 ## 1.1.1 - 2026-10-01
 

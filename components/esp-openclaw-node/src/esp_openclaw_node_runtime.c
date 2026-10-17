@@ -267,6 +267,7 @@ static void handle_request_gateway(
 {
     esp_openclaw_node_send_gateway_request(
         node,
+        message->transport_id,
         message->method,
         message->params_json,
         message->request_cb,
@@ -628,7 +629,9 @@ esp_err_t esp_openclaw_node_submit_gateway_request(
 {
     esp_openclaw_node_lock_state(node);
     bool ready = node->state == ESP_OPENCLAW_NODE_INTERNAL_READY &&
-                 node->pending_control == ESP_OPENCLAW_NODE_PENDING_CONTROL_REQUEST_NONE;
+                 node->pending_control == ESP_OPENCLAW_NODE_PENDING_CONTROL_REQUEST_NONE &&
+                 node->active_transport_id != 0;
+    uint32_t transport_id = node->active_transport_id;
     esp_openclaw_node_unlock_state(node);
     if (!ready) {
         return ESP_ERR_INVALID_STATE;
@@ -636,6 +639,7 @@ esp_err_t esp_openclaw_node_submit_gateway_request(
 
     esp_openclaw_node_work_message_t message = {
         .type = ESP_OPENCLAW_NODE_WORK_MSG_REQUEST_GATEWAY,
+        .transport_id = transport_id,
         .method = esp_openclaw_node_duplicate_string(method),
         .params_json = esp_openclaw_node_duplicate_string(
             params_json != NULL ? params_json : "{}"),

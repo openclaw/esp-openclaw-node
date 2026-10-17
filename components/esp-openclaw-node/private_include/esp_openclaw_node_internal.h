@@ -312,6 +312,7 @@ void esp_openclaw_node_process_gateway_message(
     const char *text);
 void esp_openclaw_node_send_gateway_request(
     esp_openclaw_node_handle_t node,
+    uint32_t transport_id,
     const char *method,
     const char *params_json,
     esp_openclaw_node_gateway_request_cb_t callback,

@@ -35,6 +35,13 @@ class ReplyDiagnosticsTests(unittest.TestCase):
         invoke = source[source.index("static void handle_invoke_request("):
                         source.index("\nstatic bool handle_gateway_response(")]
         (directory / "reply_under_test.inc").write_text(shared + reply + invoke)
+        runtime = (NODE / "src/esp_openclaw_node_runtime.c").read_text()
+        queue = runtime[runtime.index("esp_err_t esp_openclaw_node_enqueue_work_message("):
+                        runtime.index("\nvoid esp_openclaw_node_enqueue_work_message_from_callback(")]
+        dispatch = runtime[runtime.index("static void handle_request_gateway("):
+                           runtime.index("\nstatic void handle_ws_connected(")]
+        submit = runtime[runtime.index("esp_err_t esp_openclaw_node_submit_gateway_request("):]
+        (directory / "gateway_queue_under_test.inc").write_text(queue + dispatch + submit)
         cls.binaries = {}
         for quiet in (0, 1):
             binary = directory / f"reply-{quiet}"
@@ -78,6 +85,11 @@ class ReplyDiagnosticsTests(unittest.TestCase):
     def test_quiet_logging_keeps_send_behavior(self):
         self.run_case("full", quiet=1)
         self.run_case("zero", quiet=1)
+
+    def test_queued_request_stays_on_its_connection(self):
+        for scenario in ("queue-current", "queue-replaced", "queue-disconnected"):
+            with self.subTest(scenario=scenario):
+                self.run_case(scenario)
 
 
 if __name__ == "__main__":

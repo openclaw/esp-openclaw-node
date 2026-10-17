@@ -133,6 +133,7 @@ static void invoke_gateway_callback(
 
 void esp_openclaw_node_send_gateway_request(
     esp_openclaw_node_handle_t node,
+    uint32_t transport_id,
     const char *method,
     const char *params_json,
     esp_openclaw_node_gateway_request_cb_t callback,
@@ -142,6 +143,15 @@ void esp_openclaw_node_send_gateway_request(
     char request_id[40] = {0};
 
     esp_openclaw_node_lock_state(node);
+    /* Accepted RPCs belong to one transport lifetime, including when the
+     * replacement reconnects to the same URI. Never replay them there. */
+    if (transport_id != node->active_transport_id || transport_id == 0) {
+        esp_openclaw_node_unlock_state(node);
+        invoke_gateway_callback(
+            node, callback, user_ctx, false, NULL,
+            "STALE_CONNECTION", "Gateway connection changed before request was sent");
+        return;
+    }
     if (node->state == ESP_OPENCLAW_NODE_INTERNAL_READY && node->ws != NULL) {
         for (size_t i = 0; i < ESP_OPENCLAW_NODE_MAX_PENDING_REQUESTS; ++i) {
             if (!node->pending_requests[i].in_use) {

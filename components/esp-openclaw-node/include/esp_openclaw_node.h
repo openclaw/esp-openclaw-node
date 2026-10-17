@@ -418,6 +418,9 @@ esp_err_t esp_openclaw_node_request_disconnect(esp_openclaw_node_handle_t node);
  * The callback runs on the component task and must remain short and
  * non-blocking. `params_json` must contain a JSON object or may be `NULL` to
  * send an empty object. Result strings are valid only during the callback.
+ * An accepted request stays bound to that connection. If the connection is
+ * replaced before transmission, the callback fails with `STALE_CONNECTION`;
+ * the request is never replayed on the replacement connection.
  */
 esp_err_t esp_openclaw_node_gateway_request(
     esp_openclaw_node_handle_t node,

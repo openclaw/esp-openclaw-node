@@ -16,6 +16,11 @@ typedef unsigned TickType_t;
 typedef void *esp_websocket_client_handle_t;
 #define ESP_OK 0
 #define ESP_FAIL -1
+#define ESP_ERR_INVALID_STATE 0x103
+#define ESP_ERR_NO_MEM 0x101
+#define ESP_OPENCLAW_NODE_PENDING_CONTROL_REQUEST_NONE 0
+#define ESP_OPENCLAW_NODE_WORK_MSG_REQUEST_GATEWAY 1
+#define pdTRUE 1
 #define ESP_OPENCLAW_NODE_TAG "esp_openclaw_node"
 #define ESP_OPENCLAW_NODE_MAX_PENDING_REQUESTS 8
 #define ESP_OPENCLAW_NODE_MAX_SESSION_KEY_LEN 256
@@ -42,11 +47,23 @@ typedef struct {
 } websocket_ops_t;
 struct node {
     int state;
+    int pending_control;
+    uint32_t active_transport_id;
+    void *work_queue;
     void *ws;
     const websocket_ops_t *websocket_client_ops;
     esp_openclaw_node_pending_request_t pending_requests[ESP_OPENCLAW_NODE_MAX_PENDING_REQUESTS];
     uint64_t next_request_id;
 };
+typedef struct {
+    int type;
+    uint32_t transport_id;
+    char *method;
+    char *params_json;
+    esp_openclaw_node_gateway_request_cb_t request_cb;
+    void *request_ctx;
+} esp_openclaw_node_work_message_t;
+static esp_openclaw_node_work_message_t queued;
 typedef struct {
     const char *session_key;
 } esp_openclaw_node_command_invocation_t;
@@ -189,6 +206,26 @@ static char *tracked_print(const cJSON *item)
 #undef cJSON_Delete
 #undef free
 
+static char *esp_openclaw_node_duplicate_string(const char *value)
+{
+    return strdup(value);
+}
+
+static void esp_openclaw_node_free_work_message_payload(esp_openclaw_node_work_message_t *message)
+{
+    free(message->method);
+    free(message->params_json);
+}
+
+static int xQueueSend(void *queue, const void *message, TickType_t timeout)
+{
+    assert(queue != NULL && timeout == 0);
+    queued = *(const esp_openclaw_node_work_message_t *)message;
+    return pdTRUE;
+}
+
+#include "gateway_queue_under_test.inc"
+
 static int send_text(void *client, const char *data, int length, TickType_t timeout)
 {
     assert(client != NULL && timeout == 5000 && locks == 0);
@@ -213,9 +250,46 @@ static int send_text(void *client, const char *data, int length, TickType_t time
 static const websocket_ops_t ops = {.send_text = send_text};
 static struct node node = {
     .state = ESP_OPENCLAW_NODE_INTERNAL_READY,
+    .active_transport_id = 1,
+    .work_queue = &queued,
     .ws = &node,
     .websocket_client_ops = &ops,
 };
+
+static void stale_callback(
+    esp_openclaw_node_handle_t handle, const esp_openclaw_node_gateway_result_t *result,
+    void *context)
+{
+    assert(handle == &node && context == &queued && locks == 0);
+    assert(!result->ok);
+    assert(strcmp(result->error_code, "STALE_CONNECTION") == 0);
+    callbacks++;
+}
+
+static void check_queued_request(const char *scenario)
+{
+    assert(esp_openclaw_node_submit_gateway_request(
+        &node, "node.event", "{\"event\":\"agent.request\"}", stale_callback, &queued) == ESP_OK);
+    if (strcmp(scenario, "queue-replaced") == 0) {
+        node.active_transport_id = 2;
+    } else if (strcmp(scenario, "queue-disconnected") == 0) {
+        node.active_transport_id = 0;
+        node.state = 0;
+        node.ws = NULL;
+    }
+    handle_request_gateway(&node, &queued);
+    if (strcmp(scenario, "queue-current") == 0) {
+        assert(sends == 1 && callbacks == 0);
+        assert(node.pending_requests[0].in_use);
+    } else {
+        assert(sends == 0 && callbacks == 1);
+        for (unsigned i = 0; i < ESP_OPENCLAW_NODE_MAX_PENDING_REQUESTS; ++i) {
+            assert(!node.pending_requests[i].in_use);
+        }
+    }
+    esp_openclaw_node_free_work_message_payload(&queued);
+    free(sent);
+}
 
 static void gateway_callback(
     esp_openclaw_node_handle_t handle, const esp_openclaw_node_gateway_result_t *result,
@@ -284,6 +358,10 @@ static void check_envelope(bool gateway)
 int main(int argc, char **argv)
 {
     assert(argc == 2);
+    if (strncmp(argv[1], "queue-", 6) == 0) {
+        check_queued_request(argv[1]);
+        return 0;
+    }
     bool gateway = strncmp(argv[1], "gateway-", 8) == 0;
     const char *scenario = gateway ? argv[1] + 8 : argv[1];
     send_mode = strcmp(scenario, "negative") == 0 ? 1
@@ -296,7 +374,7 @@ int main(int argc, char **argv)
         : strcmp(scenario, "other-command") == 0 ? "camera.snap.extra" : "camera.snap";
     if (gateway) {
         esp_openclaw_node_send_gateway_request(
-            &node, "fixture.request", "{\"value\":\"params_canary\"}", gateway_callback, &node);
+            &node, node.active_transport_id, "fixture.request", "{\"value\":\"params_canary\"}", gateway_callback, &node);
         assert(callbacks == (send_mode != 0 ? 1U : 0U));
         assert(node.pending_requests[0].in_use == (send_mode == 0));
         assert(record_count == 0 && warnings == 0 && payload_frees == 0);

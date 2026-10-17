@@ -106,6 +106,12 @@ successful `hello-ok`
 - `esp_openclaw_node_request_disconnect()`
 - `esp_openclaw_node_gateway_request()`
 
+Queued Gateway RPCs stay bound to the connection that accepted them. A
+disconnect or reconnect before transmission completes the request with
+`STALE_CONNECTION`; it is never replayed on the replacement connection, even
+when the Gateway URI is unchanged. A request already transmitted completes
+normally or fails with `DISCONNECTED` when its connection closes.
+
 ### Inspection
 
 - `esp_openclaw_node_get_device_id()`

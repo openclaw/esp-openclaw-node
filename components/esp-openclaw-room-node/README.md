@@ -158,7 +158,9 @@ setting. Use a Gateway that supports `device.scopes.requestUpgrade` and
    not mean the replacement token has been saved.
 4. Enable **OpenClaw room node → Request owner access for voice agent actions**
    (`CONFIG_OPENCLAW_ROOM_VOICE_ACTIONS=y`) in `idf.py menuconfig`, rebuild,
-   and flash. Verify a real spoken action with an enabled agent tool.
+   and flash. Verify a real spoken action with an enabled agent tool. When the
+   Gateway asks for confirmation of a high-impact action, answer aloud; owner
+   access does not bypass that confirmation.
 
 **This grants owner access**, including the configured agent's `nodes` tool
 for spoken control of other devices and Gateway administration tools. It is

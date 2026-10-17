@@ -429,6 +429,28 @@ esp_err_t esp_openclaw_node_gateway_request(
     esp_openclaw_node_gateway_request_cb_t callback,
     void *user_ctx);
 
+/**
+ * @brief Send only if the specified connection is still ready.
+ *
+ * Capture the nonzero ID with esp_openclaw_node_get_connection_id(). A stale
+ * ID returns ESP_ERR_INVALID_STATE without taking ownership of user_ctx or
+ * invoking the callback. An accepted request has the normal RPC callback
+ * contract, including STALE_CONNECTION if replaced before transmission.
+ */
+esp_err_t esp_openclaw_node_gateway_request_on_connection(
+    esp_openclaw_node_handle_t node,
+    uint32_t connection_id,
+    const char *method,
+    const char *params_json,
+    esp_openclaw_node_gateway_request_cb_t callback,
+    void *user_ctx);
+
+/** @brief Return the current ready connection ID, or zero while unavailable.
+ * The ID identifies a transport lifetime within this node handle, not a device
+ * or Gateway identity. Looking it up does not reserve the connection.
+ */
+uint32_t esp_openclaw_node_get_connection_id(esp_openclaw_node_handle_t node);
+
 /* Inspection APIs */
 
 /**

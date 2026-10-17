@@ -622,6 +622,7 @@ esp_err_t esp_openclaw_node_submit_disconnect_request(esp_openclaw_node_handle_t
 
 esp_err_t esp_openclaw_node_submit_gateway_request(
     esp_openclaw_node_handle_t node,
+    uint32_t connection_id,
     const char *method,
     const char *params_json,
     esp_openclaw_node_gateway_request_cb_t callback,
@@ -630,7 +631,8 @@ esp_err_t esp_openclaw_node_submit_gateway_request(
     esp_openclaw_node_lock_state(node);
     bool ready = node->state == ESP_OPENCLAW_NODE_INTERNAL_READY &&
                  node->pending_control == ESP_OPENCLAW_NODE_PENDING_CONTROL_REQUEST_NONE &&
-                 node->active_transport_id != 0;
+                 node->active_transport_id != 0 &&
+                 (connection_id == 0 || connection_id == node->active_transport_id);
     uint32_t transport_id = node->active_transport_id;
     esp_openclaw_node_unlock_state(node);
     if (!ready) {

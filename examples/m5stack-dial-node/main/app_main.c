@@ -8,6 +8,7 @@
 
 #include "bsp/m5dial.h"
 #include "cJSON.h"
+#include "dial_action.h"
 #include "dial_control.h"
 #include "dial_input.h"
 #include "driver/gpio.h"
@@ -24,6 +25,7 @@
 #include "esp_openclaw_node_wifi.h"
 #include "esp_timer.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "lvgl.h"
 #include "nvs_flash.h"
 
@@ -38,23 +40,24 @@ static const char *commands[] = {"display.show", "display.clear", "display.statu
 
 typedef enum { VIEW_FACE, VIEW_CONTROL, VIEW_MESSAGE } dial_view_t;
 typedef struct {
-    uint32_t generation;
+    dial_action_token_t token;
     int value;
     char action[65];
     char unit[17];
     char session[ESP_OPENCLAW_NODE_MAX_SESSION_KEY_LEN + 1];
 } dial_action_t;
-typedef struct { uint32_t generation; bool ok; } action_result_t;
+typedef struct { dial_action_token_t token; bool ok; } action_result_t;
 static QueueHandle_t actions, results;
+static SemaphoreHandle_t action_lock;
+static dial_action_state_t action_state;
 static struct {
     dial_control_t control;
     dial_view_t view;
     char heading[65], text[513], label[65], unit[17], action[65];
     char session[ESP_OPENCLAW_NODE_MAX_SESSION_KEY_LEN + 1];
     const char *mood;
-    uint32_t generation, changes, presses, touches;
+    uint32_t changes, presses, touches;
     int brightness;
-    bool action_pending;
     lv_obj_t *arc, *title, *value, *message, *footer, *eyes[2], *mouth;
     dial_input_t input;
 } ui;
@@ -117,13 +120,22 @@ static void update_value(void)
     lv_label_set_text_fmt(ui.value, "%d%s", dial_control_value(&ui.control), ui.unit);
 }
 
+static void publish_action_result(dial_action_token_t token, bool ok)
+{
+    xSemaphoreTake(action_lock, portMAX_DELAY);
+    if (dial_action_matches(&action_state, token)) {
+        action_result_t completion = {token, ok};
+        xQueueOverwrite(results, &completion);
+    }
+    xSemaphoreGive(action_lock);
+}
+
 static void action_response(esp_openclaw_node_handle_t client,
                             const esp_openclaw_node_gateway_result_t *result, void *context)
 {
     (void)client;
-    action_result_t completion = {*(uint32_t *)context, result->ok};
+    publish_action_result(*(dial_action_token_t *)context, result->ok);
     free(context);
-    xQueueOverwrite(results, &completion);
 }
 
 static void action_worker(void *context)
@@ -149,17 +161,17 @@ static void action_worker(void *context)
         char *json = built ? cJSON_PrintUnformatted(params) : NULL;
         cJSON_Delete(params);
         free(payload_json);
-        uint32_t *generation = malloc(sizeof(*generation));
+        dial_action_token_t *token = malloc(sizeof(*token));
         esp_err_t err = ESP_ERR_NO_MEM;
-        if (json != NULL && generation != NULL) {
-            *generation = action.generation;
-            err = esp_openclaw_node_gateway_request(node, "node.event", json, action_response, generation);
+        if (json != NULL && token != NULL) {
+            *token = action.token;
+            err = esp_openclaw_node_gateway_request_on_connection(
+                node, token->connection_id, "node.event", json, action_response, token);
         }
         free(json);
         if (err != ESP_OK) {
-            free(generation);
-            action_result_t result = {action.generation, false};
-            xQueueOverwrite(results, &result);
+            free(token);
+            publish_action_result(action.token, false);
         }
     }
 }
@@ -167,25 +179,36 @@ static void action_worker(void *context)
 static void commit_action(void)
 {
     ++ui.presses;
-    if (ui.action_pending) return;
-    if (ui.action[0] == '\0' || ui.session[0] == '\0') {
+    xSemaphoreTake(action_lock, portMAX_DELAY);
+    if (action_state.pending_attempt != 0) {
+        xSemaphoreGive(action_lock);
+        return;
+    }
+    if (action_state.configured_uri == NULL || ui.action[0] == '\0' || ui.session[0] == '\0') {
+        xSemaphoreGive(action_lock);
         lv_label_set_text(ui.footer, "No action configured");
         return;
     }
-    if (!atomic_load(&connected)) {
+    if (action_state.connection_id == 0) {
+        xSemaphoreGive(action_lock);
         lv_label_set_text(ui.footer, "Gateway offline");
         return;
     }
-    dial_action_t action = {.generation = ui.generation, .value = dial_control_value(&ui.control)};
+    dial_action_t action = {.value = dial_control_value(&ui.control)};
+    if (!dial_action_begin(&action_state, &action.token)) {
+        xSemaphoreGive(action_lock);
+        return;
+    }
     strlcpy(action.action, ui.action, sizeof(action.action));
     strlcpy(action.unit, ui.unit, sizeof(action.unit));
     strlcpy(action.session, ui.session, sizeof(action.session));
     if (xQueueSend(actions, &action, 0) == pdTRUE) {
-        ui.action_pending = true;
         lv_label_set_text(ui.footer, "Sending action...");
     } else {
+        dial_action_complete(&action_state, action.token);
         lv_label_set_text(ui.footer, "Action busy");
     }
+    xSemaphoreGive(action_lock);
 }
 
 static void input_event(dial_input_event_t event, int value, bool pointer, void *context)
@@ -208,17 +231,19 @@ static void input_event(dial_input_event_t event, int value, bool pointer, void 
 static void refresh_ui(lv_timer_t *timer)
 {
     (void)timer;
+    xSemaphoreTake(action_lock, portMAX_DELAY);
     action_result_t result;
-    if (xQueueReceive(results, &result, 0) == pdTRUE && result.generation == ui.generation) {
-        ui.action_pending = false;
+    if (xQueueReceive(results, &result, 0) == pdTRUE && dial_action_complete(&action_state, result.token)) {
         lv_label_set_text(ui.footer, result.ok ? "Action sent" : "Action failed; press to retry");
     }
-    static bool was_connected;
-    bool online = atomic_load(&connected);
-    if (online != was_connected) {
-        was_connected = online;
-        lv_label_set_text(ui.footer, online ? "Connected | turn + press" : "Offline | USB setup");
+    static uint32_t last_connection;
+    if (action_state.connection_id != last_connection) {
+        last_connection = action_state.connection_id;
+        lv_label_set_text(ui.footer, last_connection == 0 ? "Offline | USB setup" :
+            ui.action[0] != '\0' && action_state.configured_uri == NULL ? "Configure action again" :
+            "Connected | turn + press");
     }
+    xSemaphoreGive(action_lock);
     if (ui.view != VIEW_FACE) return;
     uint32_t phase = lv_tick_get() % 4400;
     int height = 42;
@@ -319,8 +344,10 @@ static cJSON *status_payload(void)
     cJSON_AddNumberToObject(result, "touches", ui.touches);
     cJSON_AddNumberToObject(result, "brightness", ui.brightness);
     cJSON_AddBoolToObject(result, "buzzerPlaying", atomic_load(&tone_active));
-    cJSON_AddBoolToObject(result, "actionConfigured", ui.action[0] != '\0');
-    cJSON_AddBoolToObject(result, "actionPending", ui.action_pending);
+    xSemaphoreTake(action_lock, portMAX_DELAY);
+    cJSON_AddBoolToObject(result, "actionConfigured", action_state.configured_uri != NULL);
+    cJSON_AddBoolToObject(result, "actionPending", action_state.pending_attempt != 0);
+    xSemaphoreGive(action_lock);
     cJSON_AddStringToObject(result, "mood", ui.mood);
     cJSON_AddNumberToObject(result, "width", 240);
     cJSON_AddNumberToObject(result, "height", 240);
@@ -393,21 +420,24 @@ static esp_err_t handle_command(esp_openclaw_node_handle_t client, void *context
             err = invalid(error, "dial range must contain 1..1000 equal steps; value must lie on that grid");
         } else if (action[0] != '\0' && (invocation == NULL || invocation->session_key == NULL || invocation->session_key[0] == '\0')) {
             err = invalid(error, "configure an action from an agent session so button presses have a destination");
-        } else if (ui.action_pending) {
-            error->code = "UNAVAILABLE";
-            error->message = "wait for the pending dial action before replacing the control";
-            err = ESP_ERR_INVALID_STATE;
         } else {
-            ++ui.generation;
-            ui.control = control;
-            strlcpy(ui.label, name, sizeof(ui.label));
-            strlcpy(ui.unit, unit, sizeof(ui.unit));
-            strlcpy(ui.action, action, sizeof(ui.action));
-            strlcpy(ui.session, action[0] != '\0' ? invocation->session_key : "", sizeof(ui.session));
-            lv_arc_set_range(ui.arc, 0, dial_control_positions(&ui.control));
-            lv_arc_set_value(ui.arc, ui.control.position);
-            update_value();
-            show_view(VIEW_CONTROL);
+            xSemaphoreTake(action_lock, portMAX_DELAY);
+            if (!dial_action_configure(&action_state, action[0] != '\0')) {
+                error->code = "UNAVAILABLE";
+                error->message = "finish the pending action and connect to a Gateway before configuring an action";
+                err = ESP_ERR_INVALID_STATE;
+            } else {
+                ui.control = control;
+                strlcpy(ui.label, name, sizeof(ui.label));
+                strlcpy(ui.unit, unit, sizeof(ui.unit));
+                strlcpy(ui.action, action, sizeof(ui.action));
+                strlcpy(ui.session, action[0] != '\0' ? invocation->session_key : "", sizeof(ui.session));
+                lv_arc_set_range(ui.arc, 0, dial_control_positions(&ui.control));
+                lv_arc_set_value(ui.arc, ui.control.position);
+                update_value();
+                show_view(VIEW_CONTROL);
+            }
+            xSemaphoreGive(action_lock);
         }
     } else if (strcmp(command, "face.set") == 0) {
         const char *fields[] = {"mood"};
@@ -456,8 +486,15 @@ static esp_err_t handle_command(esp_openclaw_node_handle_t client, void *context
 static void node_event(esp_openclaw_node_handle_t client, esp_openclaw_node_event_t event,
                        const void *data, void *context)
 {
-    (void)client; (void)context;
-    atomic_store(&connected, event == ESP_OPENCLAW_NODE_EVENT_CONNECTED);
+    (void)context;
+    bool online = event == ESP_OPENCLAW_NODE_EVENT_CONNECTED;
+    char *uri = online ? esp_openclaw_node_dup_gateway_uri(client) : NULL;
+    uint32_t id = online ? esp_openclaw_node_get_connection_id(client) : 0;
+    xSemaphoreTake(action_lock, portMAX_DELAY);
+    dial_action_connect(&action_state, id, uri);
+    atomic_store(&connected, action_state.connection_id != 0);
+    xSemaphoreGive(action_lock);
+    free(uri);
     esp_openclaw_node_example_saved_session_reconnect_handle_event(&reconnect, event, data);
     ESP_LOGI(TAG, "Gateway %s", event == ESP_OPENCLAW_NODE_EVENT_CONNECTED ? "connected" : "offline");
 }
@@ -496,7 +533,8 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     actions = xQueueCreate(1, sizeof(dial_action_t));
     results = xQueueCreate(1, sizeof(action_result_t));
-    ESP_ERROR_CHECK(actions != NULL && results != NULL ? ESP_OK : ESP_ERR_NO_MEM);
+    action_lock = xSemaphoreCreateMutex();
+    ESP_ERROR_CHECK(actions != NULL && results != NULL && action_lock != NULL ? ESP_OK : ESP_ERR_NO_MEM);
     ledc_timer_config_t tone = {.speed_mode = LEDC_LOW_SPEED_MODE, .duty_resolution = LEDC_TIMER_10_BIT,
         .timer_num = LEDC_TIMER_0, .freq_hz = 1000, .clk_cfg = LEDC_AUTO_CLK};
     ledc_channel_config_t speaker = {.gpio_num = GPIO_NUM_3, .speed_mode = LEDC_LOW_SPEED_MODE,

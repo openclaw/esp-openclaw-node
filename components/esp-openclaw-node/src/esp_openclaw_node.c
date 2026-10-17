@@ -628,8 +628,9 @@ esp_err_t esp_openclaw_node_request_disconnect(esp_openclaw_node_handle_t node)
     return esp_openclaw_node_submit_disconnect_request(node);
 }
 
-esp_err_t esp_openclaw_node_gateway_request(
+static esp_err_t gateway_request(
     esp_openclaw_node_handle_t node,
+    uint32_t connection_id,
     const char *method,
     const char *params_json,
     esp_openclaw_node_gateway_request_cb_t callback,
@@ -646,10 +647,37 @@ esp_err_t esp_openclaw_node_gateway_request(
     }
     return esp_openclaw_node_submit_gateway_request(
         node,
+        connection_id,
         method,
         params_json,
         callback,
         user_ctx);
+}
+
+esp_err_t esp_openclaw_node_gateway_request(
+    esp_openclaw_node_handle_t node, const char *method, const char *params_json,
+    esp_openclaw_node_gateway_request_cb_t callback, void *user_ctx)
+{
+    return gateway_request(node, 0, method, params_json, callback, user_ctx);
+}
+
+esp_err_t esp_openclaw_node_gateway_request_on_connection(
+    esp_openclaw_node_handle_t node, uint32_t connection_id, const char *method,
+    const char *params_json, esp_openclaw_node_gateway_request_cb_t callback, void *user_ctx)
+{
+    if (connection_id == 0) return ESP_ERR_INVALID_ARG;
+    return gateway_request(node, connection_id, method, params_json, callback, user_ctx);
+}
+
+uint32_t esp_openclaw_node_get_connection_id(esp_openclaw_node_handle_t node)
+{
+    if (node == NULL) return 0;
+    esp_openclaw_node_lock_state(node);
+    uint32_t id = node->state == ESP_OPENCLAW_NODE_INTERNAL_READY &&
+        node->pending_control == ESP_OPENCLAW_NODE_PENDING_CONTROL_REQUEST_NONE
+        ? node->active_transport_id : 0;
+    esp_openclaw_node_unlock_state(node);
+    return id;
 }
 
 const char *esp_openclaw_node_get_device_id(esp_openclaw_node_handle_t node)

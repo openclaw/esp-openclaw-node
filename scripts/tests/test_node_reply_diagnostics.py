@@ -87,7 +87,7 @@ class ReplyDiagnosticsTests(unittest.TestCase):
         self.run_case("zero", quiet=1)
 
     def test_queued_request_stays_on_its_connection(self):
-        for scenario in ("queue-current", "queue-replaced", "queue-disconnected"):
+        for scenario in ("queue-current", "queue-bound", "queue-replaced", "queue-disconnected", "queue-stale-submit"):
             with self.subTest(scenario=scenario):
                 self.run_case(scenario)
 

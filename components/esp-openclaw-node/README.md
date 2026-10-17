@@ -105,12 +105,20 @@ successful `hello-ok`
 - `esp_openclaw_node_request_connect()`
 - `esp_openclaw_node_request_disconnect()`
 - `esp_openclaw_node_gateway_request()`
+- `esp_openclaw_node_gateway_request_on_connection()`
 
 Queued Gateway RPCs stay bound to the connection that accepted them. A
 disconnect or reconnect before transmission completes the request with
 `STALE_CONNECTION`; it is never replayed on the replacement connection, even
 when the Gateway URI is unchanged. A request already transmitted completes
 normally or fails with `DISCONNECTED` when its connection closes.
+
+For work queued by the application, capture
+`esp_openclaw_node_get_connection_id()` while the request is authorized and
+pass it to `esp_openclaw_node_gateway_request_on_connection()`. A zero ID means
+no connection is ready. A replaced connection is rejected before submission;
+the callback runs only when submission succeeds. IDs are scoped to one node
+handle and identify transport lifetimes, not Gateway identities.
 
 ### Inspection
 

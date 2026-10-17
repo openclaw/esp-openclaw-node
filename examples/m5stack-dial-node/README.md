@@ -65,6 +65,13 @@ until that result arrives. Offline presses show `Gateway offline` and are not
 replayed after reconnection. `Action sent` means the Gateway accepted the event,
 not that an external device completed an action.
 
+Actions stay bound to the Gateway URI that configured them. Reconnecting to
+that URI preserves the control, but cancels any pending press. Connecting to a
+different URI clears the action binding, retains the numeric value, and shows
+`Configure action again`. Configure the control from an agent session on that
+Gateway to enable presses again. Late replies from an older press cannot
+change the result of a newer one.
+
 ## Commands
 
 | Command | Parameters | Result |

@@ -268,8 +268,16 @@ static void stale_callback(
 
 static void check_queued_request(const char *scenario)
 {
+    if (strcmp(scenario, "queue-stale-submit") == 0) {
+        node.active_transport_id = 2;
+        assert(esp_openclaw_node_submit_gateway_request(
+            &node, 1, "node.event", "{}", stale_callback, &queued) == ESP_ERR_INVALID_STATE);
+        assert(queued.method == NULL && sends == 0 && callbacks == 0);
+        return;
+    }
+    uint32_t connection_id = strcmp(scenario, "queue-bound") == 0 ? 1 : 0;
     assert(esp_openclaw_node_submit_gateway_request(
-        &node, "node.event", "{\"event\":\"agent.request\"}", stale_callback, &queued) == ESP_OK);
+        &node, connection_id, "node.event", "{\"event\":\"agent.request\"}", stale_callback, &queued) == ESP_OK);
     if (strcmp(scenario, "queue-replaced") == 0) {
         node.active_transport_id = 2;
     } else if (strcmp(scenario, "queue-disconnected") == 0) {
@@ -278,7 +286,7 @@ static void check_queued_request(const char *scenario)
         node.ws = NULL;
     }
     handle_request_gateway(&node, &queued);
-    if (strcmp(scenario, "queue-current") == 0) {
+    if (strcmp(scenario, "queue-current") == 0 || strcmp(scenario, "queue-bound") == 0) {
         assert(sends == 1 && callbacks == 0);
         assert(node.pending_requests[0].in_use);
     } else {

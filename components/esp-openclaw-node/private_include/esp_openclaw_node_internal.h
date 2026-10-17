@@ -348,6 +348,7 @@ esp_err_t esp_openclaw_node_submit_disconnect_request(
     esp_openclaw_node_handle_t node);
 esp_err_t esp_openclaw_node_submit_gateway_request(
     esp_openclaw_node_handle_t node,
+    uint32_t connection_id,
     const char *method,
     const char *params_json,
     esp_openclaw_node_gateway_request_cb_t callback,

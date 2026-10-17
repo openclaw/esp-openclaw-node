@@ -65,6 +65,12 @@ jobs:
             examples/m5stack-dial-node/tests/test_dial_control.c \
             -lm -o /tmp/dial_control_test
           /tmp/dial_control_test
+          cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+            -I examples/m5stack-dial-node/main \
+            examples/m5stack-dial-node/main/dial_action.c \
+            examples/m5stack-dial-node/tests/test_dial_action.c \
+            -o /tmp/dial_action_test
+          /tmp/dial_action_test
           python3 -m unittest discover -s scripts/tests -p test_saved_session_reconnect.py -v
 
       - name: Host room audio tests

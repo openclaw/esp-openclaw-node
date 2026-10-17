@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Bind queued Gateway RPCs and M5Dial agent actions to their active connection; reject stale work and replies, retain controls across same-Gateway reconnects, and clear action destinations when the Gateway changes.
+- Include the visible M5Dial message heading and text in status readback.
+- Suppress speaker feedback on single-microphone room/watch boards during playback and its acoustic tail.
 - Add an opt-in room/watch setting for voice-agent owner actions, including other-node control, requiring separate Gateway approval and preserving read-only voice access by default.
 - Reuse the room supervisor for NVS-backed node/operator reconnects, avoiding temporary internal stacks that can prevent WebSocket tasks from starting.
 - Reserve the AFE worker's internal stack for the audio source lifetime so repeated Talk transitions cannot lose microphone capture to fragmented RAM.

@@ -54,6 +54,24 @@ static bool text_hint_active;
 static bool camera_indicator_active;
 static room_ui_facts_t current_facts;
 static esp_timer_handle_t text_hint_timer;
+static void (*talk_action_handler)(bool start);
+
+void room_ui_set_talk_action_handler(void (*handler)(bool start))
+{
+    talk_action_handler = handler;
+}
+
+static void talk_control_clicked(lv_event_t *event)
+{
+    (void)event;
+    taskENTER_CRITICAL(&state_mux);
+    room_ui_talk_state_t talk = current_facts.talk;
+    bool overlay = diagnostics_open;
+    taskEXIT_CRITICAL(&state_mux);
+    if (talk_action_handler == NULL || overlay) return;
+    if (talk == ROOM_UI_TALK_READY) talk_action_handler(true);
+    else if (talk == ROOM_UI_TALK_CONNECTING || talk == ROOM_UI_TALK_ACTIVE) talk_action_handler(false);
+}
 
 extern const uint8_t home_lobster_pixels[] asm("_binary_openclaw_lobster_argb8888_start");
 static const lv_image_dsc_t home_lobster = {
@@ -259,6 +277,23 @@ void room_ui_init(void)
         ESP_LOGW(TAG, "face unavailable; talk states fall back to text");
     }
     if (board != NULL && !board_has_animated_face) home_create(display, board);
+    if (talk_action_handler != NULL) {
+        talk_pill = lv_obj_create(lv_layer_top());
+        lv_obj_set_size(talk_pill, 148, 44);
+        lv_obj_align(talk_pill, LV_ALIGN_TOP_MID, 0, 14);
+        lv_obj_set_style_bg_color(talk_pill, lv_color_hex(0x181818), 0);
+        lv_obj_set_style_bg_opa(talk_pill, LV_OPA_90, 0);
+        lv_obj_set_style_border_width(talk_pill, 0, 0);
+        lv_obj_set_style_radius(talk_pill, 12, 0);
+        lv_obj_set_style_pad_all(talk_pill, 0, 0);
+        lv_obj_clear_flag(talk_pill, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_EVENT_BUBBLE);
+        lv_obj_add_event_cb(talk_pill, talk_control_clicked, LV_EVENT_SHORT_CLICKED, NULL);
+        talk_pill_label = lv_label_create(talk_pill);
+        lv_obj_set_style_text_color(talk_pill_label, lv_color_white(), 0);
+        lv_obj_set_style_text_font(talk_pill_label, &lv_font_montserrat_14, 0);
+        lv_obj_clear_flag(talk_pill_label, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_center(talk_pill_label);
+    }
     room_board_display_unlock();
     room_ui_refresh();
 }
@@ -301,6 +336,15 @@ static bool room_ui_render_locked(void)
     room_ui_facts_t facts = current_facts;
     taskEXIT_CRITICAL(&state_mux);
     bool canvas_active = room_canvas_is_active();
+    if (talk_pill != NULL) {
+        bool start = facts.talk == ROOM_UI_TALK_READY;
+        bool stop = facts.talk == ROOM_UI_TALK_CONNECTING || facts.talk == ROOM_UI_TALK_ACTIVE;
+        lv_label_set_text(talk_pill_label, start ? "Start Talk" : stop ? "Stop Talk" :
+            facts.talk == ROOM_UI_TALK_STOPPING ? "Stopping..." : "Talk unavailable");
+        lv_obj_set_state(talk_pill, LV_STATE_DISABLED, !start && !stop);
+        lv_obj_set_flag(talk_pill, LV_OBJ_FLAG_HIDDEN, overlay);
+        if (!overlay) lv_obj_move_foreground(talk_pill);
+    }
     if (gateway_label != NULL) {
         /* The gateway line rides along with every non-canvas view. */
         lv_label_set_text(gateway_label, gateway);
@@ -326,38 +370,9 @@ static bool room_ui_render_locked(void)
             /* A call that ended behind canvas must not leak its mood into the
              * next call. */
             room_face_reset_mood();
-            if (talk_pill != NULL) {
-                lv_obj_delete(talk_pill);
-                talk_pill = NULL;
-                talk_pill_label = NULL;
-            }
-        } else {
-            if (talk_pill == NULL) {
-                talk_pill = lv_obj_create(lv_layer_top());
-                lv_obj_set_height(talk_pill, LV_SIZE_CONTENT);
-                lv_obj_set_width(talk_pill, LV_SIZE_CONTENT);
-                lv_obj_set_style_bg_color(talk_pill, lv_color_hex(0x181818), 0);
-                lv_obj_set_style_bg_opa(talk_pill, LV_OPA_90, 0);
-                lv_obj_set_style_border_width(talk_pill, 0, 0);
-                lv_obj_set_style_radius(talk_pill, 12, 0);
-                lv_obj_set_style_pad_hor(talk_pill, 10, 0);
-                lv_obj_set_style_pad_ver(talk_pill, 6, 0);
-                talk_pill_label = lv_label_create(talk_pill);
-                lv_obj_set_style_text_color(talk_pill_label, lv_color_white(), 0);
-                lv_obj_set_style_text_font(talk_pill_label, &lv_font_montserrat_14, 0);
-                lv_obj_center(talk_pill_label);
-            }
-            lv_label_set_text(talk_pill_label, labels[state]);
-            /* The rounded glass clips the corners; top-center stays visible. */
-            lv_obj_align(talk_pill, LV_ALIGN_TOP_MID, 0, 14);
         }
         if (camera_indicator != NULL) lv_obj_move_foreground(camera_indicator);
         return true;
-    }
-    if (talk_pill != NULL) {
-        lv_obj_delete(talk_pill);
-        talk_pill = NULL;
-        talk_pill_label = NULL;
     }
     if (home != NULL) {
         room_face_hide();
@@ -617,6 +632,7 @@ void room_ui_set_diagnostics_open(bool open)
     taskEXIT_CRITICAL(&state_mux);
     if (open) {
         if (home != NULL) lv_obj_add_flag(home, LV_OBJ_FLAG_HIDDEN);
+        if (talk_pill != NULL) lv_obj_add_flag(talk_pill, LV_OBJ_FLAG_HIDDEN);
         if (camera_indicator != NULL) lv_obj_move_foreground(camera_indicator);
         room_board_display_brightness_set(ROOM_CANVAS_ACTIVE_BRIGHTNESS);
     } else {

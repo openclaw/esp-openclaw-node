@@ -16,6 +16,7 @@ static uint8_t *frame, *draw_buffer;
 static int width, height, brightness, display_depth, critical_depth;
 static bool deny_display, canvas_active, face_visible;
 static unsigned toggles, holds;
+static unsigned talk_starts, talk_stops;
 static lv_obj_t *modal;
 static room_canvas_action_handler_t canvas_action;
 struct ui_timer { esp_timer_create_args_t args; bool active; };
@@ -131,6 +132,64 @@ static bool visible_text(const char *text)
     lv_obj_t *label = find_text(lv_screen_active(), text);
     return label && lv_obj_is_visible(label);
 }
+static void talk_action(bool start)
+{
+    if (start) ++talk_starts;
+    else ++talk_stops;
+}
+
+static void check_talk_control(void)
+{
+    room_ui_facts_t facts = {.talk = ROOM_UI_TALK_READY};
+    room_ui_store_facts(&facts);
+    room_ui_refresh();
+    lv_obj_update_layout(lv_layer_top());
+    lv_obj_t *label = find_text(lv_layer_top(), "Start Talk");
+    assert(label && lv_obj_is_visible(label));
+    lv_obj_t *button = lv_obj_get_parent(label);
+    lv_obj_update_layout(lv_layer_top());
+    lv_area_t bounds;
+    lv_obj_get_coords(button, &bounds);
+    assert(bounds.x1 >= 0 && bounds.y1 >= 0 && bounds.x2 < width && bounds.y2 < height);
+    unsigned old_toggles = toggles, old_holds = holds;
+    lv_obj_send_event(button, LV_EVENT_SHORT_CLICKED, NULL);
+    assert(talk_starts == 1 && talk_stops == 0);
+    assert(toggles == old_toggles && holds == old_holds);
+    for (int active = ROOM_UI_TALK_CONNECTING; active <= ROOM_UI_TALK_ACTIVE; ++active) {
+        facts.talk = active;
+        room_ui_store_facts(&facts);
+        room_ui_refresh();
+        assert(find_text(button, "Stop Talk"));
+        lv_obj_send_event(button, LV_EVENT_SHORT_CLICKED, NULL);
+    }
+    assert(talk_stops == 2);
+    facts.talk = ROOM_UI_TALK_STOPPING;
+    room_ui_store_facts(&facts);
+    room_ui_refresh();
+    assert(lv_obj_has_state(button, LV_STATE_DISABLED));
+    lv_obj_send_event(button, LV_EVENT_SHORT_CLICKED, NULL);
+    assert(talk_stops == 2);
+    facts.talk = ROOM_UI_TALK_READY;
+    room_ui_store_facts(&facts);
+    canvas_active = true;
+    room_ui_refresh();
+    assert(lv_obj_is_visible(button));
+    room_diagnostics_open();
+    assert(!lv_obj_is_visible(button));
+    lv_obj_send_event(button, LV_EVENT_SHORT_CLICKED, NULL);
+    assert(talk_starts == 1);
+    room_diagnostics_close();
+    canvas_active = false;
+    facts.talk = ROOM_UI_TALK_UNAVAILABLE;
+    room_ui_store_facts(&facts);
+    room_ui_refresh();
+    assert(lv_obj_has_state(button, LV_STATE_DISABLED));
+    lv_obj_send_event(button, LV_EVENT_SHORT_CLICKED, NULL);
+    assert(talk_starts == 1 && talk_stops == 2);
+    facts = (room_ui_facts_t){0};
+    room_ui_store_facts(&facts);
+    room_ui_refresh();
+}
 static unsigned check_home_tree(lv_obj_t *parent)
 {
     unsigned count = 1;
@@ -166,10 +225,11 @@ static void snapshot(const char *path)
 int main(int argc, char **argv)
 {
     assert(argc >= 2);
-    bool animated = strcmp(argv[1], "animated") == 0;
+    bool watch = strcmp(argv[1], "watch") == 0;
+    bool animated = watch || strcmp(argv[1], "animated") == 0;
     int idle = strcmp(argv[1], "tab5") == 0 ? 18 : 0;
-    width = animated ? 410 : 1280;
-    height = animated ? 502 : 720;
+    width = watch ? 368 : animated ? 410 : 1280;
+    height = watch ? 448 : animated ? 502 : 720;
     lv_init();
     display = lv_display_create(width, height);
     frame = calloc((size_t)width * height, 4);
@@ -189,8 +249,10 @@ int main(int argc, char **argv)
     assert(room_board_bind(&board) == ESP_ERR_INVALID_ARG);
     board.display.idle_brightness = idle;
     assert(room_board_bind(&board) == ESP_OK);
+    room_ui_set_talk_action_handler(talk_action);
     room_ui_init();
     assert(brightness == idle);
+    check_talk_control();
     if (animated) {
         assert(!find_text(lv_screen_active(), "OpenClaw Room Node"));
         room_ui_set(ROOM_UI_LISTENING, NULL);

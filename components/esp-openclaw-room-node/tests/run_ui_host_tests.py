@@ -91,7 +91,7 @@ def main():
         ]
         print("Building real room UI + LVGL host renderer", flush=True)
         subprocess.run(command, check=True)
-        for scenario in ("tab5", "default-off", "animated"):
+        for scenario in ("tab5", "default-off", "animated", "watch"):
             arguments = [str(binary), scenario]
             if args.snapshot and scenario == "tab5":
                 arguments.append(str(args.snapshot.resolve()))

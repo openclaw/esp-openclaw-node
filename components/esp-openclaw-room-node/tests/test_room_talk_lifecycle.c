@@ -684,6 +684,34 @@ static void wake_admission_loss(void)
     CHECK(host.opens == 0 && talk_call == NULL, "lost wake admission never opens media");
 }
 
+static void local_talk_control(void)
+{
+    request_local_talk(true);
+    request_local_talk(true);
+    CHECK(talk_call == NULL, "local input defers admission outside the display callback");
+    drain();
+    CHECK(talk_start_in_flight && talk_call != NULL, "local start admits one call");
+    request_local_talk(false);
+    drain();
+    host_run_task("talk_start");
+    drain();
+    CHECK(talk_call == NULL && host.opens == 0, "local stop cancels before media acquisition");
+    connect_call();
+    request_local_talk(false);
+    request_local_talk(false);
+    drain();
+    expect_closed();
+    CHECK(host.closes == 1, "repeated local stops close once");
+}
+
+static void local_talk_readiness_loss(void)
+{
+    request_local_talk(true);
+    host_emit_node(operator_client, ESP_OPENCLAW_NODE_EVENT_DISCONNECTED);
+    drain();
+    CHECK(talk_call == NULL && host.opens == 0, "stale local start cannot use a lost operator");
+}
+
 static void immediate_config_failure(void)
 {
     host.fail_config_submit = true;
@@ -996,6 +1024,8 @@ static const struct { const char *name; void (*run)(void); } cases[] = {
     {"coalesced-connection-retries", coalesced_connection_retries},
     {"late-create-replacement", late_create_replacement},
     {"wake-admission-loss", wake_admission_loss},
+    {"local-talk-control", local_talk_control},
+    {"local-talk-readiness-loss", local_talk_readiness_loss},
     {"loss-before-worker", loss_before_worker},
     {"loss-at-media-gate", loss_at_media_gate},
     {"loss-config-pending", loss_config_pending},

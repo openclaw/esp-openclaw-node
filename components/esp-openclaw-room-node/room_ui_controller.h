@@ -55,6 +55,8 @@ typedef struct {
 } room_ui_diagnostics_snapshot_t;
 
 void room_ui_init(void);
+/** Register a short, non-blocking local Talk request handler before init. */
+void room_ui_set_talk_action_handler(void (*handler)(bool start));
 void room_ui_set(room_ui_state_t state, const char *detail);
 /** Store one coherent snapshot without taking the display lock. Refresh after releasing owner locks. */
 void room_ui_store_facts(const room_ui_facts_t *facts);

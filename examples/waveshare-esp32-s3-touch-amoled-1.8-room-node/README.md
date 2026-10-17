@@ -45,6 +45,12 @@ Voice-agent write actions require the shared
 [opt-in and Gateway approval steps](../../components/esp-openclaw-room-node/README.md#voice-agent-actions);
 the default firmware uses read-only voice access.
 
+Tap the screen or press BOOT to wake the display, then use **Start Talk** at the
+top of the screen. During connection and conversation it becomes **Stop Talk**.
+It is disabled while Talk is unavailable or stopping. The control also appears
+over Canvas; the existing screen tap/hold gestures still toggle Canvas and open
+diagnostics. Diagnostics hides the Talk control until closed.
+
 ## Board behavior
 
 The pinned Waveshare BSP 2.0.3 detects CST816S or FT5x06 touch and applies the

@@ -19,6 +19,12 @@ keeps the backlight dimly lit and consumes more idle power. The home is a
 status surface, not evidence that touch, camera, networking or Talk has been
 qualified on a particular board.
 
+The local **Start Talk / Stop Talk** control uses the same admission and cleanup
+as wake-word and remote Talk commands. It stays visible over the home, face,
+and Canvas, and is hidden by diagnostics. Readiness comes from the operator and
+media state; unavailable and stopping states disable the control. On boards
+that sleep the display, wake it with the existing local input first.
+
 The audio port's input gain override is optional. Boards that set
 `configure_input_gain` also provide `input_gain_db`; otherwise shared media
 initialization preserves the codec or board default.

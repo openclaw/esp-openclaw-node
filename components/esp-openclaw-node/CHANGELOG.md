@@ -10,6 +10,7 @@
 - Reserve the AFE worker's internal stack for the audio source lifetime so repeated Talk transitions cannot lose microphone capture to fragmented RAM.
 - Clarify voice-node pairing for room/watch profiles and document live Talk verification without assuming an automatic greeting.
 - Reduce watch display DMA buffers to leave internal RAM for Talk capture transitions and both Gateway connections; include the error code when AFE initialization fails.
+- Add local Start Talk / Stop Talk controls over the room/watch home screen, face, and Canvas, using the existing Talk admission and teardown lifecycle.
 
 ## 1.2.0 - 2026-10-16
 

@@ -80,6 +80,11 @@ static bool node_reconnect_pending;
 static esp_timer_handle_t node_reconnect_timer;
 static bool camera_active;
 static char *gateway_http_base;
+static struct {
+    bool pending, start;
+    uint32_t generation;
+    uint64_t operator_incarnation;
+} local_talk_request;
 
 /* A one-slot wakeup has no identity or action to become stale. The durable,
  * generation-checked facts under state_lock are the only work authority. */
@@ -197,6 +202,7 @@ static void capture_scheduler(const char *name, esp_capture_thread_schedule_cfg_
 }
 
 static void start_talk_once(void);
+static bool admit_talk_locked(void);
 static esp_err_t register_talk_node_commands(esp_openclaw_node_handle_t node);
 static TaskHandle_t talk_start_worker;
 /* Timer and queued operator work are guarded by state_lock. The existing
@@ -320,6 +326,19 @@ static void wake_talk_teardown(void)
     xQueueOverwrite(talk_teardown_queue, &wake);
 }
 
+static void request_local_talk(bool start)
+{
+    /* The LVGL callback only records intent. The supervisor owns admission
+     * and cancellation after the display lock has been released. */
+    xSemaphoreTake(state_lock, portMAX_DELAY);
+    local_talk_request.pending = true;
+    local_talk_request.start = start;
+    local_talk_request.generation = talk_generation;
+    local_talk_request.operator_incarnation = operator_incarnation;
+    xSemaphoreGive(state_lock);
+    wake_talk_teardown();
+}
+
 /* Caller holds state_lock. Cancellation is durable, including during admission
  * and media-gate waits; no later CONNECTED event can undo it. */
 static bool request_talk_stop_locked(uint32_t generation, const char *message)
@@ -347,6 +366,19 @@ static void talk_teardown_task(void *arg)
         talk_teardown_request_t wake;
         if (xQueueReceive(talk_teardown_queue, &wake, portMAX_DELAY) != pdTRUE) continue;
         xSemaphoreTake(state_lock, portMAX_DELAY);
+        bool local_start = false;
+        bool local_error = false;
+        if (local_talk_request.pending) {
+            bool current = local_talk_request.generation == talk_generation &&
+                local_talk_request.operator_incarnation == operator_incarnation;
+            if (current && local_talk_request.start) {
+                local_start = media_ready && admit_talk_locked();
+                local_error = !local_start && talk_call == NULL;
+            } else if (current) {
+                request_talk_stop_locked(local_talk_request.generation, NULL);
+            }
+            local_talk_request.pending = false;
+        }
         bool close = talk_call != NULL && talk_cancel_requested &&
             !talk_start_in_flight && !talk_closing;
         bool speaking = talk_speaking_pending && !talk_cancel_requested && !talk_closing;
@@ -362,6 +394,7 @@ static void talk_teardown_task(void *arg)
         const char *message = talk_cancel_message;
         uint32_t generation = talk_generation;
         xSemaphoreGive(state_lock);
+        if (local_start) xTaskNotifyGive(talk_start_worker);
         refresh_home_facts();
         /* One worker serializes call/operator UI. A delayed callback never
          * paints over a replacement call's newer connecting/speaking state. */
@@ -373,6 +406,7 @@ static void talk_teardown_task(void *arg)
             room_ui_set(ready ? ROOM_UI_IDLE : ROOM_UI_ERROR, ready ? NULL : "Operator offline");
             if (ready) room_ui_show_face_hint(8000);
         }
+        if (local_error) room_ui_set(ROOM_UI_ERROR, "Talk unavailable; try again when ready");
         if (!close) {
             start_node_if_pending();
             start_operator_if_pending();
@@ -1535,6 +1569,7 @@ esp_err_t esp_openclaw_room_node_start(const esp_openclaw_room_node_config_t *co
         NULL);
     ESP_ERROR_CHECK(teardown_task == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
 
+    room_ui_set_talk_action_handler(request_local_talk);
     room_ui_init();
     ESP_ERROR_CHECK(room_canvas_init());
     if (config->display.setup_local_input != NULL) {

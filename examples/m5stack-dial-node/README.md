@@ -70,13 +70,17 @@ not that an external device completed an action.
 | Command | Parameters | Result |
 | --- | --- | --- |
 | `device.info`, `device.status`, `wifi.status` | `{}` | Shared device/network status |
-| `display.show` | `{"heading":"Hello","text":"A message"}` | Display state; limits: 64/512 UTF-8 bytes |
+| `display.show` | `{"heading":"Hello","text":"A message"}` | Display state including `heading` and `text`; limits: 64/512 UTF-8 bytes |
 | `display.clear` | `{}` | Return to the face |
 | `display.status`, `dial.status`, `input.status` | `{}` | View, value/range, input counts, brightness, connection, action state |
 | `display.brightness` | `{"percent":65}` | Set backlight, integer 0–100 |
 | `dial.configure` | Numeric control above, optional `unit` (16 bytes) and `action` (64 bytes) | New control state |
 | `face.set` | `{"mood":"happy"}` | Show face; neutral/happy/excited/thinking/sleepy/sad |
 | `buzzer.play` | `{"frequencyHz":1000,"durationMs":200}` | Start a tone; 100–4000 Hz, 20–2000 ms |
+
+Display-state responses include `heading` and `text` while `view` is `message`,
+so an agent can read back the displayed content. Other views omit those fields;
+`display.clear` returns to the face without reporting the hidden message.
 
 The buzzer stops asynchronously and rejects overlapping tones. It uses LEDC
 timer/channel 0; the display retains the BSP's separate backlight timer/channel.

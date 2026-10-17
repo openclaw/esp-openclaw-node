@@ -304,6 +304,10 @@ static cJSON *status_payload(void)
     if (result == NULL) return NULL;
     cJSON_AddBoolToObject(result, "connected", atomic_load(&connected));
     cJSON_AddStringToObject(result, "view", ui.view == VIEW_FACE ? "face" : ui.view == VIEW_CONTROL ? "control" : "message");
+    if (ui.view == VIEW_MESSAGE) {
+        cJSON_AddStringToObject(result, "heading", ui.heading);
+        cJSON_AddStringToObject(result, "text", ui.text);
+    }
     cJSON_AddStringToObject(result, "label", ui.label);
     cJSON_AddStringToObject(result, "unit", ui.unit);
     cJSON_AddNumberToObject(result, "value", dial_control_value(&ui.control));

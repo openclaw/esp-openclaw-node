@@ -76,6 +76,8 @@ static bool talk_speaking_pending;
 static bool talk_connecting_pending;
 static bool operator_ui_pending;
 static bool node_reconnect_scheduled;
+static bool node_reconnect_pending;
+static esp_timer_handle_t node_reconnect_timer;
 static bool camera_active;
 static char *gateway_http_base;
 
@@ -239,6 +241,8 @@ static char *gateway_http_base_from_uri(const char *gateway_uri)
 }
 
 static void start_operator_if_pending(void);
+static void start_node_if_pending(void);
+static void node_reconnect_timer_fired(void *arg);
 static void wake_talk_teardown(void);
 
 /* The timer only hands work to the supervisor. A transient startup stack
@@ -252,6 +256,18 @@ static void operator_start_timer_fired(void *arg)
     wake_talk_teardown();
 }
 
+static esp_err_t create_connection_timers(void)
+{
+    esp_timer_create_args_t args = {
+        .callback = operator_start_timer_fired,
+        .name = "operator_start",
+    };
+    ESP_RETURN_ON_ERROR(esp_timer_create(&args, &operator_start_timer), TAG, "operator retry timer");
+    args.callback = node_reconnect_timer_fired;
+    args.name = "node_reconnect";
+    return esp_timer_create(&args, &node_reconnect_timer);
+}
+
 static bool schedule_operator_start(uint32_t delay_ms)
 {
     xSemaphoreTake(state_lock, portMAX_DELAY);
@@ -262,20 +278,6 @@ static bool schedule_operator_start(uint32_t delay_ms)
     xSemaphoreGive(state_lock);
     if (!schedule) {
         return true;
-    }
-    if (operator_start_timer == NULL) {
-        const esp_timer_create_args_t args = {
-            .callback = operator_start_timer_fired,
-            .name = "operator_start",
-        };
-        esp_err_t err = esp_timer_create(&args, &operator_start_timer);
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "operator timer creation failed: %s (%d)", esp_err_to_name(err), (int)err);
-            xSemaphoreTake(state_lock, portMAX_DELAY);
-            operator_start_scheduled = false;
-            xSemaphoreGive(state_lock);
-            return false;
-        }
     }
     esp_timer_stop(operator_start_timer);
     esp_err_t err = esp_timer_start_once(operator_start_timer, (uint64_t)delay_ms * 1000);
@@ -372,6 +374,7 @@ static void talk_teardown_task(void *arg)
             if (ready) room_ui_show_face_hint(8000);
         }
         if (!close) {
+            start_node_if_pending();
             start_operator_if_pending();
             continue;
         }
@@ -421,6 +424,7 @@ static void talk_teardown_task(void *arg)
         xSemaphoreGive(state_lock);
         esp_openclaw_talk_call_release(call);
         refresh_home_facts();
+        start_node_if_pending();
         start_operator_if_pending();
     }
 }
@@ -792,46 +796,53 @@ static esp_err_t request_node_connection(void)
 
 static void schedule_node_reconnect(uint32_t delay_ms);
 
-static void node_reconnect_task(void *arg)
+static void node_reconnect_timer_fired(void *arg)
 {
-    uint32_t delay_ms = (uint32_t)(uintptr_t)arg;
-    vTaskDelay(pdMS_TO_TICKS(delay_ms));
+    (void)arg;
     xSemaphoreTake(state_lock, portMAX_DELAY);
-    node_reconnect_scheduled = false;
+    node_reconnect_pending = true;
     xSemaphoreGive(state_lock);
+    wake_talk_teardown();
+}
+
+static void start_node_if_pending(void)
+{
+    xSemaphoreTake(state_lock, portMAX_DELAY);
+    bool start = node_reconnect_pending && !node_ready;
+    if (node_reconnect_pending) {
+        node_reconnect_pending = false;
+        node_reconnect_scheduled = false;
+    }
+    xSemaphoreGive(state_lock);
+    if (!start) return;
     esp_err_t err = request_node_connection();
     if (err == ESP_ERR_NOT_FOUND) {
-        /* No saved session and no baked setup code: provisioning is a console
-         * action, so retrying here would loop forever with no new input. */
-        room_ui_set(ROOM_UI_SETUP, "USB console:\ngateway setup-code");
-        vTaskDelete(NULL);
+        /* A missing session requires provisioning, not an endless retry.
+         * Node loss alone must not replace an active operator call's UI. */
+        if (!room_ui_talk_face_active()) {
+            room_ui_set(ROOM_UI_SETUP, "USB console:\ngateway setup-code");
+        }
         return;
     }
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
         schedule_node_reconnect(5000);
     }
-    vTaskDelete(NULL);
 }
 
 static void schedule_node_reconnect(uint32_t delay_ms)
 {
     xSemaphoreTake(state_lock, portMAX_DELAY);
     bool schedule = !node_reconnect_scheduled;
-    if (schedule) {
-        node_reconnect_scheduled = true;
-    }
+    if (schedule) node_reconnect_scheduled = true;
     xSemaphoreGive(state_lock);
-    if (schedule &&
-        xTaskCreate(
-            node_reconnect_task,
-            "node_reconnect",
-            4096,
-            (void *)(uintptr_t)delay_ms,
-            5,
-            NULL) != pdPASS) {
+    if (!schedule) return;
+    esp_timer_stop(node_reconnect_timer);
+    esp_err_t err = esp_timer_start_once(node_reconnect_timer, (uint64_t)delay_ms * 1000);
+    if (err != ESP_OK) {
         xSemaphoreTake(state_lock, portMAX_DELAY);
         node_reconnect_scheduled = false;
         xSemaphoreGive(state_lock);
+        ESP_LOGE(TAG, "node retry timer start failed: %s (%d)", esp_err_to_name(err), (int)err);
     }
 }
 
@@ -908,7 +919,7 @@ static void node_event(
         room_ui_set_gateway(host);
         refresh_home_facts();
         free(gateway_uri);
-        /* Retry timer allocation/arming through the same path. */
+        /* Retry timer arming through the same path. */
         if (!schedule_operator_start(0)) {
             ESP_LOGE(TAG, "failed scheduling operator client start; retrying in 5s");
             room_ui_set(ROOM_UI_ERROR, "Operator token");
@@ -1499,6 +1510,7 @@ esp_err_t esp_openclaw_room_node_start(const esp_openclaw_room_node_config_t *co
         state_lock != NULL && talk_teardown_queue != NULL
             ? ESP_OK
             : ESP_ERR_NO_MEM);
+    ESP_ERROR_CHECK(create_connection_timers());
     /* Media setup can use PSRAM; teardown and NVS-backed operator startup
      * share one internal stack. */
     BaseType_t starter_task = xTaskCreateWithCaps(

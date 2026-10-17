@@ -25,7 +25,7 @@ typedef struct {
     unsigned critical_depth, callback_depth;
     bool media_owned, ambient, inside_start;
     bool reject_task_creation;
-    unsigned operator_connect_requests;
+    unsigned operator_connect_requests, node_connect_requests;
     room_ui_state_t ui;
     room_ui_facts_t home;
     esp_openclaw_node_wifi_status_t wifi;

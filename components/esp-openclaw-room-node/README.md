@@ -132,9 +132,9 @@ canceled starts and failed setup. The operator Node is reused across reconnects
 and remains alive for pending RPC cleanup.
 
 The source-only [lifetime tests](tests/README.md) exercise these boundaries with
-synthetic transports. Physical operator-control-loss reproduction and acoustic
-teardown proof remain outstanding; host results do not establish audible
-continuation or hardware behavior.
+synthetic transports. Verify operator control loss and acoustic teardown on the
+target board as well; host results do not establish audible continuation or
+hardware behavior.
 
 ## Voice agent actions
 
@@ -168,3 +168,17 @@ Interrupted preparation may require re-pairing with default firmware. Flashing
 the enabled build before preparation fails authentication instead of creating
 a pending approval. To return to read-only voice access, flash a build with
 the setting disabled; the declared connection scopes then omit write access.
+
+An operator token that was explicitly narrowed after a previous write approval
+stays narrowed when the same scopes are approved again. If completion reports
+insufficient access, a Gateway administrator must restore this device's token
+scopes before re-pairing with a fresh voice-node setup code on default firmware:
+
+```sh
+openclaw devices rotate --device <device-id> --role operator \
+  --scope operator.read --scope operator.talk --scope operator.write
+```
+
+Keep the returned credential private. Use the voice-node setup code for USB
+provisioning; do not paste the raw token into the console. Wait for operator
+readiness before flashing the enabled build.

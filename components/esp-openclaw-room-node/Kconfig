@@ -37,8 +37,8 @@ config OPENCLAW_ROOM_VOICE_ACTIONS
     help
         Request operator.write in addition to operator.read and operator.talk.
         The Gateway must separately approve the additional scope. This permits
-        mutating tools available to the configured agent, including commands
-        for other connected nodes. Prepare an approved credential with the
+        non-owner mutating tools available to the configured agent. Owner-only
+        tools, including nodes, remain unavailable. Prepare a credential with the
         USB voice-actions commands before enabling and flashing this setting.
         Leave disabled for read-only voice access.
 

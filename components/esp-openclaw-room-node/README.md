@@ -158,10 +158,11 @@ setting. Use a Gateway that supports `device.scopes.requestUpgrade` and
    not mean the replacement token has been saved.
 4. Enable **OpenClaw room node → Request write access for voice agent actions**
    (`CONFIG_OPENCLAW_ROOM_VOICE_ACTIONS=y`) in `idf.py menuconfig`, rebuild,
-   and flash. Verify a real spoken action against the target device.
+   and flash. Verify a real spoken action with an enabled agent tool.
 
-Write access permits mutating tools available to the configured agent, including
-commands for other nodes; it is not restricted to this board's own controls.
+Write access permits non-owner mutating tools available to the configured agent.
+The Gateway's owner-only tools, including `nodes`, remain unavailable: this
+setting alone does not enable spoken commands to another node.
 The build option defaults to off and never approves its own request. Approval
 rotates the old token, so keep power and connectivity until step 3 completes.
 Interrupted preparation may require re-pairing with default firmware. Flashing

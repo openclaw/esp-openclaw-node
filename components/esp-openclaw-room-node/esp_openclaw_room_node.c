@@ -731,6 +731,9 @@ static esp_err_t start_operator_client(void)
     if (err == ESP_OK) {
         err = esp_openclaw_node_register_scope(created, "operator.write");
     }
+    if (err == ESP_OK) {
+        err = esp_openclaw_node_register_scope(created, "operator.admin");
+    }
 #endif
     if (err != ESP_OK) {
         esp_openclaw_node_destroy(created);
@@ -1152,24 +1155,25 @@ static void voice_actions_reply(
         printf("voice-actions failed: check Gateway support and connection, then retry\n");
     } else if (request->request_id == NULL) {
         printf("voice-actions approval request: %s\n", id->valuestring);
-        printf("approve this device's read/talk/write request on the Gateway, then run voice-actions complete <requestId>\n");
+        printf("approve this device's read/talk/write/admin owner-access request on the Gateway, then run voice-actions complete <requestId>\n");
     } else {
         cJSON *status = cJSON_GetObjectItemCaseSensitive(payload, "status");
         cJSON *token = cJSON_GetObjectItemCaseSensitive(payload, "deviceToken");
         cJSON *scopes = cJSON_GetObjectItemCaseSensitive(payload, "scopes");
         if (!cJSON_IsArray(scopes)) scopes = NULL;
-        bool read = false, talk = false, write = false;
+        bool read = false, talk = false, write = false, admin = false;
         cJSON *scope;
         cJSON_ArrayForEach(scope, scopes) {
             if (!cJSON_IsString(scope)) continue;
             read |= strcmp(scope->valuestring, "operator.read") == 0;
             talk |= strcmp(scope->valuestring, "operator.talk") == 0;
             write |= strcmp(scope->valuestring, "operator.write") == 0;
+            admin |= strcmp(scope->valuestring, "operator.admin") == 0;
         }
         if (strcmp(id->valuestring, request->request_id) != 0 ||
             !cJSON_IsString(status) || strcmp(status->valuestring, "approved") != 0 ||
-            !cJSON_IsString(token) || token->valuestring[0] == '\0' || !read || !talk || !write) {
-            printf("voice-actions not approved with read/talk/write access; check the exact Gateway request\n");
+            !cJSON_IsString(token) || token->valuestring[0] == '\0' || !read || !talk || !write || !admin) {
+            printf("voice-actions not approved with read/talk/write/admin owner access; check the exact Gateway request\n");
         } else {
             /* The existing connect lifecycle validates and persists the replacement
              * token before READY. Never print it or introduce a second token store. */
@@ -1214,7 +1218,7 @@ static int voice_actions_console_command(int argc, char **argv)
         }
         cJSON_Delete(params);
     } else {
-        json = strdup("{\"scopes\":[\"operator.read\",\"operator.talk\",\"operator.write\"]}");
+        json = strdup("{\"scopes\":[\"operator.read\",\"operator.talk\",\"operator.write\",\"operator.admin\"]}");
     }
     esp_err_t err = request->gateway_uri != NULL && json != NULL
         ? esp_openclaw_node_gateway_request(client,

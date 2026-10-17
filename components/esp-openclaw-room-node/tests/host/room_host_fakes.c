@@ -40,7 +40,7 @@ struct esp_openclaw_node {
     esp_openclaw_node_config_t config;
     esp_openclaw_node_command_t commands[2];
     unsigned command_count;
-    const char *scopes[3];
+    const char *scopes[4];
     unsigned scope_count;
 };
 static struct host_task tasks[8];
@@ -389,7 +389,7 @@ esp_err_t esp_openclaw_node_destroy(esp_openclaw_node_handle_t node)
 { (void)node; host_require(false, "unexpected Node destruction"); return ESP_FAIL; }
 esp_err_t esp_openclaw_node_register_scope(esp_openclaw_node_handle_t node, const char *scope)
 {
-    host_require(node->scope_count < 3, "room client scope capacity");
+    host_require(node->scope_count < sizeof(node->scopes) / sizeof(*node->scopes), "room client scope capacity");
     node->scopes[node->scope_count++] = scope;
     return ESP_OK;
 }

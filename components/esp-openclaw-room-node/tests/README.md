@@ -21,12 +21,12 @@ These tests do not exercise ESP-IDF VFS or physical SD-card removal.
 
 The `operator-scopes` case observes the production client's registered scopes.
 It protects the default read/talk-only operator and the node role's empty scope
-set. Run it with `--voice-actions` to verify that the opt-in requests only the
-additional `operator.write` scope. This tests the firmware request; Gateway
+set. Run it with `--voice-actions` to verify that the opt-in requests the
+additional `operator.write` and `operator.admin` scopes. This tests the firmware request; Gateway
 approval and actual tool execution require separate live verification.
 
 `voice-actions-provision` exercises the USB request/completion flow, exact
-read/talk/write approval, invalid results, and credential-free console output.
+read/talk/write/admin approval, write-only rejection, invalid results, and credential-free console output.
 `voice-actions-stale` rejects completion after an operator reconnect, Gateway
 change, or Talk admission. The approved token enters the existing SDK connect
 lifecycle; the host fixture does not prove transport authentication or NVS.

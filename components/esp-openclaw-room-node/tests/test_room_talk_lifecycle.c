@@ -93,17 +93,19 @@ static void operator_scopes(void)
     CHECK(host_node_has_scope(operator_client, "operator.read"), "Talk routing can read configuration");
     CHECK(host_node_has_scope(operator_client, "operator.talk"), "operator can open Talk sessions");
 #if CONFIG_OPENCLAW_ROOM_VOICE_ACTIONS
-    CHECK(host_node_scope_count(operator_client) == 3, "voice actions request only read, talk, and write");
+    CHECK(host_node_scope_count(operator_client) == 4, "voice actions request read, talk, write, and admin");
     CHECK(host_node_has_scope(operator_client, "operator.write"), "opt-in requests write approval");
+    CHECK(host_node_has_scope(operator_client, "operator.admin"), "opt-in requests owner approval");
 #else
     CHECK(host_node_scope_count(operator_client) == 2, "default remains read and talk only");
     CHECK(!host_node_has_scope(operator_client, "operator.write"), "default connection does not request write access");
+    CHECK(!host_node_has_scope(operator_client, "operator.admin"), "default connection does not request owner access");
 #endif
 }
 
 static const char *approved_scope =
     "{\"requestId\":\"scope-a\",\"status\":\"approved\",\"deviceToken\":\"approved-test-token\","
-    "\"scopes\":[\"operator.read\",\"operator.talk\",\"operator.write\"]}";
+    "\"scopes\":[\"operator.read\",\"operator.talk\",\"operator.write\",\"operator.admin\"]}";
 
 static void voice_actions_provision(void)
 {
@@ -116,16 +118,16 @@ static void voice_actions_provision(void)
     CHECK(voice_actions_console_command(2, request) != 0, "disconnected operator cannot request approval");
     host_emit_node(operator_client, ESP_OPENCLAW_NODE_EVENT_CONNECTED);
     CHECK(host.scope_requests == 0, "invalid requests never reach the Gateway");
-    CHECK(voice_actions_console_command(2, request) == 0, "USB explicitly requests write approval");
+    CHECK(voice_actions_console_command(2, request) == 0, "USB explicitly requests owner approval");
     CHECK(strcmp(host.scope_method, "device.scopes.requestUpgrade") == 0, "uses the identity-bound upgrade API");
     cJSON *params = cJSON_Parse(host.scope_params);
     cJSON *scopes = cJSON_GetObjectItemCaseSensitive(params, "scopes");
-    CHECK(cJSON_GetArraySize(scopes) == 3, "requests exactly three scopes");
-    const char *expected[] = {"operator.read", "operator.talk", "operator.write"};
-    for (int i = 0; i < 3; ++i) {
+    CHECK(cJSON_GetArraySize(scopes) == 4, "requests exactly four scopes");
+    const char *expected[] = {"operator.read", "operator.talk", "operator.write", "operator.admin"};
+    for (int i = 0; i < 4; ++i) {
         cJSON *scope = cJSON_GetArrayItem(scopes, i);
         CHECK(cJSON_IsString(scope) && strcmp(scope->valuestring, expected[i]) == 0,
-            "approval preserves read/talk and adds only write");
+            "approval explicitly includes owner access");
     }
     cJSON_Delete(params);
     host_reply_scope(true, "{\"requestId\":\"scope-a\"}");
@@ -146,6 +148,7 @@ static void voice_actions_provision(void)
         "{\"requestId\":\"scope-b\",\"status\":\"approved\",\"deviceToken\":\"wrong\"}",
         "{\"requestId\":\"scope-a\",\"status\":\"rejected\"}",
         "{\"requestId\":\"scope-a\",\"status\":\"approved\",\"deviceToken\":\"wrong\",\"scopes\":[\"operator.write\"]}",
+        "{\"requestId\":\"scope-a\",\"status\":\"approved\",\"deviceToken\":\"wrong\",\"scopes\":[\"operator.read\",\"operator.talk\",\"operator.write\"]}",
     };
     for (size_t i = 0; i < sizeof(invalid) / sizeof(*invalid); ++i) {
         CHECK(voice_actions_console_command(3, complete) == 0, "submit invalid-result case");

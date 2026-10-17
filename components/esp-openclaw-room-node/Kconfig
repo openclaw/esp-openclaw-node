@@ -32,15 +32,16 @@ config OPENCLAW_ROOM_TALK_VOICE
     default ""
 
 config OPENCLAW_ROOM_VOICE_ACTIONS
-    bool "Request write access for voice agent actions"
+    bool "Request owner access for voice agent actions"
     default n
     help
-        Request operator.write in addition to operator.read and operator.talk.
-        The Gateway must separately approve the additional scope. This permits
-        non-owner mutating tools available to the configured agent. Owner-only
-        tools, including nodes, remain unavailable. Prepare a credential with the
-        USB voice-actions commands before enabling and flashing this setting.
-        Leave disabled for read-only voice access.
+        Request operator.write and operator.admin in addition to read/talk.
+        The Gateway must separately approve owner access. This permits the
+        configured agent's owner-only tools, including control of other nodes
+        and Gateway administration; access is not limited to one device.
+        Prepare a credential with the USB voice-actions commands before
+        enabling and flashing this setting. Leave disabled for read-only voice
+        access.
 
 config OPENCLAW_ROOM_CALL_IDLE_SECONDS
     int "Maximum call lifetime in seconds"

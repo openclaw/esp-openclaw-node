@@ -64,7 +64,11 @@ instance and one paired I²S bus serve separate capture and playback handles,
 so stopping playback cannot power down an active microphone. Capture declares
 one microphone (`M`), with no hardware speaker-reference channel. Wake word and
 Talk are available, but this profile does **not** claim acoustic echo
-cancellation. Start with the default 70% speaker volume and no digital boost.
+cancellation. The shared audio path silences microphone PCM during playback
+and for a 300 ms capture tail to keep replies from becoming new user turns.
+Voice interruption is unavailable while the watch speaks; wait for it to
+finish before answering. Start with the default 70% speaker volume and no
+digital boost.
 
 The [shared room component](../../components/esp-openclaw-room-node/README.md)
 owns face animation, Talk, Canvas, session behavior, and diagnostics. This

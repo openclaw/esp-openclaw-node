@@ -71,6 +71,7 @@ static void room_afe_wake(void *ctx)
  * needs no knowledge of the render's internals.
  */
 static audio_render_handle_t render_tap_target;
+static room_audio_gate_t playback_gate;
 static uint8_t render_tap_channels = 2;
 static uint8_t render_tap_bits_per_sample;
 static uint32_t render_gain_q12 = ROOM_PCM_GAIN_UNITY_Q12;
@@ -109,8 +110,12 @@ static int render_tap_write(audio_render_handle_t render, av_render_audio_frame_
         room_diagnostics_audio_get(&snapshot);
         room_face_set_speech_level((uint8_t)((snapshot.renderer_level * 255U) / 100U));
     }
+    bool has_audio = frame != NULL && frame->data != NULL && frame->size > 0;
+    bool gated = has_audio && room_audio_gate_begin_playback(
+        &playback_gate, (const int16_t *)frame->data, (size_t)frame->size / sizeof(int16_t));
     int result = audio_render_write(render, frame);
-    if (frame != NULL && frame->data != NULL && frame->size > 0) {
+    if (gated) room_audio_gate_end_playback(&playback_gate);
+    if (has_audio) {
         room_diagnostics_audio_record_renderer_result(result == 0);
     }
     return result;
@@ -360,12 +365,17 @@ esp_err_t room_media_init(room_wake_callback_t callback, void *ctx)
         board->audio.playback_volume,
         board->audio.playback_gain_db);
 
+    room_audio_gate_init(&playback_gate, board->audio.afe_layout);
+    if (playback_gate.enabled) {
+        ESP_LOGI(TAG, "no speaker reference: half-duplex capture with 300 ms playback tail");
+    }
     room_capture_audio_aec_src_cfg_t source_cfg = {
         .mic_layout = board->audio.afe_layout,
         .record_handle = record,
         .channel = board->audio.record_channels,
         .channel_mask = board->audio.channel_mask,
         .wake_cb = room_afe_wake,
+        .playback_gate = &playback_gate,
     };
     audio_source = room_capture_new_audio_aec_src(&source_cfg);
     if (audio_source == NULL) {

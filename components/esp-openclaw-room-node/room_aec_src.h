@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "esp_capture_audio_src_if.h"
+#include "room_audio_gate.h"
 
 typedef struct {
     const char *mic_layout;
@@ -13,6 +14,7 @@ typedef struct {
     bool data_on_vad;
     void (*wake_cb)(void *ctx);
     void *wake_ctx;
+    room_audio_gate_t *playback_gate;
 } room_capture_audio_aec_src_cfg_t;
 
 esp_capture_audio_src_if_t *room_capture_new_audio_aec_src(

@@ -27,8 +27,15 @@ The board-owned `playback_gain_db` is an optional 0–12 dB post-decode PCM16
 boost; zero leaves playback samples unchanged. The shared renderer applies it
 with fixed-point saturation immediately before diagnostics and I2S output.
 Compressed media is never mutated. Boards with a physical speaker-reference
-channel retain it for AEC; single-microphone boards declare `M` and do not
-provide that echo-cancellation path. Samples above the remaining digital
+channel retain it for AEC. Boards without a reference channel, such as the
+single-microphone `M` watch, use half-duplex capture: microphone PCM is replaced
+with silence during non-silent speaker writes and for 300 ms of capture afterward.
+Silent playback frames do not extend this tail. The
+AFE and capture clock keep running, including ambient wake, but spoken
+interruptions during playback are suppressed. Wait until the speaker finishes
+before replying or confirming an action. This is turn-taking protection, not
+acoustic echo cancellation; analog audibility and recognition still need a
+physical check. Samples above the remaining digital
 headroom saturate at PCM16 full scale; this is not a limiter or a guarantee
 against analog distortion. Diagnostics shows the configured volume and boost.
 

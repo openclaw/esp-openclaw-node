@@ -98,6 +98,7 @@ typedef struct {
     audio_aec_vad_res_t        *vad_res;
     void                      (*wake_cb)(void *ctx);
     void                       *wake_ctx;
+    room_audio_gate_t           *playback_gate;
     bool                        wakenet_enabled;
     capture_mutex_handle_t      afe_lock;
     capture_sema_handle_t       afe_request;
@@ -401,6 +402,8 @@ static void codec_dev_read_thread(void *arg)
             err = true;
             break;
         }
+        room_audio_gate_filter(src->playback_gate, data, read_size,
+            (uint64_t)read_size * 1000000 / (sizeof(int16_t) * channels * src->info.sample_rate));
         esp_gmf_data_queue_release_write(vad_res->in_q, read_size);
     }
     if (err) {
@@ -474,6 +477,8 @@ static inline int audio_aec_src_read_directly(audio_aec_src_t *src)
                 ESP_LOGE(TAG, "Fail to read data %d", ret);
                 break;
             }
+            room_audio_gate_filter(src->playback_gate, feed_data, read_size,
+                (uint64_t)read_size * 1000000 / (sizeof(int16_t) * channels * src->info.sample_rate));
             ret = audio_aec_feed_data(src, (uint8_t *)feed_data, read_size);
             if (ret < 0) {
                 ESP_LOGE(TAG, "Fail to feed data %d", ret);
@@ -827,6 +832,7 @@ esp_capture_audio_src_if_t *room_capture_new_audio_aec_src(room_capture_audio_ae
     src->data_on_vad = cfg->data_on_vad;
     src->wake_cb = cfg->wake_cb;
     src->wake_ctx = cfg->wake_ctx;
+    src->playback_gate = cfg->playback_gate;
     src->wakenet_enabled = cfg->wake_cb != NULL;
     if (cfg->mic_layout == NULL) {
         src->mic_layout = "MR";

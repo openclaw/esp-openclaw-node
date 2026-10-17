@@ -83,6 +83,12 @@ jobs:
             components/esp-openclaw-room-node/tests/test_room_pcm_gain.c \
             -lm -o /tmp/room_pcm_gain_test
           /tmp/room_pcm_gain_test
+          cc -std=c11 -Wall -Wextra -Werror \
+            -I components/esp-openclaw-room-node \
+            components/esp-openclaw-room-node/room_audio_gate.c \
+            components/esp-openclaw-room-node/tests/test_room_audio_gate.c \
+            -o /tmp/room_audio_gate_test
+          /tmp/room_audio_gate_test
 
       - name: Firmware packaging tests
         if: matrix.name == 'component-test-app-build'

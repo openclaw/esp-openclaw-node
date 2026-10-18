@@ -146,6 +146,37 @@ Other first-connect options from the REPL are:
 `gateway connect` is only for reconnecting with a saved session that already
 exists on the board.
 
+### Approve A Manual Connection
+
+Setup codes normally complete the required approvals. A first connection with
+`gateway token`, `gateway password`, or `gateway no-auth` can leave two separate
+requests: one for the device identity and one for its node command surface.
+
+On the Gateway host, find the device request for this board and approve it:
+
+```bash
+openclaw devices list --json
+openclaw devices approve <device-request-id> --json
+```
+
+If the first connection ended while waiting for approval, repeat the original
+`gateway token`, `gateway password`, or `gateway no-auth` command on the board.
+Then inspect the node request and approve its advertised capabilities and commands:
+
+```bash
+openclaw nodes pending --json
+openclaw nodes approve <node-request-id> --json
+```
+
+Match each request to the intended board before approving it. A connected node
+can advertise commands while its command surface is still awaiting approval;
+invocations can then fail with `PAIRING_CHANGED` or `node pairing changed while
+invocation was active`. See [pending approvals](troubleshooting.md#pending-approvals-still-appear-after-setup-code-pairing).
+
+Each Gateway owns its approvals. Repeat this check when moving a board to a new
+Gateway. After a successful connection has saved a session, use `gateway connect`
+to reconnect.
+
 ## Check The Node From The Gateway
 
 ```bash

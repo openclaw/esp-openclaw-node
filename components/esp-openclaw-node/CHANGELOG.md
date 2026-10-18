@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Explain the separate device and node command approvals required by manual Gateway enrollment, including recovery when a connected node reports `PAIRING_CHANGED`.
 - Bind queued Gateway RPCs and M5Dial agent actions to their active connection; reject stale work and replies, retain controls across same-Gateway reconnects, and clear action destinations when the Gateway changes.
 - Include the visible M5Dial message heading and text in status readback.
 - Suppress speaker feedback on single-microphone room/watch boards during playback and its acoustic tail.

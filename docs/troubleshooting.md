@@ -105,22 +105,31 @@ embedded in the setup code or passed to `gateway token`, `gateway password`, or
 
 ## Pending Approvals Still Appear After Setup-Code Pairing
 
-Fresh setup-code pairing should not normally require extra approval commands. If the gateway still leaves a pending device or node request, inspect and approve it as a fallback:
+Fresh setup-code pairing should not normally require extra approval commands.
+Manual token, password, or no-auth enrollment can leave separate device and
+node requests. If either request remains pending, inspect it and approve the
+request matching your board:
 
 ```bash
-openclaw devices approve --latest
+openclaw devices list --json
+openclaw devices approve <device-request-id> --json
 openclaw nodes pending --json
 openclaw nodes approve <request-id> --json
 ```
 
-After approval, a board that already has a saved reconnect session should
-reconnect automatically once Wi-Fi and the gateway are back. Otherwise request
-another connection attempt or reboot the board.
+The node request may appear only after device approval and another connection
+attempt. If there is no saved session yet, repeat the original explicit auth
+command on the board. Otherwise use `gateway connect`.
+
+A connected node with advertised commands can still need node approval. If
+an invocation fails with `PAIRING_CHANGED` or `node pairing changed while
+invocation was active`, check `openclaw nodes pending --json`. Approve the
+expected command surface before retrying the invocation.
 
 `openclaw devices` and `openclaw nodes` do different jobs:
 
 - `openclaw devices` works with device pairing records
-- `openclaw nodes` works with the live node list and the commands available on each node
+- `openclaw nodes` approves the node command surface and reports live node state
 
 ## Reset Saved State on the Board
 

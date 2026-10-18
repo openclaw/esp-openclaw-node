@@ -23,7 +23,8 @@ The local **Start Talk / Stop Talk** control uses the same admission and cleanup
 as wake-word and remote Talk commands. It stays visible over the home, face,
 and Canvas, and is hidden by diagnostics. Readiness comes from the operator and
 media state; unavailable and stopping states disable the control. On boards
-that sleep the display, wake it with the existing local input first. If the
+that sleep the display, the first touch on a dark Talk control only wakes the
+display; tap the visible control again to start or stop Talk. If the
 button's action changes during a press, release and press again; a held Start
 press cannot become Stop when wake word or a remote command starts Talk.
 

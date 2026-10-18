@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Wake a dark room/watch display before accepting local Talk input, so an invisible control cannot start a call on the first touch.
 - Keep room/watch Talk presses bound to the displayed action; cancel held gestures when Start/Stop availability changes instead of sending the opposite action.
 - Cancel held M5Dial button and touch gestures when commands replace the view or control, preventing a release from confirming a newly configured action.
 - Explain the separate device and node command approvals required by manual Gateway enrollment, including recovery when a connected node reports `PAIRING_CHANGED`.

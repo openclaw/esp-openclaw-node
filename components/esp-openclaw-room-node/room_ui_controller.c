@@ -76,11 +76,12 @@ static void talk_control_clicked(lv_event_t *event)
 {
     lv_event_code_t code = lv_event_get_code(event);
     if (code != LV_EVENT_PRESSED && code != LV_EVENT_PRESS_LOST && code != LV_EVENT_SHORT_CLICKED) return;
+    bool wake = code == LV_EVENT_PRESSED && room_board_display_is_dark();
     talk_control_action_t requested = TALK_CONTROL_NONE;
     taskENTER_CRITICAL(&state_mux);
     talk_control_action_t action = talk_control_action(current_facts.talk);
     if (code == LV_EVENT_PRESSED) {
-        pressed_talk_action = !diagnostics_open && action == painted_talk_action
+        pressed_talk_action = !wake && !diagnostics_open && action == painted_talk_action
             ? action : TALK_CONTROL_NONE;
     } else {
         if (code == LV_EVENT_SHORT_CLICKED && !diagnostics_open && pressed_talk_action == action) {
@@ -89,7 +90,9 @@ static void talk_control_clicked(lv_event_t *event)
         pressed_talk_action = TALK_CONTROL_NONE;
     }
     taskEXIT_CRITICAL(&state_mux);
-    if (talk_action_handler != NULL && requested != TALK_CONTROL_NONE) {
+    if (wake) {
+        room_canvas_view_toggle();
+    } else if (talk_action_handler != NULL && requested != TALK_CONTROL_NONE) {
         talk_action_handler(requested == TALK_CONTROL_START);
     }
 }

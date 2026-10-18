@@ -8,3 +8,4 @@ lv_display_t *room_board_display_start(void);
 bool room_board_display_lock(uint32_t timeout_ms);
 void room_board_display_unlock(void);
 esp_err_t room_board_display_brightness_set(int percent);
+bool room_board_display_is_dark(void);

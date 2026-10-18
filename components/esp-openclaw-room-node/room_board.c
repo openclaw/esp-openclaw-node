@@ -1,9 +1,11 @@
 #include "room_board.h"
 
+#include <stdatomic.h>
 #include <string.h>
 
 static esp_openclaw_room_node_config_t board;
 static bool bound;
+static atomic_int display_brightness = -1;
 
 esp_err_t room_board_bind(const esp_openclaw_room_node_config_t *config)
 {
@@ -15,6 +17,7 @@ esp_err_t room_board_bind(const esp_openclaw_room_node_config_t *config)
         return ESP_ERR_INVALID_ARG;
     }
     board = *config;
+    atomic_store(&display_brightness, -1);
     bound = true;
     return ESP_OK;
 }
@@ -43,6 +46,13 @@ void room_board_display_unlock(void)
 
 esp_err_t room_board_display_brightness_set(int percent)
 {
-    return bound ? board.display.set_brightness(board.display.ctx, percent)
-                 : ESP_ERR_INVALID_STATE;
+    if (!bound) return ESP_ERR_INVALID_STATE;
+    esp_err_t err = board.display.set_brightness(board.display.ctx, percent);
+    if (err == ESP_OK) atomic_store(&display_brightness, percent);
+    return err;
+}
+
+bool room_board_display_is_dark(void)
+{
+    return atomic_load(&display_brightness) == 0;
 }

@@ -72,7 +72,11 @@ bool room_face_is_visible(void) { return face_visible; }
 void room_face_reset_mood(void) {}
 void room_canvas_set_action_handler(room_canvas_action_handler_t handler) { canvas_action = handler; }
 bool room_canvas_is_active(void) { return canvas_active; }
-void room_canvas_view_toggle(void) { ++toggles; }
+void room_canvas_view_toggle(void)
+{
+    ++toggles;
+    if (brightness == 0) canvas_action(ROOM_CANVAS_ACTION_REQUEST_FACE_HINT, 10000);
+}
 bool room_diagnostics_is_open(void) { return modal != NULL; }
 esp_err_t room_diagnostics_open(void)
 {
@@ -173,6 +177,7 @@ static void click_talk(lv_obj_t *button)
 
 static void check_talk_control(void)
 {
+    room_ui_set(ROOM_UI_LISTENING, NULL);
     room_ui_facts_t facts = {.talk = ROOM_UI_TALK_READY};
     room_ui_store_facts(&facts);
     room_ui_refresh();
@@ -279,7 +284,35 @@ static void check_talk_control(void)
 
     facts = (room_ui_facts_t){0};
     room_ui_store_facts(&facts);
+    room_ui_set(ROOM_UI_IDLE, NULL);
+}
+
+static void check_dark_talk_control(void)
+{
+    if (room_board_config()->display.idle_brightness != 0) return;
+    room_ui_facts_t facts = {.talk = ROOM_UI_TALK_READY};
+    room_ui_store_facts(&facts);
     room_ui_refresh();
+    lv_obj_t *button = lv_obj_get_parent(find_text(lv_layer_top(), "Start Talk"));
+    unsigned starts = talk_starts, old_toggles = toggles;
+    assert(brightness == 0);
+    click_talk(button);
+    assert(talk_starts == starts && toggles == old_toggles + 1 && brightness > 0);
+    click_talk(button);
+    assert(talk_starts == starts + 1);
+
+    room_ui_set(ROOM_UI_IDLE, NULL);
+    if (brightness != 0) fire_timer("text_hint");
+    assert(brightness == 0);
+    touch_talk(button, true);
+    room_ui_show_face_hint(10000);
+    touch_talk(button, false);
+    assert(talk_starts == starts + 1 && toggles == old_toggles + 2);
+
+    facts = (room_ui_facts_t){0};
+    room_ui_store_facts(&facts);
+    room_ui_set(ROOM_UI_IDLE, NULL);
+    if (brightness != 0) fire_timer("text_hint");
 }
 static unsigned check_home_tree(lv_obj_t *parent)
 {
@@ -344,6 +377,7 @@ int main(int argc, char **argv)
     room_ui_init();
     assert(brightness == idle);
     check_talk_control();
+    check_dark_talk_control();
     if (animated) {
         assert(!find_text(lv_screen_active(), "OpenClaw Room Node"));
         room_ui_set(ROOM_UI_LISTENING, NULL);
@@ -415,8 +449,9 @@ int main(int argc, char **argv)
             assert(snprintf(error_path, sizeof(error_path), "%s.error.ppm", argv[2]) < (int)sizeof(error_path));
             snapshot(error_path);
         }
+        unsigned old_toggles = toggles;
         lv_obj_send_event(lv_screen_active(), LV_EVENT_CLICKED, NULL);
-        assert(toggles == 1);
+        assert(toggles == old_toggles + 1);
         unsigned holds_before = holds;
         lv_obj_send_event(lv_screen_active(), LV_EVENT_LONG_PRESSED, NULL);
         assert(holds == holds_before + 1 && !visible_text("OpenClaw Room Node") && brightness == ROOM_CANVAS_ACTIVE_BRIGHTNESS);

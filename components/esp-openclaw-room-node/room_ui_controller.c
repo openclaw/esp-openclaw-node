@@ -55,6 +55,17 @@ static bool camera_indicator_active;
 static room_ui_facts_t current_facts;
 static esp_timer_handle_t text_hint_timer;
 static void (*talk_action_handler)(bool start);
+typedef enum { TALK_CONTROL_NONE, TALK_CONTROL_START, TALK_CONTROL_STOP } talk_control_action_t;
+/* Painted intent is display-lock owned; a press is invalidated with the facts. */
+static talk_control_action_t painted_talk_action;
+static talk_control_action_t pressed_talk_action;
+
+static talk_control_action_t talk_control_action(room_ui_talk_state_t talk)
+{
+    if (talk == ROOM_UI_TALK_READY) return TALK_CONTROL_START;
+    if (talk == ROOM_UI_TALK_CONNECTING || talk == ROOM_UI_TALK_ACTIVE) return TALK_CONTROL_STOP;
+    return TALK_CONTROL_NONE;
+}
 
 void room_ui_set_talk_action_handler(void (*handler)(bool start))
 {
@@ -63,14 +74,24 @@ void room_ui_set_talk_action_handler(void (*handler)(bool start))
 
 static void talk_control_clicked(lv_event_t *event)
 {
-    (void)event;
+    lv_event_code_t code = lv_event_get_code(event);
+    if (code != LV_EVENT_PRESSED && code != LV_EVENT_PRESS_LOST && code != LV_EVENT_SHORT_CLICKED) return;
+    talk_control_action_t requested = TALK_CONTROL_NONE;
     taskENTER_CRITICAL(&state_mux);
-    room_ui_talk_state_t talk = current_facts.talk;
-    bool overlay = diagnostics_open;
+    talk_control_action_t action = talk_control_action(current_facts.talk);
+    if (code == LV_EVENT_PRESSED) {
+        pressed_talk_action = !diagnostics_open && action == painted_talk_action
+            ? action : TALK_CONTROL_NONE;
+    } else {
+        if (code == LV_EVENT_SHORT_CLICKED && !diagnostics_open && pressed_talk_action == action) {
+            requested = pressed_talk_action;
+        }
+        pressed_talk_action = TALK_CONTROL_NONE;
+    }
     taskEXIT_CRITICAL(&state_mux);
-    if (talk_action_handler == NULL || overlay) return;
-    if (talk == ROOM_UI_TALK_READY) talk_action_handler(true);
-    else if (talk == ROOM_UI_TALK_CONNECTING || talk == ROOM_UI_TALK_ACTIVE) talk_action_handler(false);
+    if (talk_action_handler != NULL && requested != TALK_CONTROL_NONE) {
+        talk_action_handler(requested == TALK_CONTROL_START);
+    }
 }
 
 extern const uint8_t home_lobster_pixels[] asm("_binary_openclaw_lobster_argb8888_start");
@@ -287,7 +308,7 @@ void room_ui_init(void)
         lv_obj_set_style_radius(talk_pill, 12, 0);
         lv_obj_set_style_pad_all(talk_pill, 0, 0);
         lv_obj_clear_flag(talk_pill, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_EVENT_BUBBLE);
-        lv_obj_add_event_cb(talk_pill, talk_control_clicked, LV_EVENT_SHORT_CLICKED, NULL);
+        lv_obj_add_event_cb(talk_pill, talk_control_clicked, LV_EVENT_ALL, NULL);
         talk_pill_label = lv_label_create(talk_pill);
         lv_obj_set_style_text_color(talk_pill_label, lv_color_white(), 0);
         lv_obj_set_style_text_font(talk_pill_label, &lv_font_montserrat_14, 0);
@@ -337,6 +358,7 @@ static bool room_ui_render_locked(void)
     taskEXIT_CRITICAL(&state_mux);
     bool canvas_active = room_canvas_is_active();
     if (talk_pill != NULL) {
+        painted_talk_action = talk_control_action(facts.talk);
         bool start = facts.talk == ROOM_UI_TALK_READY;
         bool stop = facts.talk == ROOM_UI_TALK_CONNECTING || facts.talk == ROOM_UI_TALK_ACTIVE;
         lv_label_set_text(talk_pill_label, start ? "Start Talk" : stop ? "Stop Talk" :
@@ -458,6 +480,9 @@ void room_ui_store_facts(const room_ui_facts_t *facts)
 {
     if (facts == NULL) return;
     taskENTER_CRITICAL(&state_mux);
+    if (talk_control_action(current_facts.talk) != talk_control_action(facts->talk)) {
+        pressed_talk_action = TALK_CONTROL_NONE;
+    }
     current_facts = *facts;
     taskEXIT_CRITICAL(&state_mux);
 }
@@ -629,6 +654,7 @@ void room_ui_set_diagnostics_open(bool open)
 {
     taskENTER_CRITICAL(&state_mux);
     diagnostics_open = open;
+    if (open) pressed_talk_action = TALK_CONTROL_NONE;
     taskEXIT_CRITICAL(&state_mux);
     if (open) {
         if (home != NULL) lv_obj_add_flag(home, LV_OBJ_FLAG_HIDDEN);

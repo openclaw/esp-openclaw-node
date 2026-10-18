@@ -17,6 +17,9 @@ static int width, height, brightness, display_depth, critical_depth;
 static bool deny_display, canvas_active, face_visible;
 static unsigned toggles, holds;
 static unsigned talk_starts, talk_stops;
+static lv_indev_t *touchscreen;
+static lv_indev_state_t touch_state;
+static lv_point_t touch_point;
 static lv_obj_t *modal;
 static room_canvas_action_handler_t canvas_action;
 struct ui_timer { esp_timer_create_args_t args; bool active; };
@@ -138,6 +141,36 @@ static void talk_action(bool start)
     else ++talk_stops;
 }
 
+static void read_touch(lv_indev_t *indev, lv_indev_data_t *data)
+{
+    (void)indev;
+    data->state = touch_state;
+    data->point = touch_point;
+}
+
+static void touch_talk(lv_obj_t *button, bool pressed)
+{
+    if (touchscreen == NULL) {
+        touchscreen = lv_indev_create();
+        lv_indev_set_type(touchscreen, LV_INDEV_TYPE_POINTER);
+        lv_indev_set_mode(touchscreen, LV_INDEV_MODE_EVENT);
+        lv_indev_set_read_cb(touchscreen, read_touch);
+    }
+    lv_obj_update_layout(lv_layer_top());
+    lv_area_t bounds;
+    lv_obj_get_coords(button, &bounds);
+    touch_point = (lv_point_t){(bounds.x1 + bounds.x2) / 2, (bounds.y1 + bounds.y2) / 2};
+    touch_state = pressed ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
+    lv_indev_read(touchscreen);
+    lv_tick_inc(40);
+}
+
+static void click_talk(lv_obj_t *button)
+{
+    touch_talk(button, true);
+    touch_talk(button, false);
+}
+
 static void check_talk_control(void)
 {
     room_ui_facts_t facts = {.talk = ROOM_UI_TALK_READY};
@@ -152,7 +185,7 @@ static void check_talk_control(void)
     lv_obj_get_coords(button, &bounds);
     assert(bounds.x1 >= 0 && bounds.y1 >= 0 && bounds.x2 < width && bounds.y2 < height);
     unsigned old_toggles = toggles, old_holds = holds;
-    lv_obj_send_event(button, LV_EVENT_SHORT_CLICKED, NULL);
+    click_talk(button);
     assert(talk_starts == 1 && talk_stops == 0);
     assert(toggles == old_toggles && holds == old_holds);
     for (int active = ROOM_UI_TALK_CONNECTING; active <= ROOM_UI_TALK_ACTIVE; ++active) {
@@ -160,7 +193,7 @@ static void check_talk_control(void)
         room_ui_store_facts(&facts);
         room_ui_refresh();
         assert(find_text(button, "Stop Talk"));
-        lv_obj_send_event(button, LV_EVENT_SHORT_CLICKED, NULL);
+        click_talk(button);
     }
     assert(talk_stops == 2);
     facts.talk = ROOM_UI_TALK_STOPPING;
@@ -186,6 +219,64 @@ static void check_talk_control(void)
     assert(lv_obj_has_state(button, LV_STATE_DISABLED));
     lv_obj_send_event(button, LV_EVENT_SHORT_CLICKED, NULL);
     assert(talk_starts == 1 && talk_stops == 2);
+
+    // A held Start press cannot become Stop when another source starts Talk.
+    facts.talk = ROOM_UI_TALK_READY;
+    room_ui_store_facts(&facts);
+    room_ui_refresh();
+    touch_talk(button, true);
+    facts.talk = ROOM_UI_TALK_CONNECTING;
+    room_ui_store_facts(&facts);
+    room_ui_refresh();
+    touch_talk(button, false);
+    assert(talk_starts == 1 && talk_stops == 2);
+
+    // Ending the call cannot turn a held Stop press into a new Start either.
+    touch_talk(button, true);
+    facts.talk = ROOM_UI_TALK_READY;
+    room_ui_store_facts(&facts);
+    room_ui_refresh();
+    touch_talk(button, false);
+    assert(talk_starts == 1 && talk_stops == 2);
+
+    // Connection completion keeps the same Stop intent valid.
+    facts.talk = ROOM_UI_TALK_CONNECTING;
+    room_ui_store_facts(&facts);
+    room_ui_refresh();
+    touch_talk(button, true);
+    facts.talk = ROOM_UI_TALK_ACTIVE;
+    room_ui_store_facts(&facts);
+    room_ui_refresh();
+    touch_talk(button, false);
+    assert(talk_starts == 1 && talk_stops == 3);
+
+    // Reverting to the original label does not revive an invalidated gesture.
+    touch_talk(button, true);
+    facts.talk = ROOM_UI_TALK_READY;
+    room_ui_store_facts(&facts);
+    facts.talk = ROOM_UI_TALK_ACTIVE;
+    room_ui_store_facts(&facts);
+    touch_talk(button, false);
+    assert(talk_starts == 1 && talk_stops == 3);
+    click_talk(button);
+    assert(talk_starts == 1 && talk_stops == 4);
+
+    // A stale painting cannot lend its press to a newly available action.
+    facts.talk = ROOM_UI_TALK_READY;
+    room_ui_store_facts(&facts);
+    touch_talk(button, true);
+    room_ui_refresh();
+    touch_talk(button, false);
+    assert(talk_starts == 1 && talk_stops == 4);
+    click_talk(button);
+    assert(talk_starts == 2 && talk_stops == 4);
+
+    touch_talk(button, true);
+    room_diagnostics_open();
+    room_diagnostics_close();
+    touch_talk(button, false);
+    assert(talk_starts == 2 && talk_stops == 4);
+
     facts = (room_ui_facts_t){0};
     room_ui_store_facts(&facts);
     room_ui_refresh();

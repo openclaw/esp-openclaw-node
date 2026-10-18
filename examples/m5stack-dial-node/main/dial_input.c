@@ -79,6 +79,15 @@ void dial_input_init(dial_input_t *input, lv_indev_t *encoder, lv_obj_t *screen,
 
 void dial_input_set_control(dial_input_t *input, bool control)
 {
+    // A held press belongs to the old view/configuration, not its replacement.
+    lv_display_t *display = lv_obj_get_display(input->screen);
+    for (lv_indev_t *indev = lv_indev_get_next(NULL); indev != NULL; indev = lv_indev_get_next(indev)) {
+        if (lv_indev_get_display(indev) == display &&
+            lv_indev_get_state(indev) == LV_INDEV_STATE_PRESSED) {
+            lv_indev_reset(indev, NULL);
+            lv_indev_wait_release(indev);
+        }
+    }
     input->control = control;
     lv_group_focus_obj(control ? input->arc : input->screen);
     lv_group_set_editing(input->group, true);

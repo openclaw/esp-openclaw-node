@@ -162,5 +162,43 @@ int main(void)
     assert(confirmations == 2);
     puts("stationary touch tap/hold: passed");
 
+    // A remotely shown/reconfigured control needs a fresh press to confirm.
+    for (unsigned i = 0; i < 2; ++i) {
+        encoder_state = LV_INDEV_STATE_PRESSED;
+        lv_indev_read(encoder);
+        advance(40);
+        control();
+        encoder_state = LV_INDEV_STATE_RELEASED;
+        lv_indev_read(encoder);
+        advance(40);
+        assert(confirmations == 2);
+    }
+    encoder_state = LV_INDEV_STATE_PRESSED;
+    lv_indev_read(encoder);
+    advance(40);
+    encoder_state = LV_INDEV_STATE_RELEASED;
+    lv_indev_read(encoder);
+    advance(40);
+    assert(confirmations == 3);
+    puts("control changes cancel held encoder presses: passed");
+
+    // A remote view change also consumes an in-progress touch gesture.
+    touch(120, 120, true);
+    lv_obj_set_hidden(input.arc, true);
+    dial_input_set_control(&input, false);
+    touch(120, 120, false);
+    assert(!input.control && confirmations == 3);
+    touch(120, 120, true);
+    touch(120, 120, false);
+    assert(input.control && confirmations == 3);
+    touch(120, 120, true);
+    control();
+    touch(120, 120, false);
+    assert(confirmations == 3);
+    touch(120, 120, true);
+    touch(120, 120, false);
+    assert(confirmations == 4);
+    puts("view changes cancel held touches: passed");
+
     lv_deinit();
 }

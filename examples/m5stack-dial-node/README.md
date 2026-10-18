@@ -43,6 +43,8 @@ or tap to open the numeric control. Turn or drag its arc to change the value;
 press the encoder or tap the center to confirm. Hold the encoder or the center
 of the screen to return to the face. Dragging the arc never confirms an action
 or triggers the home gesture. Turning continues to adjust after confirmation.
+If a command changes the view or reconfigures the control during a held press,
+release and press again to interact with the new view or confirm the new value.
 
 `dial.configure` defines the control. Its values must be integers between
 −10000 and 10000, with a positive step and 1–1000 equal intervals. Both the

@@ -2,19 +2,25 @@
 
 ## Unreleased
 
+## 1.3.0 - 2026-10-20
+
+**Highlights:** Local Start/Stop Talk controls, opt-in voice-agent owner actions, and safer gestures and connection recovery for room, watch, and M5Dial nodes.
+
+- Add local Start Talk / Stop Talk controls over the room/watch home screen, face, and Canvas, using the existing Talk admission and teardown lifecycle.
+- Add an opt-in room/watch setting for voice-agent owner actions, including other-node control, requiring separate Gateway approval and preserving read-only voice access by default.
 - Wake a dark room/watch display before accepting local Talk input, so an invisible control cannot start a call on the first touch.
 - Keep room/watch Talk presses bound to the displayed action; cancel held gestures when Start/Stop availability changes instead of sending the opposite action.
 - Cancel held M5Dial button and touch gestures when commands replace the view or control, preventing a release from confirming a newly configured action.
-- Explain the separate device and node command approvals required by manual Gateway enrollment, including recovery when a connected node reports `PAIRING_CHANGED`.
 - Bind queued Gateway RPCs and M5Dial agent actions to their active connection; reject stale work and replies, retain controls across same-Gateway reconnects, and clear action destinations when the Gateway changes.
-- Include the visible M5Dial message heading and text in status readback.
-- Suppress speaker feedback on single-microphone room/watch boards during playback and its acoustic tail.
-- Add an opt-in room/watch setting for voice-agent owner actions, including other-node control, requiring separate Gateway approval and preserving read-only voice access by default.
 - Reuse the room supervisor for NVS-backed node/operator reconnects, avoiding temporary internal stacks that can prevent WebSocket tasks from starting.
 - Reserve the AFE worker's internal stack for the audio source lifetime so repeated Talk transitions cannot lose microphone capture to fragmented RAM.
-- Clarify voice-node pairing for room/watch profiles and document live Talk verification without assuming an automatic greeting.
 - Reduce watch display DMA buffers to leave internal RAM for Talk capture transitions and both Gateway connections; include the error code when AFE initialization fails.
-- Add local Start Talk / Stop Talk controls over the room/watch home screen, face, and Canvas, using the existing Talk admission and teardown lifecycle.
+- Suppress speaker feedback on single-microphone room/watch boards during playback and its acoustic tail.
+- Include the visible M5Dial message heading and text in status readback.
+- Explain the separate device and node command approvals required by manual Gateway enrollment, including recovery when a connected node reports `PAIRING_CHANGED`.
+- Clarify voice-node pairing for room/watch profiles and document live Talk verification without assuming an automatic greeting.
+
+Qualification scope: host checks and CI firmware builds only. Publication requires all seven firmware builds to pass on the release commit. No hardware flashing, on-device Unity execution, live Gateway pairing/reconnect, acoustic wake/Talk, display/Canvas, camera/DMA, SD-card removal, or C6 coprocessor qualification is claimed for this release.
 
 ## 1.2.0 - 2026-10-16
 

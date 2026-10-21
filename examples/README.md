@@ -2,6 +2,10 @@
 
 This directory contains thin board applications. Reusable provisioning and room-node policy live under `components/`.
 
+The board defaults use the [maintained public CA bundle](../certificates/README.md).
+Existing `sdkconfig` files need the documented bundle selection before rebuilding;
+changing defaults alone does not update configured builds or installed devices.
+
 ## Available Examples
 
 - [ESP32 Wi-Fi Node Example](./esp32-node/README.md) A general-purpose ESP32 node with `device.*`, `wifi.status`, `gpio.*`, and `adc.read`.

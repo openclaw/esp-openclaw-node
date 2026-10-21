@@ -136,6 +136,10 @@ jobs:
               python3 -m unittest discover -s ../../scripts/tests -p test_package_firmware.py -v
             fi &&
             ninja -C build -j2 &&
+            if [ "${{ matrix.name }}" != "component-test-app-build" ]; then
+              python3 ../../scripts/check_certificate_bundle.py \
+                --bundle build/esp-idf/mbedtls/x509_crt_bundle
+            fi &&
             if [ "${{ matrix.name }}" = "m5stack-tab5-room-node" ]; then
               for hook in esp_openclaw_node_transport_start_begin esp_openclaw_node_transport_start_end; do
                 riscv32-esp-elf-nm --defined-only build/openclaw_m5stack_tab5_room_node.elf |

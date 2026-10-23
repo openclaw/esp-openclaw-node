@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Remove the affected AAA Certificate Services and emSign ECC Root CA - G3 roots from the maintained examples' public CA bundle; existing firmware must be rebuilt with the updated bundle to apply the trust change. Thanks @joshavant. (#91)
+
 ## 1.3.0 - 2026-10-20
 
 **Highlights:** Local Start/Stop Talk controls, opt-in voice-agent owner actions, and safer gestures and connection recovery for room, watch, and M5Dial nodes.

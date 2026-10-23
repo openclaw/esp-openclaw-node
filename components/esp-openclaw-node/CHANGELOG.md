@@ -2,7 +2,13 @@
 
 ## Unreleased
 
+## 1.3.1 - 2026-10-23
+
+**Highlights:** Security: remove affected CA roots from the examples' trust bundle; a firmware rebuild is required to apply the trust change.
+
 - Remove the affected AAA Certificate Services and emSign ECC Root CA - G3 roots from the maintained examples' public CA bundle; existing firmware must be rebuilt with the updated bundle to apply the trust change. Thanks @joshavant. (#91)
+
+Qualification scope: host checks and CI firmware builds only. Publication requires all seven firmware builds to pass on the release commit. No hardware flashing, on-device Unity execution, live Gateway pairing/reconnect, acoustic wake/Talk, display/Canvas, camera/DMA, SD-card removal, or C6 coprocessor qualification is claimed for this release.
 
 ## 1.3.0 - 2026-10-20
 

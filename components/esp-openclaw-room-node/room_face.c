@@ -22,6 +22,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "room_board.h"
+#include "room_lobster.h"
 
 #define TAG "room_face"
 
@@ -35,6 +36,7 @@ static int32_t eye_center_y;
 static int32_t mouth_center_y;
 #define FACE_DEFAULT_TICK_MS 16
 static uint16_t face_tick_ms = FACE_DEFAULT_TICK_MS;
+static bool lobster_enabled;
 /* Speech level decays to closed when the model pauses mid-utterance. */
 #define SPEECH_STALE_MS 300
 
@@ -636,6 +638,25 @@ static void face_tick(lv_timer_t *timer)
     int32_t bob = attentive ? (breath * 4) / 8 : (breath * 2) / 8;
     int32_t breath_pct = breath / 4; /* +-1% size */
 
+    if (lobster_enabled) {
+        uint32_t now_ms = (uint32_t)(now_us / 1000);
+        room_lobster_update(&(room_lobster_pose_t){
+            .time_ms = now_ms,
+            .eye_open_pct = tw_eye_h.value * (100 - tw_lid.value) *
+                LV_CLAMP(0, blink_q10, 1024) / 102400,
+            .eye_width_pct = tw_eye_w.value,
+            .gaze_x = tw_gaze_x.value,
+            .gaze_y = tw_gaze_y.value + tw_eye_dy.value,
+            .smile = tw_smile.value,
+            .mouth_open_pct = tw_mouth_o.value,
+            .claw_lift = mood == &MOODS[ROOM_FACE_MOOD_EXCITED] ? 30 : 0,
+            .speech_level = now_ms - speech_level_at_ms <= SPEECH_STALE_MS ? speech_level : 0,
+            .speaking = state == ROOM_FACE_SPEAKING,
+            .attentive = attentive,
+        });
+        return;
+    }
+
     /* Compose eye geometry: mood/gesture base x blink x breath x sparkle,
      * with squash widening the eye as the lid drops (volume conservation). */
     int32_t h_pct = tw_eye_h.value + breath_pct + tw_sparkle.value;
@@ -686,6 +707,9 @@ esp_err_t room_face_create(lv_obj_t *parent)
     face_width = lv_display_get_horizontal_resolution(display);
     face_height = lv_display_get_vertical_resolution(display);
     const esp_openclaw_room_node_config_t *board = room_board_config();
+    /* This is the watch's artwork; other board profiles retain their face. */
+    lobster_enabled = board != NULL && board->model_identifier != NULL &&
+        strcmp(board->model_identifier, "waveshare-esp32-s3-touch-amoled-1.8") == 0;
     face_tick_ms = board != NULL && board->display.animation_frame_ms > 0
         ? board->display.animation_frame_ms
         : FACE_DEFAULT_TICK_MS;
@@ -706,54 +730,62 @@ esp_err_t room_face_create(lv_obj_t *parent)
     /* Taps must keep reaching the status screen's canvas toggle. */
     lv_obj_remove_flag(face_root, LV_OBJ_FLAG_CLICKABLE);
 
-    eye_left = lv_obj_create(face_root);
-    eye_right = lv_obj_create(face_root);
-    lid_left = lv_obj_create(face_root);
-    lid_right = lv_obj_create(face_root);
-    mouth_arc = lv_arc_create(face_root);
-    mouth_o = lv_obj_create(face_root);
-    bars[0] = lv_obj_create(face_root);
-    bars[1] = lv_obj_create(face_root);
-    bars[2] = lv_obj_create(face_root);
-    lv_obj_t *parts[] = {eye_left, eye_right, lid_left, lid_right, mouth_o,
-                         bars[0], bars[1], bars[2]};
-    bool ok = mouth_arc != NULL;
-    for (size_t i = 0; i < sizeof(parts) / sizeof(parts[0]); ++i) {
-        if (parts[i] == NULL) {
-            ok = false;
-            continue;
+    if (lobster_enabled) {
+        if (room_lobster_create(face_root) != ESP_OK) {
+            lv_obj_delete(face_root);
+            face_root = NULL;
+            return ESP_ERR_NO_MEM;
         }
-        lv_obj_remove_style_all(parts[i]);
-        lv_obj_set_style_bg_opa(parts[i], LV_OPA_COVER, 0);
-        lv_obj_set_style_radius(parts[i], 26, 0);
-        lv_obj_remove_flag(parts[i], LV_OBJ_FLAG_CLICKABLE);
+    } else {
+        eye_left = lv_obj_create(face_root);
+        eye_right = lv_obj_create(face_root);
+        lid_left = lv_obj_create(face_root);
+        lid_right = lv_obj_create(face_root);
+        mouth_arc = lv_arc_create(face_root);
+        mouth_o = lv_obj_create(face_root);
+        bars[0] = lv_obj_create(face_root);
+        bars[1] = lv_obj_create(face_root);
+        bars[2] = lv_obj_create(face_root);
+        lv_obj_t *parts[] = {eye_left, eye_right, lid_left, lid_right, mouth_o,
+                             bars[0], bars[1], bars[2]};
+        bool ok = mouth_arc != NULL;
+        for (size_t i = 0; i < sizeof(parts) / sizeof(parts[0]); ++i) {
+            if (parts[i] == NULL) {
+                ok = false;
+                continue;
+            }
+            lv_obj_remove_style_all(parts[i]);
+            lv_obj_set_style_bg_opa(parts[i], LV_OPA_COVER, 0);
+            lv_obj_set_style_radius(parts[i], 26, 0);
+            lv_obj_remove_flag(parts[i], LV_OBJ_FLAG_CLICKABLE);
+        }
+        if (!ok) {
+            lv_obj_delete(face_root);
+            face_root = NULL;
+            return ESP_ERR_NO_MEM;
+        }
+        for (int i = 0; i < 2; ++i) {
+            lv_obj_t *eye = i == 0 ? eye_left : eye_right;
+            lv_obj_set_style_transform_pivot_x(eye, lv_pct(50), 0);
+            lv_obj_set_style_transform_pivot_y(eye, lv_pct(50), 0);
+        }
+        lv_obj_set_style_bg_color(lid_left, lv_color_black(), 0);
+        lv_obj_set_style_bg_color(lid_right, lv_color_black(), 0);
+        lv_obj_set_style_radius(lid_left, 8, 0);
+        lv_obj_set_style_radius(lid_right, 8, 0);
+        lv_obj_set_style_radius(mouth_o, 18, 0);
+        lv_obj_set_style_radius(bars[0], 10, 0);
+        lv_obj_set_style_radius(bars[1], 10, 0);
+        lv_obj_set_style_radius(bars[2], 10, 0);
+        /* The arc is a bare stroke: style its background arc, hide the rest. */
+        lv_obj_remove_style_all(mouth_arc);
+        lv_obj_set_style_arc_width(mouth_arc, 9, LV_PART_MAIN);
+        lv_obj_set_style_arc_rounded(mouth_arc, true, LV_PART_MAIN);
+        lv_obj_set_style_arc_opa(mouth_arc, LV_OPA_COVER, LV_PART_MAIN);
+        lv_obj_set_style_arc_opa(mouth_arc, LV_OPA_TRANSP, LV_PART_INDICATOR);
+        lv_obj_set_style_bg_opa(mouth_arc, LV_OPA_TRANSP, LV_PART_KNOB);
+        lv_obj_remove_flag(mouth_arc, LV_OBJ_FLAG_CLICKABLE);
     }
-    if (!ok) {
-        lv_obj_delete(face_root);
-        face_root = NULL;
-        return ESP_ERR_NO_MEM;
-    }
-    for (int i = 0; i < 2; ++i) {
-        lv_obj_t *eye = i == 0 ? eye_left : eye_right;
-        lv_obj_set_style_transform_pivot_x(eye, lv_pct(50), 0);
-        lv_obj_set_style_transform_pivot_y(eye, lv_pct(50), 0);
-    }
-    lv_obj_set_style_bg_color(lid_left, lv_color_black(), 0);
-    lv_obj_set_style_bg_color(lid_right, lv_color_black(), 0);
-    lv_obj_set_style_radius(lid_left, 8, 0);
-    lv_obj_set_style_radius(lid_right, 8, 0);
-    lv_obj_set_style_radius(mouth_o, 18, 0);
-    lv_obj_set_style_radius(bars[0], 10, 0);
-    lv_obj_set_style_radius(bars[1], 10, 0);
-    lv_obj_set_style_radius(bars[2], 10, 0);
-    /* The arc is a bare stroke: style its background arc, hide the rest. */
-    lv_obj_remove_style_all(mouth_arc);
-    lv_obj_set_style_arc_width(mouth_arc, 9, LV_PART_MAIN);
-    lv_obj_set_style_arc_rounded(mouth_arc, true, LV_PART_MAIN);
-    lv_obj_set_style_arc_opa(mouth_arc, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_arc_opa(mouth_arc, LV_OPA_TRANSP, LV_PART_INDICATOR);
-    lv_obj_set_style_bg_opa(mouth_arc, LV_OPA_TRANSP, LV_PART_KNOB);
-    lv_obj_remove_flag(mouth_arc, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_flag(face_root, LV_OBJ_FLAG_HIDDEN);
 
     tween_jump(&tw_eye_h, 100);

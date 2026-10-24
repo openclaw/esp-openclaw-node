@@ -15,6 +15,7 @@ idf_component_register(
         "room_diagnostics_data.c"
         "room_diagnostics_metrics.c"
         "room_face.c"
+        "room_lobster.c"
         "room_file_validation.c"
         "room_files.c"
         "room_media.c"
@@ -50,3 +51,19 @@ idf_component_register(
         mbedtls
         media_lib_utils
         nvs_flash)
+
+if(NOT CMAKE_BUILD_EARLY_EXPANSION)
+    idf_build_get_property(python PYTHON)
+    set(lobster_generator "${CMAKE_CURRENT_LIST_DIR}/../../scripts/generate_watch_lobster.py")
+    set(lobster_assets "${CMAKE_CURRENT_BINARY_DIR}/watch_lobster")
+    add_custom_command(
+        OUTPUT "${lobster_assets}/watch_lobster.argb8888" "${lobster_assets}/watch_lobster_parts.h"
+        COMMAND "${python}" "${lobster_generator}" --output-dir "${lobster_assets}"
+        DEPENDS "${lobster_generator}"
+        VERBATIM)
+    add_custom_target(room_watch_lobster_assets
+        DEPENDS "${lobster_assets}/watch_lobster.argb8888" "${lobster_assets}/watch_lobster_parts.h")
+    add_dependencies(${COMPONENT_LIB} room_watch_lobster_assets)
+    target_include_directories(${COMPONENT_LIB} PRIVATE "${lobster_assets}")
+    target_add_binary_data(${COMPONENT_LIB} "${lobster_assets}/watch_lobster.argb8888" BINARY)
+endif()

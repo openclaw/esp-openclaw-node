@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Use the mobile app's animated OpenClaw lobster on the 1.8-inch watch, with blinking, claw and antenna movement, mood expressions, and speech-reactive mouth animation. Other board displays are unchanged.
+
 ## 1.3.1 - 2026-10-23
 
 **Highlights:** Security: remove affected CA roots from the examples' trust bundle; a firmware rebuild is required to apply the trust change.

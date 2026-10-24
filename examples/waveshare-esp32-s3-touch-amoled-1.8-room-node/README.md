@@ -3,7 +3,8 @@
 This profile runs the shared OpenClaw room node on the **1.8-inch, 368×448**
 Waveshare watch board with 16 MB flash and 8 MB PSRAM. It provides authenticated
 node/operator sessions, reconnect, microphone capture, WakeNet, WebRTC Talk,
-an animated agent face, image/A2UI Canvas, and the shared diagnostics overlay.
+the mobile app's animated OpenClaw lobster, image/A2UI Canvas, and the shared
+diagnostics overlay.
 
 Use this profile only for the 1.8-inch board. The 2.06-inch board has different
 display, touch, and audio hardware. A successful flash does not identify a
@@ -52,6 +53,12 @@ over Canvas; the existing screen tap/hold gestures still toggle Canvas and open
 diagnostics. Diagnostics hides the Talk control until closed.
 
 ## Board behavior
+
+The watch mascot uses the mobile app's red lobster artwork and turquoise eyes.
+Its claws and antennae move, it blinks and looks around, and its mouth follows
+speech playback. The existing `face.set` moods and `face.gesture` commands still
+apply. Animation pauses when the mascot is hidden; Talk controls, Canvas,
+diagnostics, and display sleep keep their existing behavior.
 
 The pinned Waveshare BSP 2.0.3 detects CST816S or FT5x06 touch and applies the
 CO5300 panel offset required by the CST816S revision. The adapter registers

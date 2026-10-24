@@ -17,6 +17,24 @@ SHA-256:
 - Source PNG: `e8c7ce0a3a6c52bd904cc55e31a5b3a8b6392dcd70ba9e220ecf0ef1d6bd8c16`
 - Embedded bitmap: `984065fcee3b54174a3849c56ba5c31c890ee2bca35124e88ce287255aa58044`
 
+## Watch animation parts
+
+`watch_lobster.argb8888` and `watch_lobster_parts.h` are generated in the build
+directory by `scripts/generate_watch_lobster.py` from the body, claw, and antenna
+geometry used by the mobile app. The renderer draws the eyes and mouth with
+LVGL and reuses the existing face lifecycle, moods, gestures, and speech level.
+Five cropped, straight-alpha BGRA images (255,152 bytes total) are embedded in
+flash; no image decoder or animation file is needed at runtime. The design
+canvas is 288 x 288 pixels. Generation uses Python's standard library with 4x
+supersampling, and requires no additional build dependency.
+
+Source geometry and dark palette:
+
+- [OpenClawMascotView.swift](https://github.com/openclaw/openclaw/blob/5a4472678cfc08d5d286bcebec8889f8cb414fb7/apps/shared/OpenClawKit/Sources/OpenClawChatUI/OpenClawMascotView.swift)
+- [favicon.svg](https://github.com/openclaw/openclaw/blob/5a4472678cfc08d5d286bcebec8889f8cb414fb7/ui/public/favicon.svg)
+
+The same MIT license below applies to these derived assets.
+
 ## MIT License
 
 Copyright (c) 2026 OpenClaw Foundation

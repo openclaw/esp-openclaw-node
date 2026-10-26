@@ -102,6 +102,14 @@ firmware and physical boot/reconnect checks cover those boundaries.
 
 ## Talk lifecycle
 
+The timeout callback only retains the newest expired call generation and wakes
+the existing worker. `timeout-stop` rejects logging or blocking semaphore calls
+in timer context and verifies one deferred close after repeated expiry.
+`replacement-ordering` also injects a delayed old expiry before and after the
+current expiry; it cannot close a replacement or overwrite its pending timeout.
+These scheduler checks do not prove the ESP timer task's stack usage; hardware
+verification must include a full call timeout.
+
 These tests compile the real room controller and Talk adapter against synthetic
 Node, WebRTC, media, UI and scheduling boundaries. They do not operate hardware
 or connect to a Gateway/provider. Production deployment delta is **ZERO**.

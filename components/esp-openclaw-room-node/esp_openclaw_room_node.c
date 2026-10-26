@@ -50,6 +50,8 @@ static esp_webrtc_handle_t webrtc;
 static SemaphoreHandle_t state_lock;
 static QueueHandle_t talk_teardown_queue;
 static TimerHandle_t talk_timeout_timer;
+static portMUX_TYPE talk_timeout_lock = portMUX_INITIALIZER_UNLOCKED;
+static uint32_t talk_timeout_generation;
 static bool operator_ready;
 static bool node_ready;
 static bool media_ready;
@@ -366,7 +368,13 @@ static void talk_teardown_task(void *arg)
     for (;;) {
         talk_teardown_request_t wake;
         if (xQueueReceive(talk_teardown_queue, &wake, portMAX_DELAY) != pdTRUE) continue;
+        portENTER_CRITICAL(&talk_timeout_lock);
+        uint32_t expired_generation = talk_timeout_generation;
+        talk_timeout_generation = 0;
+        portEXIT_CRITICAL(&talk_timeout_lock);
         xSemaphoreTake(state_lock, portMAX_DELAY);
+        bool timeout_accepted = expired_generation != 0 &&
+            request_talk_stop_locked(expired_generation, NULL);
         bool local_start = false;
         bool local_error = false;
         if (local_talk_request.pending) {
@@ -398,6 +406,9 @@ static void talk_teardown_task(void *arg)
         const char *message = talk_cancel_message;
         uint32_t generation = talk_generation;
         xSemaphoreGive(state_lock);
+        if (expired_generation != 0) {
+            talk_stage(expired_generation, "stop_request", timeout_accepted ? "accepted" : "ignored", 0);
+        }
         if (local_start) xTaskNotifyGive(talk_start_worker);
         refresh_home_facts();
         /* One worker serializes call/operator UI. A delayed callback never
@@ -470,7 +481,13 @@ static void talk_teardown_task(void *arg)
 
 static void call_timeout(TimerHandle_t timer)
 {
-    request_talk_teardown((uint32_t)(uintptr_t)pvTimerGetTimerID(timer), NULL);
+    /* The timer daemon must not block or format logs. Admissions never wrap
+     * generations, so a delayed old expiry cannot overwrite a newer one. */
+    uint32_t generation = (uint32_t)(uintptr_t)pvTimerGetTimerID(timer);
+    portENTER_CRITICAL(&talk_timeout_lock);
+    if (generation > talk_timeout_generation) talk_timeout_generation = generation;
+    portEXIT_CRITICAL(&talk_timeout_lock);
+    wake_talk_teardown();
 }
 
 static void talk_setup_failed(esp_openclaw_talk_setup_result_t result, void *ctx)

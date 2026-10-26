@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Defer room/watch call-timeout cancellation and logging to the Talk worker, preventing timer-service stack exhaustion while preserving stale-call protection.
 - Add room/watch `talk.say` to queue a bounded spoken confirmation on the current voice call through `talk.client.say`, with visible Gateway failures and no retargeting after call replacement.
 - Let the configuring agent session report a M5Dial action outcome with `dial.complete`; correlate replies with the latest press and reject stale, duplicate, reconfigured, or reconnected results.
 - Use the mobile app's animated OpenClaw lobster on the 1.8-inch watch, with blinking, claw and antenna movement, mood expressions, and speech-reactive mouth animation. Other board displays are unchanged.

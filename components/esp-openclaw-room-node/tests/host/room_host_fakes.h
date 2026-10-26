@@ -68,6 +68,7 @@ void host_reply_create(bool ok);
 void host_reply_speech(bool ok);
 void host_reply_scope(bool ok, const char *payload);
 void host_fire_timeout(TimerHandle_t timer);
+void host_fire_timeout_generation(TimerHandle_t timer, uint32_t generation);
 void host_command(esp_openclaw_node_handle_t node, const char *name);
 esp_err_t host_command_params(esp_openclaw_node_handle_t node, const char *name, const char *params);
 void host_fire_operator_timer(esp_timer_handle_t timer);

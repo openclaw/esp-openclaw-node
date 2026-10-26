@@ -629,13 +629,14 @@ static void replacement_ordering(void)
     webrtc_event(&connected, (void *)(uintptr_t)old_generation);
     webrtc_event(&disconnected, (void *)(uintptr_t)old_generation);
     talk_setup_failed(ESP_OPENCLAW_TALK_SETUP_FAILED, (void *)(uintptr_t)old_generation);
-    request_talk_teardown(old_generation, "old timeout");
+    host_fire_timeout_generation(talk_timeout_timer, old_generation);
     host_emit_gateway(operator_client, "talk.event", closed_a);
     wake_talk_teardown(); /* An old wake token is never a teardown action. */
     drain();
     CHECK(host.closes == 1 && talk_active && host.ui == ROOM_UI_SPEAKING && !talk_cancel_requested,
         "old callbacks, timeout, terminal and wakeup cannot change replacement");
-    stop();
+    host_fire_timeout(talk_timeout_timer);
+    host_fire_timeout_generation(talk_timeout_timer, old_generation);
     drain();
     CHECK(host.closes == 2 && host.media_ends == 2 && host.ambient_restores == 2, "each generation closes once");
     CHECK(strcmp(host.close_voice, "voice-b") == 0, "replacement cleanup uses returned B identity");
@@ -777,7 +778,8 @@ static void timeout_stop(void)
 {
     connect_call();
     host_fire_timeout(talk_timeout_timer);
-    CHECK(talk_cancel_requested && host.closes == 0, "timeout requests canonical deferred stop");
+    host_fire_timeout(talk_timeout_timer);
+    CHECK(!talk_cancel_requested && host.closes == 0, "timeout defers cancellation to the worker");
     drain();
     expect_closed();
 }

@@ -71,6 +71,7 @@ typedef struct {
     bool ready;
 } fake_rtc_t;
 static fake_rtc_t *recycled_rtc;
+static bool timer_callback_active;
 
 void host_require(bool condition, const char *message)
 {
@@ -81,6 +82,7 @@ void host_require(bool condition, const char *message)
 
 void host_log(const char *tag, const char *format, ...)
 {
+    host_require(!timer_callback_active, "timer callbacks do not format logs");
     char line[1024];
     va_list args;
     va_start(args, format);
@@ -172,7 +174,7 @@ SemaphoreHandle_t xSemaphoreCreateMutex(void)
 
 BaseType_t xSemaphoreTake(SemaphoreHandle_t value, TickType_t wait)
 {
-    (void)wait;
+    host_require(!timer_callback_active || wait == 0, "timer callbacks do not block on semaphores");
     if (value->binary) {
         host_require(value->available, "single-thread room fixture cannot block on callback drain");
         value->available = false;
@@ -350,7 +352,19 @@ bool host_timer_active(TimerHandle_t timer) { return timer != NULL && timer->act
 BaseType_t xTimerDelete(TimerHandle_t timer, TickType_t wait)
 { (void)wait; host_require(timer == timeout, "delete owned timer"); free(timer); timeout = NULL; return pdPASS; }
 void *pvTimerGetTimerID(TimerHandle_t timer) { return timer->id; }
-void host_fire_timeout(TimerHandle_t timer) { timer->callback(timer); }
+void host_fire_timeout(TimerHandle_t timer)
+{
+    timer_callback_active = true;
+    timer->callback(timer);
+    timer_callback_active = false;
+}
+void host_fire_timeout_generation(TimerHandle_t timer, uint32_t generation)
+{
+    void *id = timer->id;
+    timer->id = (void *)(uintptr_t)generation;
+    host_fire_timeout(timer);
+    timer->id = id;
+}
 
 esp_err_t esp_timer_create(const esp_timer_create_args_t *args, esp_timer_handle_t *out)
 {

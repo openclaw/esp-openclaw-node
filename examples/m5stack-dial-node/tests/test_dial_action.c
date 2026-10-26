@@ -68,6 +68,7 @@ int main(void)
     assert(!dial_action_resolve(&state, (dial_action_token_t){4, current.attempt}));
     assert(dial_action_complete(&state, current));
     assert(dial_action_resolve(&state, current));
+    assert(dial_action_configure(&state, false));
     assert(dial_action_connect(&state, 0, NULL));
     return 0;
 }

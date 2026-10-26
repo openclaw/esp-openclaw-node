@@ -176,6 +176,9 @@ static void media_scheduler(const char *name, media_lib_thread_cfg_t *cfg)
         cfg->stack_size = 40 * 1024;
         cfg->priority = strcmp(name, "aenc_0") == 0 ? 10 : 15;
         cfg->core_id = 1;
+    } else if (watch && strcmp(name, "aud_src") == 0) {
+        /* Let the GMF source/copy pipeline share time with audio decoding. */
+        cfg->priority = 15;
     } else if (strcmp(name, "buffer_in") == 0) {
         cfg->stack_size = 6 * 1024;
         cfg->priority = 10;

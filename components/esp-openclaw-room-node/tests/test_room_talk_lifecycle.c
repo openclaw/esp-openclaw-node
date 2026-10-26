@@ -1040,7 +1040,31 @@ static void speech_confirmation(void)
         "a late speech rejection cannot replace the next call's UI");
 }
 
+static void capture_source_scheduler(void)
+{
+    const struct { const char *model; int source_priority; } boards[] = {
+        {"waveshare-esp32-s3-touch-amoled-1.8", 15},
+        {"m5stack-tab5", 10},
+        {NULL, 10},
+    };
+    for (size_t i = 0; i < sizeof(boards) / sizeof(boards[0]); ++i) {
+        host.board_model_identifier = boards[i].model;
+        esp_capture_thread_schedule_cfg_t source = {
+            .priority = 10, .stack_size = 4096, .core_id = 0,
+        };
+        capture_scheduler("aud_src", &source);
+        CHECK(source.priority == boards[i].source_priority,
+            "only the watch's GMF source pipeline shares the audio decoder priority");
+        CHECK(source.core_id == 0 && source.stack_size == 4096 && source.stack_in_ext,
+            "source pipeline keeps the capture manager's core and stack");
+        capture_scheduler("AUD_SRC", &source);
+        CHECK(source.core_id == 1 && source.priority == 15 && source.stack_size == 40 * 1024,
+            "the distinct raw capture reader keeps its existing schedule");
+    }
+}
+
 static const struct { const char *name; void (*run)(void); } cases[] = {
+    {"capture-source-scheduler", capture_source_scheduler},
     {"speech-confirmation", speech_confirmation},
     {"operator-scopes", operator_scopes},
     {"voice-actions-provision", voice_actions_provision},

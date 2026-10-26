@@ -753,9 +753,11 @@ esp_err_t room_files_register_node_commands(esp_openclaw_node_handle_t node, con
 { (void)node; (void)root; host_require(false, "fixture has no storage"); return ESP_FAIL; }
 const esp_openclaw_room_node_config_t *room_board_config(void)
 {
-    static const esp_openclaw_room_node_config_t board = {
-        .display_name = "Synthetic room", .model_identifier = "host-fixture",
+    static esp_openclaw_room_node_config_t board = {
+        .display_name = "Synthetic room",
     };
+    board.model_identifier = host.board_model_identifier != NULL
+        ? host.board_model_identifier : "host-fixture";
     return &board;
 }
 

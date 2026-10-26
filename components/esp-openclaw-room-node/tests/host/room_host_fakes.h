@@ -30,6 +30,7 @@ typedef struct {
     unsigned operator_connect_requests, node_connect_requests;
     room_ui_state_t ui;
     room_ui_facts_t home;
+    const char *board_model_identifier;
     esp_openclaw_node_wifi_status_t wifi;
     esp_err_t node_connect_result, operator_connect_result;
     char close_voice[129], close_key[257];

@@ -114,6 +114,10 @@ firmware and physical boot/reconnect checks cover those boundaries.
 
 ## Talk lifecycle
 
+`capture-source-scheduler` checks the real scheduler's watch-only GMF source
+priority, preserved core/stack, and distinct raw-reader schedule. It does
+not simulate FreeRTOS contention or prove sustained audio throughput.
+
 The timeout callback only retains the newest expired call generation and wakes
 the existing worker. `timeout-stop` rejects logging or blocking semaphore calls
 in timer context and verifies one deferred close after repeated expiry.

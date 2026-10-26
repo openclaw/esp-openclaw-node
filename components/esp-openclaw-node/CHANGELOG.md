@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Count discarded AFE input frames as errors and expose capture-read and fetch timing in room/watch audio diagnostics.
+- Give the watch's capture-copy pipeline equal priority with audio decoding while preserving its core and stack.
 
 - Reduce watch voice-call display load by skipping unchanged mascot redraws, resting large image transforms during calls, and separating audio codec work from display timing.
 

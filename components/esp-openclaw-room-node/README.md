@@ -137,6 +137,13 @@ OpenClaw node commands and require no gateway allowlist entries. The open and
 close commands report that work was queued; `diagnostics status` reports the
 state after the LVGL task has executed it.
 
+Audio diagnostics count an AFE feed as accepted only for a positive vendor
+return; a full-ring drop returns zero and counts as an error. The console
+and overlay also report the maximum interval between capture read calls and the
+maximum time inside AFE fetch, in microseconds. These maxima reset when AFE starts
+a new run. A long read interval with short fetches points to downstream scheduling
+or queue backpressure; the values identify where to investigate, not its cause.
+
 Talk admission freezes the authoritative operator handle, its authenticated
 connection incarnation, the Gateway origin, and a monotonically increasing
 call generation before the wake/command worker or media gate can run. Losing

@@ -107,10 +107,12 @@ static void talk_audio_snapshot(uint32_t generation, const char *stage)
     ESP_LOGI(TAG,
         "room_talk_audio generation=%" PRIu32 " stage=%s capture_ok=%" PRIu64
         " capture_err=%" PRIu64 " feed_ok=%" PRIu64 " feed_err=%" PRIu64
-        " fetch_ok=%" PRIu64 " fetch_err=%" PRIu64 " render_ok=%" PRIu64 " render_err=%" PRIu64,
+        " fetch_ok=%" PRIu64 " fetch_err=%" PRIu64 " render_ok=%" PRIu64 " render_err=%" PRIu64
+        " read_interval_max_us=%" PRIu64 " fetch_max_us=%" PRIu64,
         generation, stage, audio.capture_read_successes, audio.capture_read_errors,
         audio.feed_successes, audio.feed_errors, audio.fetch_successes, audio.fetch_errors,
-        audio.renderer_accepted, audio.renderer_errors);
+        audio.renderer_accepted, audio.renderer_errors,
+        audio.max_read_interval_us, audio.max_fetch_duration_us);
 }
 
 static void refresh_home_facts(void)
@@ -1430,6 +1432,10 @@ static int diagnostics_status_command(void)
         audio.last_renderer_accepted_us,
         audio.renderer_accepted,
         audio.renderer_errors);
+    printf("AFE feed accepted/errors=%" PRIu64 "/%" PRIu64
+           " ring_free=%u%% read_interval_max_us=%" PRIu64 " fetch_max_us=%" PRIu64 "\n",
+        audio.feed_successes, audio.feed_errors, audio.ringbuffer_free_percent,
+        audio.max_read_interval_us, audio.max_fetch_duration_us);
     printf("wifi=%s ssid=\"%.32s\" rssi=%d dBm heap=%" PRIu32 "/%" PRIu32
            " B psram=%" PRIu32 " B\n",
         runtime.wifi_connected ? "connected" : "disconnected",

@@ -49,6 +49,14 @@ cause of a prior observation whose raw header was not retained.
 
 ## Media diagnostic regressions
 
+`python3 components/esp-openclaw-room-node/tests/run_audio_diagnostics_host_tests.py`
+compiles the actual AFE feed helper with the production diagnostics collector
+under ASan/UBSan. Positive, zero-drop, and negative vendor returns must preserve
+the return value and update accepted/error counts correctly. Synthetic monotonic
+time checks maximum read intervals, fetch durations, and reset between AFE runs.
+`--feed-source` selects a trusted baseline source for the feed regression. These
+tests do not model FreeRTOS contention or prove hardware queue timing.
+
 The Talk pthread suite now captures the actual adapter's fixed-field records,
 injects HTTP initialization/transport/status/body failures and callback return
 errors, and checks first-failure retention, ignored-return behavior, late

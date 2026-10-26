@@ -8,6 +8,7 @@
 
 static portMUX_TYPE audio_mux = portMUX_INITIALIZER_UNLOCKED;
 static room_audio_diagnostics_snapshot_t audio_snapshot;
+static int64_t last_read_entry_us;
 
 void room_diagnostics_audio_get(room_audio_diagnostics_snapshot_t *snapshot)
 {
@@ -28,6 +29,10 @@ void room_diagnostics_audio_set_capture_mode(
     audio_snapshot.wakenet_enabled = wakenet_enabled;
     audio_snapshot.feed_bytes = feed_bytes;
     audio_snapshot.fetch_bytes = fetch_bytes;
+    /* Each AFE run starts a new timing window; mode transitions are not stalls. */
+    audio_snapshot.max_read_interval_us = 0;
+    audio_snapshot.max_fetch_duration_us = 0;
+    last_read_entry_us = 0;
     taskEXIT_CRITICAL(&audio_mux);
 }
 
@@ -79,11 +84,26 @@ void room_diagnostics_audio_record_capture_read(
     taskEXIT_CRITICAL(&audio_mux);
 }
 
-void room_diagnostics_audio_record_feed(bool success)
+void room_diagnostics_audio_record_feed(int feed_result)
 {
     taskENTER_CRITICAL(&audio_mux);
-    if (success) audio_snapshot.feed_successes++;
+    /* The pinned AFE returns zero when its full ring drops this input frame. */
+    if (feed_result > 0) audio_snapshot.feed_successes++;
     else audio_snapshot.feed_errors++;
+    taskEXIT_CRITICAL(&audio_mux);
+}
+
+void room_diagnostics_audio_record_read_entry(void)
+{
+    int64_t now_us = esp_timer_get_time();
+    taskENTER_CRITICAL(&audio_mux);
+    if (last_read_entry_us != 0) {
+        uint64_t interval_us = (uint64_t)(now_us - last_read_entry_us);
+        if (interval_us > audio_snapshot.max_read_interval_us) {
+            audio_snapshot.max_read_interval_us = interval_us;
+        }
+    }
+    last_read_entry_us = now_us;
     taskEXIT_CRITICAL(&audio_mux);
 }
 
@@ -92,7 +112,8 @@ void room_diagnostics_audio_record_fetch(
     size_t sample_count,
     bool success,
     bool valid_size,
-    uint8_t ringbuffer_free_percent)
+    uint8_t ringbuffer_free_percent,
+    uint64_t fetch_duration_us)
 {
     uint8_t level = success && valid_size
         ? room_diagnostics_pcm_level(pcm, sample_count, 1)
@@ -103,6 +124,9 @@ void room_diagnostics_audio_record_fetch(
     else audio_snapshot.fetch_errors++;
     if (!valid_size) audio_snapshot.fetch_invalid_sizes++;
     audio_snapshot.ringbuffer_free_percent = ringbuffer_free_percent;
+    if (fetch_duration_us > audio_snapshot.max_fetch_duration_us) {
+        audio_snapshot.max_fetch_duration_us = fetch_duration_us;
+    }
     if (success && valid_size) {
         audio_snapshot.afe_level = level;
         audio_snapshot.last_fetch_us = now_us;

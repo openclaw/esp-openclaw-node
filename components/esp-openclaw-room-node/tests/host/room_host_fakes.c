@@ -778,6 +778,8 @@ void room_diagnostics_audio_get(room_audio_diagnostics_snapshot_t *snapshot)
     *snapshot = (room_audio_diagnostics_snapshot_t){
         .capture_read_successes = 11, .capture_read_errors = 2,
         .feed_successes = 13, .feed_errors = 3, .fetch_successes = 17,
+        .ringbuffer_free_percent = 25,
+        .max_read_interval_us = 200000, .max_fetch_duration_us = 12000,
         .fetch_errors = 5, .renderer_accepted = 19, .renderer_errors = 7,
     };
 }

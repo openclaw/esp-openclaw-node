@@ -896,6 +896,7 @@ static void check_console_header(room_media_tone_state_t state, room_media_tone_
         "diagnostics=closed Talk=idle tone=%s (13/7/3 requested/queued/accepted)\n"
         "%s"
         "audio mic=0@0us afe=0@0us rx=0@0us renderer accepted/errors=19/7\n"
+        "AFE feed accepted/errors=13/3 ring_free=25%% read_interval_max_us=200000 fetch_max_us=12000\n"
         "wifi=disconnected ssid=\"\" rssi=0 dBm heap=40000/16000 B psram=8000000 B\n"
         "Talk VAD silence=%u ms player queues=%u/%u KiB\n",
         expected_tone, competing ? competing_record : "",

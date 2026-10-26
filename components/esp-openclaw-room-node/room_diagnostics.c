@@ -290,6 +290,7 @@ static void update_slow_text(
         "Capture read ok/err: %" PRIu64 "/%" PRIu64 " (last %s)\n"
         "AFE feed ok/err: %" PRIu64 "/%" PRIu64
         "   fetch ok/err/invalid: %" PRIu64 "/%" PRIu64 "/%" PRIu64 " (last %s)\n"
+        "AFE max read interval/fetch duration: %" PRIu64 "/%" PRIu64 " us\n"
         "WakeNet detections: %" PRIu64 " (last %s)\n"
         "Renderer offered: %" PRIu64 " frames / %" PRIu64 " B; renderer accepted/errors: %" PRIu64 "/%" PRIu64 " (last %s)\n"
         "Local tone: %s; requested/enqueued/renderer accepted: %u/%u/%u. "
@@ -312,6 +313,8 @@ static void update_slow_text(
         audio->fetch_errors,
         audio->fetch_invalid_sizes,
         fetch_age,
+        audio->max_read_interval_us,
+        audio->max_fetch_duration_us,
         audio->wakenet_detections,
         wake_age,
         audio->renderer_frames_offered,

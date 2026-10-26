@@ -77,6 +77,7 @@ jobs:
         if: matrix.name == 'component-test-app-build'
         run: |
           python3 components/esp-openclaw-room-node/tests/test_room_audio_port_compat.py
+          python3 components/esp-openclaw-room-node/tests/run_audio_diagnostics_host_tests.py
           cc -std=c11 -Wall -Wextra -Werror \
             -I components/esp-openclaw-room-node \
             components/esp-openclaw-room-node/room_diagnostics_metrics.c \

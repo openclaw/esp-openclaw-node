@@ -36,6 +36,8 @@ typedef struct {
     uint64_t fetch_successes;
     uint64_t fetch_errors;
     uint64_t fetch_invalid_sizes;
+    uint64_t max_read_interval_us;
+    uint64_t max_fetch_duration_us;
     uint64_t wakenet_detections;
     uint64_t renderer_frames_offered;
     uint64_t renderer_bytes_offered;
@@ -62,13 +64,15 @@ void room_diagnostics_audio_record_capture_read(
     size_t mic_channel,
     size_t reference_channel,
     bool success);
-void room_diagnostics_audio_record_feed(bool success);
+void room_diagnostics_audio_record_feed(int feed_result);
+void room_diagnostics_audio_record_read_entry(void);
 void room_diagnostics_audio_record_fetch(
     const int16_t *pcm,
     size_t sample_count,
     bool success,
     bool valid_size,
-    uint8_t ringbuffer_free_percent);
+    uint8_t ringbuffer_free_percent,
+    uint64_t fetch_duration_us);
 void room_diagnostics_audio_record_wakenet(void);
 void room_diagnostics_audio_record_renderer_offer(
     const int16_t *pcm,

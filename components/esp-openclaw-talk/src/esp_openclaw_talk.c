@@ -59,6 +59,9 @@ typedef struct esp_openclaw_talk_call {
     bool close_notified;
     bool gateway_owned;
     bool diagnostic_failure_seen;
+    bool speech_pending;
+    esp_openclaw_node_gateway_request_cb_t speech_callback;
+    void *speech_ctx;
 } talk_signaling_t;
 
 typedef struct {
@@ -297,6 +300,66 @@ static esp_err_t request_talk_rpc(
     esp_err_t err = esp_openclaw_node_gateway_request(
         talk->operator_node, method, params_json, callback, talk);
     if (err != ESP_OK) release_talk_signaling(talk);
+    dispatch_exit(talk);
+    return err;
+}
+
+static void handle_talk_say(
+    esp_openclaw_node_handle_t node,
+    const esp_openclaw_node_gateway_result_t *result, void *ctx)
+{
+    talk_signaling_t *talk = ctx;
+    portENTER_CRITICAL(&talk->state_lock);
+    esp_openclaw_node_gateway_request_cb_t callback = talk->speech_callback;
+    void *callback_ctx = talk->speech_ctx;
+    talk->speech_pending = false;
+    talk->speech_callback = NULL;
+    talk->speech_ctx = NULL;
+    portEXIT_CRITICAL(&talk->state_lock);
+    if (callback != NULL) callback(node, result, callback_ctx);
+    release_talk_signaling(talk);
+}
+
+esp_err_t esp_openclaw_talk_call_say(
+    esp_openclaw_talk_call_handle_t talk, const char *text,
+    esp_openclaw_node_gateway_request_cb_t callback, void *ctx)
+{
+    if (talk == NULL || text == NULL || text[0] == '\0' ||
+        strnlen(text, ESP_OPENCLAW_TALK_MAX_SPEECH_BYTES + 1U) > ESP_OPENCLAW_TALK_MAX_SPEECH_BYTES) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!dispatch_enter(talk)) return ESP_ERR_INVALID_STATE;
+    portENTER_CRITICAL(&talk->state_lock);
+    bool ready = !talk->stopped && talk->gateway_owned && !talk->speech_pending;
+    if (ready) {
+        talk->speech_pending = true;
+        talk->speech_callback = callback;
+        talk->speech_ctx = ctx;
+    }
+    portEXIT_CRITICAL(&talk->state_lock);
+    if (!ready) {
+        dispatch_exit(talk);
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    cJSON *params = cJSON_CreateObject();
+    bool complete = params != NULL &&
+        cJSON_AddStringToObject(params, "sessionKey", talk->session_key) != NULL &&
+        cJSON_AddStringToObject(params, "voiceSessionId", talk->voice_session_id) != NULL &&
+        cJSON_AddStringToObject(params, "text", text) != NULL;
+    char *json = complete ? cJSON_PrintUnformatted(params) : NULL;
+    cJSON_Delete(params);
+    esp_err_t err = json != NULL
+        ? request_talk_rpc(talk, "talk.client.say", json, handle_talk_say)
+        : ESP_ERR_NO_MEM;
+    free(json);
+    if (err != ESP_OK) {
+        portENTER_CRITICAL(&talk->state_lock);
+        talk->speech_pending = false;
+        talk->speech_callback = NULL;
+        talk->speech_ctx = NULL;
+        portEXIT_CRITICAL(&talk->state_lock);
+    }
     dispatch_exit(talk);
     return err;
 }

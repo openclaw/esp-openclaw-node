@@ -17,6 +17,8 @@
 typedef struct {
     unsigned opens, starts, closes, media_begins, media_ends, ambient_restores;
     unsigned config_requests, create_requests, close_requests;
+    unsigned speech_requests;
+    char speech_params[1536];
     unsigned scope_requests, token_connects;
     char scope_method[40], scope_params[256], token_value[80], token_uri[256];
     esp_openclaw_node_handle_t token_node;
@@ -63,9 +65,11 @@ void host_emit_gateway(esp_openclaw_node_handle_t node, const char *event, const
 void host_emit_peer(esp_webrtc_handle_t session, esp_webrtc_event_type_t event);
 void host_reply_config(void);
 void host_reply_create(bool ok);
+void host_reply_speech(bool ok);
 void host_reply_scope(bool ok, const char *payload);
 void host_fire_timeout(TimerHandle_t timer);
 void host_command(esp_openclaw_node_handle_t node, const char *name);
+esp_err_t host_command_params(esp_openclaw_node_handle_t node, const char *name, const char *params);
 void host_fire_operator_timer(esp_timer_handle_t timer);
 bool host_timer_active(TimerHandle_t timer);
 unsigned host_node_scope_count(esp_openclaw_node_handle_t node);

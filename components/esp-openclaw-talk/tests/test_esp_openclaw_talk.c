@@ -27,14 +27,19 @@ typedef struct {
 typedef struct {
     pending_talk_request_t config;
     pending_talk_request_t create;
+    pending_talk_request_t speech;
     char config_params[64];
     char create_params[512];
     char close_params[512];
+    char speech_params[1536];
     esp_openclaw_node_handle_t close_node;
     esp_err_t config_submit_error;
     esp_err_t create_submit_error;
+    esp_err_t speech_submit_error;
     int config_count;
     int create_count;
+    int speech_count;
+    int speech_results;
     int ownership_rejections;
     int close_count;
     int ice_count;
@@ -166,6 +171,12 @@ esp_err_t test_talk_gateway_request(
         if (s_talk.create_submit_error != ESP_OK) return s_talk.create_submit_error;
         TEST_ASSERT_NULL(s_talk.create.callback);
         s_talk.create = request;
+    } else if (strcmp(method, "talk.client.say") == 0) {
+        ++s_talk.speech_count;
+        capture_params(s_talk.speech_params, sizeof(s_talk.speech_params), params_json);
+        if (s_talk.speech_submit_error != ESP_OK) return s_talk.speech_submit_error;
+        TEST_ASSERT_NULL(s_talk.speech.callback);
+        s_talk.speech = request;
     } else {
         TEST_ASSERT_EQUAL_STRING("talk.client.close", method);
         ++s_talk.close_count;
@@ -567,6 +578,58 @@ TEST_CASE("Gateway-owned Talk create preserves the broker offer", "[esp_openclaw
     stop_signaling(handle);
     TEST_ASSERT_EQUAL(1, s_talk.close_count);
     TEST_ASSERT_TRUE(request_has_string(s_talk.close_params, "voiceSessionId", "voice-1"));
+}
+
+static void record_speech_result(esp_openclaw_node_handle_t node,
+    const esp_openclaw_node_gateway_result_t *result, void *ctx)
+{
+    assert_not_critical();
+    TEST_ASSERT_EQUAL_PTR((esp_openclaw_node_handle_t)1, node);
+    TEST_ASSERT_EQUAL_PTR(&s_talk, ctx);
+    TEST_ASSERT_TRUE(result->ok);
+    ++s_talk.speech_results;
+}
+
+TEST_CASE("speech stays bound to its call and acknowledges after close", "[esp_openclaw_talk]")
+{
+    esp_peer_signaling_handle_t handle = start_signaling();
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE,
+        esp_openclaw_talk_call_say(handle, "Set to 23 degrees.", record_speech_result, &s_talk));
+    respond_to_create(true, valid_response(), NULL);
+    TEST_ASSERT_EQUAL(ESP_OK,
+        esp_openclaw_talk_call_say(handle, "Set to 23 degrees.", record_speech_result, &s_talk));
+    TEST_ASSERT_TRUE(request_has_string(s_talk.speech_params, "sessionKey", "main"));
+    TEST_ASSERT_TRUE(request_has_string(s_talk.speech_params, "voiceSessionId", "voice-1"));
+    TEST_ASSERT_TRUE(request_has_string(s_talk.speech_params, "text", "Set to 23 degrees."));
+    TEST_ASSERT_EQUAL(0, s_talk.speech_results);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE,
+        esp_openclaw_talk_call_say(handle, "Another request", NULL, NULL));
+    TEST_ASSERT_EQUAL(1, s_talk.speech_count);
+    stop_signaling(handle);
+    reply_request(take_request(&s_talk.speech), true, "{\"accepted\":true}", NULL);
+    TEST_ASSERT_EQUAL(1, s_talk.speech_results);
+}
+
+TEST_CASE("speech submission failures release admission and reject oversized text", "[esp_openclaw_talk]")
+{
+    esp_peer_signaling_handle_t handle = start_signaling();
+    respond_to_create(true, valid_response(), NULL);
+    char oversized[ESP_OPENCLAW_TALK_MAX_SPEECH_BYTES + 2];
+    memset(oversized, 'x', sizeof(oversized) - 1);
+    oversized[sizeof(oversized) - 1] = '\0';
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, esp_openclaw_talk_call_say(handle, oversized, NULL, NULL));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, esp_openclaw_talk_call_say(handle, "", NULL, NULL));
+    TEST_ASSERT_EQUAL(0, s_talk.speech_count);
+    s_talk.speech_submit_error = ESP_FAIL;
+    TEST_ASSERT_EQUAL(ESP_FAIL, esp_openclaw_talk_call_say(handle, "Ready", NULL, NULL));
+    s_talk.speech_submit_error = ESP_OK;
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_talk_call_say(handle, "Ready", NULL, NULL));
+    reply_request(take_request(&s_talk.speech), false, NULL, "UNAVAILABLE");
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_talk_call_say(handle, "Recovered", NULL, NULL));
+    reply_request(take_request(&s_talk.speech), true, "{\"accepted\":true}", NULL);
+    esp_openclaw_talk_call_cancel(handle);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, esp_openclaw_talk_call_say(handle, "Stopped", NULL, NULL));
+    stop_signaling(handle);
 }
 
 TEST_CASE("Talk rejects non-Gateway control before peer creation", "[esp_openclaw_talk]")

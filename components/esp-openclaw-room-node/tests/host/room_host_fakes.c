@@ -38,7 +38,7 @@ struct host_task {
 };
 struct esp_openclaw_node {
     esp_openclaw_node_config_t config;
-    esp_openclaw_node_command_t commands[2];
+    esp_openclaw_node_command_t commands[3];
     unsigned command_count;
     const char *scopes[4];
     unsigned scope_count;
@@ -61,7 +61,7 @@ typedef struct {
     void *ctx;
     esp_openclaw_node_handle_t node;
 } pending_rpc_t;
-static pending_rpc_t config_rpc, create_rpc, scope_rpc;
+static pending_rpc_t config_rpc, create_rpc, scope_rpc, speech_rpc;
 
 typedef struct {
     esp_webrtc_cfg_t config;
@@ -407,7 +407,8 @@ esp_err_t esp_openclaw_node_register_capability(esp_openclaw_node_handle_t node,
 esp_err_t esp_openclaw_node_register_command(esp_openclaw_node_handle_t node,
     const esp_openclaw_node_command_t *command)
 {
-    host_require(node->command_count < 2, "only real Talk commands are registered");
+    host_require(node->command_count < sizeof(node->commands) / sizeof(node->commands[0]),
+        "registered commands fit the fixture");
     node->commands[node->command_count++] = *command;
     return ESP_OK;
 }
@@ -470,7 +471,7 @@ void host_emit_gateway(esp_openclaw_node_handle_t node, const char *event, const
     free(borrowed); /* Match the Node API's callback-only payload lifetime. */
 }
 
-void host_command(esp_openclaw_node_handle_t node, const char *name)
+esp_err_t host_command_params(esp_openclaw_node_handle_t node, const char *name, const char *params)
 {
     for (unsigned i = 0; i < node->command_count; ++i) {
         esp_openclaw_node_command_t *command = &node->commands[i];
@@ -478,14 +479,19 @@ void host_command(esp_openclaw_node_handle_t node, const char *name)
         char *payload = NULL;
         esp_openclaw_node_error_t error = {0};
         ++host.callback_depth;
-        esp_err_t result = command->handler(node, command->context, "{}", 2, &payload, &error);
+        esp_err_t result = command->handler(node, command->context, params, strlen(params), &payload, &error);
         --host.callback_depth;
         host.last_started = payload != NULL && strstr(payload, "\"started\":true") != NULL;
         free(payload);
-        host_require(result == ESP_OK, "registered command succeeds");
-        return;
+        return result;
     }
     host_require(false, "command was never registered");
+    return ESP_ERR_NOT_FOUND;
+}
+
+void host_command(esp_openclaw_node_handle_t node, const char *name)
+{
+    host_require(host_command_params(node, name, "{}") == ESP_OK, "registered command succeeds");
 }
 
 esp_err_t esp_openclaw_node_gateway_request(esp_openclaw_node_handle_t node,
@@ -517,6 +523,12 @@ esp_err_t esp_openclaw_node_gateway_request(esp_openclaw_node_handle_t node,
         cJSON_Delete(json);
         create_rpc = request;
         ++host.create_requests;
+    } else if (strcmp(method, "talk.client.say") == 0) {
+        host_require(speech_rpc.callback == NULL, "one speech request outstanding");
+        host_require(strlen(params) < sizeof(host.speech_params), "speech request fits observation");
+        strcpy(host.speech_params, params);
+        speech_rpc = request;
+        ++host.speech_requests;
     } else {
         host_require(strcmp(method, "talk.client.close") == 0, "unexpected RPC method");
         cJSON *json = cJSON_Parse(params);
@@ -564,6 +576,11 @@ void host_reply_create(bool ok)
         "\"clientSecret\":\"synthetic-unused-token\",\"voiceSessionId\":\"%s\","
         "\"clientControl\":{\"owner\":\"gateway\"}}", host.create_voice != NULL ? host.create_voice : "voice-a");
     reply(&create_rpc, ok, ok ? payload : NULL);
+}
+
+void host_reply_speech(bool ok)
+{
+    reply(&speech_rpc, ok, ok ? "{\"accepted\":true}" : NULL);
 }
 
 const esp_peer_ops_t *esp_peer_get_default_impl(void)

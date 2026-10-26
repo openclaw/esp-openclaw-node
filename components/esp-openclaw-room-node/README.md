@@ -28,6 +28,13 @@ display; tap the visible control again to start or stop Talk. If the
 button's action changes during a press, release and press again; a held Start
 press cannot become Stop when wake word or a remote command starts Talk.
 
+`talk.say {"text":"Set to 23 degrees."}` sends a short confirmation into the
+current connected voice call. Text is limited to 1024 UTF-8 bytes. The response
+`{"queued":true}` confirms local submission; a Gateway rejection appears on
+the display without ending the call. A stopped, disconnected, or busy call
+rejects the command. Add `talk.say` to the Gateway command allowlist and approve
+the updated node surface. The Gateway must support `talk.client.say`.
+
 The audio port's input gain override is optional. Boards that set
 `configure_input_gain` also provide `input_gain_db`; otherwise shared media
 initialization preserves the codec or board default.

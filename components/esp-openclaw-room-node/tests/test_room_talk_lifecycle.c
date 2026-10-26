@@ -1007,7 +1007,38 @@ static void coalesced_connection_retries(void)
         "rearmed node retry is consumed once");
 }
 
+static void speech_confirmation(void)
+{
+    const char *speech = "{\"text\":\"Set to 23 degrees.\"}";
+    CHECK(host_command_params(node_client, "talk.say", speech) == ESP_ERR_INVALID_STATE,
+        "speech requires a connected call");
+    connect_call();
+    CHECK(host_command_params(node_client, "talk.say", "{}") == ESP_ERR_INVALID_ARG,
+        "speech requires text");
+    CHECK(host_command_params(node_client, "talk.say", "{\"text\":\"a\",\"text\":\"b\"}") == ESP_ERR_INVALID_ARG,
+        "duplicate speech fields are rejected");
+    CHECK(host_command_params(node_client, "talk.say", speech) == ESP_OK,
+        "connected speech request queues");
+    CHECK(strstr(host.speech_params, "\"voiceSessionId\":\"voice-a\"") != NULL &&
+        strstr(host.speech_params, "\"sessionKey\":\"agent:fixture:main\"") != NULL,
+        "speech uses the current call's frozen identity");
+    CHECK(host_command_params(node_client, "talk.say", speech) == ESP_ERR_INVALID_STATE,
+        "pending speech is bounded");
+    host_reply_speech(false);
+    drain();
+    CHECK(host.ui == ROOM_UI_ERROR && talk_active, "Gateway rejection is visible without ending Talk");
+    CHECK(host_command_params(node_client, "talk.say", speech) == ESP_OK, "speech can retry after rejection");
+    stop();
+    drain();
+    connect_call();
+    host_reply_speech(false);
+    drain();
+    CHECK(host.ui == ROOM_UI_SPEAKING && talk_active,
+        "a late speech rejection cannot replace the next call's UI");
+}
+
 static const struct { const char *name; void (*run)(void); } cases[] = {
+    {"speech-confirmation", speech_confirmation},
     {"operator-scopes", operator_scopes},
     {"voice-actions-provision", voice_actions_provision},
     {"voice-actions-stale", voice_actions_stale},

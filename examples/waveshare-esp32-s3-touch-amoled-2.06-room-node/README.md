@@ -155,6 +155,7 @@ The node registers these commands. Canvas: `placement` is accepted by `canvas.pr
 | `face.set` | `{"mood":"happy","holdMs":8000}` | `{"mood":"happy","holdMs":8000,"visible":true}` |
 | `face.gesture` | `{"name":"nod"}` | `{"gesture":"nod","played":true}` |
 | `talk.start` | `{}` | `{"started":true}` |
+| `talk.say` | `{"text":"Set to 23 degrees."}` (1–1024 UTF-8 bytes; connected call required) | `{"queued":true}`; Gateway rejection is shown on the display |
 | `talk.stop` | `{}` | `{"stopped":true}` |
 
 `canvas.present`, `canvas.navigate`, and A2UI `Image` components accept HTTP(S) URLs. A URL beginning with `/` is resolved through the Gateway's authenticated `canvas` plugin surface URL and the connected Gateway HTTP origin. The device follows redirects, uses the ESP certificate bundle for HTTPS, and accepts only content whose bytes begin with PNG or JPEG magic. Each fetch has a 10-second timeout. The capability-scoped surface URL the Gateway mints has an idle expiry, so the firmware keeps it warm with a periodic `plugin.surface.refresh` RPC — a present after hours of quiet works exactly like the first one.

@@ -74,6 +74,7 @@ static bool talk_media_owned;
 static bool talk_ambient_suspended;
 static bool talk_speaking_pending;
 static bool talk_connecting_pending;
+static bool talk_speech_failed_pending;
 static bool operator_ui_pending;
 static bool node_reconnect_scheduled;
 static bool node_reconnect_pending;
@@ -383,10 +384,13 @@ static void talk_teardown_task(void *arg)
             !talk_start_in_flight && !talk_closing;
         bool speaking = talk_speaking_pending && !talk_cancel_requested && !talk_closing;
         bool connecting = talk_connecting_pending && !talk_active && !talk_cancel_requested && !talk_closing;
+        bool speech_failed = talk_speech_failed_pending && talk_active &&
+            !talk_cancel_requested && !talk_closing;
         bool operator_ui = operator_ui_pending && talk_call == NULL;
         bool ready = operator_ready;
         talk_speaking_pending = false;
         talk_connecting_pending = false;
+        talk_speech_failed_pending = false;
         operator_ui_pending = false;
         if (close) talk_closing = true;
         esp_webrtc_handle_t session = webrtc;
@@ -407,6 +411,7 @@ static void talk_teardown_task(void *arg)
             if (ready) room_ui_show_face_hint(8000);
         }
         if (local_error) room_ui_set(ROOM_UI_ERROR, "Talk unavailable; try again when ready");
+        if (speech_failed) room_ui_set(ROOM_UI_ERROR, "Speech request failed; try again");
         if (!close) {
             start_node_if_pending();
             start_operator_if_pending();
@@ -543,6 +548,7 @@ static bool admit_talk_locked(void)
     talk_start_in_flight = true;
     talk_cancel_requested = false;
     talk_cancel_message = NULL;
+    talk_speech_failed_pending = false;
     talk_connecting_pending = true;
     wake_talk_teardown();
     return true;
@@ -1092,6 +1098,76 @@ static esp_err_t handle_talk_start(
     return ESP_OK;
 }
 
+static void talk_say_result(
+    esp_openclaw_node_handle_t node,
+    const esp_openclaw_node_gateway_result_t *result, void *ctx)
+{
+    uint32_t generation = (uint32_t)(uintptr_t)ctx;
+    xSemaphoreTake(state_lock, portMAX_DELAY);
+    bool current = generation == talk_generation && node == talk_operator &&
+        operator_incarnation == talk_operator_incarnation && talk_active &&
+        !talk_cancel_requested && !talk_closing;
+    if (current && !result->ok) {
+        talk_speech_failed_pending = true;
+        wake_talk_teardown();
+    }
+    xSemaphoreGive(state_lock);
+}
+
+static esp_err_t handle_talk_say(
+    esp_openclaw_node_handle_t node,
+    void *context,
+    const char *params_json,
+    size_t params_len,
+    char **out_payload_json,
+    esp_openclaw_node_error_t *out_error)
+{
+    (void)node;
+    (void)context;
+    cJSON *params = cJSON_ParseWithLength(params_json, params_len);
+    cJSON *text = cJSON_GetObjectItemCaseSensitive(params, "text");
+    bool valid = cJSON_IsObject(params) && params->child == text &&
+        text != NULL && text->next == NULL && cJSON_IsString(text) &&
+        text->valuestring[0] != '\0' &&
+        strlen(text->valuestring) <= ESP_OPENCLAW_TALK_MAX_SPEECH_BYTES &&
+        strstr(params_json, "\\u0000") == NULL;
+    if (!valid) {
+        cJSON_Delete(params);
+        out_error->code = "INVALID_PARAMS";
+        out_error->message = "talk.say requires only text (1 to 1024 UTF-8 bytes)";
+        return ESP_ERR_INVALID_ARG;
+    }
+    char *payload = strdup("{\"queued\":true}");
+    if (payload == NULL) {
+        cJSON_Delete(params);
+        out_error->code = "INTERNAL";
+        out_error->message = "not enough memory for the command result";
+        return ESP_ERR_NO_MEM;
+    }
+    xSemaphoreTake(state_lock, portMAX_DELAY);
+    bool ready = talk_active && operator_ready && talk_operator == operator_client &&
+        talk_operator_incarnation == operator_incarnation &&
+        !talk_cancel_requested && !talk_closing;
+    esp_openclaw_talk_call_handle_t call = ready ? talk_call : NULL;
+    uint32_t generation = talk_generation;
+    if (call != NULL) esp_openclaw_talk_call_retain(call);
+    xSemaphoreGive(state_lock);
+    esp_err_t err = call != NULL
+        ? esp_openclaw_talk_call_say(call, text->valuestring, talk_say_result,
+            (void *)(uintptr_t)generation)
+        : ESP_ERR_INVALID_STATE;
+    esp_openclaw_talk_call_release(call);
+    cJSON_Delete(params);
+    if (err != ESP_OK) {
+        free(payload);
+        out_error->code = "UNAVAILABLE";
+        out_error->message = "Talk must be connected with no speech request pending";
+        return err;
+    }
+    *out_payload_json = payload;
+    return ESP_OK;
+}
+
 static esp_err_t handle_talk_stop(
     esp_openclaw_node_handle_t node,
     void *context,
@@ -1129,6 +1205,7 @@ static esp_err_t register_talk_node_commands(esp_openclaw_node_handle_t node)
 {
     static const esp_openclaw_node_command_t COMMANDS[] = {
         {.name = "talk.start", .handler = handle_talk_start},
+        {.name = "talk.say", .handler = handle_talk_say},
         {.name = "talk.stop", .handler = handle_talk_stop},
     };
     for (size_t i = 0; i < sizeof(COMMANDS) / sizeof(COMMANDS[0]); ++i) {

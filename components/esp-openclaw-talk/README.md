@@ -105,6 +105,15 @@ the owner's lock before handing it to another event dispatcher, and release
 that reference after synchronous ingress returns. There is one teardown worker
 per owner; quiesce/SDK close/release must be serialized.
 
+`esp_openclaw_talk_call_say` submits up to 1024 UTF-8 bytes to the call's
+existing `talk.client.say` session. It never starts or selects another call.
+Only one speech request may be pending per call. `ESP_OK` means queued locally;
+the optional callback reports the Gateway result, not audible playback. Keep
+the callback context alive until the reply, including after call teardown.
+Submission failures do not invoke the callback. The room-node `talk.say`
+command uses this API and displays asynchronous Gateway failures only while
+the originating call remains active.
+
 ## Native HTTP regression
 
 With ESP-IDF activated and the component-test app's cJSON dependency configured,

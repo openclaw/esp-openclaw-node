@@ -64,6 +64,8 @@ const esp_peer_signaling_impl_t *esp_openclaw_talk_signaling_impl(void);
 typedef struct esp_openclaw_talk_call *esp_openclaw_talk_call_handle_t;
 typedef void (*esp_openclaw_talk_closed_cb_t)(void *ctx);
 
+#define ESP_OPENCLAW_TALK_MAX_SPEECH_BYTES 1024U
+
 esp_err_t esp_openclaw_talk_call_prepare(
     const esp_openclaw_talk_signaling_config_t *config,
     esp_openclaw_talk_call_handle_t *out_call);
@@ -75,6 +77,16 @@ const esp_peer_signaling_impl_t *esp_openclaw_talk_call_signaling_impl(void);
 /** Retain under the owner's lock before handing a call to another dispatcher. */
 void esp_openclaw_talk_call_retain(esp_openclaw_talk_call_handle_t call);
 void esp_openclaw_talk_call_release(esp_openclaw_talk_call_handle_t call);
+/**
+ * Queue speech on this call's existing Gateway-controlled voice session.
+ * One request may be pending per call. ESP_OK means queued; the optional
+ * callback receives the Gateway acknowledgement, not proof of audible playback.
+ * The callback runs even if the call closes while its request is pending.
+ * Keep its context alive until completion; failed submission has no callback.
+ */
+esp_err_t esp_openclaw_talk_call_say(
+    esp_openclaw_talk_call_handle_t call, const char *text,
+    esp_openclaw_node_gateway_request_cb_t callback, void *ctx);
 /** Parse borrowed JSON synchronously. Only exact talk.event/session.closed matches. */
 void esp_openclaw_talk_call_gateway_event(
     esp_openclaw_talk_call_handle_t call, esp_openclaw_node_handle_t source,

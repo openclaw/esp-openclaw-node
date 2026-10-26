@@ -1,6 +1,8 @@
 /* The mobile OpenClaw mascot in its canonical 120 x 120 coordinate space. */
 #include "room_lobster.h"
 
+#include <string.h>
+
 #include "watch_lobster_parts.h"
 
 #define LOBSTER_SIZE 288
@@ -23,6 +25,12 @@ static void visible(lv_obj_t *obj, bool show)
 {
     if (show) lv_obj_remove_flag(obj, LV_OBJ_FLAG_HIDDEN);
     else lv_obj_add_flag(obj, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void opacity(lv_obj_t *obj, lv_opa_t value)
+{
+    /* LVGL invalidates unchanged local-style writes too. */
+    if (lv_obj_get_style_opa(obj, 0) != value) lv_obj_set_style_opa(obj, value, 0);
 }
 
 static void round_part(lv_obj_t *obj, uint32_t color)
@@ -71,6 +79,11 @@ esp_err_t room_lobster_create(lv_obj_t *parent)
         lv_obj_set_style_line_color(happy_eyes[i], lv_color_hex(INK), 0);
         lv_obj_set_style_line_width(happy_eyes[i], 6, 0);
         lv_obj_set_style_line_rounded(happy_eyes[i], true, 0);
+        for (int j = 0; j < 9; ++j) {
+            happy_points[i][j] = (lv_point_precise_t){
+                .x = j * unit(12) / 8, .y = unit(4) * (j - 4) * (j - 4) / 16};
+        }
+        lv_line_set_points(happy_eyes[i], happy_points[i], 9);
     }
     mouth = lv_line_create(root);
     mouth_o = lv_obj_create(root);
@@ -86,13 +99,16 @@ esp_err_t room_lobster_create(lv_obj_t *parent)
 
 void room_lobster_update(const room_lobster_pose_t *pose)
 {
+    /* Large alpha-image transforms compete with voice encoding. Keep the body
+     * still during calls; eyes and the speech-reactive mouth keep animating. */
+    uint32_t motion_ms = pose->voice_active ? 0 : pose->time_ms;
     /* Integer sine, no per-frame heap allocation or image decoding. */
-    int32_t wave = lv_trigo_sin((pose->time_ms % 4000) * 360 / 4000);
+    int32_t wave = lv_trigo_sin((motion_ms % 4000) * 360 / 4000);
     int32_t bob = wave * (pose->attentive ? 5 : 3) / 32768;
     lv_obj_t *parent = lv_obj_get_parent(root);
     lv_obj_set_pos(root, (lv_obj_get_width(parent) - LOBSTER_SIZE) / 2,
                    (lv_obj_get_height(parent) - LOBSTER_SIZE) / 2 + bob);
-    int32_t snap_phase = pose->time_ms % 4000;
+    int32_t snap_phase = motion_ms % 4000;
     int32_t left_snap = snap_phase > 3400 && snap_phase < 3800
         ? lv_trigo_sin((snap_phase - 3400) * 180 / 400) * 80 / 32768 : 0;
     int32_t right_snap = snap_phase > 3600
@@ -100,7 +116,7 @@ void room_lobster_update(const room_lobster_pose_t *pose)
     int32_t lift = pose->claw_lift * 10 + (pose->attentive ? wave * 45 / 32768 : 0);
     lv_image_set_rotation(parts[1], lift - left_snap);
     lv_image_set_rotation(parts[2], -lift - right_snap);
-    int32_t wiggle = lv_trigo_sin((pose->time_ms % 2000) * 360 / 2000) * 30 / 32768;
+    int32_t wiggle = lv_trigo_sin((motion_ms % 2000) * 360 / 2000) * 30 / 32768;
     int32_t droop = pose->smile < 0 ? -pose->smile : 0;
     lv_image_set_rotation(parts[3], wiggle - droop);
     lv_image_set_rotation(parts[4], wiggle + droop);
@@ -114,19 +130,15 @@ void room_lobster_update(const room_lobster_pose_t *pose)
         int32_t h = LV_MAX(3, unit(12) * open / 100);
         lv_obj_set_size(eyes[i], w, h);
         lv_obj_set_pos(eyes[i], x - w / 2, y - h / 2);
-        lv_obj_set_style_opa(eyes[i], LV_OPA_COVER * (100 - happy) / 100, 0);
+        opacity(eyes[i], LV_OPA_COVER * (100 - happy) / 100);
         int32_t glow = unit(4) * LV_MIN(open, 100) / 100;
         lv_obj_set_size(glows[i], glow, glow);
         lv_obj_set_pos(glows[i], x + unit(1) - glow / 2, y - unit(1) - glow / 2);
         visible(glows[i], open > 30 && happy < 80);
-        lv_obj_set_style_opa(glows[i], LV_OPA_COVER * (100 - happy) / 100, 0);
-        for (int j = 0; j < 9; ++j) {
-            happy_points[i][j] = (lv_point_precise_t){
-                .x = j * unit(12) / 8, .y = unit(4) * (j - 4) * (j - 4) / 16};
-        }
-        lv_line_set_points(happy_eyes[i], happy_points[i], 9);
+        opacity(glows[i], LV_OPA_COVER * (100 - happy) / 100);
+
         lv_obj_set_pos(happy_eyes[i], x - unit(6), y - unit(2));
-        lv_obj_set_style_opa(happy_eyes[i], LV_OPA_COVER * happy * LV_MIN(open * 2, 100) / 100, 0);
+        opacity(happy_eyes[i], LV_OPA_COVER * happy * LV_MIN(open * 2, 100) / 100);
     }
     bool round = pose->mouth_open_pct > 4 || pose->speaking;
     visible(mouth_o, round);
@@ -138,12 +150,16 @@ void room_lobster_update(const room_lobster_pose_t *pose)
         lv_obj_set_size(mouth_o, w, h);
         lv_obj_set_pos(mouth_o, unit(60) - w / 2, unit(51) - h / 2);
     } else {
+        lv_point_precise_t next_points[9];
         for (int i = 0; i < 9; ++i) {
-            mouth_points[i] = (lv_point_precise_t){
+            next_points[i] = (lv_point_precise_t){
                 .x = i * unit(15) / 8,
                 .y = unit(8) + unit(4) * pose->smile * i * (8 - i) / 1600};
         }
-        lv_line_set_points(mouth, mouth_points, 9);
+        if (memcmp(mouth_points, next_points, sizeof(mouth_points)) != 0) {
+            memcpy(mouth_points, next_points, sizeof(mouth_points));
+            lv_line_set_points(mouth, mouth_points, 9);
+        }
         lv_obj_set_pos(mouth, unit(60) - unit(15) / 2, unit(49) - unit(8));
     }
 }

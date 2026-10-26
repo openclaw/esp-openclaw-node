@@ -9,6 +9,7 @@
 #include "room_canvas.h"
 #include "room_diagnostics.h"
 #include "room_face.h"
+#include "room_lobster.h"
 #include "room_ui_controller.h"
 
 static lv_display_t *display;
@@ -16,7 +17,7 @@ static uint8_t *frame, *draw_buffer;
 static int width, height, brightness, display_depth, critical_depth;
 static bool deny_display, canvas_active, face_visible;
 static unsigned toggles, holds;
-static unsigned talk_starts, talk_stops;
+static unsigned talk_starts, talk_stops, display_flushes;
 static lv_indev_t *touchscreen;
 static lv_indev_state_t touch_state;
 static lv_point_t touch_point;
@@ -96,6 +97,7 @@ esp_err_t room_diagnostics_close(void)
 
 static void flush(lv_display_t *target, const lv_area_t *area, uint8_t *pixels)
 {
+    ++display_flushes;
     int row_bytes = lv_area_get_width(area) * 4;
     for (int y = area->y1; y <= area->y2; ++y) {
         memcpy(frame + ((size_t)y * width + area->x1) * 4,
@@ -346,6 +348,35 @@ static void snapshot(const char *path)
     assert(fclose(out) == 0);
 }
 
+static void check_watch_repaint(void)
+{
+    lv_obj_t *parent = lv_obj_create(lv_screen_active());
+    lv_obj_set_size(parent, width, height);
+    assert(room_lobster_create(parent) == ESP_OK);
+    room_lobster_pose_t pose = {
+        .eye_open_pct = 100, .eye_width_pct = 100, .smile = 24,
+        .voice_active = true, .attentive = true,
+    };
+    room_lobster_update(&pose);
+    lv_refr_now(display);
+    unsigned previous = display_flushes;
+    pose.time_ms = 500;
+    room_lobster_update(&pose);
+    lv_refr_now(display);
+    assert(display_flushes == previous);
+
+    pose.eye_open_pct = 20;
+    room_lobster_update(&pose);
+    lv_refr_now(display);
+    assert(display_flushes > previous);
+    previous = display_flushes;
+    pose.voice_active = false;
+    room_lobster_update(&pose);
+    lv_refr_now(display);
+    assert(display_flushes > previous);
+    lv_obj_delete(parent);
+}
+
 int main(int argc, char **argv)
 {
     assert(argc >= 2);
@@ -484,6 +515,7 @@ int main(int argc, char **argv)
         fire_timer("text_hint");
         assert(brightness == idle);
     }
+    if (watch) check_watch_repaint();
     assert(room_board_display_brightness_set(0) == ESP_OK && brightness == 0);
     assert(display_depth == 0 && critical_depth == 0);
     lv_deinit();

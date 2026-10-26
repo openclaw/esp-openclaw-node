@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Reduce watch voice-call display load by skipping unchanged mascot redraws, resting large image transforms during calls, and separating audio codec work from display timing.
+
 - Defer room/watch call-timeout cancellation and logging to the Talk worker, preventing timer-service stack exhaustion while preserving stale-call protection.
 - Add room/watch `talk.say` to queue a bounded spoken confirmation on the current voice call through `talk.client.say`, with visible Gateway failures and no retargeting after call replacement.
 - Let the configuring agent session report a M5Dial action outcome with `dial.complete`; correlate replies with the latest press and reject stale, duplicate, reconfigured, or reconnected results.

@@ -14,6 +14,7 @@ typedef struct {
     int16_t mouth_open_pct;
     int16_t claw_lift;
     uint8_t speech_level;
+    bool voice_active;
     bool speaking;
     bool attentive;
 } room_lobster_pose_t;

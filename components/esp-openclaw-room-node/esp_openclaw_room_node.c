@@ -165,6 +165,11 @@ static void home_network_event(void *arg, esp_event_base_t base, int32_t event_i
 
 static void media_scheduler(const char *name, media_lib_thread_cfg_t *cfg)
 {
+    /* The watch's encoder and capture fetch share core 1. Keep peer traffic
+     * on core 0 so speech and networking leave time for display updates. */
+    const esp_openclaw_room_node_config_t *board = room_board_config();
+    bool watch = board != NULL && board->model_identifier != NULL &&
+        strcmp(board->model_identifier, "waveshare-esp32-s3-touch-amoled-1.8") == 0;
     if (strcmp(name, "aenc_0") == 0 || strcmp(name, "AUD_SRC") == 0) {
         cfg->stack_size = 40 * 1024;
         cfg->priority = strcmp(name, "aenc_0") == 0 ? 10 : 15;
@@ -176,11 +181,11 @@ static void media_scheduler(const char *name, media_lib_thread_cfg_t *cfg)
     } else if (strcmp(name, "pc_task") == 0) {
         cfg->stack_size = 25 * 1024;
         cfg->priority = 18;
-        cfg->core_id = 1;
+        cfg->core_id = watch ? 0 : 1;
     } else if (strcmp(name, "pc_send") == 0) {
         cfg->stack_size = 4 * 1024;
         cfg->priority = 15;
-        cfg->core_id = 1;
+        cfg->core_id = watch ? 0 : 1;
     } else if (strcmp(name, "Adec") == 0) {
         cfg->stack_size = 40 * 1024;
         cfg->priority = 15;

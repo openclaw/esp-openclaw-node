@@ -84,6 +84,10 @@ dispatch, Canvas/diagnostics visibility, camera-indicator priority and
 brightness, hint expiry, explicit off requests and a nonblank rendered mascot.
 Error details remain visible alongside ready connection facts, yield to
 Diagnostics, and clear on a later non-error state.
+The watch case also compiles the production lobster renderer and generated
+assets. An unchanged voice pose must not flush the display; blinking and idle
+body movement must still render. This catches redundant LVGL style and line
+updates without asserting renderer implementation details.
 The lifecycle runner also checks real node/operator/network event handling for
 the home facts, including missing-session results versus ordinary disconnects,
 raw busy/failure results, accepted reconnects and later connection failures.

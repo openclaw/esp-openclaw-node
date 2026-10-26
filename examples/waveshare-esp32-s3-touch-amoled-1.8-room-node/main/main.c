@@ -9,6 +9,7 @@
 #include "driver/gpio.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/idf_additions.h"
 #include "freertos/task.h"
@@ -65,6 +66,20 @@ static void align_co5300_flush(lv_event_t *event)
     area->y2 |= 1;
 }
 
+static uint32_t watch_tick_ms(void)
+{
+    return (uint32_t)(esp_timer_get_time() / 1000);
+}
+
+static void watch_use_clock_tick(void *arg)
+{
+    (void)arg;
+    /* Run after port startup, without the ESP timer's input-lock priority boost. */
+    ESP_ERROR_CHECK(lvgl_port_stop());
+    lv_tick_set_cb(watch_tick_ms);
+    lv_timer_enable(true);
+}
+
 static lv_display_t *waveshare_display_start(void *ctx)
 {
     (void)ctx;
@@ -103,6 +118,10 @@ static lv_display_t *waveshare_display_start(void *ctx)
     if (display == NULL) return NULL;
     const lvgl_port_touch_cfg_t touch_config = {.disp = display, .handle = touch};
     if (lvgl_port_add_touch(&touch_config) == NULL || !bsp_display_lock(0)) return NULL;
+    if (lv_async_call(watch_use_clock_tick, NULL) != LV_RESULT_OK) {
+        bsp_display_unlock();
+        return NULL;
+    }
     lv_display_add_event_cb(display, align_co5300_flush, LV_EVENT_INVALIDATE_AREA, NULL);
     bsp_display_unlock();
     return display;
@@ -237,7 +256,8 @@ void app_main(void)
             .native_height = BSP_LCD_V_RES,
             .safe_inset = 24,
             .animated_face = true,
-            .animation_frame_ms = 16,
+            /* Leave CPU time for full-duplex voice while the mascot moves. */
+            .animation_frame_ms = 50,
         },
         .audio = {
             .open = waveshare_audio_open,

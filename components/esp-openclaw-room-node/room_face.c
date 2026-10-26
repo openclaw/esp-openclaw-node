@@ -651,6 +651,8 @@ static void face_tick(lv_timer_t *timer)
             .mouth_open_pct = tw_mouth_o.value,
             .claw_lift = mood == &MOODS[ROOM_FACE_MOOD_EXCITED] ? 30 : 0,
             .speech_level = now_ms - speech_level_at_ms <= SPEECH_STALE_MS ? speech_level : 0,
+            .voice_active = state == ROOM_FACE_LISTENING ||
+                state == ROOM_FACE_THINKING || state == ROOM_FACE_SPEAKING,
             .speaking = state == ROOM_FACE_SPEAKING,
             .attentive = attentive,
         });

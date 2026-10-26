@@ -55,10 +55,14 @@ diagnostics. Diagnostics hides the Talk control until closed.
 ## Board behavior
 
 The watch mascot uses the mobile app's red lobster artwork and turquoise eyes.
-Its claws and antennae move, it blinks and looks around, and its mouth follows
-speech playback. The existing `face.set` moods and `face.gesture` commands still
-apply. Animation pauses when the mascot is hidden; Talk controls, Canvas,
-diagnostics, and display sleep keep their existing behavior.
+At 20 frames per second, its claws and antennae move, it blinks and looks around,
+and its mouth follows speech playback. During voice calls, the body, claws,
+and antennae rest so audio
+processing has priority; blinking, gaze, and the speech-reactive mouth continue.
+Unchanged poses do not schedule display redraws. The existing `face.set` moods
+and `face.gesture` commands still apply. Animation pauses when the mascot is
+hidden; Talk controls, Canvas, diagnostics, and display sleep keep their
+existing behavior.
 
 The pinned Waveshare BSP 2.0.3 detects CST816S or FT5x06 touch and applies the
 CO5300 panel offset required by the CST816S revision. The adapter registers

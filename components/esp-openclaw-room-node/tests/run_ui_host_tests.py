@@ -76,6 +76,16 @@ def main():
             'const unsigned char pixels[] __asm__("_binary_openclaw_lobster_argb8888_start") = {\n'
             + ",".join(str(value) for value in bitmap) + "\n};\n"
         )
+        subprocess.run([
+            sys.executable, str(component.parents[1] / "scripts/generate_watch_lobster.py"),
+            "--output-dir", str(root),
+        ], check=True)
+        watch_pixels = root / "watch_pixels.c"
+        watch_pixels.write_text(
+            'const unsigned char watch_pixels[] __asm__("_binary_watch_lobster_argb8888_start") = {\n'
+            + ",".join(str(value) for value in (root / "watch_lobster.argb8888").read_bytes())
+            + "\n};\n"
+        )
         binary = root / "room-ui-test"
         command = [
             "cc", "-std=gnu11", "-O1", "-g", "-fsanitize=address,undefined",
@@ -86,7 +96,8 @@ def main():
             "-I", str(root), "-I", str(component), "-I", str(component / "include"),
             "-I", str(lvgl), str(tests / "test_room_ui_controller.c"),
             str(component / "room_ui_controller.c"), str(component / "room_board.c"),
-            str(pixels), *map(str, sorted((lvgl / "src").rglob("*.c"))),
+            str(pixels), str(watch_pixels), str(component / "room_lobster.c"),
+            *map(str, sorted((lvgl / "src").rglob("*.c"))),
             "-lm", "-o", str(binary),
         ]
         print("Building real room UI + LVGL host renderer", flush=True)

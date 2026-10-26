@@ -59,13 +59,30 @@ An optional `action` name binds confirmation to the agent session that invoked
 `dial.configure`. Invoke it from that session so the Gateway supplies its
 session key. The device sends one `agent.request` through `node.event` when the
 user presses; rotary ticks never create agent turns. The message reports
-`DIAL_INPUT`, the action name, value, and unit. The agent decides what to do with
+`DIAL_INPUT`, a `requestId`, the action name, value, and unit. The agent decides what to do with
 it. Commands do not execute arbitrary local shell or GPIO operations.
 
 Only one confirmation can be pending. A replacement configuration is rejected
 until that result arrives. Offline presses show `Gateway offline` and are not
 replayed after reconnection. `Action sent` means the Gateway accepted the event,
 not that an external device completed an action.
+
+After carrying out an action, the same agent session can invoke `dial.complete`
+with the event's `requestId`, a boolean `success`, and a short `text` message:
+
+```json
+{"requestId":"7-3","success":true,"text":"Brightness set to 65%"}
+```
+
+This displays the outcome without replacing the control. It accepts each result
+once, and rejects results from another session, an older press, a replaced
+control, or a previous connection. A result can arrive before the event's
+transport acknowledgment without being overwritten by that acknowledgment.
+`dial.status` includes `requestId`, the captured `confirmedValue`, and
+`actionCompleted` while that press is current. A completed result also includes
+`actionSucceeded` and `actionMessage`. Turning afterward changes `value`, not
+the captured confirmation. This is an agent-reported outcome, not independent
+verification of the external action. Speech on the watch is a separate step.
 
 Actions stay bound to the Gateway URI that configured them. Reconnecting to
 that URI preserves the control, but cancels any pending press. Connecting to a
@@ -84,6 +101,7 @@ change the result of a newer one.
 | `display.status`, `dial.status`, `input.status` | `{}` | View, value/range, input counts, brightness, connection, action state |
 | `display.brightness` | `{"percent":65}` | Set backlight, integer 0–100 |
 | `dial.configure` | Numeric control above, optional `unit` (16 bytes) and `action` (64 bytes) | New control state |
+| `dial.complete` | `requestId`, boolean `success`, `text` (128 bytes) | Outcome for the latest press, from its configuring agent session |
 | `face.set` | `{"mood":"happy"}` | Show face; neutral/happy/excited/thinking/sleepy/sad |
 | `buzzer.play` | `{"frequencyHz":1000,"durationMs":200}` | Start a tone; 100–4000 Hz, 20–2000 ms |
 

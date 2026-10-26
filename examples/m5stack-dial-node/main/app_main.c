@@ -1,4 +1,5 @@
 #include <ctype.h>
+#include <inttypes.h>
 #include <math.h>
 #include <stdatomic.h>
 #include <stdint.h>
@@ -23,6 +24,7 @@
 #include "esp_openclaw_node_example_repl.h"
 #include "esp_openclaw_node_example_saved_session_reconnect.h"
 #include "esp_openclaw_node_wifi.h"
+#include "esp_random.h"
 #include "esp_timer.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
@@ -36,7 +38,7 @@ static atomic_bool connected;
 static atomic_bool tone_active;
 static esp_timer_handle_t tone_timer;
 static const char *commands[] = {"display.show", "display.clear", "display.status", "display.brightness",
-    "dial.configure", "dial.status", "input.status", "face.set", "buzzer.play"};
+    "dial.configure", "dial.complete", "dial.status", "input.status", "face.set", "buzzer.play"};
 
 typedef enum { VIEW_FACE, VIEW_CONTROL, VIEW_MESSAGE } dial_view_t;
 typedef struct {
@@ -45,6 +47,7 @@ typedef struct {
     char action[65];
     char unit[17];
     char session[ESP_OPENCLAW_NODE_MAX_SESSION_KEY_LEN + 1];
+    char request_id[48];
 } dial_action_t;
 typedef struct { dial_action_token_t token; bool ok; } action_result_t;
 static QueueHandle_t actions, results;
@@ -55,6 +58,11 @@ static struct {
     dial_view_t view;
     char heading[65], text[513], label[65], unit[17], action[65];
     char session[ESP_OPENCLAW_NODE_MAX_SESSION_KEY_LEN + 1];
+    char request_id[48];
+    dial_action_token_t last_action;
+    int confirmed_value;
+    bool action_completed, action_succeeded;
+    char action_message[129];
     const char *mood;
     uint32_t changes, presses, touches;
     int brightness;
@@ -144,8 +152,8 @@ static void action_worker(void *context)
     dial_action_t action;
     for (;;) {
         xQueueReceive(actions, &action, portMAX_DELAY);
-        char message[192], key[80];
-        snprintf(message, sizeof(message), "DIAL_INPUT action=%s value=%d unit=%s", action.action, action.value, action.unit);
+        char message[256], key[80];
+        snprintf(message, sizeof(message), "DIAL_INPUT requestId=%s action=%s value=%d unit=%s", action.request_id, action.action, action.value, action.unit);
         snprintf(key, sizeof(key), "dial-%s-%lld", esp_openclaw_node_get_device_id(node), (long long)esp_timer_get_time());
         cJSON *payload = cJSON_CreateObject();
         bool built = payload != NULL && cJSON_AddStringToObject(payload, "message", message) != NULL &&
@@ -202,10 +210,20 @@ static void commit_action(void)
     strlcpy(action.action, ui.action, sizeof(action.action));
     strlcpy(action.unit, ui.unit, sizeof(action.unit));
     strlcpy(action.session, ui.session, sizeof(action.session));
+    uint64_t nonce;
+    esp_fill_random(&nonce, sizeof(nonce));
+    snprintf(action.request_id, sizeof(action.request_id), "%016" PRIx64 "-%" PRIu64, nonce, action.token.attempt);
     if (xQueueSend(actions, &action, 0) == pdTRUE) {
+        ui.last_action = action.token;
+        ui.confirmed_value = action.value;
+        ui.action_completed = false;
+        ui.action_succeeded = false;
+        ui.action_message[0] = '\0';
+        strlcpy(ui.request_id, action.request_id, sizeof(ui.request_id));
         lv_label_set_text(ui.footer, "Sending action...");
     } else {
         dial_action_complete(&action_state, action.token);
+        dial_action_resolve(&action_state, action.token);
         lv_label_set_text(ui.footer, "Action busy");
     }
     xSemaphoreGive(action_lock);
@@ -234,6 +252,7 @@ static void refresh_ui(lv_timer_t *timer)
     xSemaphoreTake(action_lock, portMAX_DELAY);
     action_result_t result;
     if (xQueueReceive(results, &result, 0) == pdTRUE && dial_action_complete(&action_state, result.token)) {
+        if (!result.ok) dial_action_resolve(&action_state, result.token);
         lv_label_set_text(ui.footer, result.ok ? "Action sent" : "Action failed; press to retry");
     }
     static uint32_t last_connection;
@@ -347,6 +366,16 @@ static cJSON *status_payload(void)
     xSemaphoreTake(action_lock, portMAX_DELAY);
     cJSON_AddBoolToObject(result, "actionConfigured", action_state.configured_uri != NULL);
     cJSON_AddBoolToObject(result, "actionPending", action_state.pending_attempt != 0);
+    if (ui.request_id[0] != '\0' && ui.last_action.connection_id == action_state.connection_id &&
+        (action_state.result_attempt == ui.last_action.attempt || ui.action_completed)) {
+        cJSON_AddStringToObject(result, "requestId", ui.request_id);
+        cJSON_AddNumberToObject(result, "confirmedValue", ui.confirmed_value);
+        cJSON_AddBoolToObject(result, "actionCompleted", ui.action_completed);
+        if (ui.action_completed) {
+            cJSON_AddBoolToObject(result, "actionSucceeded", ui.action_succeeded);
+            cJSON_AddStringToObject(result, "actionMessage", ui.action_message);
+        }
+    }
     xSemaphoreGive(action_lock);
     cJSON_AddStringToObject(result, "mood", ui.mood);
     cJSON_AddNumberToObject(result, "width", 240);
@@ -405,6 +434,30 @@ static esp_err_t handle_command(esp_openclaw_node_handle_t client, void *context
             err = bsp_display_brightness_set(percent);
             if (err == ESP_OK) ui.brightness = percent;
         }
+    } else if (strcmp(command, "dial.complete") == 0) {
+        const char *fields[] = {"requestId", "success", "text"};
+        const char *request_id, *text;
+        cJSON *success = cJSON_GetObjectItemCaseSensitive(params, "success");
+        if (!only_fields(params, fields, 3) || !text_field(params, "requestId", 47, &request_id) ||
+            !text_field(params, "text", 128, &text) || !cJSON_IsBool(success)) {
+            err = invalid(error, "dial.complete needs requestId, boolean success, and text (up to 128 bytes)");
+        } else {
+            xSemaphoreTake(action_lock, portMAX_DELAY);
+            if (invocation == NULL || invocation->session_key == NULL ||
+                strcmp(invocation->session_key, ui.session) != 0 ||
+                strcmp(request_id, ui.request_id) != 0 ||
+                !dial_action_resolve(&action_state, ui.last_action)) {
+                error->code = "UNAVAILABLE";
+                error->message = "the press is no longer current or belongs to another agent session";
+                err = ESP_ERR_INVALID_STATE;
+            } else {
+                ui.action_completed = true;
+                ui.action_succeeded = cJSON_IsTrue(success);
+                strlcpy(ui.action_message, text, sizeof(ui.action_message));
+                lv_label_set_text(ui.footer, text[0] != '\0' ? text : ui.action_succeeded ? "Action complete" : "Action failed");
+            }
+            xSemaphoreGive(action_lock);
+        }
     } else if (strcmp(command, "dial.configure") == 0) {
         const char *fields[] = {"label", "min", "max", "step", "value", "unit", "action"};
         const char *name, *unit = "", *action = "";
@@ -428,6 +481,8 @@ static esp_err_t handle_command(esp_openclaw_node_handle_t client, void *context
                 err = ESP_ERR_INVALID_STATE;
             } else {
                 ui.control = control;
+                ui.request_id[0] = '\0';
+                ui.action_completed = false;
                 strlcpy(ui.label, name, sizeof(ui.label));
                 strlcpy(ui.unit, unit, sizeof(ui.unit));
                 strlcpy(ui.action, action, sizeof(ui.action));

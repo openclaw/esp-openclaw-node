@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Count discarded AFE input frames as errors and expose capture-read and fetch timing in room/watch audio diagnostics.
+
 - Reduce watch voice-call display load by skipping unchanged mascot redraws, resting large image transforms during calls, and separating audio codec work from display timing.
 
 - Defer room/watch call-timeout cancellation and logging to the Talk worker, preventing timer-service stack exhaustion while preserving stale-call protection.

@@ -58,6 +58,11 @@ live**; it does not infer speech playback from the connection state. Missing
 clock and battery telemetry are omitted. The display still sleeps when idle;
 waking it does not start a conversation. Idle, setup and error views keep static
 mascot artwork without running the animation timer; wake-up hints still animate.
+When a retained reader is available, Home shows its agent and **Continue
+conversations** above the separate Talk button. Continue restores the reader
+without changing the next Talk agent; a reader changed during the tap is not
+opened. Without a reader, a selected next-Talk agent appears in the compact
+headline. Setup, errors, and active calls take priority over the Continue card.
 Agents shows local fox and lobster artwork for configured 🦊 and 🦞 identities,
 with an ASCII symbol or name initials for other identities. The same avatar
 appears in the list and detail view; it does not change agent routing.

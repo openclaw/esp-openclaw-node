@@ -936,6 +936,11 @@ void host_release_resources(void)
 
 void room_ui_set_conversation_handler(void (*handler)(room_ui_conversation_action_t, const char *, unsigned, size_t, unsigned)) { (void)handler; }
 bool room_ui_wants_conversations(void) { return false; }
+void room_ui_store_conversation_context(const room_conversation_context_t *context)
+{
+    host_require(mutex_depth == 0 && host.critical_depth == 0, "Home context publishes outside owner locks");
+    (void)context;
+}
 void room_ui_store_conversations(const room_conversations_snapshot_t *snapshot, unsigned generation) { (void)snapshot; (void)generation; }
 void room_ui_conversations_failed(unsigned generation) { (void)generation; }
 

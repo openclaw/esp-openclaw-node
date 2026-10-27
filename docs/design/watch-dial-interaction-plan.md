@@ -1,6 +1,6 @@
 # Watch and Dial: interaction plan
 
-**Revision 06 · mobile pairing, Home and Talk · design proposal · no firmware changes**
+**Revision 07 · quiet Home, mobile pairing and Talk · design proposal · no firmware changes**
 
 Start with the [interactive flow explorer](watch-dial-ux-flows.html), then use
 the [annotated layout board](watch-dial-ux-plan.html) for the spatial overview. The
@@ -81,10 +81,11 @@ the watch presents the list. Both expose every destination.
 | Activity | History / completed item | Read outcomes, incoming content and pending work with its original owner |
 | Settings | Gear | Display, connection, capabilities, local audio where present, help and recovery |
 
-Home shows the current agent and conversation, one useful recent task, and
-a capability-aware primary action. On a voice-ready watch this is Hold to talk;
-on the current Dial it is Continue, opening reply options. Both resume the same
-context. Live conversation is a separate explicit mode. The Dial's encoder is an
+Home shows the selected agent, a quiet lobster, one short status line and
+a capability-aware primary action. Conversation titles, previews and device
+shortcuts live in their destinations behind Menu. On a voice-ready watch the
+primary action is Hold to talk; on the current Dial it is Continue, opening the
+current conversation. Both resume the same context. Live conversation is a separate explicit mode. The Dial's encoder is an
 input method for the same navigation and actions, not a reason to remove agent
 selection or conversations. Help is within Settings on both devices.
 
@@ -150,25 +151,59 @@ budgets to test on hardware, not claims about accessible physical size.
 
 | Template | Header | Main region | Bottom region |
 | --- | --- | --- | --- |
-| Home / action | y34–78: 44 px | y90–364: 274 px | y376–432: one 56 px action |
+| Home | y34–78: 44 px | y96–352: 256 px | y376–432: one 56 px action |
 | Menu / choose | y34–78: 44 px | y90–432: 342 px scroll region | No fixed footer |
 | Reader / card | y34–78: 44 px | y90–432: 342 px; reserve action space only when needed | Optional 56 px content action |
 | Call | y34–78: 44 px, assistant identity | y90–364: 274 px, lobster plus truthful connection state | y376–432: End |
 | Setup / confirmation | y34–78: 44 px, step or consequence | y90–364: 274 px, explanation and target | y376–432: primary action; Back/Cancel in header |
 
-Home uses a 44 px agent switcher, a 121 px mascot/state region, one 64 px recent
-item and a short row of Threads, Devices and Reply shortcuts. The bottom 56 px
-Hold to talk target starts recording in place. The OpenClaw title is quiet;
-Kitsune's fox and the lobster have separate roles. A recent item is a destination,
-not a duplicate status banner. Private previews hide its content by default.
+### Quiet Home (revision 07)
 
-Home has explicit first-conversation, working, reply-ready, offline and live-call
-variants. An offline Home opens Connection but retains local navigation. A live
-call changes the primary action to Return to call, preserving explicit End.
-Dial uses the same agent and state, a smaller mascot, Threads/Devices shortcuts
-and an encoder-accessible Continue action. Turning on Home cycles Continue,
-Agents, Menu, Threads and Devices; pressing opens the focused action. Menu is
-also a labeled touch target. It does not advertise a microphone.
+Home is an entry point, not a dashboard. The previous proposal stacked a brand
+header, agent row, mascot/status, recent card, shortcuts and primary action.
+Each was defensible alone; together they competed for attention. Remove the
+brand heading, separate agent row, recent card and shortcut row. Keep all five
+menu destinations and the current conversation; moving their entry points does
+not remove their capabilities.
+
+| Region | Watch | Dial |
+| --- | --- | --- |
+| System status | y10–26, unchanged | y20–36, unchanged |
+| Agent and Menu | y34–78: avatar/name opens Agents; Menu at right | x40–200, y40–84: same two labeled controls |
+| Quiet center | y96–352: 140 px lobster, 22 px gap, one 16 px status line | y88–183: 68 px lobster, 5 px gap, one 13 px status line |
+| One primary action | y376–432: 56 px target | x54–186, y187–217: 30 px pill; encoder press is equivalent |
+
+Kitsune's fox identifies who handles the request. The lobster supplies product
+personality, with subtle idle motion and a reduced-motion alternative. The
+center is not another button. Do not repeat the agent, thread, brand or action
+in a second panel. Home hides conversation content by default. Opting into
+message previews replaces the reply-ready status with a bounded summary; it
+never adds another row or card.
+
+| State | Single status line | Watch action | Dial action |
+| --- | --- | --- | --- |
+| Ready | Ready | Hold to talk; Continue if voice is unavailable | Continue to current conversation |
+| First conversation | Ready when you are | Hold to talk; Continue if voice is unavailable | Start |
+| Working | Working on your request | View progress | View progress |
+| Reply | Reply ready | Read reply | Read reply |
+| Offline | OpenClaw offline | Connection | Connection |
+| Live call | Microphone active | Return to call | No call state on this hardware |
+
+The status line and action change in place; no banners or cards accumulate.
+A working request leads back to its progress instead of inviting a duplicate.
+Offline keeps Agents, Menu and local controls reachable. A live call retains
+explicit End in the call view.
+
+On the watch, hold the primary target to capture in place. On the Dial, **press
+activates the visible primary action; turn either way opens Menu**. Further
+turns move through the menu and press selects. Do not make Home a carousel of
+hidden actions. Touch can open the selected agent or Menu directly on either
+device. The explorer's control hint teaches the encoder mapping; firmware
+onboarding must teach it once without adding permanent Home instructions.
+
+This applies [Apple's watchOS guidance](https://developer.apple.com/design/human-interface-guidelines/designing-for-watchos)
+on glanceable information and brief interactions to our own device UI; it is
+not a copied platform skin.
 
 Five 64 px icon-and-label rows fit in the 342 px browse region. Comfortable
 spacing uses 68 px rows; larger text scrolls rather than hiding a destination.
@@ -180,7 +215,7 @@ the list rather than reducing their text size or clipping the selected title.
 
 Daily use must not require choosing an agent again. Continue resumes the
 last valid selected context; Talk uses that same context where available.
-Home shows a human name and conversation title;
+Home shows the selected agent; Conversations shows the current thread;
 Automatic is a real, explicit Gateway-routing choice, not a guessed agent.
 
 1. Open Agents on either device to change who handles new work, or use Home's
@@ -205,11 +240,10 @@ discover an unexplained disabled button. Settings must never grant authority.
 
 ## Dial layout and input
 
-Home presents the same agent, conversation and recent-task context as the
-watch. Turn opens the shared menu; press continues the current conversation.
-The user reaches Devices to select a control. A configured control can be
-pinned as a Home shortcut on either device; it must not replace access to the
-common menu. Pinning/persistence needs a defined owner before implementation.
+Home presents the same selected agent and single status as the watch. Turn
+opens the shared menu; press activates the visible primary action. The user
+reaches Devices to select or resume a control. Keep control pinning as a later
+option with a defined owner; it is not part of this Home proposal.
 
 Inside a numeric control editor, turn changes only the draft and press applies.
 Watch touch/slider controls submit through the same action contract. Both
@@ -225,8 +259,8 @@ selected labels may wrap to two lines and displace a neighbor.
 Short press selects; turn moves; hold returns Home. Include a Back item for
 encoder-only navigation. Touching a named item selects that item, not a
 different currently focused item. Retain menu focus on return. Exiting a
-control never sends it. A retained draft is marked on Home and can be resumed
-or explicitly discarded from Devices; a reported value stays separate.
+control never sends it. A retained draft can be resumed or explicitly
+discarded from Devices; a reported value stays separate.
 
 ### Dial spatial templates
 
@@ -317,7 +351,7 @@ only when it affects the current task and put detail under Connection / Power.
 | First use, either device | Identify device → mobile QR/BLE or an alternative → Wi-Fi → Gateway authorization → first useful action | Bad password, expired code and pending approval keep prior progress; do not claim ready from Wi-Fi alone |
 | Daily conversation, both | Wake → see agent/context → Continue → read or act; Talk where supported → result in Activity | Home/Back preserves the call; failure explains connection/audio repair; microphone privacy is real capture state |
 | Change who handles work | Agents → choose permitted agent → existing/new thread → Continue | No access keeps old context; active call requires an explicit switch; voice is offered only where available |
-| Read and resume work | Home recent card or Activity → full content → source conversation | Empty/offline content is honest; card actions retain their original owner |
+| Read and resume work | Home Read reply or Menu → Activity → full content → source conversation | Empty/offline content is honest; card actions retain their original owner |
 | Device control, both | Devices → target → edit draft → Apply → Waiting → result | Navigate while pending; retain new draft; unknown result requires checking target |
 | Reassignment, both | Devices → assignment → agent → target → preview → accepted binding | Reject/offline retains old binding; warn about already submitted work |
 | Preferences and repair | Settings → preview text/layout or repair the failed layer → return to prior task | Wi-Fi changes retain Gateway identity; re-pair clears old call, routing and grants; reset states exact consequences |
@@ -498,15 +532,15 @@ pairing is not proof of revoking the old remote identity.
 Every scene family was reviewed as a task with entry, primary action, Back,
 result and recovery. The same scene model renders both devices and the sheets.
 
-| Panes | Finding | Revision 06 decision |
+| Panes | Finding | Current decision |
 | --- | --- | --- |
-| Home, menu | Large generic status and duplicated identity; no useful glance state | Quiet brand header, agent switcher, mascot/state, one recent item, direct shortcuts, five Home variants |
+| Home, menu | Brand, agent row, recent card and shortcuts compete with the primary action | Agent/Menu header, centered lobster, one status line, one action; encoder turn opens Menu |
 | Agents and profiles | Current markers and profile actions could contradict selection | Resolve Current and Use/Conversations from the selected agent; preserve fox/cube/compass/initials |
 | Conversations | Reply required another menu; titles could drift from selection | One-hold watch reply; Dial Reply; carry selected thread and pending-turn owner separately |
 | Talk, review, replies | Similar generic panels, unclear recording time, accidental tap capture | Distinct recording stage, elapsed/cap timer, slide-up cancel, tap rejection, automatic demo transcription, recipient and unsent transcript card |
 | Live Talk | Home could lose the call affordance | Return to call; End stays deliberate; agent switch offers End & switch |
 | Finger input | Device touch support and recognition could be confused | Keep working stroke/keyboard previews; label sample recognition; preserve explicit Send |
-| Devices and Activity | A request acknowledgment can be mistaken for completion | Keep draft → waiting → reported result/unknown distinct; Home links to original result owner |
+| Devices and Activity | A request acknowledgment can be mistaken for completion | Keep draft → waiting → reported result/unknown distinct; Read reply retains its original result owner |
 | Pairing | Wi-Fi-first browser route missed mobile expectation | QR discovery plus BLE primary path, mobile companion panes, device confirmation and specific recoveries |
 | Display, input, sound | Menu summaries could retain old selections | Derive current summaries from preview values; Compact and text size remain separate |
 | Privacy and context | Home could expose conversation details | Hide previews by default; agent remains visible; no hidden rerouting of pending work |
@@ -525,7 +559,7 @@ visible now so review can cover the whole product.
 | Display | Compact / Comfortable, Standard / Larger / Largest text, brightness, Normal / Reduced motion, display sleep | Compact; readable proportional text; preview before saving; sleep must match actual wake hardware |
 | Talk & input | Hold-review-send / Live / Text only, microphone enabled/disabled, wake word, finger methods, input language | PTT proposed for watch; wake word off in PTT; Dial explains unavailable audio |
 | Sound | Speech volume, feedback on/off, deliberate audio check | Watch speech independent of mic state; Dial buzzer only, no invented volume control |
-| Privacy & alerts | Hide / show Home previews, quiet badge / sound / off, clear local previews | Hide sensitive previews; clearing local content never deletes server history |
+| Privacy & alerts | Hide / show message previews, quiet badge / sound / off, clear local previews | Hide sensitive previews; clearing local content never deletes server history |
 | Agent & context | Default agent, resume last valid thread, current conversation | Configured identity retained; no automatic agent fallback |
 | Connection | Wi-Fi status/details/change, mobile QR/BLE setup, OpenClaw status/reconnect/re-pair, granted permissions | Inspect separate layers; permissions are read-only facts |
 | Power | Battery and power-source status | Unknown today; no invented percentage or charging state |

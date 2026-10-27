@@ -1101,6 +1101,123 @@ static unsigned load_target_roster(const char *json)
     return agents_snapshot().revision;
 }
 
+static const char *conversation_page = "{\"sessions\":[{\"key\":\"agent:fixture:thread:one\",\"label\":\"One\"}],\"offset\":0,\"hasMore\":false,\"nextOffset\":null}";
+static const char *conversation_preview = "{\"previews\":[{\"key\":\"agent:fixture:thread:one\",\"status\":\"ok\",\"items\":[{\"role\":\"user\",\"text\":\"A question\"}]}]}";
+
+static room_conversations_snapshot_t conversations_snapshot(void)
+{
+    room_conversations_snapshot_t snapshot;
+    room_conversations_copy(&snapshot);
+    return snapshot;
+}
+
+static void conversations_read(void)
+{
+    unsigned revision = load_target_roster(agent_roster);
+    CHECK(room_conversations_open("fixture", revision + 1) == ESP_ERR_INVALID_STATE,
+        "stale roster cannot open a reader");
+    CHECK(room_conversations_open("unknown", revision) == ESP_ERR_INVALID_STATE,
+        "only a roster member can be read");
+    CHECK(room_conversations_open("fixture", revision) == ESP_OK, "read does not require a Talk main key");
+    host_run_task("talk_teardown");
+    CHECK(strcmp(host.reader_method, "sessions.list") == 0 &&
+        strstr(host.reader_params, "\"agentId\":\"fixture\"") != NULL &&
+        strstr(host.reader_params, "\"includeGlobal\":false") != NULL &&
+        strstr(host.reader_params, "\"limit\":8") != NULL, "bounded per-agent read contract");
+    host_reply_agents(true, conversation_page);
+    host_run_task("talk_teardown");
+    room_conversations_snapshot_t snapshot = conversations_snapshot();
+    CHECK(snapshot.state == ROOM_AGENTS_READY && snapshot.page.count == 1, "session page published");
+    CHECK(room_conversations_preview(0, snapshot.revision) == ESP_OK, "open exact page row");
+    host_run_task("talk_teardown");
+    CHECK(strcmp(host.reader_method, "sessions.preview") == 0 &&
+        strstr(host.reader_params, "agent:fixture:thread:one") != NULL &&
+        strstr(host.reader_params, "\"limit\":4") != NULL, "preview carries exact returned key");
+    host_reply_agents(true, conversation_preview);
+    host_run_task("talk_teardown");
+    snapshot = conversations_snapshot();
+    CHECK(snapshot.preview_state == ROOM_AGENTS_READY && snapshot.preview.count == 1 &&
+        strcmp(snapshot.preview.items[0].text, "A question") == 0, "preview published");
+    CHECK(!talk_target.selected && host.config_requests == 0 && host.create_requests == 0,
+        "read does not select or start Talk");
+    room_conversations_close();
+    snapshot = conversations_snapshot();
+    CHECK(snapshot.state == ROOM_AGENTS_IDLE && snapshot.page.count == 0 && snapshot.preview.count == 0,
+        "close releases all reader content");
+}
+
+static void conversations_stale(void)
+{
+    unsigned revision = load_target_roster(target_roster);
+    room_conversations_open("fixture", revision);
+    host_run_task("talk_teardown");
+    room_conversations_open("builder", revision);
+    host_reply_agents(true, conversation_page);
+    host_run_task("talk_teardown");
+    room_conversations_snapshot_t snapshot = conversations_snapshot();
+    CHECK(snapshot.state == ROOM_AGENTS_LOADING && snapshot.page.count == 0 &&
+        strcmp(snapshot.agent.id, "builder") == 0, "late old agent page cannot populate a replacement");
+    CHECK(strstr(host.reader_params, "\"agentId\":\"builder\"") != NULL, "replacement request follows old completion");
+    room_conversations_close();
+    host_reply_agents(true, "{\"sessions\":[],\"offset\":0,\"hasMore\":false,\"nextOffset\":null}");
+    host_run_task("talk_teardown");
+    CHECK(conversations_snapshot().state == ROOM_AGENTS_IDLE, "late page after Back stays closed");
+    room_conversations_open("fixture", revision);
+    host_run_task("talk_teardown");
+    host_reply_agents(true, conversation_page);
+    host_run_task("talk_teardown");
+    snapshot = conversations_snapshot();
+    room_conversations_preview(0, snapshot.revision);
+    host_run_task("talk_teardown");
+    room_agent_directory_refresh(0);
+    host_reply_agents(true, conversation_preview);
+    host_run_task("talk_teardown");
+    CHECK(conversations_snapshot().preview.count == 0, "roster replacement clears outstanding preview");
+    host_reply_agents(true, target_roster);
+    host_run_task("talk_teardown");
+    revision = agents_snapshot().revision;
+    room_conversations_open("fixture", revision);
+    host_run_task("talk_teardown");
+    host_emit_node(operator_client, ESP_OPENCLAW_NODE_EVENT_DISCONNECTED);
+    host_reply_agents(true, conversation_page);
+    host_run_task("talk_teardown");
+    CHECK(conversations_snapshot().state == ROOM_AGENTS_OFFLINE && conversations_snapshot().page.count == 0,
+        "lost owner cannot publish a stale page");
+}
+
+static void conversations_timeout_talk(void)
+{
+    unsigned revision = load_target_roster(target_roster);
+    CHECK(select_talk_agent("builder", revision) == ESP_OK, "select next Talk target");
+    room_conversations_open("fixture", revision);
+    host_run_task("talk_teardown");
+    admit();
+    host_run_task("talk_start");
+    host_reply_create(true);
+    host_emit_peer(webrtc, ESP_WEBRTC_EVENT_CONNECTED);
+    host_run_task("talk_teardown");
+    host.now_us += 16000000;
+    host_fire_directory_timer();
+    host_run_task("talk_teardown");
+    CHECK(conversations_snapshot().state == ROOM_AGENTS_TIMEOUT && talk_active && operator_ready,
+        "read timeout leaves shared Talk connection and call alive");
+    CHECK(strcmp(talk_target.id, "builder") == 0, "read leaves selected target unchanged");
+    room_conversations_refresh(0);
+    host_run_task("talk_teardown");
+    CHECK(host.conversation_requests == 1, "timeout cannot accumulate requests");
+    host_reply_agents(true, conversation_page);
+    host_run_task("talk_teardown");
+    CHECK(host.conversation_requests == 2 && conversations_snapshot().state == ROOM_AGENTS_LOADING,
+        "late completion releases the queued refresh without publishing expired content");
+    host_reply_agents(true, conversation_page);
+    host_run_task("talk_teardown");
+    CHECK(conversations_snapshot().state == ROOM_AGENTS_READY && talk_active, "new page coexists with the original call");
+    stop();
+    drain();
+    expect_closed();
+    CHECK(strcmp(host.close_key, "agent:builder:work") == 0, "stop retains the admitted Talk key");
+}
+
 static void target_selection(void)
 {
     unsigned revision = load_target_roster(target_roster);
@@ -1331,6 +1448,9 @@ static void directory_errors(void)
 }
 
 static const struct { const char *name; void (*run)(void); } cases[] = {
+    {"conversations-read", conversations_read},
+    {"conversations-stale", conversations_stale},
+    {"conversations-timeout-talk", conversations_timeout_talk},
     {"directory-ready", directory_ready},
     {"target-selection", target_selection},
     {"target-stale", target_stale},

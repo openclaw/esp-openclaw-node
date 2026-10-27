@@ -19,6 +19,15 @@ typedef struct {
     esp_openclaw_agent_page_t page;
 } room_agents_snapshot_t;
 
+typedef struct {
+    room_agents_state_t state, preview_state;
+    unsigned revision, preview_revision;
+    esp_openclaw_agent_t agent;
+    esp_openclaw_session_page_t page;
+    esp_openclaw_session_preview_t preview;
+    size_t selected;
+} room_conversations_snapshot_t;
+
 esp_err_t room_agent_directory_init(SemaphoreHandle_t owner_lock, void (*wake)(void));
 /* Called with the room owner lock held, before releasing/replacing authority. */
 void room_agent_directory_set_owner_locked(esp_openclaw_node_handle_t client,
@@ -26,6 +35,12 @@ void room_agent_directory_set_owner_locked(esp_openclaw_node_handle_t client,
 esp_err_t room_agent_directory_refresh(size_t offset);
 void room_agent_directory_cancel(void);
 void room_agent_directory_copy(room_agents_snapshot_t *snapshot);
+/* Browsing never changes the current or next Talk target. */
+esp_err_t room_conversations_open(const char *agent_id, unsigned agents_revision);
+esp_err_t room_conversations_refresh(size_t offset);
+esp_err_t room_conversations_preview(size_t index, unsigned revision);
+void room_conversations_close(void);
+void room_conversations_copy(room_conversations_snapshot_t *snapshot);
 typedef struct {
     esp_openclaw_agent_t agent;
     char main_key[129];

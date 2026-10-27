@@ -1161,10 +1161,18 @@ static void directory_cancel(void)
 {
     room_agent_directory_refresh(0);
     host_run_task("talk_teardown");
+    host_reply_agents(true, agent_roster);
+    host_run_task("talk_teardown");
+    CHECK(host.agents_state == ROOM_AGENTS_READY, "ready roster reaches display");
+    room_agent_directory_cancel();
+    host_run_task("talk_teardown");
+    CHECK(host.agents_state == ROOM_AGENTS_IDLE, "cancel publishes paused state without another event");
+    room_agent_directory_refresh(0);
+    host_run_task("talk_teardown");
     room_agent_directory_cancel();
     host_reply_agents(true, agent_roster);
     host_run_task("talk_teardown");
-    CHECK(agents_snapshot().state == ROOM_AGENTS_IDLE && host.agent_requests == 1 && operator_ready,
+    CHECK(agents_snapshot().state == ROOM_AGENTS_IDLE && host.agent_requests == 2 && operator_ready,
         "leaving directory discards late reply without closing shared connection");
 }
 

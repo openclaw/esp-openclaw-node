@@ -21,6 +21,7 @@ typedef struct {
     char speech_params[1536];
     unsigned scope_requests, token_connects;
     unsigned agent_requests;
+    room_agents_state_t agents_state;
     bool fail_agent_submit;
     int64_t now_us;
     char scope_method[40], scope_params[256], token_value[80], token_uri[256];

@@ -769,7 +769,7 @@ void room_ui_set(room_ui_state_t state, const char *detail)
 { (void)detail; host.ui = state; }
 void room_ui_store_facts(const room_ui_facts_t *facts) { host.home = *facts; }
 void room_ui_set_agents_action_handler(void (*handler)(bool, size_t)) { (void)handler; }
-void room_ui_store_agents(const room_agents_snapshot_t *snapshot) { (void)snapshot; }
+void room_ui_store_agents(const room_agents_snapshot_t *snapshot) { host.agents_state = snapshot->state; }
 void room_ui_refresh(void) {}
 esp_err_t room_ui_watch_menu(const char *page) { (void)page; return ESP_ERR_INVALID_STATE; }
 const char *WIFI_EVENT = "wifi";

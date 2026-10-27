@@ -10,6 +10,7 @@ import tempfile
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--lvgl-dir", type=Path, required=True)
+    parser.add_argument("--snapshot-prefix", type=Path)
     args = parser.parse_args()
     lvgl = args.lvgl_dir.resolve()
     tests = Path(__file__).resolve().parent
@@ -30,7 +31,7 @@ def main():
             *map(str, sorted((lvgl / "src").rglob("*.c"))), "-lm", "-o", str(binary),
         ]
         subprocess.run(command, check=True)
-        subprocess.run([str(binary)], check=True)
+        subprocess.run([str(binary), *([str(args.snapshot_prefix)] if args.snapshot_prefix else [])], check=True)
 
 
 if __name__ == "__main__":

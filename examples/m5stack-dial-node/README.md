@@ -231,4 +231,15 @@ the session assigned by `dial.configure` nor sends a message. Opening requires
 a current agent-directory row; reconnects, a new roster, and leaving the
 browser invalidate old replies. Missing previews remain distinct from empty
 transcripts. Pages and previews share a single bounded request slot and its
-15-second response deadline. The on-screen browser is a subsequent UI slice.
+15-second response deadline.
+Open **Agents**, choose an agent, then press **Conversations**. Turn the dial to
+choose a row and press to read its preview. In the preview, turning scrolls;
+pressing or tapping Back returns to the selected row. Back from the list returns
+to that agent. Holding still returns Home. A drag scrolls without selecting.
+Loading, empty, missing, offline and failed reads replace the previous content.
+
+For a remotely selected USB browser context, `display.menu` also accepts
+`{"page":"conversations"}` and `{"page":"preview"}`. These show the current
+validated selection; they do not choose a new agent or conversation. A preview
+is read-only and limited to the Gateway's returned messages, not a full chat
+history or a reply composer.

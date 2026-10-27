@@ -1151,6 +1151,35 @@ static void target_stale(void)
     connect_call();
 }
 
+static void target_default(void)
+{
+    unsigned revision = load_target_roster(target_roster);
+    CHECK(select_talk_agent("builder", revision) == ESP_OK, "select explicit agent");
+    admit();
+    host_run_task("talk_start");
+    host_reply_create(true);
+    host_emit_peer(webrtc, ESP_WEBRTC_EVENT_CONNECTED);
+    host_run_task("talk_teardown");
+    unsigned refreshes = host.ui_refreshes;
+    request_local_agent_selection("", 0);
+    CHECK(talk_target.selected, "default request waits for the owner");
+    host_run_task("talk_teardown");
+    CHECK(!talk_target.selected && !host.ui_target.selected && host.selection_result == ESP_OK &&
+        host.ui_refreshes > refreshes, "owner acknowledges, clears and publishes default routing");
+    CHECK(talk_active && strcmp(host.create_key, "agent:builder:work") == 0,
+        "default selection leaves the current call with its admitted agent");
+    host_command(node_client, "talk.stop");
+    host_run_task("talk_teardown");
+    CHECK(strcmp(host.close_key, "agent:builder:work") == 0, "close preserves the original agent");
+    admit();
+    host_run_task("talk_start");
+    CHECK(host.config_requests == 1, "the next call asks the Gateway for its default");
+    host_reply_config();
+    CHECK(strcmp(host.create_key, "agent:fixture:main") == 0, "the next call uses Gateway default routing");
+    host_reply_create(true);
+    host_emit_peer(webrtc, ESP_WEBRTC_EVENT_CONNECTED);
+}
+
 static void target_metadata(void)
 {
     unsigned revision = load_target_roster(agent_roster);
@@ -1305,6 +1334,7 @@ static const struct { const char *name; void (*run)(void); } cases[] = {
     {"directory-ready", directory_ready},
     {"target-selection", target_selection},
     {"target-stale", target_stale},
+    {"target-default", target_default},
     {"target-metadata", target_metadata},
     {"target-origin", target_origin},
     {"directory-reconnect", directory_reconnect},

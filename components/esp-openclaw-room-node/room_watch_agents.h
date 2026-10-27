@@ -4,10 +4,10 @@
 #include "lvgl.h"
 
 enum {
-    ROOM_AGENT_CHOOSE = -5, ROOM_AGENT_BACK, ROOM_AGENT_PREVIOUS, ROOM_AGENT_NEXT, ROOM_AGENT_REFRESH,
+    ROOM_AGENT_DEFAULT = -6, ROOM_AGENT_CHOOSE, ROOM_AGENT_BACK, ROOM_AGENT_PREVIOUS, ROOM_AGENT_NEXT, ROOM_AGENT_REFRESH,
 };
 
-typedef enum { ROOM_AGENT_STAY, ROOM_AGENT_LEAVE, ROOM_AGENT_LOAD, ROOM_AGENT_SELECT_TARGET } room_agent_action_t;
+typedef enum { ROOM_AGENT_STAY, ROOM_AGENT_LEAVE, ROOM_AGENT_LOAD, ROOM_AGENT_SELECT_TARGET, ROOM_AGENT_RESET_TARGET } room_agent_action_t;
 
 void room_watch_agents_create(lv_obj_t *parent, lv_event_cb_t handler);
 void room_watch_agents_reset(void);

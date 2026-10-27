@@ -67,7 +67,8 @@ void room_ui_set_talk_action_handler(void (*handler)(bool start));
 void room_ui_set_agents_action_handler(void (*handler)(bool open, size_t offset));
 /** Copy a directory result outside the room owner lock; repaint retries on contention. */
 void room_ui_store_agents(const room_agents_snapshot_t *snapshot);
-/** Selection intent is copied by the owner; this callback must not wait for it. */
+/** Selection intent is copied by the owner; this callback must not wait for it.
+ * An empty ID explicitly restores Gateway-default routing for the next call. */
 void room_ui_set_agent_selection_handler(void (*handler)(const char *id, unsigned revision));
 void room_ui_store_talk_target(const room_ui_talk_target_t *target);
 /** Acknowledge only after the owner has accepted or rejected the selection. */

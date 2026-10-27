@@ -42,8 +42,10 @@ confirms the choice after the room owner accepts it; Home shows the next
 agent. While selection is pending, Start Talk is disabled. A lost operator
 connection expires the choice and disables Start until an agent is chosen
 again, or USB `agents default` restores Gateway-default routing.
-Loading, offline, empty, denied, oversized, and timed-out requests have visible
-outcomes. USB `menu agents` opens this screen for hardware inspection.
+Returning Home keeps the screen awake for ten seconds before the configured
+idle display policy resumes. Loading, offline, empty, denied, oversized, and
+timed-out requests have visible outcomes. USB `menu agents` opens this screen
+for hardware inspection.
 
 The local USB command `agents refresh [offset]` reads a page of up to eight
 agents through the existing operator connection. `agents` reports its state

@@ -17,6 +17,8 @@
 #include "room_watch_agents.h"
 
 static bool watch_navigation_active(void);
+static void start_text_hint(uint32_t show_ms);
+static void room_ui_paint_and_unlock(void);
 
 /* Tap toggles retained Canvas content; hold opens local diagnostics. */
 static void room_ui_status_clicked(lv_event_t *event)
@@ -171,14 +173,15 @@ static esp_err_t watch_navigation_show(room_watch_page_t page)
     taskENTER_CRITICAL(&state_mux);
     bool leaving_agents = watch_page == ROOM_WATCH_AGENTS && page != ROOM_WATCH_AGENTS;
     bool entering_agents = watch_page != ROOM_WATCH_AGENTS && page == ROOM_WATCH_AGENTS;
+    bool wake_home = page == ROOM_WATCH_HOME;
     watch_page = show_canvas ? ROOM_WATCH_HOME : page;
     pressed_watch_page = -1;
     pressed_talk_action = TALK_CONTROL_NONE;
     taskEXIT_CRITICAL(&state_mux);
     if (entering_agents) { room_watch_agents_reset(); request_agents_page(0); }
     if (leaving_agents && agents_action_handler != NULL) agents_action_handler(false, 0);
-    room_board_display_unlock();
-    room_ui_refresh();
+    if (wake_home) start_text_hint(10000);
+    room_ui_paint_and_unlock();
     return ESP_OK;
 }
 
@@ -423,6 +426,31 @@ static void text_hint_expired(void *arg)
     room_ui_refresh();
 }
 
+static void start_text_hint(uint32_t show_ms)
+{
+    taskENTER_CRITICAL(&state_mux);
+    text_hint_active = true;
+    taskEXIT_CRITICAL(&state_mux);
+    if (text_hint_timer == NULL) {
+        const esp_timer_create_args_t args = {
+            .callback = text_hint_expired,
+            .name = "text_hint",
+        };
+        (void)esp_timer_create(&args, &text_hint_timer);
+    }
+    bool timer_started = false;
+    if (text_hint_timer != NULL) {
+        (void)esp_timer_stop(text_hint_timer);
+        timer_started = esp_timer_start_once(
+            text_hint_timer, (uint64_t)show_ms * 1000U) == ESP_OK;
+    }
+    if (!timer_started) {
+        taskENTER_CRITICAL(&state_mux);
+        text_hint_active = false;
+        taskEXIT_CRITICAL(&state_mux);
+    }
+}
+
 static bool controller_canvas_active(void)
 {
     return room_canvas_is_active();
@@ -572,8 +600,9 @@ static int room_ui_target_brightness(room_ui_state_t state, bool canvas_active)
     bool camera = camera_indicator_active;
     bool navigation = watch_home_enabled && watch_page != ROOM_WATCH_HOME;
     taskEXIT_CRITICAL(&state_mux);
+    int idle_level = text_hint ? (watch_home_enabled ? 40 : 18) : idle_brightness;
     int brightness = overlay || canvas_active || navigation ? ROOM_CANVAS_ACTIVE_BRIGHTNESS
-        : state == ROOM_UI_IDLE ? (text_hint ? 18 : idle_brightness)
+        : state == ROOM_UI_IDLE ? idle_level
         : room_ui_state_uses_face(state) ? 40 : 18;
     return camera && brightness < ROOM_UI_CAMERA_MIN_BRIGHTNESS
         ? ROOM_UI_CAMERA_MIN_BRIGHTNESS : brightness;
@@ -777,16 +806,19 @@ void room_ui_show_face_hint(uint32_t show_ms)
     if (status_label == NULL) {
         return;
     }
+    /* A Watch wake must survive display contention and static Home repaints. */
+    bool watch_hint = watch_home_enabled && !watch_navigation_active();
+    if (watch_hint) start_text_hint(show_ms);
     if (!room_board_display_lock(100)) {
+        if (watch_hint) arm_repaint_retry();
         return;
     }
     if (watch_navigation_active()) {
         room_ui_paint_and_unlock();
         return;
     }
-    /* The face tick owns the hint lifetime (expiry triggers a refresh), so
-     * there is no second timer to race against; re-arming just moves the
-     * deadline the tick reads under the same LVGL lock. */
+    /* Animated-only boards keep the face-owned lifetime. The Watch's static
+     * Home and text fallback use the controller-owned wake timer. */
     room_face_show_hint(esp_timer_get_time() + (int64_t)show_ms * 1000);
     /* If face creation failed at boot the show is a no-op; keep the text
      * status instead of leaving a blank lit panel for the hold duration. */
@@ -806,36 +838,16 @@ void room_ui_show_face_hint(uint32_t show_ms)
                 lv_obj_move_foreground(gateway_label);
             }
         }
-    } else {
-        taskENTER_CRITICAL(&state_mux);
-        text_hint_active = true;
-        taskEXIT_CRITICAL(&state_mux);
+    }
+    if (!shown) {
+        if (!watch_hint) start_text_hint(show_ms);
         (void)room_ui_render_locked();
     }
     room_board_display_unlock();
     if (shown) {
         room_board_display_brightness_set(40);
-    } else {
-        if (text_hint_timer == NULL) {
-            const esp_timer_create_args_t args = {
-                .callback = text_hint_expired,
-                .name = "text_hint",
-            };
-            (void)esp_timer_create(&args, &text_hint_timer);
-        }
-        bool timer_started = false;
-        if (text_hint_timer != NULL) {
-            (void)esp_timer_stop(text_hint_timer);
-            timer_started = esp_timer_start_once(
-                text_hint_timer, (uint64_t)show_ms * 1000U) == ESP_OK;
-        }
-        if (!timer_started) {
-            taskENTER_CRITICAL(&state_mux);
-            text_hint_active = false;
-            taskEXIT_CRITICAL(&state_mux);
-        }
-        room_ui_refresh();
     }
+    if (!shown) room_ui_refresh();
 }
 
 void room_ui_refresh(void)

@@ -204,6 +204,11 @@ static lv_obj_t *find_visible_text(lv_obj_t *parent, const char *text)
     }
     return NULL;
 }
+static bool visible_watch_text(const char *text)
+{
+    lv_obj_update_layout(lv_layer_top());
+    return find_visible_text(lv_layer_top(), text) != NULL;
+}
 static void talk_action(bool start)
 {
     if (start) ++talk_starts;
@@ -695,10 +700,22 @@ static void check_watch_agents(const char *path)
     room_ui_agent_selection_complete(ESP_OK);
     room_ui_refresh();
     assert(lv_obj_is_visible(find_text(lv_layer_top(), "Selected for next Talk")));
+    assert(visible_watch_text("with Kitsune"));
     assert(talk_starts == starts);
     if (path) { snprintf(output, sizeof(output), "%s-agent-detail.ppm", path); write_frame(output); }
-    // Changing the target cancels a held Start press; release cannot start a different agent.
+    // A new press cannot use a changed recipient before the button is repainted.
     lv_obj_t *start = lv_obj_get_parent(find_text(lv_layer_top(), "Start Talk"));
+    strcpy(target.name, "Builder");
+    strcpy(target.id, "builder");
+    room_ui_store_talk_target(&target);
+    click_talk(start);
+    assert(talk_starts == starts);
+    assert(visible_watch_text("with Kitsune"));
+    strcpy(target.name, "Kitsune");
+    strcpy(target.id, "agent-0");
+    room_ui_store_talk_target(&target);
+    room_ui_refresh();
+    // Changing the target also cancels a held Start press.
     touch_talk(start, true);
     target.expired = true;
     room_ui_store_talk_target(&target);
@@ -706,11 +723,13 @@ static void check_watch_agents(const char *path)
     touch_talk(start, false);
     assert(talk_starts == starts);
     assert(lv_obj_is_visible(find_text(lv_layer_top(), "Choose an agent")));
+    assert(!visible_watch_text("with Kitsune"));
     target.expired = false;
     room_ui_store_talk_target(&target);
     facts.talk = ROOM_UI_TALK_ACTIVE;
     room_ui_store_facts(&facts);
     room_ui_refresh();
+    assert(!visible_watch_text("with Kitsune"));
     unsigned stops = talk_stops;
     click_talk(lv_obj_get_parent(find_text(lv_layer_top(), "Stop Talk")));
     assert(talk_stops == stops + 1);
@@ -803,14 +822,9 @@ static void check_watch_agents(const char *path)
     assert(agent_selections == selections + 1);
     assert(lv_obj_is_visible(find_text(lv_layer_top(), "Start Talk")));
     assert(room_ui_watch_menu("home") == ESP_OK);
+    assert(visible_watch_text("with default agent"));
     assert(lv_obj_is_visible(find_text(lv_layer_top(), "Tap to start a live conversation")));
     puts("watch agents: acknowledged selection, next-call identity, paging and fenced pointer input passed");
-}
-
-static bool visible_watch_text(const char *text)
-{
-    lv_obj_update_layout(lv_layer_top());
-    return find_visible_text(lv_layer_top(), text) != NULL;
 }
 
 static void check_watch_conversations(const char *path)
@@ -910,12 +924,31 @@ static void check_watch_conversations(const char *path)
     lv_obj_t *continue_hint = find_text(lv_layer_top(), "Continue conversations");
     lv_obj_t *continue_card = lv_obj_get_parent(continue_hint);
     assert(lv_obj_is_visible(continue_hint));
+    assert(visible_watch_text("with Builder"));
     lv_area_t card_area, home_talk_area;
     lv_obj_update_layout(lv_layer_top());
     lv_obj_get_coords(continue_card, &card_area);
     lv_obj_get_coords(lv_obj_get_parent(find_text(lv_layer_top(), "Start Talk")), &home_talk_area);
     assert(card_area.y1 >= 304 && card_area.y2 < home_talk_area.y1);
     if (path) { snprintf(output, sizeof(output), "%s-home-continue.ppm", path); write_frame(output); }
+    lv_obj_t *talk_target = find_visible_text(lv_layer_top(), "with Builder");
+    assert(talk_target != NULL);
+    strcpy(target.name, "A very long agent name for the next live conversation");
+    room_ui_store_talk_target(&target);
+    room_ui_refresh();
+    lv_obj_update_layout(lv_layer_top());
+    assert(lv_obj_is_visible(talk_target));
+    assert(strncmp(lv_label_get_text(talk_target), "with A very", 11) == 0);
+    lv_area_t target_area, action_area;
+    lv_obj_get_coords(talk_target, &target_area);
+    lv_obj_get_coords(find_text(lv_layer_top(), "Start Talk"), &action_area);
+    assert(lv_area_get_height(&target_area) <= 18 && target_area.y1 > action_area.y2);
+    assert(target_area.x1 > home_talk_area.x1 && target_area.x2 < home_talk_area.x2);
+    assert(target_area.y2 < home_talk_area.y2);
+    if (path) { snprintf(output, sizeof(output), "%s-home-talk-long-name.ppm", path); write_frame(output); }
+    strcpy(target.name, "Builder");
+    room_ui_store_talk_target(&target);
+    room_ui_refresh();
     strcpy(context.agent_name, "A very long agent name for this small watch display");
     room_ui_store_conversation_context(&context);
     lv_obj_update_layout(lv_layer_top());

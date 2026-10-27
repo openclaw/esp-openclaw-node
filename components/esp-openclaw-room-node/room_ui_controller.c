@@ -2,6 +2,7 @@
 
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -48,6 +49,7 @@ static lv_obj_t *home_talk;
 static lv_obj_t *home_detail;
 static lv_obj_t *talk_pill;
 static lv_obj_t *talk_pill_label;
+static lv_obj_t *talk_target_label;
 static lv_obj_t *camera_indicator;
 static bool animated_face_enabled;
 static bool watch_home_enabled;
@@ -79,6 +81,8 @@ static int pressed_watch_page = -1;
 static void (*agents_action_handler)(bool open, size_t offset);
 static room_agents_snapshot_t current_agents, painted_agents;
 static room_ui_talk_target_t current_target;
+/* A changed recipient must reach the display before accepting a new Start. */
+static unsigned target_revision, painted_target_revision;
 static bool selection_pending, selection_failed;
 static void (*agent_selection_handler)(const char *id, unsigned revision);
 static int pressed_agent_action = -100;
@@ -199,6 +203,7 @@ void room_ui_store_talk_target(const room_ui_talk_target_t *target)
     if (target->selected != current_target.selected || target->expired != current_target.expired ||
         strcmp(target->id, current_target.id) != 0 || strcmp(target->name, current_target.name) != 0) {
         current_target = *target;
+        ++target_revision;
         pressed_talk_action = TALK_CONTROL_NONE;
     }
     taskEXIT_CRITICAL(&state_mux);
@@ -604,7 +609,8 @@ static void talk_control_clicked(lv_event_t *event)
     taskENTER_CRITICAL(&state_mux);
     talk_control_action_t action = talk_control_action(current_facts.talk);
     if (code == LV_EVENT_PRESSED) {
-        pressed_talk_action = !wake && !diagnostics_open && action == painted_talk_action
+        bool target_current = action != TALK_CONTROL_START || target_revision == painted_target_revision;
+        pressed_talk_action = !wake && !diagnostics_open && target_current && action == painted_talk_action
             ? action : TALK_CONTROL_NONE;
     } else {
         if (code == LV_EVENT_SHORT_CLICKED && !diagnostics_open && pressed_talk_action == action) {
@@ -887,6 +893,17 @@ void room_ui_init(void)
         lv_obj_set_style_text_font(talk_pill_label, &lv_font_montserrat_14, 0);
         lv_obj_clear_flag(talk_pill_label, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_center(talk_pill_label);
+        if (watch_home_enabled) {
+            talk_target_label = lv_label_create(talk_pill);
+            lv_obj_set_size(talk_target_label, 280, 18);
+            lv_label_set_long_mode(talk_target_label, LV_LABEL_LONG_DOT);
+            lv_obj_set_style_text_font(talk_target_label, &lv_font_montserrat_14, 0);
+            lv_obj_set_style_text_align(talk_target_label, LV_TEXT_ALIGN_CENTER, 0);
+            lv_obj_set_style_text_color(talk_target_label, lv_color_hex(0x66596a), 0);
+            lv_obj_set_clickable(talk_target_label, false);
+            lv_obj_align(talk_target_label, LV_ALIGN_TOP_MID, 0, 29);
+            lv_obj_set_hidden(talk_target_label, true);
+        }
     }
     room_board_display_unlock();
     room_ui_refresh();
@@ -979,6 +996,7 @@ static bool room_ui_render_locked(void)
     bool overlay = diagnostics_open;
     room_ui_facts_t facts = current_facts;
     room_ui_talk_target_t target = current_target;
+    unsigned recipient_revision = target_revision;
     room_conversation_context_t reader_context = current_reader_context;
     bool selecting = selection_pending, selection_error = selection_failed;
     room_watch_page_t page = watch_page;
@@ -1040,6 +1058,25 @@ static bool room_ui_render_locked(void)
         lv_label_set_text(talk_pill_label, start ? "Start Talk" : stop ? "Stop Talk"
             : selecting ? "Choosing agent..." : target.expired ? "Choose an agent" :
             facts.talk == ROOM_UI_TALK_STOPPING ? "Stopping..." : "Talk unavailable");
+        if (talk_target_label != NULL) {
+            bool show_target = start && !canvas_active;
+            lv_obj_set_hidden(talk_target_label, !show_target);
+            lv_obj_set_style_text_font(talk_pill_label, &lv_font_montserrat_14, 0);
+            if (show_target) {
+                char recipient[80];
+                snprintf(recipient, sizeof(recipient), "with %s", target.selected ? target.name : "default agent");
+                lv_label_set_text(talk_target_label, recipient);
+#if LV_FONT_MONTSERRAT_20
+                lv_obj_set_style_text_font(talk_pill_label, &lv_font_montserrat_20, 0);
+#endif
+                lv_obj_align(talk_pill_label, LV_ALIGN_TOP_MID, 0, 3);
+            } else {
+                lv_obj_center(talk_pill_label);
+            }
+        }
+        taskENTER_CRITICAL(&state_mux);
+        painted_target_revision = recipient_revision;
+        taskEXIT_CRITICAL(&state_mux);
         lv_obj_set_state(talk_pill, LV_STATE_DISABLED, !start && !stop);
         lv_obj_set_flag(talk_pill, LV_OBJ_FLAG_HIDDEN, overlay);
         if (!overlay) lv_obj_move_foreground(talk_pill);

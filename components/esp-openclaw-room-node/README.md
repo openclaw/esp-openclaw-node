@@ -32,6 +32,14 @@ display; tap the visible control again to start or stop Talk. If the
 button's action changes during a press, release and press again; a held Start
 press cannot become Stop when wake word or a remote command starts Talk.
 
+On the 1.8-inch Watch, **Menu → Agents** opens the same read-only directory.
+Swipe the list to browse up to eight agents per page; use the arrows for more
+pages, and tap a row to inspect its name and exact ID. Initials replace emoji
+that the embedded font cannot display. Back returns to the list or menu, and
+Start Talk / Stop Talk remains available without changing the conversation.
+Loading, offline, empty, denied, oversized, and timed-out requests have visible
+outcomes. USB `menu agents` opens this screen for hardware inspection.
+
 The local USB command `agents refresh [offset]` reads a page of up to eight
 agents through the existing operator connection. `agents` reports its state
 and copied identities; `agents close` releases the page. This is read-only:

@@ -14,6 +14,7 @@
 #include "room_board.h"
 #include "room_watch_home.h"
 #include "room_watch_navigation.h"
+#include "room_watch_agents.h"
 
 static bool watch_navigation_active(void);
 
@@ -68,6 +69,40 @@ static talk_control_action_t painted_talk_action;
 static talk_control_action_t pressed_talk_action;
 static room_watch_page_t watch_page = ROOM_WATCH_HOME;
 static int pressed_watch_page = -1;
+static void (*agents_action_handler)(bool open, size_t offset);
+static room_agents_snapshot_t current_agents, painted_agents;
+static int pressed_agent_action = -100;
+static unsigned pressed_agent_revision;
+static room_agents_state_t pressed_agent_state;
+
+void room_ui_set_agents_action_handler(void (*handler)(bool open, size_t offset))
+{
+    agents_action_handler = handler;
+}
+
+void room_ui_store_agents(const room_agents_snapshot_t *snapshot)
+{
+    taskENTER_CRITICAL(&state_mux);
+    bool changed = current_agents.revision != snapshot->revision || current_agents.state != snapshot->state;
+    if (changed) {
+        current_agents = *snapshot;
+        pressed_agent_action = -100;
+    }
+    taskEXIT_CRITICAL(&state_mux);
+    if (changed) room_ui_refresh();
+}
+
+static void request_agents_page(size_t offset)
+{
+    taskENTER_CRITICAL(&state_mux);
+    current_agents.state = ROOM_AGENTS_LOADING;
+    memset(&current_agents.page, 0, sizeof(current_agents.page));
+    current_agents.page.offset = offset;
+    pressed_agent_action = -100;
+    taskEXIT_CRITICAL(&state_mux);
+    if (agents_action_handler != NULL) agents_action_handler(true, offset);
+}
+
 
 static bool watch_navigation_active(void)
 {
@@ -106,10 +141,14 @@ static esp_err_t watch_navigation_show(room_watch_page_t page)
         }
     }
     taskENTER_CRITICAL(&state_mux);
+    bool leaving_agents = watch_page == ROOM_WATCH_AGENTS && page != ROOM_WATCH_AGENTS;
+    bool entering_agents = watch_page != ROOM_WATCH_AGENTS && page == ROOM_WATCH_AGENTS;
     watch_page = show_canvas ? ROOM_WATCH_HOME : page;
     pressed_watch_page = -1;
     pressed_talk_action = TALK_CONTROL_NONE;
     taskEXIT_CRITICAL(&state_mux);
+    if (entering_agents) { room_watch_agents_reset(); request_agents_page(0); }
+    if (leaving_agents && agents_action_handler != NULL) agents_action_handler(false, 0);
     room_board_display_unlock();
     room_ui_refresh();
     return ESP_OK;
@@ -120,6 +159,7 @@ esp_err_t room_ui_watch_menu(const char *page)
     room_watch_page_t requested;
     if (page == NULL) return ESP_ERR_INVALID_ARG;
     if (strcmp(page, "menu") == 0) requested = ROOM_WATCH_MENU;
+    else if (strcmp(page, "agents") == 0) requested = ROOM_WATCH_AGENTS;
     else if (strcmp(page, "connection") == 0) requested = ROOM_WATCH_CONNECTION;
     else if (strcmp(page, "canvas") == 0) requested = ROOM_WATCH_CANVAS;
     else if (strcmp(page, "home") == 0) requested = ROOM_WATCH_HOME;
@@ -157,6 +197,37 @@ static void watch_home_menu_clicked(lv_event_t *event)
 static void watch_navigation_clicked(lv_event_t *event)
 {
     watch_navigation_input(event, (room_watch_page_t)(intptr_t)lv_event_get_user_data(event));
+}
+
+static void watch_agents_clicked(lv_event_t *event)
+{
+    lv_event_code_t code = lv_event_get_code(event);
+    if (code != LV_EVENT_PRESSED && code != LV_EVENT_PRESS_LOST && code != LV_EVENT_SHORT_CLICKED) return;
+    int action = (int)(intptr_t)lv_event_get_user_data(event);
+    bool wake = code == LV_EVENT_PRESSED && room_board_display_is_dark();
+    bool activate = false;
+    taskENTER_CRITICAL(&state_mux);
+    bool current = watch_page == ROOM_WATCH_AGENTS && !diagnostics_open &&
+        current_agents.revision == painted_agents.revision && current_agents.state == painted_agents.state;
+    if (code == LV_EVENT_PRESSED) {
+        pressed_agent_action = current && !wake ? action : -100;
+        pressed_agent_revision = current_agents.revision;
+        pressed_agent_state = current_agents.state;
+    } else {
+        activate = code == LV_EVENT_SHORT_CLICKED && current && pressed_agent_action == action &&
+            pressed_agent_revision == current_agents.revision && pressed_agent_state == current_agents.state;
+        pressed_agent_action = -100;
+    }
+    taskEXIT_CRITICAL(&state_mux);
+    if (wake) { room_ui_show_face_hint(10000); return; }
+    if (!activate) return;
+    size_t offset = 0;
+    room_agent_action_t result = room_watch_agents_activate(action, &offset);
+    if (result == ROOM_AGENT_LEAVE) (void)watch_navigation_show(ROOM_WATCH_MENU);
+    else {
+        if (result == ROOM_AGENT_LOAD) request_agents_page(offset);
+        room_ui_refresh();
+    }
 }
 
 static talk_control_action_t talk_control_action(room_ui_talk_state_t talk)
@@ -400,6 +471,7 @@ void room_ui_init(void)
         lv_obj_set_style_bg_grad_dir(lv_screen_active(), LV_GRAD_DIR_VER, 0);
         room_watch_home_create(lv_layer_top(), watch_home_menu_clicked);
         room_watch_navigation_create(lv_layer_top(), watch_navigation_clicked);
+        room_watch_agents_create(lv_layer_top(), watch_agents_clicked);
     }
     bool board_has_animated_face = board != NULL && board->display.animated_face;
     idle_brightness = board != NULL ? board->display.idle_brightness : 0;
@@ -478,12 +550,24 @@ static bool room_ui_render_locked(void)
     bool overlay = diagnostics_open;
     room_ui_facts_t facts = current_facts;
     room_watch_page_t page = watch_page;
+    bool agents_changed = current_agents.revision != painted_agents.revision || current_agents.state != painted_agents.state;
+    painted_agents = current_agents;
     taskEXIT_CRITICAL(&state_mux);
+    if (agents_changed && page == ROOM_WATCH_AGENTS) {
+        for (lv_indev_t *input = lv_indev_get_next(NULL); input != NULL; input = lv_indev_get_next(input)) {
+            if (lv_indev_get_display(input) == lv_obj_get_display(status_label) &&
+                lv_indev_get_state(input) == LV_INDEV_STATE_PRESSED) {
+                lv_indev_reset(input, NULL);
+                lv_indev_wait_release(input);
+            }
+        }
+    }
     bool canvas_active = room_canvas_is_active();
     bool navigation = watch_home_enabled && page != ROOM_WATCH_HOME && !canvas_active;
     if (watch_home_enabled) {
         room_watch_home_render(&facts, state, detail, canvas_active || overlay || navigation);
-        room_watch_navigation_render(page, &facts, !navigation || overlay);
+        room_watch_navigation_render(page, &facts, !navigation || overlay || page == ROOM_WATCH_AGENTS);
+        room_watch_agents_render(&painted_agents, !navigation || overlay || page != ROOM_WATCH_AGENTS);
     }
     if (talk_pill != NULL) {
         if (watch_home_enabled) {

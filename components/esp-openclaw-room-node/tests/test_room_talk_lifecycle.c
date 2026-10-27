@@ -1074,7 +1074,8 @@ static room_agents_snapshot_t agents_snapshot(void)
 
 static void directory_ready(void)
 {
-    CHECK(room_agent_directory_refresh(0) == ESP_OK, "directory refresh admitted");
+    request_local_agents(true, 0);
+    CHECK(host.agent_requests == 0, "display intent does not submit inline");
     host_run_task("talk_teardown");
     CHECK(host.agent_requests == 1, "one bounded request");
     host_emit_node(node_client, ESP_OPENCLAW_NODE_EVENT_DISCONNECTED);
@@ -1084,6 +1085,9 @@ static void directory_ready(void)
     CHECK(snapshot.state == ROOM_AGENTS_READY && snapshot.page.count == 1 &&
         strcmp(snapshot.page.agents[0].id, "fixture") == 0, "operator roster survives primary node loss");
     CHECK(operator_ready, "directory does not reconnect operator");
+    request_local_agents(false, 0);
+    host_run_task("talk_teardown");
+    CHECK(agents_snapshot().state == ROOM_AGENTS_IDLE, "leaving browser releases directory interest");
 }
 
 static void directory_reconnect(void)

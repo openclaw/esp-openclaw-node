@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "esp_err.h"
+#include "room_agent_directory.h"
 
 typedef enum {
     ROOM_UI_IDLE = 0,
@@ -57,12 +58,16 @@ typedef struct {
 void room_ui_init(void);
 /** Register a short, non-blocking local Talk request handler before init. */
 void room_ui_set_talk_action_handler(void (*handler)(bool start));
+/** Records directory intent without waiting for the Gateway or room owner lock. */
+void room_ui_set_agents_action_handler(void (*handler)(bool open, size_t offset));
+/** Copy a directory result outside the room owner lock; repaint retries on contention. */
+void room_ui_store_agents(const room_agents_snapshot_t *snapshot);
 void room_ui_set(room_ui_state_t state, const char *detail);
 /** Store one coherent snapshot without taking the display lock. Refresh after releasing owner locks. */
 void room_ui_store_facts(const room_ui_facts_t *facts);
 /** Repaint the most recently set state, e.g. after leaving canvas mode. */
 void room_ui_refresh(void);
-/** Open a local watch page (menu, connection, canvas, home) without changing Talk. */
+/** Open a local watch page (menu, agents, connection, canvas, home) without changing Talk. */
 esp_err_t room_ui_watch_menu(const char *page);
 /** Show the idle face for `show_ms` (tap wake-up or agent face.set outside a call). */
 void room_ui_show_face_hint(uint32_t show_ms);

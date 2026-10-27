@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-static lv_obj_t *root, *heading, *rows[3], *values[3], *empty;
+static lv_obj_t *root, *heading, *rows[4], *values[4], *empty;
 
 static lv_obj_t *label(lv_obj_t *parent, const char *value, int x, int y, int width)
 {
@@ -37,19 +37,19 @@ void room_watch_navigation_create(lv_obj_t *parent, lv_event_cb_t handler)
 #if LV_FONT_MONTSERRAT_28
     lv_obj_set_style_text_font(heading, &lv_font_montserrat_28, 0);
 #endif
-    const char *names[] = {LV_SYMBOL_IMAGE "  Canvas", LV_SYMBOL_WIFI "  Connection", LV_SYMBOL_SETTINGS "  Device status"};
-    const room_watch_page_t pages[] = {ROOM_WATCH_CANVAS, ROOM_WATCH_CONNECTION, ROOM_WATCH_DEVICE_STATUS};
-    for (unsigned i = 0; i < 3; ++i) {
+    const char *names[] = {LV_SYMBOL_LIST "  Agents", LV_SYMBOL_IMAGE "  Canvas", LV_SYMBOL_WIFI "  Connection", LV_SYMBOL_SETTINGS "  Device status"};
+    const room_watch_page_t pages[] = {ROOM_WATCH_AGENTS, ROOM_WATCH_CANVAS, ROOM_WATCH_CONNECTION, ROOM_WATCH_DEVICE_STATUS};
+    for (unsigned i = 0; i < 4; ++i) {
         rows[i] = lv_obj_create(root);
         lv_obj_remove_style_all(rows[i]);
-        lv_obj_set_pos(rows[i], 26, 122 + (int)i * 74);
-        lv_obj_set_size(rows[i], 316, 62);
+        lv_obj_set_pos(rows[i], 26, 116 + (int)i * 60);
+        lv_obj_set_size(rows[i], 316, 52);
         lv_obj_set_style_bg_color(rows[i], lv_color_hex(0x302535), 0);
         lv_obj_set_style_bg_opa(rows[i], LV_OPA_COVER, 0);
         lv_obj_set_style_radius(rows[i], 16, 0);
         lv_obj_set_scrollable(rows[i], false);
         lv_obj_set_clickable(rows[i], true);
-        values[i] = label(rows[i], names[i], 18, 22, 280);
+        values[i] = label(rows[i], names[i], 18, 18, 280);
         lv_obj_add_event_cb(rows[i], handler, LV_EVENT_ALL, (void *)(intptr_t)pages[i]);
     }
     empty = label(root, "No card yet\n\nAsk your assistant to show\na card on this watch.", 26, 156, 316);
@@ -77,12 +77,12 @@ void room_watch_navigation_render(room_watch_page_t page, const room_ui_facts_t 
         (unsigned)facts->talk < sizeof(talk) / sizeof(*talk) ? talk[facts->talk] : "Unknown",
     };
     const char *names[] = {"Wi-Fi", "Gateway", "Talk"};
-    for (unsigned i = 0; i < 3; ++i) {
-        lv_obj_set_hidden(rows[i], canvas);
+    for (unsigned i = 0; i < 4; ++i) {
+        lv_obj_set_hidden(rows[i], canvas || (connection && i == 3));
         lv_obj_set_clickable(rows[i], !connection);
-        if (connection) lv_label_set_text_fmt(values[i], "%s: %s", names[i], states[i]);
+        if (connection && i < 3) lv_label_set_text_fmt(values[i], "%s: %s", names[i], states[i]);
         else {
-            const char *menu[] = {LV_SYMBOL_IMAGE "  Canvas", LV_SYMBOL_WIFI "  Connection", LV_SYMBOL_SETTINGS "  Device status"};
+            const char *menu[] = {LV_SYMBOL_LIST "  Agents", LV_SYMBOL_IMAGE "  Canvas", LV_SYMBOL_WIFI "  Connection", LV_SYMBOL_SETTINGS "  Device status"};
             lv_label_set_text_static(values[i], menu[i]);
         }
     }

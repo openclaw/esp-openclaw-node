@@ -20,6 +20,11 @@ static room_canvas_retained_kind_t retained_kind;
 static esp_openclaw_node_command_handler_t face_gesture;
 static unsigned toggles, holds;
 static unsigned talk_starts, talk_stops, display_flushes;
+static unsigned agent_requests;
+static bool agent_open;
+static size_t agent_offset;
+static void request_agents(bool open, size_t offset)
+{ ++agent_requests; agent_open = open; agent_offset = offset; }
 static lv_indev_t *touchscreen;
 static lv_indev_state_t touch_state;
 static lv_point_t touch_point;
@@ -348,6 +353,20 @@ static unsigned check_home_tree(lv_obj_t *parent)
         count += check_home_tree(lv_obj_get_child(parent, i));
     return count;
 }
+static void write_frame(const char *path)
+{
+    lv_refr_now(display);
+    if (!path) return;
+    FILE *out = fopen(path, "wb");
+    assert(out);
+    fprintf(out, "P6\n%d %d\n255\n", width, height);
+    for (int i = 0; i < width * height; ++i) {
+        uint8_t rgb[] = {frame[i * 4 + 2], frame[i * 4 + 1], frame[i * 4]};
+        assert(fwrite(rgb, sizeof(rgb), 1, out) == 1);
+    }
+    assert(fclose(out) == 0);
+}
+
 static void snapshot(const char *path)
 {
     lv_refr_now(display);
@@ -358,15 +377,7 @@ static void snapshot(const char *path)
         light += p[0] > 150 && p[1] > 150 && p[2] > 150;
     }
     assert(red > 2000 && light > 500);
-    if (!path) return;
-    FILE *out = fopen(path, "wb");
-    assert(out);
-    fprintf(out, "P6\n%d %d\n255\n", width, height);
-    for (int i = 0; i < width * height; ++i) {
-        uint8_t rgb[] = {frame[i * 4 + 2], frame[i * 4 + 1], frame[i * 4]};
-        assert(fwrite(rgb, sizeof(rgb), 1, out) == 1);
-    }
-    assert(fclose(out) == 0);
+    write_frame(path);
 }
 
 static void check_watch_repaint(void)
@@ -532,6 +543,114 @@ static void check_watch_navigation(void)
     puts("watch menu, live connection, Talk and empty Canvas: passed");
 }
 
+static void check_watch_agents(const char *path)
+{
+    room_ui_facts_t facts = {.wifi = ROOM_UI_WIFI_CONNECTED,
+        .gateway = ROOM_UI_GATEWAY_CONNECTED, .talk = ROOM_UI_TALK_READY};
+    room_ui_store_facts(&facts);
+    room_ui_set(ROOM_UI_IDLE, NULL);
+    assert(room_ui_watch_menu("menu") == ESP_OK);
+    click_talk(lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_LIST "  Agents")));
+    assert(agent_open && agent_offset == 0);
+    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Loading agents...")));
+    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Start Talk")));
+    room_agents_snapshot_t roster = {.state = ROOM_AGENTS_READY, .revision = 1,
+        .page = {.count = 8, .total = 10}};
+    for (unsigned i = 0; i < 8; ++i) {
+        snprintf(roster.page.agents[i].id, sizeof(roster.page.agents[i].id), "agent-%u", i);
+        snprintf(roster.page.agents[i].name, sizeof(roster.page.agents[i].name), "Assistant %u", i);
+    }
+    strcpy(roster.page.agents[0].name, "Kitsune");
+    strcpy(roster.page.agents[0].emoji, "🦊");
+    room_ui_store_agents(&roster);
+    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Kitsune")));
+    lv_obj_t *first = lv_obj_get_parent(find_text(lv_layer_top(), "Kitsune"));
+    lv_obj_t *list = lv_obj_get_parent(first);
+    lv_obj_update_layout(list);
+    lv_area_t bounds;
+    lv_obj_get_coords(list, &bounds);
+    assert(bounds.x1 >= 0 && bounds.x2 < width && bounds.y1 >= 100 && bounds.y2 < 326);
+    char output[1024];
+    if (path) { snprintf(output, sizeof(output), "%s-agents.ppm", path); write_frame(output); }
+    click_talk(first);
+    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Agent ID\nagent-0")));
+    if (path) { snprintf(output, sizeof(output), "%s-agent-detail.ppm", path); write_frame(output); }
+    facts.talk = ROOM_UI_TALK_ACTIVE;
+    room_ui_store_facts(&facts);
+    room_ui_refresh();
+    unsigned stops = talk_stops;
+    click_talk(lv_obj_get_parent(find_text(lv_layer_top(), "Stop Talk")));
+    assert(talk_stops == stops + 1);
+    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Agent ID\nagent-0")));
+    click_talk(lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_LEFT " Agents")));
+    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Agents")));
+
+    // A replacement roster cannot transfer a held press to the new row.
+    touch_talk(first, true);
+    ++roster.revision;
+    strcpy(roster.page.agents[0].id, "replacement");
+    strcpy(roster.page.agents[0].name, "Replacement");
+    room_ui_store_agents(&roster);
+    touch_talk(first, false);
+    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Agents")));
+    assert(!lv_obj_is_visible(find_text(lv_layer_top(), "Agent ID\nagent-0")));
+
+    // A stored disconnect fences input even before a busy display can repaint.
+    touch_talk(first, true);
+    deny_display = true;
+    room_agents_snapshot_t offline = {.state = ROOM_AGENTS_OFFLINE, .revision = roster.revision + 1};
+    room_ui_store_agents(&offline);
+    touch_talk(first, false);
+    deny_display = false;
+    room_ui_refresh();
+    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Gateway offline\n\nReconnect to browse agents.")));
+    const struct { room_agents_state_t state; const char *message; } states[] = {
+        {ROOM_AGENTS_TIMEOUT, "Request timed out\n\nRefresh to try again."},
+        {ROOM_AGENTS_ERROR, "Agents unavailable\n\nCheck Gateway access, then refresh."},
+        {ROOM_AGENTS_TOO_LARGE, "Directory is too large\n\nOpen agents in the mobile app."},
+        {ROOM_AGENTS_EMPTY, "No agents yet\n\nAdd an agent in OpenClaw."},
+        {ROOM_AGENTS_IDLE, "Directory paused\n\nRefresh to load agents."},
+    };
+    for (unsigned i = 0; i < sizeof(states) / sizeof(*states); ++i) {
+        offline.state = states[i].state;
+        room_ui_store_agents(&offline);
+        assert(lv_obj_is_visible(find_text(lv_layer_top(), states[i].message)));
+    }
+    unsigned requests = agent_requests;
+    click_talk(lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_REFRESH "  Refresh")));
+    assert(agent_requests == requests + 1 && agent_open && agent_offset == 0);
+    roster.revision = offline.revision + 1;
+    room_ui_store_agents(&roster);
+    // Drag the list through the real pointer input, without opening a row.
+    touch_talk(first, true);
+    touch_point.y -= 80;
+    lv_indev_read(touchscreen);
+    lv_tick_inc(40);
+    touch_state = LV_INDEV_STATE_RELEASED;
+    lv_indev_read(touchscreen);
+    lv_tick_inc(40);
+    assert(lv_obj_get_scroll_y(list) > 0);
+    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Agents")));
+    requests = agent_requests;
+    click_talk(lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_RIGHT)));
+    assert(agent_requests == requests + 1 && agent_offset == 8);
+    roster.page.offset = 8;
+    roster.page.count = 0;
+    roster.state = ROOM_AGENTS_EMPTY;
+    ++roster.revision;
+    room_ui_store_agents(&roster);
+    assert(lv_obj_is_visible(find_text(lv_layer_top(), "No agents on this page.\n\nGo back or refresh the list.")));
+    click_talk(lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_LEFT)));
+    assert(agent_offset == 0);
+    click_talk(lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_LEFT " Menu")));
+    assert(!agent_open && lv_obj_is_visible(find_text(lv_layer_top(), "Menu")));
+    assert(room_ui_watch_menu("home") == ESP_OK);
+    facts.talk = ROOM_UI_TALK_READY;
+    room_ui_store_facts(&facts);
+    room_ui_set(ROOM_UI_IDLE, NULL);
+    puts("watch agents: asynchronous states, copied details, paging and fenced pointer input passed");
+}
+
 static void check_watch_home_gesture(void)
 {
     esp_openclaw_node_handle_t node = (esp_openclaw_node_handle_t)(uintptr_t)1;
@@ -575,6 +694,7 @@ int main(int argc, char **argv)
     board.display.idle_brightness = idle;
     assert(room_board_bind(&board) == ESP_OK);
     room_ui_set_talk_action_handler(talk_action);
+    room_ui_set_agents_action_handler(request_agents);
     room_ui_init();
     assert(brightness == idle);
     check_talk_control();
@@ -689,6 +809,7 @@ int main(int argc, char **argv)
     if (watch) {
         check_watch_home(argc == 3 ? argv[2] : NULL);
         check_watch_navigation();
+        check_watch_agents(argc == 3 ? argv[2] : NULL);
         check_watch_home_gesture();
         check_watch_repaint();
     }

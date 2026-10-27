@@ -1,5 +1,6 @@
 #include <inttypes.h>
 #include <string.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <stdio.h>
 
@@ -79,6 +80,7 @@ static bool talk_speaking_pending;
 static bool talk_connecting_pending;
 static bool talk_speech_failed_pending;
 static bool operator_ui_pending;
+static _Atomic size_t local_agents_request = SIZE_MAX;
 static bool node_reconnect_scheduled;
 static bool node_reconnect_pending;
 static esp_timer_handle_t node_reconnect_timer;
@@ -343,6 +345,19 @@ static void wake_talk_teardown(void)
     xQueueOverwrite(talk_teardown_queue, &wake);
 }
 
+static void request_local_agents(bool open, size_t offset)
+{
+    atomic_store(&local_agents_request, open ? offset : SIZE_MAX - 1);
+    wake_talk_teardown();
+}
+
+static void refresh_agents(void)
+{
+    size_t request = atomic_exchange(&local_agents_request, SIZE_MAX);
+    if (request == SIZE_MAX - 1) room_agent_directory_cancel();
+    else if (request != SIZE_MAX) (void)room_agent_directory_refresh(request);
+}
+
 static void request_local_talk(bool start)
 {
     /* The LVGL callback only records intent. The supervisor owns admission
@@ -443,7 +458,11 @@ static void talk_teardown_task(void *arg)
             xSemaphoreTake(state_lock, portMAX_DELAY);
             bool defer_directory = talk_start_in_flight || talk_dialing || talk_closing;
             xSemaphoreGive(state_lock);
+            refresh_agents();
             room_agent_directory_poll(defer_directory);
+            static room_agents_snapshot_t agents;
+            room_agent_directory_copy(&agents);
+            room_ui_store_agents(&agents);
             continue;
         }
 
@@ -1490,7 +1509,7 @@ static int diagnostics_console_command(int argc, char **argv)
 static int menu_console_command(int argc, char **argv)
 {
     if (argc > 2) {
-        printf("usage: menu [menu|connection|canvas|home]\n");
+        printf("usage: menu [menu|agents|connection|canvas|home]\n");
         return 1;
     }
     const char *page = argc == 2 ? argv[1] : "menu";
@@ -1553,7 +1572,7 @@ static esp_err_t register_room_console_commands(void)
         {
             .command = "menu",
             .help = "Open a local watch menu page without starting Talk",
-            .hint = "[menu|connection|canvas|home]",
+            .hint = "[menu|agents|connection|canvas|home]",
             .func = menu_console_command,
         },
         {
@@ -1762,6 +1781,7 @@ esp_err_t esp_openclaw_room_node_start(const esp_openclaw_room_node_config_t *co
     ESP_ERROR_CHECK(teardown_task == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
 
     room_ui_set_talk_action_handler(request_local_talk);
+    room_ui_set_agents_action_handler(request_local_agents);
     room_ui_init();
     ESP_ERROR_CHECK(room_canvas_init());
     if (config->display.setup_local_input != NULL) {

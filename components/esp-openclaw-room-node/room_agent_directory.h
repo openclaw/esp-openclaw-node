@@ -34,6 +34,8 @@ void room_agent_directory_set_owner_locked(esp_openclaw_node_handle_t client,
     uint64_t incarnation, uint32_t connection, bool ready);
 esp_err_t room_agent_directory_refresh(size_t offset);
 void room_agent_directory_cancel(void);
+/* Hide the browser without dropping its reader; explicit cancel still clears it. */
+void room_agent_directory_suspend(void);
 void room_agent_directory_copy(room_agents_snapshot_t *snapshot);
 /* Browsing never changes the current or next Talk target. */
 esp_err_t room_conversations_open(const char *agent_id, unsigned agents_revision);
@@ -41,6 +43,11 @@ esp_err_t room_conversations_refresh(size_t offset);
 esp_err_t room_conversations_preview(size_t index, unsigned revision);
 void room_conversations_close(void);
 void room_conversations_copy(room_conversations_snapshot_t *snapshot);
+/* Copy one live roster/reader pair under the owner lock. The display checks the
+ * epoch again after acquiring its own lock, without reversing lock order. */
+esp_err_t room_conversations_copy_resume(room_agents_snapshot_t *agents,
+    room_conversations_snapshot_t *reader, unsigned *epoch);
+bool room_conversations_resume_current(unsigned epoch);
 typedef struct {
     esp_openclaw_agent_t agent;
     char main_key[129];

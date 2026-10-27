@@ -1185,6 +1185,99 @@ static void conversations_stale(void)
         "lost owner cannot publish a stale page");
 }
 
+static void conversations_suspend(void)
+{
+    unsigned revision = load_target_roster(target_roster);
+    CHECK(select_talk_agent("builder", revision) == ESP_OK, "choose the next Talk agent independently");
+    CHECK(room_conversations_open("fixture", revision) == ESP_OK, "open reader before hiding it");
+    host_run_task("talk_teardown");
+    room_agent_directory_suspend();
+    host_reply_agents(true, conversation_page);
+    host_run_task("talk_teardown");
+
+    room_agents_snapshot_t agents;
+    room_conversations_snapshot_t reader;
+    unsigned epoch;
+    CHECK(room_conversations_copy_resume(&agents, &reader, &epoch) == ESP_OK &&
+        agents.revision == revision && reader.state == ROOM_AGENTS_READY &&
+        reader.page.count == 1 && strcmp(reader.agent.id, "fixture") == 0,
+        "hidden completion retains the matching roster and conversation page");
+    CHECK(room_conversations_resume_current(epoch), "coherent copy has live authority");
+    CHECK(room_conversations_preview(0, reader.revision) == ESP_OK, "retained page can open its exact row");
+    CHECK(!room_conversations_resume_current(epoch), "a changed selection rejects an earlier copy");
+    host_run_task("talk_teardown");
+    CHECK(room_conversations_copy_resume(&agents, &reader, &epoch) == ESP_OK &&
+        reader.preview_state == ROOM_AGENTS_LOADING, "pending preview can resume");
+    host_reply_agents(true, conversation_preview);
+    host_run_task("talk_teardown");
+    CHECK(!room_conversations_resume_current(epoch), "completion invalidates the pending preview copy");
+    CHECK(room_conversations_copy_resume(&agents, &reader, &epoch) == ESP_OK &&
+        reader.preview_state == ROOM_AGENTS_READY && reader.preview.count == 1,
+        "hidden preview completion is available on return");
+    unsigned requests = host.conversation_requests;
+    host_run_task("talk_teardown");
+    CHECK(host.conversation_requests == requests && host.agent_requests == 1,
+        "suspend and resume copies do not start another RPC");
+    CHECK(talk_target.selected && strcmp(talk_target.id, "builder") == 0 &&
+        host.config_requests == 0 && host.create_requests == 0,
+        "reader resume preserves the chosen Talk target without starting a call");
+    room_conversations_close();
+    CHECK(!room_conversations_resume_current(epoch) &&
+        room_conversations_copy_resume(&agents, &reader, &epoch) == ESP_ERR_INVALID_STATE &&
+        reader.agent.id[0] == '\0', "explicit close revokes retained content and copied authority");
+}
+
+static void conversations_resume_invalidation(void)
+{
+    unsigned revision = load_target_roster(target_roster);
+    room_conversations_open("fixture", revision);
+    host_run_task("talk_teardown");
+    host_reply_agents(true, conversation_page);
+    host_run_task("talk_teardown");
+    room_agent_directory_suspend();
+    room_agents_snapshot_t agents;
+    room_conversations_snapshot_t reader;
+    unsigned epoch;
+    CHECK(room_conversations_copy_resume(&agents, &reader, &epoch) == ESP_OK, "reader ready to resume");
+    room_conversations_refresh(0);
+    CHECK(!room_conversations_resume_current(epoch), "page refresh fences an old copied page");
+    CHECK(room_conversations_copy_resume(&agents, &reader, &epoch) == ESP_OK, "copy refreshed reader");
+    room_agent_directory_refresh(0);
+    CHECK(!room_conversations_resume_current(epoch) &&
+        room_conversations_copy_resume(&agents, &reader, &epoch) == ESP_ERR_INVALID_STATE,
+        "refreshing the roster discards its reader");
+    host_run_task("talk_teardown");
+    host_reply_agents(true, target_roster);
+    host_run_task("talk_teardown");
+    revision = agents_snapshot().revision;
+    room_conversations_open("fixture", revision);
+    CHECK(room_conversations_copy_resume(&agents, &reader, &epoch) == ESP_OK, "copy replacement reader");
+    room_agent_directory_cancel();
+    CHECK(!room_conversations_resume_current(epoch) &&
+        room_conversations_copy_resume(&agents, &reader, &epoch) == ESP_ERR_INVALID_STATE,
+        "explicit directory cancel still releases content");
+    revision = load_target_roster(target_roster);
+    room_conversations_open("fixture", revision);
+    CHECK(room_conversations_copy_resume(&agents, &reader, &epoch) == ESP_OK, "copy before owner loss");
+    host_emit_node(operator_client, ESP_OPENCLAW_NODE_EVENT_DISCONNECTED);
+    CHECK(!room_conversations_resume_current(epoch) &&
+        room_conversations_copy_resume(&agents, &reader, &epoch) == ESP_ERR_INVALID_STATE &&
+        agents.page.count == 0 && reader.page.count == 0,
+        "owner loss rejects a copy taken before the UI acquired its display lock");
+}
+
+static void directory_suspend_pending(void)
+{
+    room_agent_directory_refresh(0);
+    host_run_task("talk_teardown");
+    room_agent_directory_refresh(1);
+    room_agent_directory_suspend();
+    host_reply_agents(true, target_roster);
+    host_run_task("talk_teardown");
+    CHECK(host.agent_requests == 1 && agents_snapshot().page.count == 0,
+        "hiding drops queued roster work and rejects a late initial roster");
+}
+
 static void conversations_local_intent(void)
 {
     unsigned revision = load_target_roster(target_roster);
@@ -1471,6 +1564,9 @@ static void directory_errors(void)
 }
 
 static const struct { const char *name; void (*run)(void); } cases[] = {
+    {"conversations-suspend", conversations_suspend},
+    {"conversations-resume-invalidation", conversations_resume_invalidation},
+    {"directory-suspend-pending", directory_suspend_pending},
     {"conversations-local-intent", conversations_local_intent},
     {"conversations-read", conversations_read},
     {"conversations-stale", conversations_stale},

@@ -8,6 +8,8 @@ typedef enum { ROOM_CHAT_STAY, ROOM_CHAT_LEAVE, ROOM_CHAT_LOAD, ROOM_CHAT_READ }
 
 void room_watch_conversations_create(lv_obj_t *parent, lv_event_cb_t handler);
 void room_watch_conversations_reset(bool show_preview);
+void room_watch_conversations_suspend(void);
+void room_watch_conversations_resume(const room_conversations_snapshot_t *snapshot);
 void room_watch_conversations_render(const room_conversations_snapshot_t *snapshot, bool hidden);
 room_chat_action_t room_watch_conversations_activate(int action, size_t *value);
 

@@ -265,7 +265,12 @@ static void block_task(void)
 BaseType_t xQueueReceive(QueueHandle_t value, void *item, TickType_t wait)
 {
     if (value->count == 0) {
-        host_require(wait == portMAX_DELAY, "expected blocking queue receive");
+        host_require(wait > 0, "expected blocking queue receive");
+        host.queue_wait = wait;
+        if (host.expire_queue_wait && wait != portMAX_DELAY) {
+            host.expire_queue_wait = false;
+            return pdFALSE;
+        }
         block_task();
     }
     size_t bytes = queue_item_bytes(value, value->count);
@@ -936,3 +941,21 @@ void room_ui_conversations_failed(unsigned generation) { (void)generation; }
 
 esp_err_t room_ui_watch_reader(const room_conversations_snapshot_t *snapshot, bool preview, unsigned generation)
 { (void)snapshot; (void)preview; (void)generation; return ESP_OK; }
+
+bool room_ui_wants_conversation_resume(unsigned generation)
+{ return host.resume_wanted && generation == host.resume_generation; }
+
+esp_err_t room_ui_watch_resume(const room_agents_snapshot_t *agents,
+    const room_conversations_snapshot_t *reader, unsigned epoch, unsigned generation)
+{
+    host_require(mutex_depth == 0 && host.critical_depth == 0, "resume hands off after releasing owner locks");
+    host_require(room_ui_wants_conversation_resume(generation), "resume belongs to pending UI generation");
+    ++host.resume_attempts;
+    host.resume_fallback = reader == NULL;
+    if (reader != NULL) {
+        host_require(agents != NULL && room_conversations_resume_current(epoch), "resume has coherent live owner data");
+        strcpy(host.resumed_agent, reader->agent.id);
+    }
+    if (host.resume_result == ESP_OK) host.resume_wanted = false;
+    return host.resume_result;
+}

@@ -33,6 +33,12 @@ static unsigned conversation_requests, conversation_revision, conversation_gener
 static room_ui_conversation_action_t conversation_action;
 static char conversation_agent[65];
 static size_t conversation_value;
+static unsigned reader_epoch = 1;
+bool room_conversations_resume_current(unsigned epoch)
+{
+    assert(critical_depth == 0 && display_depth > 0);
+    return epoch == reader_epoch;
+}
 static void request_conversation(room_ui_conversation_action_t action, const char *id,
     unsigned revision, size_t value, unsigned generation)
 {
@@ -821,12 +827,14 @@ static void check_watch_conversations(const char *path)
     view->agent = roster.page.agents[0];
     view->revision = 1;
     view->state = ROOM_AGENTS_READY;
-    view->page.count = 2;
+    view->page.count = ESP_OPENCLAW_DIRECTORY_PAGE_SIZE;
     view->page.has_more = true;
-    view->page.next_offset = 2;
+    view->page.next_offset = ESP_OPENCLAW_DIRECTORY_PAGE_SIZE;
     strcpy(view->page.sessions[0].title, "Planning a trip");
     strcpy(view->page.sessions[0].last_message, "Let's choose the dates.");
     strcpy(view->page.sessions[1].title, "Project notes");
+    for (size_t i = 2; i < view->page.count; ++i)
+        snprintf(view->page.sessions[i].title, sizeof(view->page.sessions[i].title), "Conversation %zu", i + 1);
     unsigned generation = conversation_generation;
     room_ui_store_conversations(view, generation - 1);
     assert(!visible_watch_text("Planning a trip"));
@@ -875,7 +883,37 @@ static void check_watch_conversations(const char *path)
     lv_obj_t *scrolled = lv_indev_get_scroll_obj(touchscreen);
     touch_state = LV_INDEV_STATE_RELEASED; lv_indev_read(touchscreen); lv_tick_inc(40);
     assert(scrolled != NULL && lv_obj_get_scroll_y(scrolled) > 0);
+    for (unsigned i = 0; i < 30; ++i) { lv_tick_inc(20); lv_timer_handler(); }
+    assert(lv_obj_get_scroll_y(scrolled) > 0 && lv_obj_get_scroll_bottom(scrolled) >= 0);
     if (path) { snprintf(output, sizeof(output), "%s-scrolled.ppm", path); write_frame(output); }
+    int32_t scroll_y = lv_obj_get_scroll_y(scrolled);
+    unsigned requests = agent_requests;
+    assert(room_ui_watch_menu("menu") == ESP_OK);
+    assert(!room_ui_wants_conversations() && conversation_action == ROOM_CONVERSATIONS_SUSPEND);
+    assert(visible_watch_text(LV_SYMBOL_ENVELOPE "  Conversations"));
+    if (path) { snprintf(output, sizeof(output), "%s-resume-menu.ppm", path); write_frame(output); }
+    lv_obj_t *resume = lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_ENVELOPE "  Conversations"));
+    lv_area_t menu_area, talk_area;
+    lv_obj_get_coords(lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_SETTINGS "  Settings")), &menu_area);
+    lv_obj_get_coords(lv_obj_get_parent(find_text(lv_layer_top(), "Start Talk")), &talk_area);
+    assert(menu_area.y2 < talk_area.y1);
+    click_talk(resume);
+    assert(conversation_action == ROOM_CONVERSATIONS_RESUME && !room_ui_wants_conversations());
+    unsigned resume_generation = conversation_generation;
+    assert(room_ui_wants_conversation_resume(resume_generation));
+    room_ui_conversations_failed(resume_generation);
+    assert(visible_watch_text("Reader unavailable.\n\nRetrying...\nYou can return Home."));
+    deny_display = true;
+    assert(room_ui_watch_resume(&roster, view, reader_epoch, resume_generation) == ESP_ERR_TIMEOUT);
+    deny_display = false;
+    unsigned stale_epoch = reader_epoch++;
+    assert(room_ui_watch_resume(&roster, view, stale_epoch, resume_generation) == ESP_ERR_INVALID_STATE);
+    assert(room_ui_wants_conversation_resume(resume_generation));
+    assert(room_ui_watch_resume(&roster, view, reader_epoch, resume_generation) == ESP_OK);
+    assert(room_ui_wants_conversations() && !room_ui_wants_conversation_resume(resume_generation));
+    assert(visible_watch_text("Project notes") && lv_obj_get_scroll_y(scrolled) == scroll_y);
+    assert(agent_requests == requests && agent_selections == selections && talk_starts == starts);
+    if (path) { snprintf(output, sizeof(output), "%s-resumed-preview.ppm", path); write_frame(output); }
     lv_obj_t *back = lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_LEFT " Chats"));
     deny_display = true;
     lv_obj_send_event(back, LV_EVENT_PRESSED, NULL);
@@ -889,6 +927,19 @@ static void check_watch_conversations(const char *path)
     lv_obj_send_event(back, LV_EVENT_SHORT_CLICKED, NULL);
     assert(room_ui_wants_conversations());
     assert(lv_obj_is_visible(find_text(lv_layer_top(), "Planning a trip")));
+    touch_point = (lv_point_t){180, 250}; touch_state = LV_INDEV_STATE_PRESSED;
+    lv_indev_read(touchscreen); lv_tick_inc(40);
+    touch_point.y = 150; lv_indev_read(touchscreen); lv_tick_inc(40);
+    lv_obj_t *list_scrolled = lv_indev_get_scroll_obj(touchscreen);
+    touch_state = LV_INDEV_STATE_RELEASED; lv_indev_read(touchscreen);
+    for (unsigned i = 0; i < 30; ++i) { lv_tick_inc(20); lv_timer_handler(); }
+    assert(list_scrolled != NULL && lv_obj_get_scroll_y(list_scrolled) > 0);
+    scroll_y = lv_obj_get_scroll_y(list_scrolled);
+    assert(room_ui_watch_menu("menu") == ESP_OK);
+    assert(room_ui_watch_menu("conversations") == ESP_OK);
+    assert(room_ui_watch_resume(&roster, view, reader_epoch, conversation_generation) == ESP_OK);
+    assert(visible_watch_text(LV_SYMBOL_LEFT " Agent") && lv_obj_get_scroll_y(list_scrolled) == scroll_y);
+    if (path) { snprintf(output, sizeof(output), "%s-resumed-list.ppm", path); write_frame(output); }
     roster.state = ROOM_AGENTS_LOADING;
     room_ui_store_agents(&roster);
     deny_display = true;
@@ -900,7 +951,7 @@ static void check_watch_conversations(const char *path)
     assert(room_ui_watch_reader(view, true, conversation_generation) == ESP_OK);
     click_talk(lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_LEFT " Chats")));
     click_talk(lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_RIGHT)));
-    assert(conversation_action == ROOM_CONVERSATIONS_LOAD && conversation_value == 2);
+    assert(conversation_action == ROOM_CONVERSATIONS_LOAD && conversation_value == ESP_OPENCLAW_DIRECTORY_PAGE_SIZE);
     view->state = view->preview_state = ROOM_AGENTS_OFFLINE;
     ++view->revision;
     memset(&view->page, 0, sizeof(view->page));
@@ -916,8 +967,31 @@ static void check_watch_conversations(const char *path)
     room_ui_store_conversations(view, conversation_generation);
     assert(!room_ui_wants_conversations());
     assert(room_ui_watch_reader(view, true, conversation_generation) == ESP_ERR_INVALID_STATE);
+    assert(room_ui_watch_menu("conversations") == ESP_OK);
+    resume_generation = conversation_generation;
+    assert(room_ui_watch_menu("home") == ESP_OK);
+    assert(room_ui_watch_resume(&roster, view, reader_epoch, resume_generation) == ESP_ERR_INVALID_STATE);
+    assert(!room_ui_wants_conversations());
+    assert(room_ui_watch_menu("conversations") == ESP_OK);
+    resume_generation = conversation_generation;
+    assert(room_diagnostics_open() == ESP_OK);
+    assert(!room_ui_wants_conversation_resume(resume_generation));
+    assert(room_ui_watch_resume(&roster, view, reader_epoch, resume_generation) == ESP_ERR_INVALID_STATE);
+    room_diagnostics_close();
+    assert(visible_watch_text("Menu"));
+    assert(room_ui_watch_menu("conversations") == ESP_OK);
+    resume_generation = conversation_generation;
+    requests = agent_requests;
+    assert(room_ui_watch_resume(NULL, NULL, 0, resume_generation) == ESP_OK);
+    assert(display_depth == 0);
+    assert(visible_watch_text("Agents") && agent_requests == requests + 1);
+    assert(agent_selections == selections && talk_starts == starts);
+    requests = agent_requests;
+    assert(room_ui_watch_menu("conversations") == ESP_OK);
+    assert(agent_requests == requests && conversation_action == ROOM_CONVERSATIONS_RESUME);
+    assert(room_ui_watch_menu("home") == ESP_OK);
     free(view);
-    puts("watch conversations: open, read, stale press, paging, offline and Back passed");
+    puts("watch conversations: read, resume, retained scroll, cancellation, stale owner, paging and Back passed");
 }
 
 static void check_watch_home_gesture(void)

@@ -74,7 +74,8 @@ void room_ui_store_talk_target(const room_ui_talk_target_t *target);
 /** Acknowledge only after the owner has accepted or rejected the selection. */
 void room_ui_agent_selection_complete(esp_err_t result);
 typedef enum { ROOM_CONVERSATIONS_OPEN, ROOM_CONVERSATIONS_LOAD,
-    ROOM_CONVERSATIONS_READ, ROOM_CONVERSATIONS_CLOSE } room_ui_conversation_action_t;
+    ROOM_CONVERSATIONS_READ, ROOM_CONVERSATIONS_CLOSE,
+    ROOM_CONVERSATIONS_SUSPEND, ROOM_CONVERSATIONS_RESUME } room_ui_conversation_action_t;
 void room_ui_set_conversation_handler(void (*handler)(room_ui_conversation_action_t,
     const char *agent_id, unsigned revision, size_t value, unsigned generation));
 bool room_ui_wants_conversations(void);
@@ -82,12 +83,16 @@ void room_ui_store_conversations(const room_conversations_snapshot_t *snapshot, 
 void room_ui_conversations_failed(unsigned generation);
 /* Show only an existing reader selection that belongs to the displayed roster. */
 esp_err_t room_ui_watch_reader(const room_conversations_snapshot_t *snapshot, bool preview, unsigned generation);
+bool room_ui_wants_conversation_resume(unsigned generation);
+/* NULL snapshots mean there is no retained reader; show Agents instead. */
+esp_err_t room_ui_watch_resume(const room_agents_snapshot_t *agents,
+    const room_conversations_snapshot_t *reader, unsigned epoch, unsigned generation);
 void room_ui_set(room_ui_state_t state, const char *detail);
 /** Store one coherent snapshot without taking the display lock. Refresh after releasing owner locks. */
 void room_ui_store_facts(const room_ui_facts_t *facts);
 /** Repaint the most recently set state, e.g. after leaving canvas mode. */
 void room_ui_refresh(void);
-/** Open a local watch page (menu, agents, settings, display, connection, canvas, home) without changing Talk. */
+/** Open a local watch page (menu, agents, conversations, settings, display, connection, canvas, home) without changing Talk. */
 esp_err_t room_ui_watch_menu(const char *page);
 /** Runtime Watch preference; sleep and camera visibility remain controller-owned. */
 esp_err_t room_ui_watch_brightness(int percent);

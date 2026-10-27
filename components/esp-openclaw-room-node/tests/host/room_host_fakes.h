@@ -25,6 +25,10 @@ typedef struct {
     char speech_params[1536];
     unsigned scope_requests, token_connects;
     unsigned agent_requests, conversation_requests;
+    bool resume_wanted, resume_fallback, expire_queue_wait;
+    unsigned resume_generation, resume_attempts, queue_wait;
+    esp_err_t resume_result;
+    char resumed_agent[65];
     char reader_method[32], reader_params[1024];
     room_agents_state_t agents_state;
     bool fail_agent_submit;

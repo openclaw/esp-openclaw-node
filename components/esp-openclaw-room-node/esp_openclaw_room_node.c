@@ -85,6 +85,8 @@ static struct {
     bool selected, expired;
     char id[65], name[65], session_key[200];
 } talk_target;
+/* State-lock owned: selection and invalidation revoke queued Start intents. */
+static uint64_t talk_target_revision;
 static portMUX_TYPE selection_lock = portMUX_INITIALIZER_UNLOCKED;
 static struct {
     bool pending;
@@ -100,6 +102,7 @@ static struct {
     bool pending, start;
     uint32_t generation;
     uint64_t operator_incarnation;
+    uint64_t recipient_revision;
 } local_talk_request;
 
 /* A one-slot wakeup has no identity or action to become stale. The durable,
@@ -147,7 +150,8 @@ static void refresh_home_facts(void)
     };
     /* Store while the owner is locked, but never wait for LVGL under that lock. */
     room_ui_store_facts(&facts);
-    room_ui_talk_target_t target = {.selected = talk_target.selected, .expired = talk_target.expired};
+    room_ui_talk_target_t target = {.selected = talk_target.selected, .expired = talk_target.expired,
+        .revision = talk_target_revision};
     memcpy(target.id, talk_target.id, sizeof(target.id));
     memcpy(target.name, talk_target.name, sizeof(target.name));
     room_ui_store_talk_target(&target);
@@ -367,7 +371,10 @@ static void request_local_agents(bool open, size_t offset)
 
 static void invalidate_talk_target_locked(void)
 {
-    if (talk_target.selected) talk_target.expired = true;
+    if (talk_target.selected && !talk_target.expired) {
+        talk_target.expired = true;
+        ++talk_target_revision;
+    }
 }
 
 static esp_err_t select_talk_agent(const char *id, unsigned revision)
@@ -381,6 +388,7 @@ static esp_err_t select_talk_agent(const char *id, unsigned revision)
         if (length < 0 || (size_t)length >= sizeof(key)) err = ESP_ERR_INVALID_SIZE;
     }
     if (err == ESP_OK) {
+        ++talk_target_revision;
         memcpy(talk_target.id, target.agent.id, sizeof(talk_target.id));
         memcpy(talk_target.name, target.agent.name, sizeof(talk_target.name));
         memcpy(talk_target.session_key, key, strlen(key) + 1);
@@ -394,6 +402,7 @@ static esp_err_t select_talk_agent(const char *id, unsigned revision)
 static void reset_talk_agent(void)
 {
     xSemaphoreTake(state_lock, portMAX_DELAY);
+    ++talk_target_revision;
     memset(&talk_target, 0, sizeof(talk_target));
     xSemaphoreGive(state_lock);
 }
@@ -528,7 +537,7 @@ static void refresh_agents(void)
     else if (request != SIZE_MAX) (void)room_agent_directory_refresh(request);
 }
 
-static void request_local_talk(bool start)
+static void request_local_talk(bool start, uint64_t recipient_revision)
 {
     /* The LVGL callback only records intent. The supervisor owns admission
      * and cancellation after the display lock has been released. */
@@ -537,6 +546,7 @@ static void request_local_talk(bool start)
     local_talk_request.start = start;
     local_talk_request.generation = talk_generation;
     local_talk_request.operator_incarnation = operator_incarnation;
+    local_talk_request.recipient_revision = recipient_revision;
     xSemaphoreGive(state_lock);
     wake_talk_teardown();
 }
@@ -579,12 +589,14 @@ static void talk_teardown_task(void *arg)
             request_talk_stop_locked(expired_generation, NULL);
         bool local_start = false;
         bool local_error = false;
+        bool recipient_changed = false;
         bool target_expired = talk_target.selected && talk_target.expired;
         if (local_talk_request.pending) {
             bool current = local_talk_request.generation == talk_generation &&
                 local_talk_request.operator_incarnation == operator_incarnation;
             if (current && local_talk_request.start) {
-                local_start = media_ready && admit_talk_locked();
+                recipient_changed = local_talk_request.recipient_revision != talk_target_revision;
+                local_start = !recipient_changed && media_ready && admit_talk_locked();
                 local_error = !local_start && talk_call == NULL;
             } else if (current) {
                 request_talk_stop_locked(local_talk_request.generation, NULL);
@@ -624,7 +636,7 @@ static void talk_teardown_task(void *arg)
             room_ui_set(ready ? ROOM_UI_IDLE : ROOM_UI_ERROR, ready ? NULL : "Operator offline");
             if (ready) room_ui_show_face_hint(8000);
         }
-        if (local_error) room_ui_set(ROOM_UI_ERROR, target_expired
+        if (local_error) room_ui_set(ROOM_UI_ERROR, recipient_changed ? "Recipient changed; start again" : target_expired
             ? "Choose an agent again after reconnecting" : "Talk unavailable; try again when ready");
         if (speech_failed) room_ui_set(ROOM_UI_ERROR, "Speech request failed; try again");
         if (!close) {

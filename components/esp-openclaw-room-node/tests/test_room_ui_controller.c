@@ -21,6 +21,7 @@ static room_canvas_retained_kind_t retained_kind;
 static esp_openclaw_node_command_handler_t face_gesture;
 static unsigned toggles, holds;
 static unsigned talk_starts, talk_stops, display_flushes;
+static uint64_t talk_recipient;
 static unsigned agent_requests, agent_selections, selected_revision;
 static char selected_agent[65];
 static void select_agent(const char *id, unsigned revision)
@@ -209,8 +210,9 @@ static bool visible_watch_text(const char *text)
     lv_obj_update_layout(lv_layer_top());
     return find_visible_text(lv_layer_top(), text) != NULL;
 }
-static void talk_action(bool start)
+static void talk_action(bool start, uint64_t recipient_revision)
 {
+    talk_recipient = recipient_revision;
     if (start) ++talk_starts;
     else ++talk_stops;
 }
@@ -695,7 +697,7 @@ static void check_watch_agents(const char *path)
     assert(lv_obj_is_visible(find_text(lv_layer_top(), "Choosing...")));
     click_talk(lv_obj_get_parent(find_text(lv_layer_top(), "Choosing agent...")));
     assert(talk_starts == starts); // No start before the owner acknowledges its target.
-    room_ui_talk_target_t target = {.selected = true, .id = "agent-0", .name = "Kitsune"};
+    room_ui_talk_target_t target = {.selected = true, .revision = 1, .id = "agent-0", .name = "Kitsune"};
     room_ui_store_talk_target(&target);
     room_ui_agent_selection_complete(ESP_OK);
     room_ui_refresh();
@@ -705,14 +707,19 @@ static void check_watch_agents(const char *path)
     if (path) { snprintf(output, sizeof(output), "%s-agent-detail.ppm", path); write_frame(output); }
     // A new press cannot use a changed recipient before the button is repainted.
     lv_obj_t *start = lv_obj_get_parent(find_text(lv_layer_top(), "Start Talk"));
+    click_talk(start);
+    ++starts;
+    assert(talk_starts == starts && talk_recipient == target.revision);
     strcpy(target.name, "Builder");
     strcpy(target.id, "builder");
+    ++target.revision;
     room_ui_store_talk_target(&target);
     click_talk(start);
     assert(talk_starts == starts);
     assert(visible_watch_text("with Kitsune"));
     strcpy(target.name, "Kitsune");
     strcpy(target.id, "agent-0");
+    ++target.revision;
     room_ui_store_talk_target(&target);
     room_ui_refresh();
     // Changing the target also cancels a held Start press.

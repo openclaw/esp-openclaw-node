@@ -50,6 +50,7 @@ typedef struct {
 
 typedef struct {
     bool selected, expired;
+    uint64_t revision;
     char id[65], name[65];
 } room_ui_talk_target_t;
 
@@ -61,8 +62,8 @@ typedef struct {
 } room_ui_diagnostics_snapshot_t;
 
 void room_ui_init(void);
-/** Register a short, non-blocking local Talk request handler before init. */
-void room_ui_set_talk_action_handler(void (*handler)(bool start));
+/** Start carries the painted owner revision; Stop ignores it. Register before init. */
+void room_ui_set_talk_action_handler(void (*handler)(bool start, uint64_t recipient_revision));
 /** Records directory intent without waiting for the Gateway or room owner lock. */
 void room_ui_set_agents_action_handler(void (*handler)(bool open, size_t offset));
 /** Copy a directory result outside the room owner lock; repaint retries on contention. */

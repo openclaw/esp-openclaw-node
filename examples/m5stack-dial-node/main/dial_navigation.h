@@ -4,7 +4,7 @@
 #include "lvgl.h"
 
 typedef enum { DIAL_NAV_MENU, DIAL_NAV_AGENTS, DIAL_NAV_DETAIL, DIAL_NAV_SESSIONS, DIAL_NAV_PREVIEW, DIAL_NAV_SETTINGS, DIAL_NAV_DISPLAY, DIAL_NAV_CONNECTION } dial_navigation_view_t;
-typedef enum { DIAL_NAV_HOME, DIAL_NAV_CONTROL, DIAL_NAV_REFRESH, DIAL_NAV_CHANGED, DIAL_NAV_CONVERSATIONS, DIAL_NAV_SESSIONS_REFRESH, DIAL_NAV_READ, DIAL_NAV_CLOSE, DIAL_NAV_BRIGHTNESS } dial_navigation_event_t;
+typedef enum { DIAL_NAV_HOME, DIAL_NAV_CONTROL, DIAL_NAV_REFRESH, DIAL_NAV_CHANGED, DIAL_NAV_CONVERSATIONS, DIAL_NAV_SESSIONS_REFRESH, DIAL_NAV_READ, DIAL_NAV_RESUME, DIAL_NAV_BRIGHTNESS } dial_navigation_event_t;
 /* CHANGED asks the input owner to cancel active gestures before replacing rows. */
 typedef void (*dial_navigation_handler_t)(dial_navigation_event_t event, size_t offset, void *context);
 

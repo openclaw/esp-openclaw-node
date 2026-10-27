@@ -122,7 +122,7 @@ static bool only_fields(cJSON *params, const char *const *names, size_t count)
 static void show_view(dial_view_t view)
 {
     if (view != VIEW_NAVIGATION) {
-        dial_reader_conversations_close();
+        /* The reader retains the bounded selection until refresh or disconnect. */
         free(ui.conversations);
         ui.conversations = NULL;
         ui.navigation.conversations = NULL;
@@ -163,8 +163,7 @@ static void navigation_event(dial_navigation_event_t event, size_t offset, void 
             dial_reader_agents_copy(ui.agents);
             dial_navigation_update(&ui.navigation, ui.agents);
         }
-    } else if (event == DIAL_NAV_CLOSE) dial_reader_conversations_close();
-    else if (event == DIAL_NAV_CONVERSATIONS || event == DIAL_NAV_SESSIONS_REFRESH || event == DIAL_NAV_READ) {
+    } else if (event == DIAL_NAV_RESUME || event == DIAL_NAV_CONVERSATIONS || event == DIAL_NAV_SESSIONS_REFRESH || event == DIAL_NAV_READ) {
         if (ui.conversations == NULL) ui.conversations = calloc(1, sizeof(*ui.conversations));
         if (ui.conversations == NULL) {
             strlcpy(ui.heading, "Reader unavailable", sizeof(ui.heading));
@@ -177,7 +176,10 @@ static void navigation_event(dial_navigation_event_t event, size_t offset, void 
         else if (event == DIAL_NAV_SESSIONS_REFRESH) dial_reader_conversations_refresh(offset);
         else if (event == DIAL_NAV_READ) dial_reader_preview_open(offset, ui.conversations->revision);
         dial_reader_conversations_copy(ui.conversations);
-        dial_navigation_conversations_update(&ui.navigation, ui.conversations);
+        if (event == DIAL_NAV_RESUME) {
+            if (!dial_navigation_show_reader(&ui.navigation, ui.agents, ui.conversations, false))
+                dial_navigation_open(&ui.navigation, true);
+        } else dial_navigation_conversations_update(&ui.navigation, ui.conversations);
     } else dial_input_set_control(&ui.input, false);
 }
 

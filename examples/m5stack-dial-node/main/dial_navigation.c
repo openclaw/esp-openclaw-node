@@ -44,7 +44,6 @@ static void back(dial_navigation_t *nav)
         if (nav->view == DIAL_NAV_SESSIONS) {
             nav->view = DIAL_NAV_DETAIL;
             nav->focus = nav->agent_focus;
-            nav->handler(DIAL_NAV_CLOSE, 0, nav->context);
             changed(nav);
             return;
         }
@@ -197,8 +196,8 @@ static void item(dial_navigation_t *nav, unsigned index, const char **name, cons
 {
     *icon = LV_SYMBOL_RIGHT;
     if (nav->view == DIAL_NAV_MENU) {
-        const char *names[] = {"Agents", "Controls", "Settings"};
-        const char *icons[] = {LV_SYMBOL_DIRECTORY, LV_SYMBOL_SETTINGS, LV_SYMBOL_SETTINGS};
+        const char *names[] = {"Agents", "Conversations", "Controls", "Settings"};
+        const char *icons[] = {LV_SYMBOL_DIRECTORY, LV_SYMBOL_LIST, LV_SYMBOL_SETTINGS, LV_SYMBOL_SETTINGS};
         *name = names[index];
         *icon = icons[index];
         return;
@@ -297,11 +296,13 @@ static void render(dial_navigation_t *nav)
     bool sessions = nav->view == DIAL_NAV_SESSIONS;
     bool preview = nav->view == DIAL_NAV_PREVIEW;
     bool message = (nav->view == DIAL_NAV_AGENTS || sessions) && agent_count(nav) == 0;
-    nav->count = detail || preview ? 1 : nav->view == DIAL_NAV_MENU || nav->view == DIAL_NAV_SETTINGS ? 3 :
+    nav->count = detail || preview ? 1 : nav->view == DIAL_NAV_MENU ? 4 : nav->view == DIAL_NAV_SETTINGS ? 3 :
         agent_count(nav) + has_next(nav) + has_previous(nav) + 2;
     if (!detail && !preview && nav->focus >= nav->count) nav->focus = 0;
     unsigned visible = message ? 2 : 3;
     nav->first = nav->focus / visible * visible;
+    if (nav->view == DIAL_NAV_MENU && nav->first + visible > nav->count)
+        nav->first = nav->count - visible;
     lv_label_set_text_static(nav->heading, preview ? "Preview" : sessions ? "Chats" : nav->view == DIAL_NAV_MENU ? "Menu" : nav->view == DIAL_NAV_SETTINGS ? "Settings" : "Agents");
     if (sessions && nav->conversations != NULL && nav->conversations->agent.name[0] != '\0')
         lv_label_set_text(nav->heading, nav->conversations->agent.name);
@@ -315,6 +316,8 @@ static void render(dial_navigation_t *nav)
     bool readable = preview && nav->conversations != NULL && nav->preview_state == DIAL_AGENTS_READY &&
         nav->conversations->preview.status == ESP_OPENCLAW_PREVIEW_OK && nav->conversations->preview.count != 0;
     lv_label_set_text_static(nav->hint, preview ? readable ? "Turn to read" : "Press: back" : detail ? "Press: open" : sessions ? "Chats / turn" : "Turn + press");
+    if (nav->view == DIAL_NAV_MENU)
+        lv_label_set_text_fmt(nav->hint, "Turn  %u / %u", nav->focus + 1, nav->count);
     if (preview) {
         const dial_conversations_snapshot_t *view = nav->conversations;
         const char *roles[] = {"You", "Assistant", "Tool", "System", "Other"};
@@ -381,7 +384,6 @@ static void render(dial_navigation_t *nav)
 
 void dial_navigation_open(dial_navigation_t *nav, bool agents)
 {
-    if (nav->view == DIAL_NAV_SESSIONS || nav->view == DIAL_NAV_PREVIEW) nav->handler(DIAL_NAV_CLOSE, 0, nav->context);
     nav->view = agents ? DIAL_NAV_AGENTS : DIAL_NAV_MENU;
     nav->focus = 0;
     lv_obj_set_hidden(nav->root, false);
@@ -436,7 +438,8 @@ bool dial_navigation_show_reader(dial_navigation_t *nav, const dial_agents_snaps
     nav->agent_focus = agent;
     nav->session_focus = view->selected;
     nav->view = preview ? DIAL_NAV_PREVIEW : DIAL_NAV_SESSIONS;
-    nav->focus = preview ? view->selected : 0;
+    /* Selection is page-local; paging controls follow the session rows. */
+    nav->focus = view->selected;
     changed(nav);
     return true;
 }
@@ -480,8 +483,9 @@ void dial_navigation_activate(dial_navigation_t *nav)
         return;
     }
     if (nav->view == DIAL_NAV_MENU) {
-        if (nav->focus == 1) nav->handler(DIAL_NAV_CONTROL, 0, nav->context);
-        else if (nav->focus == 2) dial_navigation_open_settings(nav, DIAL_NAV_SETTINGS);
+        if (nav->focus == 1) nav->handler(DIAL_NAV_RESUME, 0, nav->context);
+        else if (nav->focus == 2) nav->handler(DIAL_NAV_CONTROL, 0, nav->context);
+        else if (nav->focus == 3) dial_navigation_open_settings(nav, DIAL_NAV_SETTINGS);
         else dial_navigation_open(nav, true);
         return;
     }
@@ -520,8 +524,6 @@ void dial_navigation_activate(dial_navigation_t *nav)
 void dial_navigation_open_settings(dial_navigation_t *nav, dial_navigation_view_t page)
 {
     if (page != DIAL_NAV_SETTINGS && page != DIAL_NAV_DISPLAY && page != DIAL_NAV_CONNECTION) return;
-    if (nav->view == DIAL_NAV_SESSIONS || nav->view == DIAL_NAV_PREVIEW)
-        nav->handler(DIAL_NAV_CLOSE, 0, nav->context);
     nav->view = page;
     nav->focus = 0;
     lv_obj_set_hidden(nav->root, false);

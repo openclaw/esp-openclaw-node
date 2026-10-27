@@ -102,7 +102,7 @@ The screen is upright with the USB connector on the right. The home screen
 shows a compact connection strip, a blinking face, and one action. Wi-Fi and
 Gateway status are separate; no battery level is invented. Home shows whether
 an agent action is assigned and retains the current action's feedback in its
-headline. **Open menu** leads to Agents, Controls, and Settings. Turn to move the
+headline. **Open menu** leads to Agents, Conversations, Controls, and Settings. Turn to move the
 highlight and press to open; touch rows directly. Hold the encoder or a
 stationary touch to return Home. The menu stays available offline.
 
@@ -131,6 +131,13 @@ screens. A refresh or disconnect cancels any held selection before replacing
 the rows. Initial letters represent identities whose avatars are not rendered.
 This is read-only browsing: opening an agent does not select a conversation or
 change which agent owns a configured numeric control.
+
+Conversations returns to the last browsed agent's list, highlighting the last
+opened conversation. Home, Controls, and Settings retain that bounded reader
+snapshot; returning does not submit an action or make another list request.
+With no selection, Conversations opens Agents. Refreshing Agents, a reconnect,
+restart, or `conversations close` clears the selection and requires choosing
+an agent again. The selection lasts only for the current reader connection.
 
 Controls opens the existing numeric dial. Turn or drag its arc to change the
 value; press the encoder or tap the center to confirm. Dragging never confirms

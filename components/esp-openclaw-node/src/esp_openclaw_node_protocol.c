@@ -5,6 +5,7 @@
  */
 
 #include "esp_openclaw_node_internal.h"
+#include "esp_openclaw_node_handshake.h"
 
 #include <inttypes.h>
 #include <stdio.h>
@@ -1077,7 +1078,10 @@ void esp_openclaw_node_process_gateway_message(
     esp_openclaw_node_handle_t node,
     const char *text)
 {
-    cJSON *root = cJSON_Parse(text);
+    esp_openclaw_node_lock_state(node);
+    bool handshake = esp_openclaw_node_state_is_connecting(node->state);
+    esp_openclaw_node_unlock_state(node);
+    cJSON *root = handshake ? esp_openclaw_node_parse_handshake(text, strlen(text)) : cJSON_Parse(text);
     if (root == NULL) {
         ESP_LOGW(ESP_OPENCLAW_NODE_TAG, "invalid gateway JSON frame");
         return;

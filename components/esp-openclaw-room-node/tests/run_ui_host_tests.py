@@ -58,6 +58,7 @@ void ui_exit_critical(portMUX_TYPE *);
 #define taskEXIT_CRITICAL(lock) ui_exit_critical(lock)
 size_t strlcpy(char *, const char *, size_t);
 """,
+    "freertos/semphr.h": "typedef void *SemaphoreHandle_t;",
     "freertos/task.h": '#include "freertos/FreeRTOS.h"',
 }
 
@@ -112,9 +113,11 @@ def main():
             "-I", str(root), "-I", str(component), "-I", str(component / "include"),
             "-I", str(lvgl), str(tests / "test_room_ui_controller.c"),
             "-I", str(cjson), str(cjson / "cJSON.c"),
+            "-I", str(component.parent / "esp-openclaw-directory/include"),
             str(component / "room_ui_controller.c"), str(component / "room_board.c"),
             str(component / "room_watch_home.c"),
             str(component / "room_watch_navigation.c"),
+            str(component / "room_watch_agents.c"),
             str(component / "room_face.c"),
             str(pixels), str(watch_pixels), str(component / "room_lobster.c"),
             *map(str, sorted((lvgl / "src").rglob("*.c"))),

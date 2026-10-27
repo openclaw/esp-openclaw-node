@@ -24,6 +24,7 @@ idf_component_register(
         "room_ui_controller.c"
         "room_watch_home.c"
         "room_watch_navigation.c"
+        "room_watch_agents.c"
     INCLUDE_DIRS "include"
     PRIV_INCLUDE_DIRS "."
     EMBED_FILES "assets/openclaw_lobster.argb8888"

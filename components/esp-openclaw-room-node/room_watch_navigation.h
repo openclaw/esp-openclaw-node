@@ -5,7 +5,7 @@
 
 typedef enum {
     ROOM_WATCH_HOME, ROOM_WATCH_MENU, ROOM_WATCH_CONNECTION,
-    ROOM_WATCH_CANVAS, ROOM_WATCH_DEVICE_STATUS,
+    ROOM_WATCH_CANVAS, ROOM_WATCH_DEVICE_STATUS, ROOM_WATCH_AGENTS,
 } room_watch_page_t;
 
 void room_watch_navigation_create(lv_obj_t *parent, lv_event_cb_t handler);

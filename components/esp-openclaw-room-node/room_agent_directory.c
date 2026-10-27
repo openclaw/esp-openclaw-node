@@ -91,6 +91,7 @@ void room_agent_directory_cancel(void)
     directory.interested = false;
     invalidate();
     xSemaphoreGive(directory.lock);
+    directory.wake();
 }
 
 void room_agent_directory_copy(room_agents_snapshot_t *snapshot)

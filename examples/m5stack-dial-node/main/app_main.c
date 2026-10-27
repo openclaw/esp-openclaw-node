@@ -144,11 +144,20 @@ static void show_view(dial_view_t view)
     dial_input_set_control(&ui.input, view == VIEW_CONTROL);
 }
 
+static esp_err_t set_brightness(int percent)
+{
+    esp_err_t err = bsp_display_brightness_set(percent);
+    if (err == ESP_OK) ui.brightness = percent;
+    dial_navigation_set_brightness(&ui.navigation, ui.brightness, err != ESP_OK);
+    return err;
+}
+
 static void navigation_event(dial_navigation_event_t event, size_t offset, void *context)
 {
     (void)context;
     if (event == DIAL_NAV_HOME) show_view(VIEW_FACE);
     else if (event == DIAL_NAV_CONTROL) show_view(VIEW_CONTROL);
+    else if (event == DIAL_NAV_BRIGHTNESS) set_brightness((int)offset);
     else if (event == DIAL_NAV_REFRESH) {
         if (dial_reader_agents_refresh(offset) == ESP_OK) {
             dial_reader_agents_copy(ui.agents);
@@ -420,6 +429,7 @@ static esp_err_t start_display(void)
     lv_label_set_text(ui.footer, "USB setup");
     dial_home_create(&ui.home, screen);
     dial_navigation_create(&ui.navigation, screen, navigation_event, NULL);
+    dial_navigation_set_brightness(&ui.navigation, ui.brightness, false);
     for (int i = 0; i < 2; ++i) {
         ui.eyes[i] = lv_obj_create(screen);
         lv_obj_set_style_bg_color(ui.eyes[i], lv_color_hex(0x58d5c4), 0);
@@ -445,7 +455,8 @@ static cJSON *status_payload(void)
     if (ui.view == VIEW_NAVIGATION) {
         cJSON_AddStringToObject(result, "page", ui.navigation.view == DIAL_NAV_MENU ? "menu" :
             ui.navigation.view == DIAL_NAV_AGENTS ? "agents" : ui.navigation.view == DIAL_NAV_SESSIONS ? "conversations" :
-            ui.navigation.view == DIAL_NAV_PREVIEW ? "preview" : "agent");
+            ui.navigation.view == DIAL_NAV_PREVIEW ? "preview" : ui.navigation.view == DIAL_NAV_SETTINGS ? "settings" :
+            ui.navigation.view == DIAL_NAV_DISPLAY ? "display" : "agent");
     }
     if (ui.view == VIEW_MESSAGE) {
         cJSON_AddStringToObject(result, "heading", ui.heading);
@@ -518,8 +529,9 @@ static esp_err_t handle_command(esp_openclaw_node_handle_t client, void *context
         if (!only_fields(params, fields, 1) ||
             (cJSON_HasObjectItem(params, "page") && !text_field(params, "page", 13, &page)) ||
             (strcmp(page, "menu") != 0 && strcmp(page, "agents") != 0 &&
-             strcmp(page, "conversations") != 0 && strcmp(page, "preview") != 0)) {
-            err = invalid(error, "page must be menu, agents, conversations or preview");
+             strcmp(page, "conversations") != 0 && strcmp(page, "preview") != 0 &&
+             strcmp(page, "settings") != 0 && strcmp(page, "display") != 0)) {
+            err = invalid(error, "page must be menu, agents, conversations, preview, settings or display");
         } else if (strcmp(page, "conversations") == 0 || strcmp(page, "preview") == 0) {
             if (ui.conversations == NULL) ui.conversations = calloc(1, sizeof(*ui.conversations));
             if (ui.agents == NULL) ui.agents = calloc(1, sizeof(*ui.agents));
@@ -531,6 +543,10 @@ static esp_err_t handle_command(esp_openclaw_node_handle_t client, void *context
                     err = invalid(error, "Open a conversation before showing this page");
                 else show_view(VIEW_NAVIGATION);
             }
+        } else if (strcmp(page, "settings") == 0 || strcmp(page, "display") == 0) {
+            open_navigation(false);
+            if (ui.view == VIEW_NAVIGATION)
+                dial_navigation_open_settings(&ui.navigation, strcmp(page, "display") == 0);
         } else open_navigation(strcmp(page, "agents") == 0);
     } else if (strcmp(command, "display.show") == 0) {
         const char *heading, *text;
@@ -550,8 +566,7 @@ static esp_err_t handle_command(esp_openclaw_node_handle_t client, void *context
         if (!only_fields(params, fields, 1) || !integer_field(params, "percent", 0, 100, &percent)) {
             err = invalid(error, "percent must be an integer from 0 to 100");
         } else {
-            err = bsp_display_brightness_set(percent);
-            if (err == ESP_OK) ui.brightness = percent;
+            err = set_brightness(percent);
         }
     } else if (strcmp(command, "dial.complete") == 0) {
         const char *fields[] = {"requestId", "success", "text"};

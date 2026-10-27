@@ -29,6 +29,12 @@ static void back(dial_navigation_t *nav)
 {
     if (nav->view == DIAL_NAV_MENU) nav->handler(DIAL_NAV_HOME, 0, nav->context);
     else {
+        if (nav->view == DIAL_NAV_DISPLAY) {
+            nav->view = DIAL_NAV_SETTINGS;
+            nav->focus = 0;
+            changed(nav);
+            return;
+        }
         if (nav->view == DIAL_NAV_PREVIEW) {
             nav->view = DIAL_NAV_SESSIONS;
             nav->focus = nav->session_focus;
@@ -77,7 +83,8 @@ static void touch(lv_event_t *event)
     for (unsigned i = 0; i < 3; ++i) {
         if (target == nav->rows[i]) {
             if (nav->view != DIAL_NAV_DETAIL) nav->focus = nav->first + i;
-            dial_navigation_activate(nav);
+            if (nav->view == DIAL_NAV_DISPLAY) dial_navigation_move(nav, i == 0 ? -1 : 1);
+            else dial_navigation_activate(nav);
             return;
         }
     }
@@ -116,7 +123,7 @@ void dial_navigation_create(dial_navigation_t *nav, lv_obj_t *parent,
         nav->icons[i] = text(nav->rows[i], "", 12, 9, 20);
         nav->names[i] = text(nav->rows[i], "", 40, 9, 112);
     }
-    nav->hint = text(nav->root, "Turn + press", 74, 198, 92);
+    nav->hint = text(nav->root, "Turn + press", 68, 198, 104);
     lv_obj_set_style_text_align(nav->hint, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(nav->hint, lv_color_hex(0xb8b0bd), 0);
     nav->description = text(nav->root, "", 44, 80, 152);
@@ -189,10 +196,15 @@ static void item(dial_navigation_t *nav, unsigned index, const char **name, cons
 {
     *icon = LV_SYMBOL_RIGHT;
     if (nav->view == DIAL_NAV_MENU) {
-        const char *names[] = {"Agents", "Controls", "Home"};
-        const char *icons[] = {LV_SYMBOL_DIRECTORY, LV_SYMBOL_SETTINGS, LV_SYMBOL_HOME};
+        const char *names[] = {"Agents", "Controls", "Settings"};
+        const char *icons[] = {LV_SYMBOL_DIRECTORY, LV_SYMBOL_SETTINGS, LV_SYMBOL_SETTINGS};
         *name = names[index];
         *icon = icons[index];
+        return;
+    }
+    if (nav->view == DIAL_NAV_SETTINGS) {
+        *name = index == 0 ? "Display" : "Back";
+        *icon = index == 0 ? LV_SYMBOL_IMAGE : LV_SYMBOL_LEFT;
         return;
     }
     if (index < agent_count(nav)) {
@@ -213,18 +225,55 @@ static void item(dial_navigation_t *nav, unsigned index, const char **name, cons
     *icon = index == 0 ? LV_SYMBOL_REFRESH : LV_SYMBOL_LEFT;
 }
 
+static void render_display(dial_navigation_t *nav)
+{
+    lv_label_set_text_static(nav->heading, "Display");
+    lv_obj_set_hidden(nav->preview_body, true);
+    lv_obj_set_hidden(nav->description, false);
+    lv_obj_set_height(nav->description, 32);
+#if LV_FONT_MONTSERRAT_24
+    lv_obj_set_style_text_font(nav->description, &lv_font_montserrat_24, 0);
+#endif
+    lv_label_set_text_fmt(nav->description, "%d%%", nav->brightness);
+    lv_obj_set_hidden(nav->id_caption, true);
+    lv_obj_set_hidden(nav->identity, false);
+    lv_obj_set_y(nav->identity, 116);
+    lv_label_set_text_static(nav->identity, nav->brightness_failed ? "Couldn't change" : "Until restart");
+    lv_obj_set_hidden(nav->hint, false);
+    lv_label_set_text_static(nav->hint, nav->brightness_failed ? "Turn to retry" : "Turn to adjust");
+    for (unsigned i = 0; i < 3; ++i) {
+        lv_obj_set_hidden(nav->rows[i], i == 2);
+        if (i == 2) continue;
+        lv_obj_set_pos(nav->rows[i], i == 0 ? 38 : 126, 150);
+        lv_obj_set_size(nav->rows[i], 76, 36);
+        lv_obj_set_pos(nav->icons[i], 12, 9);
+        lv_obj_set_pos(nav->names[i], 34, 9);
+        lv_obj_set_width(nav->names[i], 32);
+        lv_label_set_text_static(nav->icons[i], i == 0 ? LV_SYMBOL_MINUS : LV_SYMBOL_PLUS);
+        lv_label_set_text_static(nav->names[i], "5%");
+        lv_obj_set_style_bg_color(nav->rows[i], lv_color_hex(0x302535), 0);
+        lv_obj_set_style_text_color(nav->names[i], lv_color_hex(0xf4efee), 0);
+        lv_obj_set_style_text_color(nav->icons[i], lv_color_hex(0xf4efee), 0);
+    }
+}
+
 static void render(dial_navigation_t *nav)
 {
+    if (nav->view == DIAL_NAV_DISPLAY) {
+        render_display(nav);
+        return;
+    }
+    lv_obj_set_y(nav->identity, 142);
     bool detail = nav->view == DIAL_NAV_DETAIL;
     bool sessions = nav->view == DIAL_NAV_SESSIONS;
     bool preview = nav->view == DIAL_NAV_PREVIEW;
     bool message = (nav->view == DIAL_NAV_AGENTS || sessions) && agent_count(nav) == 0;
-    nav->count = detail || preview ? 1 : nav->view == DIAL_NAV_MENU ? 3 :
+    nav->count = detail || preview ? 1 : nav->view == DIAL_NAV_MENU ? 3 : nav->view == DIAL_NAV_SETTINGS ? 2 :
         agent_count(nav) + has_next(nav) + has_previous(nav) + 2;
     if (!detail && !preview && nav->focus >= nav->count) nav->focus = 0;
     unsigned visible = message ? 2 : 3;
     nav->first = nav->focus / visible * visible;
-    lv_label_set_text_static(nav->heading, preview ? "Preview" : sessions ? "Chats" : nav->view == DIAL_NAV_MENU ? "Menu" : "Agents");
+    lv_label_set_text_static(nav->heading, preview ? "Preview" : sessions ? "Chats" : nav->view == DIAL_NAV_MENU ? "Menu" : nav->view == DIAL_NAV_SETTINGS ? "Settings" : "Agents");
     if (sessions && nav->conversations != NULL && nav->conversations->agent.name[0] != '\0')
         lv_label_set_text(nav->heading, nav->conversations->agent.name);
     else if (preview && nav->conversations != NULL && nav->conversations->selected < nav->conversations->page.count)
@@ -319,7 +368,8 @@ void dial_navigation_update(dial_navigation_t *nav, const dial_agents_snapshot_t
     nav->revision = snapshot->revision;
     /* A replacement roster may reorder identities. Never keep a detail or a
      * held activation attached to the old row number. */
-    if (nav->view != DIAL_NAV_MENU) {
+    if (nav->view == DIAL_NAV_AGENTS || nav->view == DIAL_NAV_DETAIL ||
+        nav->view == DIAL_NAV_SESSIONS || nav->view == DIAL_NAV_PREVIEW) {
         nav->view = DIAL_NAV_AGENTS;
         nav->focus = 0;
         changed(nav);
@@ -364,6 +414,14 @@ bool dial_navigation_show_reader(dial_navigation_t *nav, const dial_agents_snaps
 
 void dial_navigation_move(dial_navigation_t *nav, int direction)
 {
+    if (nav->view == DIAL_NAV_DISPLAY) {
+        int percent = nav->brightness + (direction > 0 ? 5 : -5);
+        if (percent < 10) percent = nav->brightness < 10 && direction < 0 ? nav->brightness : 10;
+        if (percent > 100) percent = 100;
+        if (percent != nav->brightness || nav->brightness_failed)
+            nav->handler(DIAL_NAV_BRIGHTNESS, (size_t)percent, nav->context);
+        return;
+    }
     if (nav->view == DIAL_NAV_PREVIEW) {
         lv_obj_scroll_by(nav->preview_body, 0, direction > 0 ? -24 : 24, LV_ANIM_OFF);
         return;
@@ -376,6 +434,12 @@ void dial_navigation_move(dial_navigation_t *nav, int direction)
 
 void dial_navigation_activate(dial_navigation_t *nav)
 {
+    if (nav->view == DIAL_NAV_DISPLAY) { back(nav); return; }
+    if (nav->view == DIAL_NAV_SETTINGS) {
+        if (nav->focus == 0) dial_navigation_open_settings(nav, true);
+        else back(nav);
+        return;
+    }
     if (nav->view == DIAL_NAV_PREVIEW) { back(nav); return; }
     if (nav->view == DIAL_NAV_DETAIL) {
         nav->agent_focus = nav->focus;
@@ -387,7 +451,7 @@ void dial_navigation_activate(dial_navigation_t *nav)
     }
     if (nav->view == DIAL_NAV_MENU) {
         if (nav->focus == 1) nav->handler(DIAL_NAV_CONTROL, 0, nav->context);
-        else if (nav->focus == 2) nav->handler(DIAL_NAV_HOME, 0, nav->context);
+        else if (nav->focus == 2) dial_navigation_open_settings(nav, false);
         else dial_navigation_open(nav, true);
         return;
     }
@@ -421,4 +485,22 @@ void dial_navigation_activate(dial_navigation_t *nav)
     }
     if (index == 0) nav->handler(nav->view == DIAL_NAV_SESSIONS ? DIAL_NAV_SESSIONS_REFRESH : DIAL_NAV_REFRESH, 0, nav->context);
     else back(nav);
+}
+
+void dial_navigation_open_settings(dial_navigation_t *nav, bool display)
+{
+    if (nav->view == DIAL_NAV_SESSIONS || nav->view == DIAL_NAV_PREVIEW)
+        nav->handler(DIAL_NAV_CLOSE, 0, nav->context);
+    nav->view = display ? DIAL_NAV_DISPLAY : DIAL_NAV_SETTINGS;
+    nav->focus = 0;
+    lv_obj_set_hidden(nav->root, false);
+    changed(nav);
+}
+
+void dial_navigation_set_brightness(dial_navigation_t *nav, int percent, bool failed)
+{
+    if (nav->brightness == percent && nav->brightness_failed == failed) return;
+    nav->brightness = percent;
+    nav->brightness_failed = failed;
+    if (nav->view == DIAL_NAV_DISPLAY) changed(nav);
 }

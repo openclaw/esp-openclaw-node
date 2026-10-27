@@ -21,6 +21,9 @@ static dial_conversations_snapshot_t conversations;
 static const char *snapshot_prefix;
 static uint16_t frame[240 * 240];
 static size_t requested_offset;
+static int brightness = 65;
+static bool brightness_failure;
+static unsigned brightness_requests;
 static uint16_t pixels[240 * 240];
 
 static void flush(lv_display_t *display, const lv_area_t *area, uint8_t *data)
@@ -79,7 +82,13 @@ static void navigation_event(dial_navigation_event_t kind, size_t offset, void *
 {
     (void)context;
     dial_input_set_control(&input, false);
-    if (kind == DIAL_NAV_CONVERSATIONS) { ++opens; requested_offset = offset; }
+    if (kind == DIAL_NAV_BRIGHTNESS) {
+        ++brightness_requests;
+        requested_offset = offset;
+        if (!brightness_failure) brightness = (int)offset;
+        dial_navigation_set_brightness(&navigation, brightness, brightness_failure);
+    }
+    else if (kind == DIAL_NAV_CONVERSATIONS) { ++opens; requested_offset = offset; }
     else if (kind == DIAL_NAV_READ) { ++reads; requested_offset = offset; }
     else if (kind == DIAL_NAV_REFRESH || kind == DIAL_NAV_SESSIONS_REFRESH) { ++refreshes; requested_offset = offset; }
     else if (kind == DIAL_NAV_HOME || kind == DIAL_NAV_CONTROL) {
@@ -492,6 +501,91 @@ int main(int argc, char **argv)
     advance(40);
     assert(changes == before_rejection + 1);
     puts("rejected reader page preserves active control input: passed");
+
+    // Local settings use real encoder/touch input and never send the numeric
+    // control. Network refreshes must not replace this local page.
+    navigating = true;
+    lv_obj_set_hidden(home.root, true);
+    lv_obj_set_hidden(arc, true);
+    dial_input_set_control(&input, false);
+    dial_navigation_set_brightness(&navigation, brightness, false);
+    dial_navigation_open(&navigation, false);
+    touch(120, 168, true); touch(120, 168, false);
+    assert(navigation.view == DIAL_NAV_SETTINGS);
+    snapshot("settings");
+    touch(120, 82, true); touch(120, 82, false);
+    assert(navigation.view == DIAL_NAV_DISPLAY);
+    assert(strcmp(lv_label_get_text(navigation.description), "65%") == 0);
+    snapshot("display");
+    lv_obj_update_layout(screen);
+    for (unsigned i = 0; i < lv_obj_get_child_count(navigation.root); ++i)
+        check_home_bounds(lv_obj_get_child(navigation.root, i));
+    unsigned before_settings = confirmations;
+    encoder_diff = 1;
+    lv_indev_read(encoder); advance(40);
+    assert(brightness == 70 && requested_offset == 70);
+    assert(strcmp(lv_label_get_text(navigation.description), "70%") == 0);
+    touch(75, 168, true); touch(75, 168, false);
+    assert(brightness == 65);
+    touch(165, 168, true); touch(185, 168, true); touch(185, 168, false);
+    assert(brightness == 65);
+    touch(165, 168, true); touch(165, 168, false);
+    assert(brightness == 70);
+    brightness_failure = true;
+    encoder_diff = 1;
+    lv_indev_read(encoder); advance(40);
+    assert(brightness == 70 && requested_offset == 75);
+    assert(strcmp(lv_label_get_text(navigation.description), "70%") == 0);
+    assert(strcmp(lv_label_get_text(navigation.identity), "Couldn't change") == 0);
+    snapshot("display-failed");
+    brightness_failure = false;
+    encoder_diff = 1;
+    lv_indev_read(encoder); advance(40);
+    assert(brightness == 75 && !navigation.brightness_failed);
+    roster.state = DIAL_AGENTS_OFFLINE;
+    ++roster.revision;
+    dial_navigation_update(&navigation, &roster);
+    assert(navigation.view == DIAL_NAV_DISPLAY && brightness == 75);
+    for (unsigned i = 0; i < 30; ++i) dial_navigation_move(&navigation, 1);
+    assert(brightness == 100);
+    unsigned before_limit = brightness_requests;
+    dial_navigation_move(&navigation, 1);
+    assert(brightness_requests == before_limit);
+    for (unsigned i = 0; i < 30; ++i) dial_navigation_move(&navigation, -1);
+    assert(brightness == 10);
+    dial_navigation_move(&navigation, -1);
+    assert(brightness == 10 && confirmations == before_settings);
+    // A command's new brightness cancels a held button; release cannot apply
+    // the old gesture to its replacement value.
+    touch(165, 168, true);
+    brightness = 55;
+    dial_navigation_set_brightness(&navigation, brightness, false);
+    touch(165, 168, false);
+    assert(brightness == 55);
+    touch(68, 44, true); touch(68, 44, false);
+    assert(navigation.view == DIAL_NAV_SETTINGS && navigation.focus == 0);
+    ++roster.revision;
+    dial_navigation_update(&navigation, &roster);
+    assert(navigation.view == DIAL_NAV_SETTINGS);
+    // Display uses the same row objects: returning must restore normal touch
+    // locations, including both the Display row and the in-list Back row.
+    touch(120, 82, true); touch(120, 82, false);
+    assert(navigation.view == DIAL_NAV_DISPLAY);
+    touch(68, 44, true); touch(68, 44, false);
+    touch(120, 126, true); touch(120, 126, false);
+    assert(navigation.view == DIAL_NAV_MENU);
+    dial_navigation_open_settings(&navigation, true);
+    encoder_state = LV_INDEV_STATE_PRESSED;
+    lv_indev_read(encoder); advance(40);
+    encoder_state = LV_INDEV_STATE_RELEASED;
+    lv_indev_read(encoder); advance(40);
+    assert(navigation.view == DIAL_NAV_SETTINGS);
+    encoder_state = LV_INDEV_STATE_PRESSED;
+    lv_indev_read(encoder); advance(1000);
+    encoder_state = LV_INDEV_STATE_RELEASED;
+    lv_indev_read(encoder); advance(40);
+    assert(!navigating && confirmations == before_settings);
+    puts("local display input, bounds, failures, offline focus and return: passed");
 
     lv_deinit();
 }

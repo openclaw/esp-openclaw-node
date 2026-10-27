@@ -22,6 +22,13 @@ cumulatively before buffer growth. Oversize or malformed continuation ordering
 closes only the affected transport and reports `ESP_ERR_INVALID_SIZE` through
 `CONNECT_FAILED` during handshake or `DISCONNECTED` after the session is ready.
 
+During connection, the SDK validates the complete JSON frame before retaining
+only the fields used for the challenge, response correlation, authentication,
+role-token handoff and plugin surface URLs. Unused initial snapshots and feature
+catalogs do not consume a second allocation as a JSON tree. Handshake JSON is
+limited to 64 nested containers; the transport's frame-size limit still applies.
+Connected RPC and event payloads continue to use the ordinary JSON parser.
+
 ## Contents
 
 - [Requirements](#requirements)

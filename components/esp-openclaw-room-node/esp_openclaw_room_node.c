@@ -81,6 +81,10 @@ static bool talk_connecting_pending;
 static bool talk_speech_failed_pending;
 static bool operator_ui_pending;
 static _Atomic size_t local_agents_request = SIZE_MAX;
+static struct {
+    bool selected, expired;
+    char id[65], session_key[200];
+} talk_target;
 static bool node_reconnect_scheduled;
 static bool node_reconnect_pending;
 static esp_timer_handle_t node_reconnect_timer;
@@ -351,6 +355,31 @@ static void request_local_agents(bool open, size_t offset)
     wake_talk_teardown();
 }
 
+static void invalidate_talk_target_locked(void)
+{
+    if (talk_target.selected) talk_target.expired = true;
+}
+
+static esp_err_t select_talk_agent(const char *id, unsigned revision)
+{
+    room_agent_target_t target;
+    char key[sizeof(talk_target.session_key)];
+    xSemaphoreTake(state_lock, portMAX_DELAY);
+    esp_err_t err = room_agent_directory_resolve_locked(revision, id, &target);
+    if (err == ESP_OK) {
+        int length = snprintf(key, sizeof(key), "agent:%s:%s", target.agent.id, target.main_key);
+        if (length < 0 || (size_t)length >= sizeof(key)) err = ESP_ERR_INVALID_SIZE;
+    }
+    if (err == ESP_OK) {
+        memcpy(talk_target.id, target.agent.id, sizeof(talk_target.id));
+        memcpy(talk_target.session_key, key, strlen(key) + 1);
+        talk_target.selected = true;
+        talk_target.expired = false;
+    }
+    xSemaphoreGive(state_lock);
+    return err;
+}
+
 static void refresh_agents(void)
 {
     size_t request = atomic_exchange(&local_agents_request, SIZE_MAX);
@@ -406,6 +435,7 @@ static void talk_teardown_task(void *arg)
             request_talk_stop_locked(expired_generation, NULL);
         bool local_start = false;
         bool local_error = false;
+        bool target_expired = talk_target.selected && talk_target.expired;
         if (local_talk_request.pending) {
             bool current = local_talk_request.generation == talk_generation &&
                 local_talk_request.operator_incarnation == operator_incarnation;
@@ -450,7 +480,8 @@ static void talk_teardown_task(void *arg)
             room_ui_set(ready ? ROOM_UI_IDLE : ROOM_UI_ERROR, ready ? NULL : "Operator offline");
             if (ready) room_ui_show_face_hint(8000);
         }
-        if (local_error) room_ui_set(ROOM_UI_ERROR, "Talk unavailable; try again when ready");
+        if (local_error) room_ui_set(ROOM_UI_ERROR, target_expired
+            ? "Choose an agent again after reconnecting" : "Talk unavailable; try again when ready");
         if (speech_failed) room_ui_set(ROOM_UI_ERROR, "Speech request failed; try again");
         if (!close) {
             start_node_if_pending();
@@ -574,6 +605,7 @@ static bool admit_talk_locked(void)
 {
     if (!operator_ready || operator_client == NULL || gateway_http_base == NULL ||
         camera_active || talk_call != NULL || talk_generation == UINT32_MAX) return false;
+    if (talk_target.selected && talk_target.expired) return false;
     uint32_t generation = talk_generation + 1;
     esp_openclaw_talk_signaling_config_t signaling = {
         .operator_node = operator_client,
@@ -581,6 +613,7 @@ static bool admit_talk_locked(void)
         .provider = CONFIG_OPENCLAW_ROOM_TALK_PROVIDER,
         .model = CONFIG_OPENCLAW_ROOM_TALK_MODEL,
         .voice = CONFIG_OPENCLAW_ROOM_TALK_VOICE,
+        .session_key = talk_target.selected ? talk_target.session_key : NULL,
         .setup_failed_cb = talk_setup_failed,
         .setup_failed_ctx = (void *)(uintptr_t)generation,
         .silence_duration_ms = ROOM_TALK_VAD_SILENCE_MS,
@@ -713,8 +746,10 @@ static void on_wake(const char *wake_word, void *ctx)
     ESP_LOGI(TAG, "ambient wake word detected: %s", wake_word);
     xSemaphoreTake(state_lock, portMAX_DELAY);
     bool start = admit_talk_locked();
+    bool expired = talk_target.selected && talk_target.expired;
     xSemaphoreGive(state_lock);
     if (!start) {
+        if (expired) room_ui_set(ROOM_UI_ERROR, "Choose an agent again after reconnecting");
         return;
     }
     xTaskNotifyGive(talk_start_worker);
@@ -760,6 +795,7 @@ static void operator_event(
      * that owner, but has no authority over the replacement operator's UI. */
     if (!connected && client == talk_operator) request_talk_stop_locked(talk_generation, NULL);
     if (current) {
+        invalidate_talk_target_locked();
         operator_ready = connected;
         if (connected) {
             operator_session_missing = false;
@@ -982,6 +1018,7 @@ static void node_event(
         char *old_http_base = gateway_http_base;
         bool origin_changed = old_http_base != NULL && strcmp(old_http_base, new_http_base) != 0;
         gateway_http_base = new_http_base;
+        if (origin_changed) invalidate_talk_target_locked();
         if (origin_changed) request_talk_stop_locked(talk_generation, NULL);
         esp_openclaw_node_handle_t existing_operator = operator_client;
         xSemaphoreGive(state_lock);
@@ -998,6 +1035,7 @@ static void node_event(
                 ESP_LOGI(TAG, "Gateway changed; reconnecting the operator client");
                 xSemaphoreTake(state_lock, portMAX_DELAY);
                 operator_ready = false;
+                invalidate_talk_target_locked();
                 room_agent_directory_set_owner_locked(existing_operator, operator_incarnation, 0, false);
                 request_talk_stop_locked(talk_generation, NULL);
                 xSemaphoreGive(state_lock);
@@ -1131,6 +1169,7 @@ static esp_err_t handle_talk_start(
     bool already_active = camera_active || talk_call != NULL;
     bool start = admit_talk_locked();
     bool operator_offline = !operator_ready;
+    bool target_expired = talk_target.selected && talk_target.expired;
     xSemaphoreGive(state_lock);
     if (operator_offline) {
         out_error->code = "UNAVAILABLE";
@@ -1138,6 +1177,11 @@ static esp_err_t handle_talk_start(
         return ESP_ERR_INVALID_STATE;
     }
     if (!start) {
+        if (target_expired && !already_active) {
+            out_error->code = "UNAVAILABLE";
+            out_error->message = "choose an agent again after reconnecting, or explicitly use the Gateway default";
+            return ESP_ERR_INVALID_STATE;
+        }
         if (!already_active) {
             out_error->code = "INTERNAL";
             out_error->message = "could not prepare Talk";
@@ -1520,6 +1564,32 @@ static int menu_console_command(int argc, char **argv)
 
 static int agents_console_command(int argc, char **argv)
 {
+    if (argc == 3 && strcmp(argv[1], "select") == 0) {
+        room_agents_snapshot_t *snapshot = malloc(sizeof(*snapshot));
+        if (snapshot == NULL) return 1;
+        room_agent_directory_copy(snapshot);
+        esp_err_t err = select_talk_agent(argv[2], snapshot->revision);
+        free(snapshot);
+        printf("next Talk agent: %s\n", err == ESP_OK ? argv[2] : "selection unavailable; refresh agents and retry");
+        return err == ESP_OK ? 0 : 1;
+    }
+    if (argc == 2 && strcmp(argv[1], "default") == 0) {
+        xSemaphoreTake(state_lock, portMAX_DELAY);
+        memset(&talk_target, 0, sizeof(talk_target));
+        xSemaphoreGive(state_lock);
+        printf("next Talk uses the Gateway default; current call is unchanged\n");
+        return 0;
+    }
+    if (argc == 2 && strcmp(argv[1], "selection") == 0) {
+        char id[sizeof(talk_target.id)];
+        xSemaphoreTake(state_lock, portMAX_DELAY);
+        memcpy(id, talk_target.id, sizeof(id));
+        bool selected = talk_target.selected, expired = talk_target.expired;
+        xSemaphoreGive(state_lock);
+        printf("next Talk agent: %s%s\n", selected ? id : "Gateway default",
+            expired ? " (expired; select again)" : "");
+        return 0;
+    }
     if (argc >= 2 && strcmp(argv[1], "refresh") == 0 && argc <= 3) {
         size_t offset = 0;
         if (argc == 3) {
@@ -1533,7 +1603,7 @@ static int agents_console_command(int argc, char **argv)
     } else if (argc == 2 && strcmp(argv[1], "close") == 0) {
         room_agent_directory_cancel();
     } else if (argc != 1) {
-        printf("usage: agents [refresh [offset] | close]\n");
+        printf("usage: agents [refresh [offset] | close | select <id> | default | selection]\n");
         return 1;
     }
     room_agents_snapshot_t *snapshot = malloc(sizeof(*snapshot));
@@ -1577,8 +1647,8 @@ static esp_err_t register_room_console_commands(void)
         },
         {
             .command = "agents",
-            .help = "Inspect the read-only agent directory",
-            .hint = "refresh [offset] | close",
+            .help = "Inspect agents and choose the next Talk target",
+            .hint = "refresh [offset] | close | select <id> | default | selection",
             .func = agents_console_command,
         },
         {

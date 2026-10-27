@@ -112,6 +112,23 @@ static bool current(const directory_request_t *request)
         request->connection == directory.connection && request->revision == directory.revision;
 }
 
+esp_err_t room_agent_directory_resolve_locked(unsigned revision, const char *id,
+    room_agent_target_t *target)
+{
+    if (id == NULL || target == NULL) return ESP_ERR_INVALID_ARG;
+    if (!directory.ready || directory.state != ROOM_AGENTS_READY ||
+        revision != directory.revision || directory.page == NULL ||
+        directory.page->main_key[0] == '\0') return ESP_ERR_INVALID_STATE;
+    for (size_t i = 0; i < directory.page->count; ++i) {
+        const esp_openclaw_agent_t *agent = &directory.page->agents[i];
+        if (strcmp(agent->id, id) != 0) continue;
+        target->agent = *agent;
+        memcpy(target->main_key, directory.page->main_key, sizeof(target->main_key));
+        return ESP_OK;
+    }
+    return ESP_ERR_NOT_FOUND;
+}
+
 static void response(esp_openclaw_node_handle_t client,
     const esp_openclaw_node_gateway_result_t *result, void *context)
 {

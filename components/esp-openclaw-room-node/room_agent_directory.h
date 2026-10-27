@@ -26,5 +26,12 @@ void room_agent_directory_set_owner_locked(esp_openclaw_node_handle_t client,
 esp_err_t room_agent_directory_refresh(size_t offset);
 void room_agent_directory_cancel(void);
 void room_agent_directory_copy(room_agents_snapshot_t *snapshot);
+typedef struct {
+    esp_openclaw_agent_t agent;
+    char main_key[129];
+} room_agent_target_t;
+/* Caller holds the room owner lock; resolve only a row from this live revision. */
+esp_err_t room_agent_directory_resolve_locked(unsigned revision, const char *id,
+    room_agent_target_t *target);
 /* The existing room supervisor calls this after urgent Talk work. */
 void room_agent_directory_poll(bool defer_request);

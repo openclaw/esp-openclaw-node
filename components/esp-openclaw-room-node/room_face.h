@@ -15,6 +15,8 @@ typedef enum {
     ROOM_FACE_SPEAKING,
     /* Idle pop-up (agent face.set outside a call); expires from the face tick. */
     ROOM_FACE_HINT,
+    /* Static watch Home artwork; no idle animation work while the display sleeps. */
+    ROOM_FACE_HOME,
 } room_face_state_t;
 
 /** Short authored keyframe gestures layered over the tween rig. */
@@ -39,6 +41,8 @@ esp_err_t room_face_create(lv_obj_t *parent);
 
 /** Show the face in `state` / hide it. Display lock must be held. */
 void room_face_show(room_face_state_t state);
+/** Show the static watch mascot without running its animation timer. Lock held. */
+void room_face_show_home(void);
 /** Show the hint face until `until_us`; the tick expires it. Lock held. */
 void room_face_show_hint(int64_t until_us);
 void room_face_hide(void);

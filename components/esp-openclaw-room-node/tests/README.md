@@ -74,26 +74,31 @@ baseline source file for a red comparison without editing the worktree.
 
 ## Static home UI
 
-The UI host runner compiles the real UI controller and board binding with LVGL 9,
-ASan and UBSan. Display, timer, Canvas, diagnostics and animated-face boundaries
-are synthetic; it does not access a device, network, Gateway or provider.
+The UI host runner compiles the real UI controller, board binding and animated
+face with LVGL 9, cJSON, ASan and UBSan. Display, clock, Canvas, diagnostics and
+command registration are synthetic; it does not access a device, network,
+Gateway or provider.
 
 ```sh
 python3 components/esp-openclaw-room-node/tests/run_ui_host_tests.py --lvgl-dir "$LVGL"
 ```
 
 `LVGL` points to existing LVGL 9 sources, such as a configured room example's
-`managed_components/lvgl__lvgl`. Optional `--snapshot home.ppm` writes the
-synthetic Tab5 framebuffer. CI uses the existing Waveshare build's dependency.
-The three cases cover Tab5 idle brightness, zero-default display sleep and the
+`managed_components/lvgl__lvgl`. cJSON defaults to the sibling
+`espressif__cjson/cJSON` directory; `--cjson-dir` can select existing sources.
+Optional `--snapshot home.ppm` and `--watch-snapshot watch.ppm` write the synthetic
+Tab5 and watch framebuffers. CI uses the existing Waveshare build's dependencies.
+The four cases cover Tab5 idle brightness, zero-default display sleep and the
 animated-board path. They check independent connection text, retained facts
 after paint lock failure, noninteractive bounded home content, tap/hold
 dispatch, Canvas/diagnostics visibility, camera-indicator priority and
 brightness, hint expiry, explicit off requests and a nonblank rendered mascot.
 Error details remain visible alongside ready connection facts, yield to
 Diagnostics, and clear on a later non-error state.
-The watch case also compiles the production lobster renderer and generated
-assets. An unchanged voice pose must not flush the display; blinking and idle
+The watch case checks Home bounds, setup text, overlay return and the registered
+`face.gesture` command waking a dark Home. It also compiles the production
+lobster renderer and generated assets. An unchanged voice pose must not flush
+the display; blinking and idle
 body movement must still render. This catches redundant LVGL style and line
 updates without asserting renderer implementation details.
 The lifecycle runner also checks real node/operator/network event handling for

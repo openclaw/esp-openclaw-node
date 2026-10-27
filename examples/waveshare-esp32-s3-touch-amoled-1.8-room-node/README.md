@@ -47,10 +47,20 @@ Voice-agent write actions require the shared
 the default firmware uses read-only voice access.
 
 Tap the screen or press BOOT to wake the display, then use **Start Talk** at the
-top of the screen. During connection and conversation it becomes **Stop Talk**.
+bottom of the screen. During connection and conversation it becomes **Stop Talk**.
 It is disabled while Talk is unavailable or stopping. The control also appears
 over Canvas; the existing screen tap/hold gestures still toggle Canvas and open
 diagnostics. Diagnostics hides the Talk control until closed.
+
+The watch Home keeps Wi-Fi and Gateway status above the lobster, with a bounded
+headline and a separate bottom action. A live connection says **Conversation
+live**; it does not infer speech playback from the connection state. Missing
+clock and battery telemetry are omitted. The display still sleeps when idle;
+waking it does not start a conversation. Idle, setup and error views keep static
+mascot artwork without running the animation timer; wake-up hints still animate.
+Agent selection, full menus and
+press-to-record messaging are tracked in the
+[interaction plan](../../docs/design/watch-dial-interaction-plan.md).
 
 ## Board behavior
 

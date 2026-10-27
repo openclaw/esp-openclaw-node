@@ -11,6 +11,7 @@
 #include "room_diagnostics.h"
 #include "room_face.h"
 #include "room_board.h"
+#include "room_watch_home.h"
 
 /* Tap toggles retained Canvas content; hold opens local diagnostics. */
 static void room_ui_status_clicked(lv_event_t *event)
@@ -38,6 +39,7 @@ static lv_obj_t *talk_pill;
 static lv_obj_t *talk_pill_label;
 static lv_obj_t *camera_indicator;
 static bool animated_face_enabled;
+static bool watch_home_enabled;
 static uint8_t idle_brightness;
 /* Guarded by state_mux like the state/detail facts. */
 static char gateway_text[64];
@@ -293,6 +295,14 @@ void room_ui_init(void)
         LV_EVENT_ALL,
         NULL);
     const esp_openclaw_room_node_config_t *board = room_board_config();
+    watch_home_enabled = board != NULL && board->model_identifier != NULL &&
+        strcmp(board->model_identifier, "waveshare-esp32-s3-touch-amoled-1.8") == 0;
+    if (watch_home_enabled) {
+        lv_obj_set_style_bg_color(lv_screen_active(), lv_color_hex(0x15101b), 0);
+        lv_obj_set_style_bg_grad_color(lv_screen_active(), lv_color_hex(0x362031), 0);
+        lv_obj_set_style_bg_grad_dir(lv_screen_active(), LV_GRAD_DIR_VER, 0);
+        room_watch_home_create(lv_layer_top());
+    }
     bool board_has_animated_face = board != NULL && board->display.animated_face;
     idle_brightness = board != NULL ? board->display.idle_brightness : 0;
     animated_face_enabled = board_has_animated_face;
@@ -310,10 +320,20 @@ void room_ui_init(void)
         lv_obj_set_style_border_width(talk_pill, 0, 0);
         lv_obj_set_style_radius(talk_pill, 12, 0);
         lv_obj_set_style_pad_all(talk_pill, 0, 0);
+        if (watch_home_enabled) {
+            lv_obj_set_size(talk_pill, 316, 52);
+            lv_obj_align(talk_pill, LV_ALIGN_BOTTOM_MID, 0, -20);
+            lv_obj_set_style_bg_color(talk_pill, lv_color_hex(0xf4efee), 0);
+            lv_obj_set_style_bg_opa(talk_pill, LV_OPA_COVER, 0);
+            lv_obj_set_style_radius(talk_pill, LV_RADIUS_CIRCLE, 0);
+        }
         lv_obj_clear_flag(talk_pill, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_EVENT_BUBBLE);
         lv_obj_add_event_cb(talk_pill, talk_control_clicked, LV_EVENT_ALL, NULL);
         talk_pill_label = lv_label_create(talk_pill);
         lv_obj_set_style_text_color(talk_pill_label, lv_color_white(), 0);
+        if (watch_home_enabled) {
+            lv_obj_set_style_text_color(talk_pill_label, lv_color_hex(0x302131), 0);
+        }
         lv_obj_set_style_text_font(talk_pill_label, &lv_font_montserrat_14, 0);
         lv_obj_clear_flag(talk_pill_label, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_center(talk_pill_label);
@@ -360,7 +380,14 @@ static bool room_ui_render_locked(void)
     room_ui_facts_t facts = current_facts;
     taskEXIT_CRITICAL(&state_mux);
     bool canvas_active = room_canvas_is_active();
+    if (watch_home_enabled) room_watch_home_render(&facts, state, detail, canvas_active || overlay);
     if (talk_pill != NULL) {
+        if (watch_home_enabled) {
+            /* Retained Canvas content keeps its existing top action clearance. */
+            lv_obj_set_size(talk_pill, canvas_active ? 148 : 316, canvas_active ? 44 : 52);
+            lv_obj_align(talk_pill, canvas_active ? LV_ALIGN_TOP_MID : LV_ALIGN_BOTTOM_MID,
+                0, canvas_active ? 14 : -20);
+        }
         painted_talk_action = talk_control_action(facts.talk);
         bool start = facts.talk == ROOM_UI_TALK_READY;
         bool stop = facts.talk == ROOM_UI_TALK_CONNECTING || facts.talk == ROOM_UI_TALK_ACTIVE;
@@ -373,7 +400,7 @@ static bool room_ui_render_locked(void)
     if (gateway_label != NULL) {
         /* The gateway line rides along with every non-canvas view. */
         lv_label_set_text(gateway_label, gateway);
-        if (home != NULL || canvas_active || overlay || gateway[0] == '\0') {
+        if (watch_home_enabled || home != NULL || canvas_active || overlay || gateway[0] == '\0') {
             lv_obj_add_flag(gateway_label, LV_OBJ_FLAG_HIDDEN);
         } else {
             lv_obj_clear_flag(gateway_label, LV_OBJ_FLAG_HIDDEN);
@@ -421,6 +448,11 @@ static bool room_ui_render_locked(void)
      * leak into the next call. The canvas branch above deliberately keeps the
      * mood because canvas can cover a still-active call. */
     room_face_reset_mood();
+    if (watch_home_enabled) {
+        room_face_show_home();
+        lv_obj_add_flag(status_label, LV_OBJ_FLAG_HIDDEN);
+        return true;
+    }
     lv_obj_clear_flag(status_label, LV_OBJ_FLAG_HIDDEN);
     lv_label_set_text_fmt(
         status_label,
@@ -518,7 +550,7 @@ void room_ui_show_face_hint(uint32_t show_ms)
     bool shown = room_face_is_visible();
     if (shown) {
         lv_obj_add_flag(status_label, LV_OBJ_FLAG_HIDDEN);
-        if (gateway_label != NULL) {
+        if (gateway_label != NULL && !watch_home_enabled) {
             /* The wake-up face is the "which claw am I?" moment: surface the
              * connected gateway under it whenever one is known. */
             taskENTER_CRITICAL(&state_mux);
@@ -660,6 +692,7 @@ void room_ui_set_diagnostics_open(bool open)
     if (open) pressed_talk_action = TALK_CONTROL_NONE;
     taskEXIT_CRITICAL(&state_mux);
     if (open) {
+        if (watch_home_enabled) room_watch_home_render(NULL, ROOM_UI_IDLE, "", true);
         if (home != NULL) lv_obj_add_flag(home, LV_OBJ_FLAG_HIDDEN);
         if (talk_pill != NULL) lv_obj_add_flag(talk_pill, LV_OBJ_FLAG_HIDDEN);
         if (camera_indicator != NULL) lv_obj_move_foreground(camera_indicator);

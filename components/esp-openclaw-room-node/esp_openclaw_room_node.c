@@ -483,6 +483,9 @@ static void apply_local_conversation(void)
 static void publish_conversations(void)
 {
     static room_conversations_snapshot_t *snapshot;
+    room_conversation_context_t context;
+    room_conversations_copy_context(&context);
+    room_ui_store_conversation_context(&context);
     if (conversation_resume.pending) {
         unsigned generation = conversation_resume.generation;
         if (!room_ui_wants_conversation_resume(generation)) conversation_resume.pending = false;

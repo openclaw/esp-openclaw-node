@@ -79,6 +79,7 @@ typedef enum { ROOM_CONVERSATIONS_OPEN, ROOM_CONVERSATIONS_LOAD,
 void room_ui_set_conversation_handler(void (*handler)(room_ui_conversation_action_t,
     const char *agent_id, unsigned revision, size_t value, unsigned generation));
 bool room_ui_wants_conversations(void);
+void room_ui_store_conversation_context(const room_conversation_context_t *context);
 void room_ui_store_conversations(const room_conversations_snapshot_t *snapshot, unsigned generation);
 void room_ui_conversations_failed(unsigned generation);
 /* Show only an existing reader selection that belongs to the displayed roster. */

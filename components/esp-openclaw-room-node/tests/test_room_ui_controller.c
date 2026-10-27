@@ -36,7 +36,8 @@ static size_t conversation_value;
 static unsigned reader_epoch = 1;
 bool room_conversations_resume_current(unsigned epoch)
 {
-    assert(critical_depth == 0 && display_depth > 0);
+    /* The owner epoch is lock-free, including checks from pointer callbacks. */
+    assert(critical_depth == 0);
     return epoch == reader_epoch;
 }
 static void request_conversation(room_ui_conversation_action_t action, const char *id,
@@ -57,7 +58,7 @@ static lv_indev_t *touchscreen;
 static lv_indev_state_t touch_state;
 static lv_point_t touch_point;
 static lv_obj_t *modal;
-static lv_obj_t *watch_menu_button;
+static lv_obj_t *watch_menu_button, *watch_continue_button;
 static room_canvas_action_handler_t canvas_action;
 struct ui_timer { esp_timer_create_args_t args; bool active; };
 static struct ui_timer timers[4];
@@ -191,6 +192,17 @@ static bool visible_text(const char *text)
     lv_obj_update_layout(lv_screen_active());
     lv_obj_t *label = find_text(lv_screen_active(), text);
     return label && lv_obj_is_visible(label);
+}
+static lv_obj_t *find_visible_text(lv_obj_t *parent, const char *text)
+{
+    if (!lv_obj_is_visible(parent)) return NULL;
+    if (lv_obj_check_type(parent, &lv_label_class) &&
+        strcmp(lv_label_get_text(parent), text) == 0) return parent;
+    for (unsigned i = 0; i < lv_obj_get_child_count(parent); ++i) {
+        lv_obj_t *found = find_visible_text(lv_obj_get_child(parent, i), text);
+        if (found != NULL) return found;
+    }
+    return NULL;
 }
 static void talk_action(bool start)
 {
@@ -374,7 +386,9 @@ static unsigned check_home_tree(lv_obj_t *parent)
 {
     unsigned count = 1;
     assert(!lv_obj_has_flag(parent, LV_OBJ_FLAG_SCROLLABLE));
-    if (parent != watch_menu_button) assert(!lv_obj_has_flag(parent, LV_OBJ_FLAG_CLICKABLE));
+    if (parent == watch_menu_button || parent == watch_continue_button)
+        assert(lv_obj_has_flag(parent, LV_OBJ_FLAG_CLICKABLE));
+    else assert(!lv_obj_has_flag(parent, LV_OBJ_FLAG_CLICKABLE));
     lv_area_t area;
     lv_obj_get_coords(parent, &area);
     assert(area.x1 >= 0 && area.y1 >= 0 && area.x2 < width && area.y2 < height);
@@ -446,6 +460,7 @@ static void check_watch_home(const char *path)
     room_ui_set(ROOM_UI_IDLE, NULL);
     lv_obj_t *title = find_text(lv_layer_top(), "Ready when you are");
     watch_menu_button = lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_BARS "  Menu"));
+    watch_continue_button = lv_obj_get_parent(find_text(lv_layer_top(), "Continue conversations"));
     assert(title && lv_obj_is_visible(title));
     assert(room_face_is_visible());
     lv_obj_update_layout(lv_layer_top());
@@ -750,7 +765,7 @@ static void check_watch_agents(const char *path)
     assert(lv_obj_get_scroll_y(list) > 0);
     assert(lv_obj_is_visible(find_text(lv_layer_top(), "Agents")));
     requests = agent_requests;
-    click_talk(lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_RIGHT)));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_RIGHT)));
     assert(agent_requests == requests + 1 && agent_offset == 8);
     roster.page.offset = 8;
     roster.page.count = 0;
@@ -767,7 +782,7 @@ static void check_watch_agents(const char *path)
     room_ui_store_facts(&facts);
     room_ui_set(ROOM_UI_IDLE, NULL);
     assert(room_ui_watch_menu("home") == ESP_OK);
-    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Next: Kitsune")));
+    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Next Talk: Kitsune")));
     assert(room_ui_watch_menu("agents") == ESP_OK);
     target.expired = true;
     room_ui_store_talk_target(&target);
@@ -795,8 +810,7 @@ static void check_watch_agents(const char *path)
 static bool visible_watch_text(const char *text)
 {
     lv_obj_update_layout(lv_layer_top());
-    lv_obj_t *label = find_text(lv_layer_top(), text);
-    return label && lv_obj_is_visible(label);
+    return find_visible_text(lv_layer_top(), text) != NULL;
 }
 
 static void check_watch_conversations(const char *path)
@@ -887,6 +901,93 @@ static void check_watch_conversations(const char *path)
     assert(lv_obj_get_scroll_y(scrolled) > 0 && lv_obj_get_scroll_bottom(scrolled) >= 0);
     if (path) { snprintf(output, sizeof(output), "%s-scrolled.ppm", path); write_frame(output); }
     int32_t scroll_y = lv_obj_get_scroll_y(scrolled);
+    room_ui_talk_target_t target = {.selected = true, .id = "builder", .name = "Builder"};
+    room_ui_store_talk_target(&target);
+    room_conversation_context_t context = {.epoch = reader_epoch, .agent_name = "Kitsune"};
+    room_ui_store_conversation_context(&context);
+    assert(room_ui_watch_menu("home") == ESP_OK);
+    assert(conversation_action == ROOM_CONVERSATIONS_SUSPEND);
+    lv_obj_t *continue_hint = find_text(lv_layer_top(), "Continue conversations");
+    lv_obj_t *continue_card = lv_obj_get_parent(continue_hint);
+    assert(lv_obj_is_visible(continue_hint));
+    lv_area_t card_area, home_talk_area;
+    lv_obj_update_layout(lv_layer_top());
+    lv_obj_get_coords(continue_card, &card_area);
+    lv_obj_get_coords(lv_obj_get_parent(find_text(lv_layer_top(), "Start Talk")), &home_talk_area);
+    assert(card_area.y1 >= 304 && card_area.y2 < home_talk_area.y1);
+    if (path) { snprintf(output, sizeof(output), "%s-home-continue.ppm", path); write_frame(output); }
+    strcpy(context.agent_name, "A very long agent name for this small watch display");
+    room_ui_store_conversation_context(&context);
+    lv_obj_update_layout(lv_layer_top());
+    lv_area_t name_area, hint_area;
+    lv_obj_get_coords(lv_obj_get_child(continue_card, 1), &name_area);
+    lv_obj_get_coords(continue_hint, &hint_area);
+    assert(name_area.x1 > card_area.x1 && name_area.x2 < card_area.x2 - 20);
+    assert(lv_area_get_height(&name_area) <= 24 && name_area.y2 < hint_area.y1);
+    if (path) { snprintf(output, sizeof(output), "%s-home-long-name.ppm", path); write_frame(output); }
+    strcpy(context.agent_name, "Kitsune");
+    room_ui_store_conversation_context(&context);
+
+    touch_talk(continue_card, true);
+    ++reader_epoch;
+    touch_talk(continue_card, false);
+    assert(conversation_action == ROOM_CONVERSATIONS_SUSPEND);
+    room_ui_refresh();
+    assert(!lv_obj_is_visible(continue_hint));
+    context.epoch = reader_epoch;
+    room_ui_store_conversation_context(&context);
+    lv_obj_send_event(continue_card, LV_EVENT_PRESSED, NULL);
+    assert(room_diagnostics_open() == ESP_OK);
+    room_diagnostics_close();
+    lv_obj_send_event(continue_card, LV_EVENT_SHORT_CLICKED, NULL);
+    assert(conversation_action == ROOM_CONVERSATIONS_SUSPEND);
+    click_talk(continue_card);
+    unsigned home_generation = conversation_generation;
+    assert(room_ui_wants_conversation_resume(home_generation));
+    ++reader_epoch;
+    context.epoch = reader_epoch;
+    room_ui_store_conversation_context(&context);
+    assert(room_ui_watch_resume(&roster, view, reader_epoch, home_generation) == ESP_OK);
+    assert(!room_ui_wants_conversation_resume(home_generation) && lv_obj_is_visible(continue_hint));
+
+    room_ui_facts_t home_facts = {.wifi = ROOM_UI_WIFI_CONNECTED,
+        .gateway = ROOM_UI_GATEWAY_CONNECTED, .talk = ROOM_UI_TALK_ACTIVE};
+    room_ui_store_facts(&home_facts);
+    room_ui_set(ROOM_UI_SPEAKING, NULL);
+    assert(!lv_obj_is_visible(continue_hint));
+    assert(visible_watch_text("Conversation live") && visible_watch_text("Tap Stop Talk to finish"));
+    unsigned stops = talk_stops;
+    click_talk(lv_obj_get_parent(find_text(lv_layer_top(), "Stop Talk")));
+    assert(talk_stops == stops + 1 && talk_starts == starts);
+    home_facts.talk = ROOM_UI_TALK_READY;
+    room_ui_store_facts(&home_facts);
+    room_ui_set(ROOM_UI_SETUP, "Pair this device");
+    assert(!lv_obj_is_visible(continue_hint) && visible_watch_text("Let's get connected"));
+    room_ui_set(ROOM_UI_ERROR, "Try reconnecting");
+    assert(!lv_obj_is_visible(continue_hint) && visible_watch_text("Needs attention"));
+    room_ui_set(ROOM_UI_IDLE, NULL);
+    target.expired = true;
+    room_ui_store_talk_target(&target);
+    room_ui_refresh();
+    assert(lv_obj_is_visible(continue_hint) && visible_watch_text("Choose an agent"));
+    target.expired = false;
+    room_ui_store_talk_target(&target);
+    room_ui_refresh();
+    expire_watch_hint();
+    click_talk(continue_card);
+    assert(brightness > 0 && !room_ui_wants_conversation_resume(conversation_generation));
+    click_talk(continue_card);
+    assert(room_ui_watch_resume(&roster, view, reader_epoch, conversation_generation) == ESP_OK);
+    assert(visible_watch_text("Project notes") && lv_obj_get_scroll_y(scrolled) == scroll_y);
+    assert(agent_selections == selections && talk_starts == starts);
+    assert(room_ui_watch_menu("home") == ESP_OK);
+    context = (room_conversation_context_t){0};
+    room_ui_store_conversation_context(&context);
+    assert(visible_watch_text("Next Talk: Builder"));
+    target = (room_ui_talk_target_t){0};
+    room_ui_store_talk_target(&target);
+    assert(room_ui_watch_menu("conversations") == ESP_OK);
+    assert(room_ui_watch_resume(&roster, view, reader_epoch, conversation_generation) == ESP_OK);
     unsigned requests = agent_requests;
     assert(room_ui_watch_menu("menu") == ESP_OK);
     assert(!room_ui_wants_conversations() && conversation_action == ROOM_CONVERSATIONS_SUSPEND);
@@ -950,7 +1051,7 @@ static void check_watch_conversations(const char *path)
     room_ui_refresh();
     assert(room_ui_watch_reader(view, true, conversation_generation) == ESP_OK);
     click_talk(lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_LEFT " Chats")));
-    click_talk(lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_RIGHT)));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_RIGHT)));
     assert(conversation_action == ROOM_CONVERSATIONS_LOAD && conversation_value == ESP_OPENCLAW_DIRECTORY_PAGE_SIZE);
     view->state = view->preview_state = ROOM_AGENTS_OFFLINE;
     ++view->revision;

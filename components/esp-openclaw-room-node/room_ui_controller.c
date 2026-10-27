@@ -90,7 +90,22 @@ static bool conversation_resume_failed;
 static room_conversations_snapshot_t *current_conversations, *painted_conversations;
 static int pressed_chat_action = -100;
 static unsigned conversation_generation;
+static room_conversation_context_t current_reader_context;
+static unsigned painted_reader_epoch, pressed_reader_epoch, resume_reader_epoch;
 static void (*conversation_handler)(room_ui_conversation_action_t, const char *, unsigned, size_t, unsigned);
+
+void room_ui_store_conversation_context(const room_conversation_context_t *context)
+{
+    taskENTER_CRITICAL(&state_mux);
+    bool changed = context->epoch != current_reader_context.epoch ||
+        strcmp(context->agent_name, current_reader_context.agent_name) != 0;
+    if (changed) {
+        current_reader_context = *context;
+        pressed_reader_epoch = 0;
+    }
+    taskEXIT_CRITICAL(&state_mux);
+    if (changed) room_ui_refresh();
+}
 
 void room_ui_set_conversation_handler(void (*handler)(room_ui_conversation_action_t,
     const char *, unsigned, size_t, unsigned))
@@ -230,7 +245,7 @@ static bool watch_navigation_active(void)
     return active;
 }
 
-static esp_err_t watch_navigation_show(room_watch_page_t page)
+static esp_err_t watch_navigation_show_context(room_watch_page_t page, unsigned reader_epoch)
 {
     if (!room_board_display_lock(100)) return ESP_ERR_TIMEOUT;
     if (page == ROOM_WATCH_DEVICE_STATUS) {
@@ -263,6 +278,8 @@ static esp_err_t watch_navigation_show(room_watch_page_t page)
     bool entering_agents = watch_page != ROOM_WATCH_AGENTS && page == ROOM_WATCH_AGENTS;
     bool suspend_reader = leaving_agents && conversations_open;
     bool resume_reader = page == ROOM_WATCH_CONVERSATIONS;
+    resume_reader_epoch = resume_reader ? reader_epoch : 0;
+    pressed_reader_epoch = 0;
     if (resume_reader) conversation_resume_failed = false;
     if (watch_page == ROOM_WATCH_CONVERSATIONS || suspend_reader || resume_reader) ++conversation_generation;
     bool wake_home = page == ROOM_WATCH_HOME;
@@ -282,6 +299,11 @@ static esp_err_t watch_navigation_show(room_watch_page_t page)
     if (wake_home) start_text_hint(10000);
     room_ui_paint_and_unlock();
     return ESP_OK;
+}
+
+static esp_err_t watch_navigation_show(room_watch_page_t page)
+{
+    return watch_navigation_show_context(page, 0);
 }
 
 esp_err_t room_ui_watch_menu(const char *page)
@@ -356,6 +378,14 @@ esp_err_t room_ui_watch_resume(const room_agents_snapshot_t *agents,
         room_board_display_unlock();
         return ESP_ERR_INVALID_STATE;
     }
+    taskENTER_CRITICAL(&state_mux);
+    unsigned expected_epoch = resume_reader_epoch;
+    taskEXIT_CRITICAL(&state_mux);
+    if (expected_epoch != 0 && (reader == NULL || epoch != expected_epoch)) {
+        esp_err_t err = watch_navigation_show(ROOM_WATCH_HOME);
+        room_board_display_unlock();
+        return err;
+    }
     if (agents == NULL || reader == NULL) {
         /* Navigation takes and releases another recursive display lock. */
         esp_err_t err = watch_navigation_show(ROOM_WATCH_AGENTS);
@@ -429,6 +459,27 @@ static void watch_navigation_input(lv_event_t *event, room_watch_page_t page)
 static void watch_home_menu_clicked(lv_event_t *event)
 {
     watch_navigation_input(event, ROOM_WATCH_MENU);
+}
+
+static void watch_home_continue_clicked(lv_event_t *event)
+{
+    lv_event_code_t code = lv_event_get_code(event);
+    if (code != LV_EVENT_PRESSED && code != LV_EVENT_PRESS_LOST && code != LV_EVENT_SHORT_CLICKED) return;
+    bool wake = code == LV_EVENT_PRESSED && room_board_display_is_dark();
+    unsigned epoch = 0;
+    taskENTER_CRITICAL(&state_mux);
+    bool visible = watch_page == ROOM_WATCH_HOME && !diagnostics_open;
+    if (code == LV_EVENT_PRESSED) pressed_reader_epoch = wake || !visible ? 0 : painted_reader_epoch;
+    else {
+        if (code == LV_EVENT_SHORT_CLICKED && visible &&
+            pressed_reader_epoch == painted_reader_epoch &&
+            pressed_reader_epoch == current_reader_context.epoch) epoch = pressed_reader_epoch;
+        pressed_reader_epoch = 0;
+    }
+    taskEXIT_CRITICAL(&state_mux);
+    if (wake) { room_ui_show_face_hint(10000); return; }
+    if (epoch != 0 && room_conversations_resume_current(epoch))
+        (void)watch_navigation_show_context(ROOM_WATCH_CONVERSATIONS, epoch);
 }
 
 static void watch_navigation_clicked(lv_event_t *event)
@@ -796,7 +847,7 @@ void room_ui_init(void)
         lv_obj_set_style_bg_color(lv_screen_active(), lv_color_hex(0x15101b), 0);
         lv_obj_set_style_bg_grad_color(lv_screen_active(), lv_color_hex(0x362031), 0);
         lv_obj_set_style_bg_grad_dir(lv_screen_active(), LV_GRAD_DIR_VER, 0);
-        room_watch_home_create(lv_layer_top(), watch_home_menu_clicked);
+        room_watch_home_create(lv_layer_top(), watch_home_menu_clicked, watch_home_continue_clicked);
         room_watch_navigation_create(lv_layer_top(), watch_navigation_clicked);
         room_watch_settings_create(lv_layer_top(), watch_navigation_clicked);
         room_watch_agents_create(lv_layer_top(), watch_agents_clicked);
@@ -928,6 +979,7 @@ static bool room_ui_render_locked(void)
     bool overlay = diagnostics_open;
     room_ui_facts_t facts = current_facts;
     room_ui_talk_target_t target = current_target;
+    room_conversation_context_t reader_context = current_reader_context;
     bool selecting = selection_pending, selection_error = selection_failed;
     room_watch_page_t page = watch_page;
     int brightness = watch_brightness < 0 ? ROOM_CANVAS_ACTIVE_BRIGHTNESS : watch_brightness;
@@ -957,7 +1009,13 @@ static bool room_ui_render_locked(void)
     bool canvas_active = room_canvas_is_active();
     bool navigation = watch_home_enabled && page != ROOM_WATCH_HOME && !canvas_active;
     if (watch_home_enabled) {
-        room_watch_home_render(&facts, &target, state, detail, canvas_active || overlay || navigation);
+        bool current = reader_context.epoch != 0 && room_conversations_resume_current(reader_context.epoch);
+        bool continue_visible = room_watch_home_render(&facts, &target, state, detail,
+            current ? reader_context.agent_name : NULL, canvas_active || overlay || navigation);
+        taskENTER_CRITICAL(&state_mux);
+        painted_reader_epoch = continue_visible ? reader_context.epoch : 0;
+        if (pressed_reader_epoch != painted_reader_epoch) pressed_reader_epoch = 0;
+        taskEXIT_CRITICAL(&state_mux);
         bool settings = page == ROOM_WATCH_SETTINGS || page == ROOM_WATCH_DISPLAY;
         room_watch_navigation_render(page, &facts, !navigation || overlay || page == ROOM_WATCH_AGENTS || settings, resume_failed);
         room_watch_settings_render(page == ROOM_WATCH_DISPLAY, brightness, brightness_failed, camera_minimum,
@@ -1269,6 +1327,8 @@ void room_ui_set_diagnostics_open(bool open)
     if (open) {
         pressed_talk_action = TALK_CONTROL_NONE;
         pressed_watch_page = -1;
+        pressed_reader_epoch = 0;
+        painted_reader_epoch = 0;
         if (watch_page == ROOM_WATCH_CONVERSATIONS) {
             watch_page = ROOM_WATCH_MENU;
             ++conversation_generation;
@@ -1276,7 +1336,7 @@ void room_ui_set_diagnostics_open(bool open)
     }
     taskEXIT_CRITICAL(&state_mux);
     if (open) {
-        if (watch_home_enabled) room_watch_home_render(NULL, NULL, ROOM_UI_IDLE, "", true);
+        if (watch_home_enabled) room_watch_home_render(NULL, NULL, ROOM_UI_IDLE, "", NULL, true);
         if (watch_home_enabled) {
             room_watch_navigation_render(ROOM_WATCH_HOME, NULL, true, false);
             room_watch_settings_render(false, 0, false, false, true);

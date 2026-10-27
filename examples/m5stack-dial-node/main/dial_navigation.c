@@ -29,9 +29,9 @@ static void back(dial_navigation_t *nav)
 {
     if (nav->view == DIAL_NAV_MENU) nav->handler(DIAL_NAV_HOME, 0, nav->context);
     else {
-        if (nav->view == DIAL_NAV_DISPLAY) {
+        if (nav->view == DIAL_NAV_DISPLAY || nav->view == DIAL_NAV_CONNECTION) {
+            nav->focus = nav->view == DIAL_NAV_CONNECTION ? 1 : 0;
             nav->view = DIAL_NAV_SETTINGS;
-            nav->focus = 0;
             changed(nav);
             return;
         }
@@ -82,6 +82,7 @@ static void touch(lv_event_t *event)
     }
     for (unsigned i = 0; i < 3; ++i) {
         if (target == nav->rows[i]) {
+            if (nav->view == DIAL_NAV_CONNECTION) return;
             if (nav->view != DIAL_NAV_DETAIL) nav->focus = nav->first + i;
             if (nav->view == DIAL_NAV_DISPLAY) dial_navigation_move(nav, i == 0 ? -1 : 1);
             else dial_navigation_activate(nav);
@@ -203,8 +204,10 @@ static void item(dial_navigation_t *nav, unsigned index, const char **name, cons
         return;
     }
     if (nav->view == DIAL_NAV_SETTINGS) {
-        *name = index == 0 ? "Display" : "Back";
-        *icon = index == 0 ? LV_SYMBOL_IMAGE : LV_SYMBOL_LEFT;
+        const char *names[] = {"Display", "Connection", "Back"};
+        const char *icons[] = {LV_SYMBOL_IMAGE, LV_SYMBOL_WIFI, LV_SYMBOL_LEFT};
+        *name = names[index];
+        *icon = icons[index];
         return;
     }
     if (index < agent_count(nav)) {
@@ -263,12 +266,38 @@ static void render(dial_navigation_t *nav)
         render_display(nav);
         return;
     }
+    if (nav->view == DIAL_NAV_CONNECTION) {
+        lv_label_set_text_static(nav->heading, "Connection");
+        lv_obj_set_hidden(nav->preview_body, true);
+        lv_obj_set_hidden(nav->description, true);
+        lv_obj_set_hidden(nav->id_caption, true);
+        lv_obj_set_hidden(nav->identity, true);
+        lv_obj_set_hidden(nav->hint, false);
+        lv_label_set_text_static(nav->hint, "Press: back");
+        for (unsigned i = 0; i < 3; ++i) {
+            lv_obj_set_hidden(nav->rows[i], i == 2);
+            if (i == 2) continue;
+            bool online = i == 0 ? nav->wifi_connected : nav->gateway_connected;
+            lv_obj_set_pos(nav->rows[i], 38, 80 + (int)i * 48);
+            lv_obj_set_size(nav->rows[i], 164, 36);
+            lv_obj_set_pos(nav->icons[i], 12, 9);
+            lv_obj_set_pos(nav->names[i], 40, 9);
+            lv_obj_set_width(nav->names[i], 112);
+            lv_label_set_text_static(nav->icons[i], i == 0 ? LV_SYMBOL_WIFI : LV_SYMBOL_LOOP);
+            lv_label_set_text_fmt(nav->names[i], "%s %s", i == 0 ? "Wi-Fi" : "Gateway",
+                !nav->connection_known ? "..." : online ? "online" : "offline");
+            lv_obj_set_style_bg_color(nav->rows[i], lv_color_hex(0x302535), 0);
+            lv_obj_set_style_text_color(nav->names[i], lv_color_hex(0xf4efee), 0);
+            lv_obj_set_style_text_color(nav->icons[i], lv_color_hex(online ? 0x58d5c4 : 0xb8b0bd), 0);
+        }
+        return;
+    }
     lv_obj_set_y(nav->identity, 142);
     bool detail = nav->view == DIAL_NAV_DETAIL;
     bool sessions = nav->view == DIAL_NAV_SESSIONS;
     bool preview = nav->view == DIAL_NAV_PREVIEW;
     bool message = (nav->view == DIAL_NAV_AGENTS || sessions) && agent_count(nav) == 0;
-    nav->count = detail || preview ? 1 : nav->view == DIAL_NAV_MENU ? 3 : nav->view == DIAL_NAV_SETTINGS ? 2 :
+    nav->count = detail || preview ? 1 : nav->view == DIAL_NAV_MENU || nav->view == DIAL_NAV_SETTINGS ? 3 :
         agent_count(nav) + has_next(nav) + has_previous(nav) + 2;
     if (!detail && !preview && nav->focus >= nav->count) nav->focus = 0;
     unsigned visible = message ? 2 : 3;
@@ -414,6 +443,7 @@ bool dial_navigation_show_reader(dial_navigation_t *nav, const dial_agents_snaps
 
 void dial_navigation_move(dial_navigation_t *nav, int direction)
 {
+    if (nav->view == DIAL_NAV_CONNECTION) return;
     if (nav->view == DIAL_NAV_DISPLAY) {
         int percent = nav->brightness + (direction > 0 ? 5 : -5);
         if (percent < 10) percent = nav->brightness < 10 && direction < 0 ? nav->brightness : 10;
@@ -434,9 +464,9 @@ void dial_navigation_move(dial_navigation_t *nav, int direction)
 
 void dial_navigation_activate(dial_navigation_t *nav)
 {
-    if (nav->view == DIAL_NAV_DISPLAY) { back(nav); return; }
+    if (nav->view == DIAL_NAV_DISPLAY || nav->view == DIAL_NAV_CONNECTION) { back(nav); return; }
     if (nav->view == DIAL_NAV_SETTINGS) {
-        if (nav->focus == 0) dial_navigation_open_settings(nav, true);
+        if (nav->focus < 2) dial_navigation_open_settings(nav, nav->focus == 0 ? DIAL_NAV_DISPLAY : DIAL_NAV_CONNECTION);
         else back(nav);
         return;
     }
@@ -451,7 +481,7 @@ void dial_navigation_activate(dial_navigation_t *nav)
     }
     if (nav->view == DIAL_NAV_MENU) {
         if (nav->focus == 1) nav->handler(DIAL_NAV_CONTROL, 0, nav->context);
-        else if (nav->focus == 2) dial_navigation_open_settings(nav, false);
+        else if (nav->focus == 2) dial_navigation_open_settings(nav, DIAL_NAV_SETTINGS);
         else dial_navigation_open(nav, true);
         return;
     }
@@ -487,11 +517,12 @@ void dial_navigation_activate(dial_navigation_t *nav)
     else back(nav);
 }
 
-void dial_navigation_open_settings(dial_navigation_t *nav, bool display)
+void dial_navigation_open_settings(dial_navigation_t *nav, dial_navigation_view_t page)
 {
+    if (page != DIAL_NAV_SETTINGS && page != DIAL_NAV_DISPLAY && page != DIAL_NAV_CONNECTION) return;
     if (nav->view == DIAL_NAV_SESSIONS || nav->view == DIAL_NAV_PREVIEW)
         nav->handler(DIAL_NAV_CLOSE, 0, nav->context);
-    nav->view = display ? DIAL_NAV_DISPLAY : DIAL_NAV_SETTINGS;
+    nav->view = page;
     nav->focus = 0;
     lv_obj_set_hidden(nav->root, false);
     changed(nav);
@@ -503,4 +534,13 @@ void dial_navigation_set_brightness(dial_navigation_t *nav, int percent, bool fa
     nav->brightness = percent;
     nav->brightness_failed = failed;
     if (nav->view == DIAL_NAV_DISPLAY) changed(nav);
+}
+
+void dial_navigation_set_connection(dial_navigation_t *nav, bool wifi, bool gateway)
+{
+    if (nav->connection_known && nav->wifi_connected == wifi && nav->gateway_connected == gateway) return;
+    nav->connection_known = true;
+    nav->wifi_connected = wifi;
+    nav->gateway_connected = gateway;
+    if (nav->view == DIAL_NAV_CONNECTION) render(nav);
 }

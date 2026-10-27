@@ -192,6 +192,7 @@ static void open_navigation(bool agents)
     }
     dial_reader_agents_copy(ui.agents);
     dial_navigation_update(&ui.navigation, ui.agents);
+    dial_navigation_set_connection(&ui.navigation, esp_openclaw_node_wifi_is_connected(), atomic_load(&connected));
     show_view(VIEW_NAVIGATION);
     dial_navigation_open(&ui.navigation, agents);
 }
@@ -346,6 +347,7 @@ static void refresh_ui(lv_timer_t *timer)
         ? lv_label_get_text(ui.footer) : NULL;
     xSemaphoreGive(action_lock);
     if (ui.view == VIEW_NAVIGATION) {
+        dial_navigation_set_connection(&ui.navigation, esp_openclaw_node_wifi_is_connected(), online);
         dial_reader_agents_copy(ui.agents);
         dial_navigation_update(&ui.navigation, ui.agents);
         if (ui.conversations != NULL) {
@@ -451,12 +453,13 @@ static cJSON *status_payload(void)
     cJSON *result = cJSON_CreateObject();
     if (result == NULL) return NULL;
     cJSON_AddBoolToObject(result, "connected", atomic_load(&connected));
+    cJSON_AddBoolToObject(result, "wifiConnected", esp_openclaw_node_wifi_is_connected());
     cJSON_AddStringToObject(result, "view", ui.view == VIEW_FACE ? "face" : ui.view == VIEW_CONTROL ? "control" : ui.view == VIEW_NAVIGATION ? "menu" : "message");
     if (ui.view == VIEW_NAVIGATION) {
         cJSON_AddStringToObject(result, "page", ui.navigation.view == DIAL_NAV_MENU ? "menu" :
             ui.navigation.view == DIAL_NAV_AGENTS ? "agents" : ui.navigation.view == DIAL_NAV_SESSIONS ? "conversations" :
             ui.navigation.view == DIAL_NAV_PREVIEW ? "preview" : ui.navigation.view == DIAL_NAV_SETTINGS ? "settings" :
-            ui.navigation.view == DIAL_NAV_DISPLAY ? "display" : "agent");
+            ui.navigation.view == DIAL_NAV_DISPLAY ? "display" : ui.navigation.view == DIAL_NAV_CONNECTION ? "connection" : "agent");
     }
     if (ui.view == VIEW_MESSAGE) {
         cJSON_AddStringToObject(result, "heading", ui.heading);
@@ -530,8 +533,8 @@ static esp_err_t handle_command(esp_openclaw_node_handle_t client, void *context
             (cJSON_HasObjectItem(params, "page") && !text_field(params, "page", 13, &page)) ||
             (strcmp(page, "menu") != 0 && strcmp(page, "agents") != 0 &&
              strcmp(page, "conversations") != 0 && strcmp(page, "preview") != 0 &&
-             strcmp(page, "settings") != 0 && strcmp(page, "display") != 0)) {
-            err = invalid(error, "page must be menu, agents, conversations, preview, settings or display");
+             strcmp(page, "settings") != 0 && strcmp(page, "display") != 0 && strcmp(page, "connection") != 0)) {
+            err = invalid(error, "page must be menu, agents, conversations, preview, settings, display or connection");
         } else if (strcmp(page, "conversations") == 0 || strcmp(page, "preview") == 0) {
             if (ui.conversations == NULL) ui.conversations = calloc(1, sizeof(*ui.conversations));
             if (ui.agents == NULL) ui.agents = calloc(1, sizeof(*ui.agents));
@@ -543,10 +546,11 @@ static esp_err_t handle_command(esp_openclaw_node_handle_t client, void *context
                     err = invalid(error, "Open a conversation before showing this page");
                 else show_view(VIEW_NAVIGATION);
             }
-        } else if (strcmp(page, "settings") == 0 || strcmp(page, "display") == 0) {
+        } else if (strcmp(page, "settings") == 0 || strcmp(page, "display") == 0 || strcmp(page, "connection") == 0) {
             open_navigation(false);
             if (ui.view == VIEW_NAVIGATION)
-                dial_navigation_open_settings(&ui.navigation, strcmp(page, "display") == 0);
+                dial_navigation_open_settings(&ui.navigation, strcmp(page, "display") == 0 ? DIAL_NAV_DISPLAY :
+                    strcmp(page, "connection") == 0 ? DIAL_NAV_CONNECTION : DIAL_NAV_SETTINGS);
         } else open_navigation(strcmp(page, "agents") == 0);
     } else if (strcmp(command, "display.show") == 0) {
         const char *heading, *text;

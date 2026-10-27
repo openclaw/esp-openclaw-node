@@ -112,7 +112,15 @@ The page shows the last successfully applied value and an error if a change
 fails. It works offline, never submits the configured numeric control, and
 keeps focus during Gateway reconnects. Brightness lasts until restart; the
 existing `display.brightness` command updates the same value and retains its
-0–100% range. Hold still to return Home from either settings page.
+0–100% range. Hold still to return Home from any settings page.
+
+Settings → Connection shows Wi-Fi and Gateway reachability separately. It
+updates in place when the network changes, so a working Wi-Fi link is not
+mistaken for a connected Gateway. Turning or tapping the status rows does not
+change setup or submit a control; press the encoder or back arrow to return
+to Settings. The USB command `local display.menu "{\"page\":\"connection\"}"`
+opens the same page. Display-state responses include `wifiConnected` alongside
+the existing Gateway `connected` flag.
 
 Agents shows a bounded page of the Gateway roster. Turn to browse names, then
 open an identity to see its canonical ID. The back arrow returns to the list;
@@ -181,7 +189,7 @@ change the result of a newer one.
 | --- | --- | --- |
 | `device.info`, `device.status`, `wifi.status` | `{}` | Shared device/network status |
 | `display.show` | `{"heading":"Hello","text":"A message"}` | Display state including `heading` and `text`; limits: 64/512 UTF-8 bytes |
-| `display.menu` | `{}` or `{"page":"settings"}` | Open `menu`, `agents`, `conversations`, `preview`, `settings`, or `display` |
+| `display.menu` | `{}` or `{"page":"settings"}` | Open `menu`, `agents`, `conversations`, `preview`, `settings`, `display`, or `connection` |
 | `display.clear` | `{}` | Return to the face |
 | `display.status`, `dial.status`, `input.status` | `{}` | View, value/range, input counts, brightness, connection, action state |
 | `display.brightness` | `{"percent":65}` | Set backlight, integer 0–100 |
@@ -193,7 +201,7 @@ change the result of a newer one.
 Display-state responses include `heading` and `text` while `view` is `message`,
 so an agent can read back the displayed content. Menu responses include
 `view: "menu"` and `page: "menu"`, `"agents"`, `"agent"`, `"conversations"`,
-`"preview"`, `"settings"`, or `"display"`. Other views omit those fields;
+`"preview"`, `"settings"`, `"display"`, or `"connection"`. Other views omit those fields;
 `display.clear` returns to the face without reporting the hidden message.
 
 The buzzer stops asynchronously and rejects overlapping tones. It uses LEDC

@@ -1,6 +1,6 @@
 # Watch and Dial: interaction plan
 
-**Revision 05 · agents, input, setup and settings · design proposal · no firmware changes**
+**Revision 06 · mobile pairing, Home and Talk · design proposal · no firmware changes**
 
 Start with the [interactive flow explorer](watch-dial-ux-flows.html), then use
 the [annotated layout board](watch-dial-ux-plan.html) for the spatial overview. The
@@ -8,8 +8,8 @@ the [annotated layout board](watch-dial-ux-plan.html) for the spatial overview. 
 design. The [research and source audit](watch-dial-ux.md) supplies the hardware,
 Gateway, pairing, and authorization constraints retained here.
 
-The flow explorer contains 110 simulated states for both devices, including
-50 settings and recovery states. Use All settings screens for the complete
+The flow explorer contains 131 simulated states for both devices, including
+52 settings and recovery states. Use All settings screens for the complete
 contact sheet, or click through the device controls for a specific journey.
 
 Build one complete OpenClaw node experience on both devices. Agents,
@@ -156,12 +156,19 @@ budgets to test on hardware, not claims about accessible physical size.
 | Call | y34–78: 44 px, assistant identity | y90–364: 274 px, lobster plus truthful connection state | y376–432: End |
 | Setup / confirmation | y34–78: 44 px, step or consequence | y90–364: 274 px, explanation and target | y376–432: primary action; Back/Cancel in header |
 
-Home's 274 px body contains a 44 px agent/conversation selector, an 88 px
-lobster, a short availability label and one recent-task card with clear gaps.
+Home uses a 44 px agent switcher, a 121 px mascot/state region, one 64 px recent
+item and a short row of Threads, Devices and Reply shortcuts. The bottom 56 px
+Hold to talk target starts recording in place. The OpenClaw title is quiet;
+Kitsune's fox and the lobster have separate roles. A recent item is a destination,
+not a duplicate status banner. Private previews hide its content by default.
 
-When there is no recent work, omit that card and center the simpler composition.
-Do not invent activity to fill space. Menu is a header action, separate from
-the capability-aware Talk / Continue action.
+Home has explicit first-conversation, working, reply-ready, offline and live-call
+variants. An offline Home opens Connection but retains local navigation. A live
+call changes the primary action to Return to call, preserving explicit End.
+Dial uses the same agent and state, a smaller mascot, Threads/Devices shortcuts
+and an encoder-accessible Continue action. Turning on Home cycles Continue,
+Agents, Menu, Threads and Devices; pressing opens the focused action. Menu is
+also a labeled touch target. It does not advertise a microphone.
 
 Five 64 px icon-and-label rows fit in the 342 px browse region. Comfortable
 spacing uses 68 px rows; larger text scrolls rather than hiding a destination.
@@ -307,7 +314,7 @@ only when it affects the current task and put detail under Connection / Power.
 
 | Journey | Happy path | Required interruption / recovery |
 | --- | --- | --- |
-| First use, either device | Identify device → protected phone/laptop setup or USB → Wi-Fi → Gateway approval → first useful action | Bad password, expired code and pending approval keep prior progress; do not claim ready from Wi-Fi alone |
+| First use, either device | Identify device → mobile QR/BLE or an alternative → Wi-Fi → Gateway authorization → first useful action | Bad password, expired code and pending approval keep prior progress; do not claim ready from Wi-Fi alone |
 | Daily conversation, both | Wake → see agent/context → Continue → read or act; Talk where supported → result in Activity | Home/Back preserves the call; failure explains connection/audio repair; microphone privacy is real capture state |
 | Change who handles work | Agents → choose permitted agent → existing/new thread → Continue | No access keeps old context; active call requires an explicit switch; voice is offered only where available |
 | Read and resume work | Home recent card or Activity → full content → source conversation | Empty/offline content is honest; card actions retain their original owner |
@@ -360,7 +367,7 @@ fallback-avatar and active-call switch states are distinct.
 ## Voice first, deliberate send
 
 Recommend **hold → speak → release → review → Send** for short watch requests.
-The Home action and the current conversation both lead to this flow. Tap the
+Hold directly on Home or a conversation to start capture, without an intermediate menu. A tap under 250 ms opens the ready hint and records nothing; the proposed threshold needs hardware tuning. Tap the
 reply-method control to use a quick reply, handwriting or a touch keyboard.
 Do not default to typing on a watch.
 
@@ -372,14 +379,14 @@ a live call follows its separate explicit End lifecycle.
 | State | Visible meaning | Exit / failure behavior |
 | --- | --- | --- |
 | Ready | Selected agent and conversation; Hold to talk | No microphone capture yet |
-| Listening | Clear mic/capture state; release to review | Slide away, Cancel, pointer loss, Home, background or timeout closes capture |
+| Listening | Clear mic/capture state; release to review | Slide up, Back, pointer loss, Home or background discards capture; the 30-second cap stops into review |
 | Transcribing | Recording closed; draft not sent | Cancel; empty/error offers record again or another input method |
 | Review | Actual recognized text and destination | Send, edit or record again; no automatic timeout-send |
 | Sending | Submit the reviewed text once | Preserve request identity; distinguish rejection from ambiguous acceptance |
 | Working | Agent accepted the turn | May leave; incoming result goes to its original context |
 | Reply | Readable result and optional watch speech | Reply, stop playback, or return; Dial reads the same content |
 
-Proposed recording cap: 30 seconds, then stop and review. Timer, pointer,
+Proposed recording cap: 30 seconds, then stop and review. An elapsed timer and release/cancel cue remain visible. Pointer,
 capture and network work need one owner and cancellation generation. The
 browser prototype simulates these boundaries without recording audio.
 Production must not route an unreviewed recording straight to the agent while
@@ -425,28 +432,86 @@ explicitly demonstrates a proposed recognition response. It does not perform
 recognition or send the strokes. The Dial pad is particularly constrained:
 qualify it physically before enabling handwriting by default.
 
-## Pairing screens, end to end
+## Mobile pairing: QR discovery and Bluetooth setup
 
-The explorer covers Welcome, method selection, protected setup-network entry,
-device confirmation, Wi-Fi selection, password handoff, joining, join failure,
-Gateway code entry handoff, destination confirmation, optional real approval,
-expired code, rejection, success and USB guidance.
+**Make OpenClaw mobile the primary setup surface.** On the phone, open Devices →
+Add device and scan the code displayed by the watch or Dial. QR identifies the
+physical device and bootstraps a protected Bluetooth LE provisioning session.
+It is not a competing transport or proof that the Gateway granted access.
+A nearby-device list provides a camera-free path to the same BLE session.
+Do not send users to the operating system's Bluetooth Settings to bond first.
 
-Codes are entered on the companion browser, not retyped on the device. Device
-screens show identity and progress. No fake scannable QR code or working secret
-appears in the design artifacts. A real QR or code must be generated by its
-authorized setup owner, expire and have a clear manual route.
+The device confirms identity, shows progress and becomes an independent Wi-Fi
+node. The phone is optional after setup; this does not add Bluetooth audio,
+phone tethering or a watch/Dial dependency. Browser SoftAP and USB remain
+explicit alternatives under Other ways. USB is the existing route; all new
+consumer pairing screens remain proposed work.
 
-Wi-Fi joining is not OpenClaw pairing. A real pending authorization is not the
-normal state for every setup-code exchange. Do not fabricate it for visual
-completeness. Cancellation closes the temporary setup surface without erasing
-already valid configuration. Network replacement needs rollback behavior
-designed at the provisioning owner.
+| Step | Device | Mobile app |
+| --- | --- | --- |
+| Begin | Pair with phone; unique device label | Devices → Add device |
+| Discover | QR with quiet zone; Other ways | Scan QR, or choose the same device from Nearby |
+| Connect | Connecting to phone | Request camera/Bluetooth permission at the point of use; open protected BLE session |
+| Verify | Compare shape pattern and code; It matches | Show the same session-bound comparison and wait for physical confirmation |
+| Join Wi-Fi | Joining, authentication failure or unsupported network | Choose a supported network and enter its password |
+| Connect OpenClaw | Real destination and requested-access summary | Select an authorized connection or paste a fresh device setup code |
+| Authorize | Await authenticated device session; real pending approval only if required | Obtain a device-specific bootstrap credential under current user authority |
+| Finish | Choose agent; first useful action | Ready; phone may disconnect |
 
-Setup is independent on each device. Consumer browser provisioning remains
-new work; the existing USB console is a complete fallback. First-use practice
-has no remote effects, and optional audio failure does not erase successful
-pairing.
+The comparison code in the preview is an example, not an invented protocol.
+A production design must bind both displays to the authenticated provisioning
+session and revalidate physical confirmation before applying configuration.
+QR possession alone cannot grant Gateway roles. The mobile app must not copy
+its own session identity into the new device. An approved device-registration
+operation must determine exactly what the phone can authorize.
+
+The explorer's QR is a real QR encoding only
+`OPENCLAW-UX-DEMO-NOT-A-PAIRING-CODE`. It contains no endpoint, password, device
+secret or bootstrap token. Its caption and surrounding review UI label it as a
+fixture. Production uses short-lived, device-bound material, sufficient module
+size and a full quiet zone. The 112 px Dial tile needs real-camera qualification
+at actual panel size; this browser rendering is not scan-distance evidence.
+
+Espressif's [ESP32-S3 provisioning manager](https://docs.espressif.com/projects/esp-idf/en/v5.5/esp32s3/api-reference/provisioning/wifi_provisioning.html)
+provides BLE and SoftAP transports with protected protocol sessions.
+Its [iOS provisioning library](https://github.com/espressif/esp-idf-provisioning-ios)
+supports QR scanning, nearby BLE discovery and provisioning. These are
+implementation references, not evidence that OpenClaw mobile already integrates
+them. The inspected ESP repository uses USB console provisioning; no BLE
+provisioning owner is present. Mobile integration, authenticated bootstrap,
+ESP memory budgeting, permission handling and repair lifecycle remain work.
+
+The phone companion panel shows the other half of each proposed setup state.
+Recovery includes camera denied, Bluetooth off/denied, no device, interrupted
+BLE, mismatched codes, expired QR, bad password, unsupported network,
+expired Gateway credential and rejected access. Local confirmation consumes its
+input rather than also starting Talk. Leaving setup closes its temporary
+surface. Keep completed progress and resume only the missing step.
+
+Network repair reuses the setup transport, then returns to Wi-Fi updated. It
+retains Gateway identity and agent selection. Replacing OpenClaw skips Wi-Fi
+entry and requests new device authorization. Forgetting or replacing local
+pairing is not proof of revoking the old remote identity.
+
+## Pane review and resulting changes
+
+Every scene family was reviewed as a task with entry, primary action, Back,
+result and recovery. The same scene model renders both devices and the sheets.
+
+| Panes | Finding | Revision 06 decision |
+| --- | --- | --- |
+| Home, menu | Large generic status and duplicated identity; no useful glance state | Quiet brand header, agent switcher, mascot/state, one recent item, direct shortcuts, five Home variants |
+| Agents and profiles | Current markers and profile actions could contradict selection | Resolve Current and Use/Conversations from the selected agent; preserve fox/cube/compass/initials |
+| Conversations | Reply required another menu; titles could drift from selection | One-hold watch reply; Dial Reply; carry selected thread and pending-turn owner separately |
+| Talk, review, replies | Similar generic panels, unclear recording time, accidental tap capture | Distinct recording stage, elapsed/cap timer, slide-up cancel, tap rejection, automatic demo transcription, recipient and unsent transcript card |
+| Live Talk | Home could lose the call affordance | Return to call; End stays deliberate; agent switch offers End & switch |
+| Finger input | Device touch support and recognition could be confused | Keep working stroke/keyboard previews; label sample recognition; preserve explicit Send |
+| Devices and Activity | A request acknowledgment can be mistaken for completion | Keep draft → waiting → reported result/unknown distinct; Home links to original result owner |
+| Pairing | Wi-Fi-first browser route missed mobile expectation | QR discovery plus BLE primary path, mobile companion panes, device confirmation and specific recoveries |
+| Display, input, sound | Menu summaries could retain old selections | Derive current summaries from preview values; Compact and text size remain separate |
+| Privacy and context | Home could expose conversation details | Hide previews by default; agent remains visible; no hidden rerouting of pending work |
+| Connection | Wi-Fi repair could restart Gateway pairing | Dedicated network-repair completion; mobile setup entry; saved session reconnect remains separate |
+| Power, About, help, reset | Unknown capabilities and reset scope need explicit wording | Retain unknown battery, supported controls only, separate local reset/revocation and deliberate diagnostics |
 
 ## Complete settings inventory
 
@@ -462,7 +527,7 @@ visible now so review can cover the whole product.
 | Sound | Speech volume, feedback on/off, deliberate audio check | Watch speech independent of mic state; Dial buzzer only, no invented volume control |
 | Privacy & alerts | Hide / show Home previews, quiet badge / sound / off, clear local previews | Hide sensitive previews; clearing local content never deletes server history |
 | Agent & context | Default agent, resume last valid thread, current conversation | Configured identity retained; no automatic agent fallback |
-| Connection | Wi-Fi status/details/change, OpenClaw status/reconnect/re-pair, granted permissions | Inspect separate layers; permissions are read-only facts |
+| Connection | Wi-Fi status/details/change, mobile QR/BLE setup, OpenClaw status/reconnect/re-pair, granted permissions | Inspect separate layers; permissions are read-only facts |
 | Power | Battery and power-source status | Unknown today; no invented percentage or charging state |
 | About | Device identity, firmware, actual capabilities, USB update guidance | No OTA install button until an OTA owner exists |
 | Help & diagnostics | Control practice, speaker/mic or buzzer check, connection checks, setup guide | Tests start deliberately, stop on exit, and report observable results |

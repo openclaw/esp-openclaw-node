@@ -2,7 +2,7 @@
 
 **Research baseline · revision 02 · 27 October 2026 · no firmware changes.**
 
-**Current direction:** [revision 05 shared interaction plan](watch-dial-interaction-plan.md)
+**Current direction:** [revision 06 shared interaction plan](watch-dial-interaction-plan.md)
 and its [interactive flow explorer](watch-dial-ux-flows.html) and
 [annotated layout board](watch-dial-ux-plan.html). The revision 02
 product split, visual rules and explorer below are retained as a superseded
@@ -139,33 +139,23 @@ executed. Implemented patterns and proposed adaptations are separated here.
 
 ## First use and pairing
 
-### Recommended setup route
+### Current setup direction (revision 06)
 
-Recommend **temporary, protected Wi-Fi setup with a local browser**, shared by
-both devices, as the first consumer setup transport. It works from a phone or
-laptop without requiring an OpenClaw mobile-app release and avoids typing long
-secrets on a watch or rotary keyboard. Keep USB as a complete alternative.
+The [current interaction plan](watch-dial-interaction-plan.md#mobile-pairing-qr-discovery-and-bluetooth-setup)
+supersedes the original Wi-Fi-first recommendation: **scan the device QR in
+OpenClaw mobile, then provision over protected Bluetooth LE**. The camera-free
+Nearby list joins the same flow. Device identity confirmation, Wi-Fi entry,
+authorized device-specific Gateway bootstrap and useful completion are separate
+steps. The phone is optional afterward; both devices operate independently.
 
-This is new firmware/client work, not an existing feature. Espressif provides
-[SoftAP and BLE provisioning transports](https://docs.espressif.com/projects/esp-idf/en/v5.5/esp32/api-reference/provisioning/wifi_provisioning.html);
-a browser UI, Gateway bootstrap exchange and OpenClaw ownership flow still need
-implementation. Do not assume an example transport supplies the whole product.
+Protected browser/SoftAP and the existing USB console remain alternatives.
+BLE provisioning and the mobile integration are proposed work, not current
+firmware capabilities. Espressif provides
+[BLE and SoftAP provisioning](https://docs.espressif.com/projects/esp-idf/en/v5.5/esp32s3/api-reference/provisioning/wifi_provisioning.html)
+and [mobile QR/discovery primitives](https://github.com/espressif/esp-idf-provisioning-ios).
 
-| Route | Decision | Tradeoff |
-| --- | --- | --- |
-| Protected SoftAP + local page | Recommended first consumer route | Temporary network switch; needs reconnection instructions, session protection and bounded memory |
-| BLE + native mobile app | Later refinement if mobile owns device setup | Better phone continuity; requires app work, permission handling and a secure protocol |
-| On-device keyboard | Optional watch recovery only | Long passwords/setup codes are unpleasant; rotary text entry is a poor default |
-| USB console | Keep throughout | Dependable developer/recovery route; not consumer onboarding |
-
-Setup mode must require physical entry, display the exact device name and
-session-specific proof of possession, expire, and close after success or Cancel.
-Use a unique protected setup network and a reviewed provisioning protocol;
-do not expose an unauthenticated configuration server on the normal LAN.
-Never put Wi-Fi passwords or Gateway bootstrap tokens into URL query strings,
-browser history, analytics, screenshots, or ordinary logs. The setup-network
-credential is not permission to control the Gateway. The transport/security
-design gets its own review before implementation.
+The historical sequence below records the initial browser-first study. Use
+revision 06 for the current mobile flow, screen review and implementation gates.
 
 ### Complete first-use journey, on either device
 

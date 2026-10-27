@@ -926,3 +926,11 @@ void host_release_resources(void)
     free(directory_timer);
     free(recycled_rtc);
 }
+
+void room_ui_set_conversation_handler(void (*handler)(room_ui_conversation_action_t, const char *, unsigned, size_t, unsigned)) { (void)handler; }
+bool room_ui_wants_conversations(void) { return false; }
+void room_ui_store_conversations(const room_conversations_snapshot_t *snapshot, unsigned generation) { (void)snapshot; (void)generation; }
+void room_ui_conversations_failed(unsigned generation) { (void)generation; }
+
+esp_err_t room_ui_watch_reader(const room_conversations_snapshot_t *snapshot, bool preview, unsigned generation)
+{ (void)snapshot; (void)preview; (void)generation; return ESP_OK; }

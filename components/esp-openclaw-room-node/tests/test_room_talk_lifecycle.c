@@ -1185,6 +1185,29 @@ static void conversations_stale(void)
         "lost owner cannot publish a stale page");
 }
 
+static void conversations_local_intent(void)
+{
+    unsigned revision = load_target_roster(target_roster);
+    request_local_conversation(ROOM_CONVERSATIONS_OPEN, "fixture", revision, 0, 1);
+    CHECK(host.conversation_requests == 0, "display callback only records intent");
+    host_run_task("talk_teardown");
+    CHECK(host.conversation_requests == 1 && strcmp(host.reader_method, "sessions.list") == 0,
+        "supervisor owns the conversation request");
+    request_local_conversation(ROOM_CONVERSATIONS_CLOSE, "", 0, 0, 2);
+    request_local_conversation(ROOM_CONVERSATIONS_OPEN, "builder", revision, 0, 2);
+    host_reply_agents(true, conversation_page);
+    host_run_task("talk_teardown");
+    room_conversations_snapshot_t snapshot = conversations_snapshot();
+    CHECK(snapshot.state == ROOM_AGENTS_LOADING && strcmp(snapshot.agent.id, "builder") == 0,
+        "latest open supersedes an earlier close and response");
+    host_reply_agents(true, "{\"sessions\":[],\"offset\":0,\"hasMore\":false,\"nextOffset\":null}");
+    host_run_task("talk_teardown");
+    request_local_conversation(ROOM_CONVERSATIONS_CLOSE, "", 0, 0, 2);
+    host_run_task("talk_teardown");
+    CHECK(conversations_snapshot().state == ROOM_AGENTS_IDLE && !talk_target.selected,
+        "leaving releases the reader without choosing a Talk agent");
+}
+
 static void conversations_timeout_talk(void)
 {
     unsigned revision = load_target_roster(target_roster);
@@ -1448,6 +1471,7 @@ static void directory_errors(void)
 }
 
 static const struct { const char *name; void (*run)(void); } cases[] = {
+    {"conversations-local-intent", conversations_local_intent},
     {"conversations-read", conversations_read},
     {"conversations-stale", conversations_stale},
     {"conversations-timeout-talk", conversations_timeout_talk},

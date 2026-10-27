@@ -10,7 +10,8 @@ typedef void (*dial_navigation_handler_t)(dial_navigation_event_t event, size_t 
 
 typedef struct {
     lv_obj_t *root, *heading, *back, *rows[3], *icons[3], *names[3], *hint, *description;
-    lv_obj_t *id_caption, *identity, *preview_body, *preview_text;
+    lv_obj_t *identity, *preview_body, *preview_text;
+    lv_obj_t *avatars[3], *detail_avatar, *detail_initials;
     dial_navigation_view_t view;
     unsigned focus, first, count;
     unsigned revision, conversation_revision, preview_revision;

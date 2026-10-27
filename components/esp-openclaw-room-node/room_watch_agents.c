@@ -1,4 +1,5 @@
 #include "room_watch_agents.h"
+#include "esp_openclaw_avatar.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -7,6 +8,8 @@
 static lv_obj_t *root, *back_text, *heading, *list, *message, *counter;
 static lv_obj_t *rows[ESP_OPENCLAW_DIRECTORY_PAGE_SIZE], *names[ESP_OPENCLAW_DIRECTORY_PAGE_SIZE];
 static lv_obj_t *avatars[ESP_OPENCLAW_DIRECTORY_PAGE_SIZE], *ids[ESP_OPENCLAW_DIRECTORY_PAGE_SIZE];
+static lv_obj_t *avatar_images[ESP_OPENCLAW_DIRECTORY_PAGE_SIZE], *detail_image;
+static lv_image_dsc_t avatar_sources[3];
 static lv_obj_t *previous, *next, *refresh, *detail_name, *detail_id, *detail_note, *detail_avatar, *choose, *choose_text;
 static lv_obj_t *use_default, *default_text, *conversations;
 static const room_agents_snapshot_t *agents;
@@ -44,8 +47,29 @@ static lv_obj_t *button(lv_obj_t *parent, int x, int y, int width, int height,
     return obj;
 }
 
+static lv_obj_t *avatar_image(lv_obj_t *parent, int x, int y, int size)
+{
+    lv_obj_t *image = lv_image_create(parent);
+    lv_obj_set_pos(image, x, y);
+    lv_obj_set_size(image, size, size);
+    lv_image_set_inner_align(image, LV_IMAGE_ALIGN_CONTAIN);
+    lv_image_set_antialias(image, true);
+    lv_obj_set_clickable(image, false);
+    lv_obj_set_scrollable(image, false);
+    lv_obj_set_hidden(image, true);
+    return image;
+}
+
 void room_watch_agents_create(lv_obj_t *parent, lv_event_cb_t handler)
 {
+    for (int kind = ESP_OPENCLAW_AVATAR_FOX; kind <= ESP_OPENCLAW_AVATAR_LOBSTER; ++kind)
+        avatar_sources[kind] = (lv_image_dsc_t){
+            .header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_ARGB8888,
+                .w = ESP_OPENCLAW_AVATAR_SIZE, .h = ESP_OPENCLAW_AVATAR_SIZE,
+                .stride = ESP_OPENCLAW_AVATAR_SIZE * 4},
+            .data_size = ESP_OPENCLAW_AVATAR_SIZE * ESP_OPENCLAW_AVATAR_SIZE * 4,
+            .data = esp_openclaw_avatar_pixels(kind),
+        };
     root = lv_obj_create(parent);
     lv_obj_remove_style_all(root);
     lv_obj_set_size(root, LV_PCT(100), LV_PCT(100));
@@ -79,6 +103,7 @@ void room_watch_agents_create(lv_obj_t *parent, lv_event_cb_t handler)
         lv_obj_set_style_bg_opa(avatars[i], LV_OPA_COVER, 0);
         lv_obj_set_style_radius(avatars[i], LV_RADIUS_CIRCLE, 0);
         lv_obj_set_style_text_align(avatars[i], LV_TEXT_ALIGN_CENTER, 0);
+        avatar_images[i] = avatar_image(rows[i], 12, 12, 36);
         names[i] = label(rows[i], "", 62, 11, 220);
         ids[i] = label(rows[i], "", 62, 34, 220);
         lv_obj_set_style_text_color(ids[i], lv_color_hex(0xb9aabe), 0);
@@ -100,6 +125,7 @@ void room_watch_agents_create(lv_obj_t *parent, lv_event_cb_t handler)
     lv_obj_set_style_bg_color(detail_avatar, lv_color_hex(0x655074), 0);
     lv_obj_set_style_bg_opa(detail_avatar, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(detail_avatar, LV_RADIUS_CIRCLE, 0);
+    detail_image = avatar_image(root, 32, 112, 64);
     detail_name = label(root, "", 112, 118, 224);
     lv_label_set_long_mode(detail_name, LV_LABEL_LONG_WRAP);
 #if LV_FONT_MONTSERRAT_20
@@ -128,23 +154,14 @@ void room_watch_agents_reset(void)
     selected_id[0] = '\0';
 }
 
-static void avatar_text(lv_obj_t *label_obj, const esp_openclaw_agent_t *agent)
+static void render_avatar(lv_obj_t *text, lv_obj_t *image, const esp_openclaw_agent_t *agent)
 {
-    /* The embedded font cannot render emoji. Preserve an ASCII avatar when
-     * supplied; otherwise use initials instead of a missing-glyph box. */
-    if (agent->emoji[0] >= 32 && agent->emoji[0] <= 126 && agent->emoji[1] == '\0')
-        lv_label_set_text(label_obj, agent->emoji);
-    else {
-        char initials[3] = {0};
-        unsigned count = 0;
-        bool word = true;
-        for (const unsigned char *p = (const unsigned char *)agent->name; *p && count < 2; ++p) {
-            bool letter = (*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z') || (*p >= '0' && *p <= '9');
-            if (word && letter) initials[count++] = (char)(*p >= 'a' && *p <= 'z' ? *p - 'a' + 'A' : *p);
-            word = *p == ' ' || *p == '-' || *p == '_';
-        }
-        lv_label_set_text(label_obj, count ? initials : LV_SYMBOL_LIST);
-    }
+    esp_openclaw_avatar_t avatar = esp_openclaw_agent_avatar(agent);
+    bool picture = avatar.kind != ESP_OPENCLAW_AVATAR_TEXT;
+    lv_obj_set_hidden(text, picture);
+    lv_obj_set_hidden(image, !picture);
+    if (picture) lv_image_set_src(image, &avatar_sources[avatar.kind]);
+    else lv_label_set_text(text, avatar.text);
 }
 
 void room_watch_agents_render(const room_agents_snapshot_t *snapshot, bool hidden,
@@ -177,13 +194,14 @@ void room_watch_agents_render(const room_agents_snapshot_t *snapshot, bool hidde
     lv_obj_set_hidden(next, detail);
     lv_obj_set_hidden(refresh, detail);
     lv_obj_set_hidden(detail_avatar, !detail);
+    lv_obj_set_hidden(detail_image, !detail);
     lv_obj_set_hidden(detail_name, !detail);
     lv_obj_set_hidden(detail_id, !detail);
     lv_obj_set_hidden(detail_note, !detail);
     lv_obj_set_hidden(choose, !detail);
     lv_obj_set_hidden(conversations, !detail);
     if (detail) {
-        avatar_text(detail_avatar, selected);
+        render_avatar(detail_avatar, detail_image, selected);
         lv_label_set_text(detail_name, selected->name);
         lv_label_set_text_fmt(detail_id, "Agent ID\n%s", selected->id);
         bool chosen = !expired && strcmp(target_id, selected->id) == 0;
@@ -205,7 +223,7 @@ void room_watch_agents_render(const room_agents_snapshot_t *snapshot, bool hidde
         for (size_t i = 0; i < ESP_OPENCLAW_DIRECTORY_PAGE_SIZE; ++i) {
             lv_obj_set_hidden(rows[i], i >= agents->page.count);
             if (i < agents->page.count) {
-                avatar_text(avatars[i], &agents->page.agents[i]);
+                render_avatar(avatars[i], avatar_images[i], &agents->page.agents[i]);
                 lv_label_set_text(names[i], agents->page.agents[i].name);
                 lv_label_set_text(ids[i], agents->page.agents[i].id);
             }

@@ -103,6 +103,17 @@ def main():
             + ",".join(str(value) for value in (root / "watch_lobster.argb8888").read_bytes())
             + "\n};\n"
         )
+        avatars = component.parent / "esp-openclaw-directory"
+        subprocess.run([
+            sys.executable, str(component.parents[1] / "scripts/generate_agent_avatars.py"),
+            "--output-dir", str(root),
+        ], check=True)
+        avatar_pixels = root / "avatar_pixels.c"
+        avatar_pixels.write_text(
+            'const unsigned char avatar_pixels[] __asm__("_binary_agent_avatars_argb8888_start") = {\n'
+            + ",".join(str(value) for value in (root / "agent_avatars.argb8888").read_bytes())
+            + "\n};\n"
+        )
         binary = root / "room-ui-test"
         command = [
             "cc", "-std=gnu11", "-O1", "-g", "-fsanitize=address,undefined",
@@ -118,6 +129,7 @@ def main():
             str(component / "room_watch_home.c"),
             str(component / "room_watch_navigation.c"), str(component / "room_watch_settings.c"),
             str(component / "room_watch_agents.c"),
+            str(avatars / "esp_openclaw_avatar.c"), str(avatar_pixels),
             str(component / "room_watch_conversations.c"),
             str(component / "room_face.c"),
             str(pixels), str(watch_pixels), str(component / "room_lobster.c"),

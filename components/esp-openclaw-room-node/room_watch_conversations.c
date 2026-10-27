@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 static lv_obj_t *root, *back_text, *heading, *list, *message, *body, *body_text;
 static lv_obj_t *previous, *next, *refresh;
@@ -11,6 +12,16 @@ static const room_conversations_snapshot_t *current;
 static bool preview, painted_preview, reset_scroll;
 static unsigned revision, preview_revision;
 static room_agents_state_t state, preview_state;
+static char agent_id[65];
+static size_t selected;
+static struct {
+    bool valid, preview, restore_scroll;
+    char agent_id[65];
+    unsigned revision, preview_revision;
+    size_t selected;
+    room_agents_state_t state, preview_state;
+    int32_t list_y, body_y;
+} suspended;
 
 static lv_obj_t *label(lv_obj_t *parent, const char *text, int x, int y, int width)
 {
@@ -96,8 +107,34 @@ void room_watch_conversations_create(lv_obj_t *parent, lv_event_cb_t handler)
 
 void room_watch_conversations_reset(bool show_preview)
 {
+    suspended.valid = suspended.restore_scroll = false;
     preview = show_preview;
     reset_scroll = true;
+    current = NULL;
+}
+
+void room_watch_conversations_suspend(void)
+{
+    suspended.valid = agent_id[0] != '\0';
+    suspended.preview = preview;
+    memcpy(suspended.agent_id, agent_id, sizeof(agent_id));
+    suspended.revision = revision;
+    suspended.preview_revision = preview_revision;
+    suspended.selected = selected;
+    suspended.state = state;
+    suspended.preview_state = preview_state;
+    suspended.list_y = lv_obj_get_scroll_y(list);
+    suspended.body_y = lv_obj_get_scroll_y(body);
+}
+
+void room_watch_conversations_resume(const room_conversations_snapshot_t *snapshot)
+{
+    bool same = suspended.valid && strcmp(suspended.agent_id, snapshot->agent.id) == 0 &&
+        suspended.revision == snapshot->revision && suspended.selected == snapshot->selected;
+    preview = same && suspended.preview && snapshot->preview_state != ROOM_AGENTS_IDLE;
+    suspended.restore_scroll = same && suspended.state == snapshot->state &&
+        suspended.preview_revision == snapshot->preview_revision && suspended.preview_state == snapshot->preview_state;
+    reset_scroll = !suspended.restore_scroll;
     current = NULL;
 }
 
@@ -136,6 +173,8 @@ void room_watch_conversations_render(const room_conversations_snapshot_t *snapsh
     bool content_changed = changed || preview_revision != snapshot->preview_revision || preview_state != snapshot->preview_state;
     if (current != NULL && revision != snapshot->revision) preview = false;
     current = snapshot;
+    memcpy(agent_id, snapshot->agent.id, sizeof(agent_id));
+    selected = snapshot->selected;
     revision = snapshot->revision;
     state = snapshot->state;
     preview_revision = snapshot->preview_revision;
@@ -185,6 +224,12 @@ void room_watch_conversations_render(const room_conversations_snapshot_t *snapsh
     }
     reset_scroll = false;
     painted_preview = preview;
+    if (suspended.restore_scroll) {
+        lv_obj_update_layout(root);
+        lv_obj_scroll_to_y(list, suspended.list_y, LV_ANIM_OFF);
+        lv_obj_scroll_to_y(body, suspended.body_y, LV_ANIM_OFF);
+        suspended.restore_scroll = false;
+    }
 }
 
 bool room_watch_conversations_input_current(void)

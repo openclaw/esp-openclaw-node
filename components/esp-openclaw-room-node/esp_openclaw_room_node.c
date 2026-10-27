@@ -436,6 +436,8 @@ static struct {
 } local_conversation;
 static atomic_uint published_conversation_generation;
 static portMUX_TYPE conversation_lock = portMUX_INITIALIZER_UNLOCKED;
+/* Supervisor-owned retries never overwrite a newer UI intent in the mailbox. */
+static struct { bool pending; unsigned generation; } conversation_resume;
 
 static void request_local_conversation(room_ui_conversation_action_t action, const char *id,
     unsigned revision, size_t value, unsigned generation)
@@ -465,10 +467,14 @@ static void apply_local_conversation(void)
     local_conversation.pending = false;
     portEXIT_CRITICAL(&conversation_lock);
     if (!pending) return;
+    conversation_resume.pending = action == ROOM_CONVERSATIONS_RESUME;
+    conversation_resume.generation = generation;
+    if (conversation_resume.pending) return;
     esp_err_t err = ESP_OK;
     if (action == ROOM_CONVERSATIONS_OPEN) err = room_conversations_open(id, revision);
     else if (action == ROOM_CONVERSATIONS_LOAD) err = room_conversations_refresh(value);
     else if (action == ROOM_CONVERSATIONS_READ) err = room_conversations_preview(value, revision);
+    else if (action == ROOM_CONVERSATIONS_SUSPEND) room_agent_directory_suspend();
     else room_conversations_close();
     atomic_store(&published_conversation_generation, generation);
     if (err != ESP_OK) { room_conversations_close(); room_ui_conversations_failed(generation); }
@@ -477,6 +483,27 @@ static void apply_local_conversation(void)
 static void publish_conversations(void)
 {
     static room_conversations_snapshot_t *snapshot;
+    if (conversation_resume.pending) {
+        unsigned generation = conversation_resume.generation;
+        if (!room_ui_wants_conversation_resume(generation)) conversation_resume.pending = false;
+        else {
+            room_agents_snapshot_t *agents = malloc(sizeof(*agents));
+            if (snapshot == NULL) snapshot = malloc(sizeof(*snapshot));
+            unsigned epoch = 0;
+            bool allocated = agents != NULL && snapshot != NULL;
+            bool available = allocated &&
+                room_conversations_copy_resume(agents, snapshot, &epoch) == ESP_OK;
+            esp_err_t err = ESP_ERR_NO_MEM;
+            if (allocated) err = room_ui_watch_resume(available ? agents : NULL,
+                available ? snapshot : NULL, epoch, generation);
+            else room_ui_conversations_failed(generation);
+            free(agents);
+            if (err == ESP_OK || !room_ui_wants_conversation_resume(generation)) {
+                conversation_resume.pending = false;
+                atomic_store(&published_conversation_generation, generation);
+            }
+        }
+    }
     if (!room_ui_wants_conversations()) {
         free(snapshot);
         snapshot = NULL;
@@ -536,7 +563,8 @@ static void talk_teardown_task(void *arg)
     (void)arg;
     for (;;) {
         talk_teardown_request_t wake;
-        if (xQueueReceive(talk_teardown_queue, &wake, portMAX_DELAY) != pdTRUE) continue;
+        TickType_t wait = conversation_resume.pending ? pdMS_TO_TICKS(100) : portMAX_DELAY;
+        if (xQueueReceive(talk_teardown_queue, &wake, wait) != pdTRUE && !conversation_resume.pending) continue;
         /* Publish the target and repaint once below, after selection and Talk work. */
         apply_local_agent_selection();
         portENTER_CRITICAL(&talk_timeout_lock);
@@ -1686,7 +1714,7 @@ static int menu_console_command(int argc, char **argv)
     }
     const char *page = argc == 2 ? argv[1] : "menu";
     esp_err_t err;
-    if (strcmp(page, "conversations") == 0 || strcmp(page, "preview") == 0) {
+    if (strcmp(page, "preview") == 0) {
         room_conversations_snapshot_t *snapshot = malloc(sizeof(*snapshot));
         if (snapshot == NULL) return 1;
         room_conversations_copy(snapshot);

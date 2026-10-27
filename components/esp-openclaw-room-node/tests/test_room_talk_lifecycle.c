@@ -1301,6 +1301,69 @@ static void conversations_local_intent(void)
         "leaving releases the reader without choosing a Talk agent");
 }
 
+static void conversations_resume_retry(void)
+{
+    connect_call();
+    unsigned revision = load_target_roster(target_roster);
+    CHECK(select_talk_agent("builder", revision) == ESP_OK, "choose next target during existing call");
+    room_conversations_open("fixture", revision);
+    host_run_task("talk_teardown");
+    host_reply_agents(true, conversation_page);
+    host_run_task("talk_teardown");
+    request_local_conversation(ROOM_CONVERSATIONS_SUSPEND, "", 0, 0, 10);
+    host_run_task("talk_teardown");
+    host.resume_wanted = true;
+    host.resume_generation = 11;
+    host.resume_result = ESP_ERR_TIMEOUT;
+    request_local_conversation(ROOM_CONVERSATIONS_RESUME, "", 0, 0, 11);
+    host_run_task("talk_teardown");
+    CHECK(host.resume_attempts == 1 && host.queue_wait == pdMS_TO_TICKS(100),
+        "busy display retains one retry and waits without spinning");
+    host.resume_result = ESP_OK;
+    host.expire_queue_wait = true;
+    host_run_task("talk_teardown");
+    CHECK(host.resume_attempts == 2 && !host.resume_fallback &&
+        strcmp(host.resumed_agent, "fixture") == 0 && host.queue_wait == portMAX_DELAY,
+        "timed retry opens the current reader and returns to idle waiting");
+    CHECK(host.conversation_requests == 1 && host.agent_requests == 1 && talk_active &&
+        strcmp(talk_target.id, "builder") == 0 && host.config_requests == 1,
+        "resume neither fetches again nor changes the current call or next Talk target");
+
+    host.resume_wanted = true;
+    host.resume_generation = 12;
+    host.resume_result = ESP_ERR_TIMEOUT;
+    request_local_conversation(ROOM_CONVERSATIONS_RESUME, "", 0, 0, 12);
+    host_run_task("talk_teardown");
+    unsigned attempts = host.resume_attempts;
+    host.resume_wanted = false;
+    request_local_conversation(ROOM_CONVERSATIONS_CLOSE, "", 0, 0, 13);
+    host.expire_queue_wait = true;
+    host_run_task("talk_teardown");
+    CHECK(host.resume_attempts == attempts && conversations_snapshot().state == ROOM_AGENTS_IDLE,
+        "a pending retry cannot overwrite a newer Close intent");
+    expect_open();
+}
+
+static void conversations_resume_owner_loss(void)
+{
+    unsigned revision = load_target_roster(target_roster);
+    room_conversations_open("fixture", revision);
+    host.resume_wanted = true;
+    host.resume_generation = 1;
+    host.resume_result = ESP_ERR_TIMEOUT;
+    request_local_conversation(ROOM_CONVERSATIONS_RESUME, "", 0, 0, 1);
+    host_run_task("talk_teardown");
+    CHECK(host.resume_attempts == 1 && !host.resume_fallback, "initial retry has a live reader");
+    host.resume_result = ESP_OK;
+    host_emit_node(operator_client, ESP_OPENCLAW_NODE_EVENT_DISCONNECTED);
+    host_run_task("talk_teardown");
+    CHECK(host.resume_attempts == 2 && host.resume_fallback,
+        "retry after owner loss offers Agents rather than a retained stale reader");
+    host_reply_agents(true, conversation_page);
+    host_run_task("talk_teardown");
+    CHECK(host.resume_attempts == 2, "late response does not reopen the finished resume");
+}
+
 static void conversations_timeout_talk(void)
 {
     unsigned revision = load_target_roster(target_roster);
@@ -1564,6 +1627,8 @@ static void directory_errors(void)
 }
 
 static const struct { const char *name; void (*run)(void); } cases[] = {
+    {"conversations-resume-retry", conversations_resume_retry},
+    {"conversations-resume-owner-loss", conversations_resume_owner_loss},
     {"conversations-suspend", conversations_suspend},
     {"conversations-resume-invalidation", conversations_resume_invalidation},
     {"directory-suspend-pending", directory_suspend_pending},

@@ -86,6 +86,7 @@ static unsigned pressed_agent_revision;
 static room_agents_state_t pressed_agent_state;
 
 static bool conversations_open;
+static bool conversation_resume_failed;
 static room_conversations_snapshot_t *current_conversations, *painted_conversations;
 static int pressed_chat_action = -100;
 static unsigned conversation_generation;
@@ -126,6 +127,7 @@ void room_ui_conversations_failed(unsigned generation)
 {
     taskENTER_CRITICAL(&state_mux);
     if (current_conversations != NULL && generation == conversation_generation) current_conversations->state = current_conversations->preview_state = ROOM_AGENTS_ERROR;
+    if (watch_page == ROOM_WATCH_CONVERSATIONS && generation == conversation_generation) conversation_resume_failed = true;
     pressed_chat_action = -100;
     taskEXIT_CRITICAL(&state_mux);
     room_ui_refresh();
@@ -259,14 +261,24 @@ static esp_err_t watch_navigation_show(room_watch_page_t page)
     taskENTER_CRITICAL(&state_mux);
     bool leaving_agents = watch_page == ROOM_WATCH_AGENTS && page != ROOM_WATCH_AGENTS;
     bool entering_agents = watch_page != ROOM_WATCH_AGENTS && page == ROOM_WATCH_AGENTS;
+    bool suspend_reader = leaving_agents && conversations_open;
+    bool resume_reader = page == ROOM_WATCH_CONVERSATIONS;
+    if (resume_reader) conversation_resume_failed = false;
+    if (watch_page == ROOM_WATCH_CONVERSATIONS || suspend_reader || resume_reader) ++conversation_generation;
     bool wake_home = page == ROOM_WATCH_HOME;
     watch_page = show_canvas ? ROOM_WATCH_HOME : page;
     pressed_watch_page = -1;
     pressed_talk_action = TALK_CONTROL_NONE;
     taskEXIT_CRITICAL(&state_mux);
     if (entering_agents) { room_watch_agents_reset(); request_agents_page(0); }
-    if (leaving_agents) close_conversations(true);
-    if (leaving_agents && agents_action_handler != NULL) agents_action_handler(false, 0);
+    if (suspend_reader || (leaving_agents && resume_reader)) {
+        if (suspend_reader) room_watch_conversations_suspend();
+        close_conversations(false);
+        if (conversation_handler != NULL)
+            conversation_handler(ROOM_CONVERSATIONS_SUSPEND, "", 0, 0, conversation_generation);
+    } else if (leaving_agents && agents_action_handler != NULL) agents_action_handler(false, 0);
+    if (resume_reader && conversation_handler != NULL)
+        conversation_handler(ROOM_CONVERSATIONS_RESUME, "", 0, 0, conversation_generation);
     if (wake_home) start_text_hint(10000);
     room_ui_paint_and_unlock();
     return ESP_OK;
@@ -278,6 +290,7 @@ esp_err_t room_ui_watch_menu(const char *page)
     if (page == NULL) return ESP_ERR_INVALID_ARG;
     if (strcmp(page, "menu") == 0) requested = ROOM_WATCH_MENU;
     else if (strcmp(page, "agents") == 0) requested = ROOM_WATCH_AGENTS;
+    else if (strcmp(page, "conversations") == 0) requested = ROOM_WATCH_CONVERSATIONS;
     else if (strcmp(page, "settings") == 0) requested = ROOM_WATCH_SETTINGS;
     else if (strcmp(page, "display") == 0) requested = ROOM_WATCH_DISPLAY;
     else if (strcmp(page, "connection") == 0) requested = ROOM_WATCH_CONNECTION;
@@ -322,6 +335,62 @@ esp_err_t room_ui_watch_reader(const room_conversations_snapshot_t *snapshot, bo
     taskEXIT_CRITICAL(&state_mux);
     room_watch_agents_focus(snapshot->agent.id);
     room_watch_conversations_reset(preview);
+    room_ui_paint_and_unlock();
+    return ESP_OK;
+}
+
+bool room_ui_wants_conversation_resume(unsigned generation)
+{
+    taskENTER_CRITICAL(&state_mux);
+    bool wanted = watch_home_enabled && watch_page == ROOM_WATCH_CONVERSATIONS &&
+        !diagnostics_open && conversation_generation == generation;
+    taskEXIT_CRITICAL(&state_mux);
+    return wanted;
+}
+
+esp_err_t room_ui_watch_resume(const room_agents_snapshot_t *agents,
+    const room_conversations_snapshot_t *reader, unsigned epoch, unsigned generation)
+{
+    if (!room_board_display_lock(150)) return ESP_ERR_TIMEOUT;
+    if (!room_ui_wants_conversation_resume(generation)) {
+        room_board_display_unlock();
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (agents == NULL || reader == NULL) {
+        /* Navigation takes and releases another recursive display lock. */
+        esp_err_t err = watch_navigation_show(ROOM_WATCH_AGENTS);
+        room_board_display_unlock();
+        return err;
+    }
+    room_conversations_snapshot_t *current = malloc(sizeof(*current));
+    room_conversations_snapshot_t *painted = malloc(sizeof(*painted));
+    if (current == NULL || painted == NULL) {
+        free(current); free(painted);
+        taskENTER_CRITICAL(&state_mux);
+        conversation_resume_failed = true;
+        taskEXIT_CRITICAL(&state_mux);
+        room_ui_paint_and_unlock();
+        return ESP_ERR_NO_MEM;
+    }
+    if (!room_ui_wants_conversation_resume(generation) || !room_conversations_resume_current(epoch)) {
+        free(current); free(painted);
+        room_board_display_unlock();
+        return ESP_ERR_INVALID_STATE;
+    }
+    *current = *painted = *reader;
+    close_conversations(false);
+    taskENTER_CRITICAL(&state_mux);
+    current_agents = *agents;
+    current_conversations = current;
+    painted_conversations = painted;
+    conversations_open = true;
+    watch_page = ROOM_WATCH_AGENTS;
+    pressed_watch_page = -1;
+    pressed_agent_action = -100;
+    pressed_talk_action = TALK_CONTROL_NONE;
+    taskEXIT_CRITICAL(&state_mux);
+    room_watch_agents_focus(reader->agent.id);
+    room_watch_conversations_resume(reader);
     room_ui_paint_and_unlock();
     return ESP_OK;
 }
@@ -867,6 +936,7 @@ static bool room_ui_render_locked(void)
     bool agents_changed = current_agents.revision != painted_agents.revision || current_agents.state != painted_agents.state;
     painted_agents = current_agents;
     bool chats = conversations_open;
+    bool resume_failed = conversation_resume_failed;
     bool chats_changed = current_conversations != NULL && painted_conversations != NULL &&
         (current_conversations->revision != painted_conversations->revision ||
          current_conversations->preview_revision != painted_conversations->preview_revision ||
@@ -889,7 +959,7 @@ static bool room_ui_render_locked(void)
     if (watch_home_enabled) {
         room_watch_home_render(&facts, &target, state, detail, canvas_active || overlay || navigation);
         bool settings = page == ROOM_WATCH_SETTINGS || page == ROOM_WATCH_DISPLAY;
-        room_watch_navigation_render(page, &facts, !navigation || overlay || page == ROOM_WATCH_AGENTS || settings);
+        room_watch_navigation_render(page, &facts, !navigation || overlay || page == ROOM_WATCH_AGENTS || settings, resume_failed);
         room_watch_settings_render(page == ROOM_WATCH_DISPLAY, brightness, brightness_failed, camera_minimum,
             !navigation || overlay || !settings);
         room_watch_agents_render(&painted_agents, !navigation || overlay || page != ROOM_WATCH_AGENTS || chats,
@@ -1199,12 +1269,16 @@ void room_ui_set_diagnostics_open(bool open)
     if (open) {
         pressed_talk_action = TALK_CONTROL_NONE;
         pressed_watch_page = -1;
+        if (watch_page == ROOM_WATCH_CONVERSATIONS) {
+            watch_page = ROOM_WATCH_MENU;
+            ++conversation_generation;
+        }
     }
     taskEXIT_CRITICAL(&state_mux);
     if (open) {
         if (watch_home_enabled) room_watch_home_render(NULL, NULL, ROOM_UI_IDLE, "", true);
         if (watch_home_enabled) {
-            room_watch_navigation_render(ROOM_WATCH_HOME, NULL, true);
+            room_watch_navigation_render(ROOM_WATCH_HOME, NULL, true, false);
             room_watch_settings_render(false, 0, false, false, true);
         }
         if (home != NULL) lv_obj_add_flag(home, LV_OBJ_FLAG_HIDDEN);

@@ -62,11 +62,17 @@ Agents shows local fox and lobster artwork for configured 🦊 and 🦞 identiti
 with an ASCII symbol or name initials for other identities. The same avatar
 appears in the list and detail view; it does not change agent routing.
 
-The **Menu** button opens Agents, Canvas, Connection, and Settings. Connection
+The **Menu** button opens Agents, Conversations, Canvas, Connection, and Settings. Connection
 shows live Wi-Fi, Gateway, and Talk states. Canvas shows the retained card or
 an empty-state explanation. Home returns to the latest conversation state;
 Start/Stop Talk remains available on menu pages. Device status opens the
 existing diagnostics overlay from Settings. The first touch on a dark screen only wakes it.
+
+Conversations returns to the last reader and its scroll position while the
+same content is still current. Leaving for Menu or Home keeps that reader in
+memory and releases the hidden display buffers; returning does not fetch it
+again or change the next Talk agent. With no retained reader, it opens Agents.
+Closing the reader, refreshing Agents, reconnecting, or restarting clears it.
 
 Settings → Display adjusts awake brightness in five-point steps from 10% to
 100%. The preference lasts until restart; an unsuccessful change keeps the
@@ -77,7 +83,7 @@ exceeds the selected value. Brightness and navigation work offline and never
 change the selected agent or end a call.
 
 The USB console can open the same pages with `menu`, `menu connection`,
-`menu settings`, `menu display`, `menu canvas`, and `menu home`, without starting or stopping a conversation.
+`menu conversations`, `menu settings`, `menu display`, `menu canvas`, and `menu home`, without starting or stopping a conversation.
 Use `brightness <10..100>` to set the same runtime preference over USB.
 Additional settings and press-to-record messaging are tracked in the
 [interaction plan](../../docs/design/watch-dial-interaction-plan.md).

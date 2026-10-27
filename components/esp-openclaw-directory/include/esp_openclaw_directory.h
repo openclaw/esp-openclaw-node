@@ -13,6 +13,8 @@ typedef struct {
 
 typedef struct {
     size_t offset, count, total;
+    /* Empty if absent or too long; routing metadata must never be shortened. */
+    char main_key[129];
     esp_openclaw_agent_t agents[ESP_OPENCLAW_DIRECTORY_PAGE_SIZE];
 } esp_openclaw_agent_page_t;
 

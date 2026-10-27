@@ -708,9 +708,27 @@ static void check_watch_agents(const char *path)
     room_ui_set(ROOM_UI_IDLE, NULL);
     assert(room_ui_watch_menu("home") == ESP_OK);
     assert(lv_obj_is_visible(find_text(lv_layer_top(), "Next: Kitsune")));
-    target = (room_ui_talk_target_t){0};
+    assert(room_ui_watch_menu("agents") == ESP_OK);
+    target.expired = true;
     room_ui_store_talk_target(&target);
     room_ui_refresh();
+    selections = agent_selections;
+    click_talk(lv_obj_get_parent(find_text(lv_layer_top(), "Use default")));
+    assert(agent_selections == selections + 1 && selected_agent[0] == '\0' && selected_revision == 0);
+    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Choosing...")));
+    click_talk(lv_obj_get_parent(find_text(lv_layer_top(), "Choosing agent...")));
+    assert(talk_starts == starts);
+    target = (room_ui_talk_target_t){0};
+    room_ui_store_talk_target(&target);
+    room_ui_agent_selection_complete(ESP_OK);
+    room_ui_refresh();
+    lv_obj_t *default_button = lv_obj_get_parent(find_text(lv_layer_top(), "Default"));
+    assert(lv_obj_has_state(default_button, LV_STATE_DISABLED));
+    click_talk(default_button);
+    assert(agent_selections == selections + 1);
+    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Start Talk")));
+    assert(room_ui_watch_menu("home") == ESP_OK);
+    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Tap to start a live conversation")));
     puts("watch agents: acknowledged selection, next-call identity, paging and fenced pointer input passed");
 }
 

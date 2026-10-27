@@ -254,10 +254,10 @@ static void watch_agents_clicked(lv_event_t *event)
     if (!activate) return;
     size_t offset = 0;
     room_agent_action_t result = room_watch_agents_activate(action, &offset);
-    if (result == ROOM_AGENT_SELECT_TARGET && agent_selection_handler != NULL) {
-        char id[65];
-        unsigned source_revision;
-        if (room_watch_agents_target(id, &source_revision)) {
+    if ((result == ROOM_AGENT_SELECT_TARGET || result == ROOM_AGENT_RESET_TARGET) && agent_selection_handler != NULL) {
+        char id[65] = {0};
+        unsigned source_revision = 0;
+        if (result == ROOM_AGENT_RESET_TARGET || room_watch_agents_target(id, &source_revision)) {
             taskENTER_CRITICAL(&state_mux);
             bool submit = !selection_pending;
             if (submit) {

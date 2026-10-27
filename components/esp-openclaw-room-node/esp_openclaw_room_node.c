@@ -391,6 +391,13 @@ static esp_err_t select_talk_agent(const char *id, unsigned revision)
     return err;
 }
 
+static void reset_talk_agent(void)
+{
+    xSemaphoreTake(state_lock, portMAX_DELAY);
+    memset(&talk_target, 0, sizeof(talk_target));
+    xSemaphoreGive(state_lock);
+}
+
 static void request_local_agent_selection(const char *id, unsigned revision)
 {
     if (id == NULL || strnlen(id, sizeof(local_agent_selection.id)) >= sizeof(local_agent_selection.id)) return;
@@ -411,7 +418,12 @@ static void apply_local_agent_selection(void)
     memcpy(id, local_agent_selection.id, sizeof(id));
     local_agent_selection.pending = false;
     portEXIT_CRITICAL(&selection_lock);
-    if (pending) room_ui_agent_selection_complete(select_talk_agent(id, revision));
+    if (pending) {
+        esp_err_t result = ESP_OK;
+        if (id[0] == '\0') reset_talk_agent();
+        else result = select_talk_agent(id, revision);
+        room_ui_agent_selection_complete(result);
+    }
 }
 
 static void refresh_agents(void)
@@ -1611,9 +1623,7 @@ static int agents_console_command(int argc, char **argv)
         return err == ESP_OK ? 0 : 1;
     }
     if (argc == 2 && strcmp(argv[1], "default") == 0) {
-        xSemaphoreTake(state_lock, portMAX_DELAY);
-        memset(&talk_target, 0, sizeof(talk_target));
-        xSemaphoreGive(state_lock);
+        reset_talk_agent();
         refresh_home_facts();
         printf("next Talk uses the Gateway default; current call is unchanged\n");
         return 0;

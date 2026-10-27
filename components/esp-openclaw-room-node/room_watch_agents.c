@@ -8,10 +8,11 @@ static lv_obj_t *root, *back_text, *heading, *list, *message, *counter;
 static lv_obj_t *rows[ESP_OPENCLAW_DIRECTORY_PAGE_SIZE], *names[ESP_OPENCLAW_DIRECTORY_PAGE_SIZE];
 static lv_obj_t *avatars[ESP_OPENCLAW_DIRECTORY_PAGE_SIZE], *ids[ESP_OPENCLAW_DIRECTORY_PAGE_SIZE];
 static lv_obj_t *previous, *next, *refresh, *detail_name, *detail_id, *detail_note, *detail_avatar, *choose, *choose_text;
+static lv_obj_t *use_default, *default_text;
 static const room_agents_snapshot_t *agents;
 static unsigned revision;
 static room_agents_state_t state;
-static bool detail, reset_scroll;
+static bool detail, reset_scroll, can_reset;
 static char selected_id[65];
 
 static lv_obj_t *label(lv_obj_t *parent, const char *text, int x, int y, int width)
@@ -53,6 +54,9 @@ void room_watch_agents_create(lv_obj_t *parent, lv_event_cb_t handler)
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
     lv_obj_t *back = button(root, 26, 18, 104, 44, ROOM_AGENT_BACK, handler);
     back_text = label(back, LV_SYMBOL_LEFT " Menu", 10, 14, 94);
+    use_default = button(root, 218, 18, 124, 44, ROOM_AGENT_DEFAULT, handler);
+    default_text = label(use_default, "Default", 8, 14, 108);
+    lv_obj_set_style_text_align(default_text, LV_TEXT_ALIGN_CENTER, 0);
     heading = label(root, "Agents", 26, 72, 218);
 #if LV_FONT_MONTSERRAT_28
     lv_obj_set_style_text_font(heading, &lv_font_montserrat_28, 0);
@@ -146,6 +150,9 @@ void room_watch_agents_render(const room_agents_snapshot_t *snapshot, bool hidde
     if (root == NULL) return;
     lv_obj_set_hidden(root, hidden);
     if (hidden) return;
+    can_reset = target_id[0] != '\0' && !pending;
+    lv_obj_set_state(use_default, LV_STATE_DISABLED, !can_reset);
+    lv_label_set_text_static(default_text, pending ? "Choosing..." : can_reset ? "Use default" : "Default");
     bool changed = agents == NULL || revision != snapshot->revision || state != snapshot->state;
     agents = snapshot;
     revision = snapshot->revision;
@@ -215,6 +222,7 @@ void room_watch_agents_render(const room_agents_snapshot_t *snapshot, bool hidde
 
 room_agent_action_t room_watch_agents_activate(int action, size_t *offset)
 {
+    if (action == ROOM_AGENT_DEFAULT) return can_reset ? ROOM_AGENT_RESET_TARGET : ROOM_AGENT_STAY;
     if (action == ROOM_AGENT_BACK) {
         if (!detail) return ROOM_AGENT_LEAVE;
         detail = false;

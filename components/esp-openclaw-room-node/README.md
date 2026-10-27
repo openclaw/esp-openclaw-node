@@ -41,7 +41,9 @@ agent without starting a call or changing an active conversation. The button
 confirms the choice after the room owner accepts it; Home shows the next
 agent. While selection is pending, Start Talk is disabled. A lost operator
 connection expires the choice and disables Start until an agent is chosen
-again, or USB `agents default` restores Gateway-default routing.
+again, or **Use default** restores Gateway-default routing for the next call.
+The default action is available on the agent list and detail screens, including
+after a choice expires. USB `agents default` performs the same reset.
 Returning Home keeps the screen awake for ten seconds before the configured
 idle display policy resumes. Loading, offline, empty, denied, oversized, and
 timed-out requests have visible outcomes. USB `menu agents` opens this screen

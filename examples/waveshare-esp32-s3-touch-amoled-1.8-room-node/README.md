@@ -58,8 +58,15 @@ live**; it does not infer speech playback from the connection state. Missing
 clock and battery telemetry are omitted. The display still sleeps when idle;
 waking it does not start a conversation. Idle, setup and error views keep static
 mascot artwork without running the animation timer; wake-up hints still animate.
-Agent selection, full menus and
-press-to-record messaging are tracked in the
+The **Menu** button opens Canvas, Connection, and Device status. Connection
+shows live Wi-Fi, Gateway, and Talk states. Canvas shows the retained card or
+an empty-state explanation. Home returns to the latest conversation state;
+Start/Stop Talk remains available on menu pages. Device status opens the
+existing diagnostics overlay. The first touch on a dark screen only wakes it.
+
+The USB console can open the same pages with `menu`, `menu connection`,
+`menu canvas`, and `menu home`, without starting or stopping a conversation.
+Agent selection, additional settings, and press-to-record messaging are tracked in the
 [interaction plan](../../docs/design/watch-dial-interaction-plan.md).
 
 ## Board behavior

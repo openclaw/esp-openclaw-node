@@ -737,6 +737,7 @@ void room_ui_set(room_ui_state_t state, const char *detail)
 { (void)detail; host.ui = state; }
 void room_ui_store_facts(const room_ui_facts_t *facts) { host.home = *facts; }
 void room_ui_refresh(void) {}
+esp_err_t room_ui_watch_menu(const char *page) { (void)page; return ESP_ERR_INVALID_STATE; }
 const char *WIFI_EVENT = "wifi";
 const char *IP_EVENT = "ip";
 void room_ui_show_face_hint(uint32_t ms) { (void)ms; }

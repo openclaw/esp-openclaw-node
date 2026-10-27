@@ -13,17 +13,29 @@ static lv_obj_t *label(const char *text, int x, int y, int width, uint32_t color
     lv_obj_set_style_text_color(obj, lv_color_hex(color), 0);
     lv_obj_set_style_text_font(obj, &lv_font_montserrat_14, 0);
     lv_label_set_text_static(obj, text);
-    lv_obj_remove_flag(obj, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(obj, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
     return obj;
 }
 
-void room_watch_home_create(lv_obj_t *parent)
+void room_watch_home_create(lv_obj_t *parent, lv_event_cb_t menu_handler)
 {
     root = lv_obj_create(parent);
     lv_obj_remove_style_all(root);
     lv_obj_set_size(root, LV_PCT(100), LV_PCT(100));
     lv_obj_remove_flag(root, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
-    label("OpenClaw", 26, 22, 132, 0xf4efee);
+    lv_obj_t *menu = lv_obj_create(root);
+    lv_obj_remove_style_all(menu);
+    lv_obj_set_pos(menu, 26, 12);
+    lv_obj_set_size(menu, 132, 44);
+    lv_obj_set_clickable(menu, true);
+    lv_obj_set_scrollable(menu, false);
+    lv_obj_add_event_cb(menu, menu_handler, LV_EVENT_ALL, NULL);
+    lv_obj_t *menu_label = lv_label_create(menu);
+    lv_label_set_text_static(menu_label, LV_SYMBOL_BARS "  Menu");
+    lv_obj_set_style_text_color(menu_label, lv_color_hex(0xf4efee), 0);
+    lv_obj_set_style_text_font(menu_label, &lv_font_montserrat_14, 0);
+    lv_obj_remove_flag(menu_label, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_align(menu_label, LV_ALIGN_LEFT_MID, 0, 0);
     wifi_label = label(LV_SYMBOL_WIFI, 196, 22, 30, 0xa6a1ac);
     gateway_label = label("Starting", 230, 22, 112, 0xa6a1ac);
     lv_obj_set_style_text_align(gateway_label, LV_TEXT_ALIGN_RIGHT, 0);

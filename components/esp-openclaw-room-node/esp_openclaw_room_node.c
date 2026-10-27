@@ -1475,9 +1475,27 @@ static int diagnostics_console_command(int argc, char **argv)
     return 1;
 }
 
+static int menu_console_command(int argc, char **argv)
+{
+    if (argc > 2) {
+        printf("usage: menu [menu|connection|canvas|home]\n");
+        return 1;
+    }
+    const char *page = argc == 2 ? argv[1] : "menu";
+    esp_err_t err = room_ui_watch_menu(page);
+    printf("watch menu: %s\n", err == ESP_OK ? page : esp_err_to_name(err));
+    return err == ESP_OK ? 0 : 1;
+}
+
 static esp_err_t register_room_console_commands(void)
 {
     static const esp_console_cmd_t COMMANDS[] = {
+        {
+            .command = "menu",
+            .help = "Open a local watch menu page without starting Talk",
+            .hint = "[menu|connection|canvas|home]",
+            .func = menu_console_command,
+        },
         {
             .command = "voice-actions",
             .help = "Prepare Gateway-approved voice write access before enabling the build setting",

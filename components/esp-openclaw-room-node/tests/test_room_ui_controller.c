@@ -16,6 +16,7 @@ static lv_display_t *display;
 static uint8_t *frame, *draw_buffer;
 static int width, height, brightness, display_depth, critical_depth;
 static bool deny_display, canvas_active;
+static room_canvas_retained_kind_t retained_kind;
 static esp_openclaw_node_command_handler_t face_gesture;
 static unsigned toggles, holds;
 static unsigned talk_starts, talk_stops, display_flushes;
@@ -23,6 +24,7 @@ static lv_indev_t *touchscreen;
 static lv_indev_state_t touch_state;
 static lv_point_t touch_point;
 static lv_obj_t *modal;
+static lv_obj_t *watch_menu_button;
 static room_canvas_action_handler_t canvas_action;
 struct ui_timer { esp_timer_create_args_t args; bool active; };
 static struct ui_timer timers[4];
@@ -73,10 +75,25 @@ esp_err_t esp_openclaw_node_register_command(esp_openclaw_node_handle_t node,
 }
 void room_canvas_set_action_handler(room_canvas_action_handler_t handler) { canvas_action = handler; }
 bool room_canvas_is_active(void) { return canvas_active; }
+void room_canvas_get_diagnostics(room_canvas_diagnostics_snapshot_t *snapshot)
+{
+    *snapshot = (room_canvas_diagnostics_snapshot_t){.active = canvas_active, .retained_kind = retained_kind};
+}
+esp_err_t room_canvas_hide(char **payload, esp_openclaw_node_error_t *error)
+{
+    (void)error;
+    canvas_active = false;
+    *payload = NULL;
+    canvas_action(ROOM_CANVAS_ACTION_RENDER_CHANGED, 0);
+    return ESP_OK;
+}
 void room_canvas_view_toggle(void)
 {
     ++toggles;
-    if (brightness == 0) canvas_action(ROOM_CANVAS_ACTION_REQUEST_FACE_HINT, 10000);
+    if (retained_kind != ROOM_CANVAS_RETAINED_NONE) {
+        canvas_active = !canvas_active;
+        canvas_action(ROOM_CANVAS_ACTION_RENDER_CHANGED, 0);
+    } else canvas_action(ROOM_CANVAS_ACTION_REQUEST_FACE_HINT, 10000);
 }
 bool room_diagnostics_is_open(void) { return modal != NULL; }
 esp_err_t room_diagnostics_open(void)
@@ -296,10 +313,12 @@ static void check_dark_talk_control(void)
     room_ui_store_facts(&facts);
     room_ui_refresh();
     lv_obj_t *button = lv_obj_get_parent(find_text(lv_layer_top(), "Start Talk"));
-    unsigned starts = talk_starts, old_toggles = toggles;
+    unsigned starts = talk_starts;
+    room_canvas_retained_kind_t previous_kind = retained_kind;
+    retained_kind = ROOM_CANVAS_RETAINED_IMAGE;
     assert(brightness == 0);
     click_talk(button);
-    assert(talk_starts == starts && toggles == old_toggles + 1 && brightness > 0);
+    assert(talk_starts == starts && !canvas_active && brightness > 0);
     click_talk(button);
     assert(talk_starts == starts + 1);
 
@@ -309,17 +328,19 @@ static void check_dark_talk_control(void)
     touch_talk(button, true);
     room_ui_show_face_hint(10000);
     touch_talk(button, false);
-    assert(talk_starts == starts + 1 && toggles == old_toggles + 2);
+    assert(talk_starts == starts + 1 && !canvas_active);
 
     facts = (room_ui_facts_t){0};
     room_ui_store_facts(&facts);
     room_ui_set(ROOM_UI_IDLE, NULL);
     if (brightness != 0) fire_timer("text_hint");
+    retained_kind = previous_kind;
 }
 static unsigned check_home_tree(lv_obj_t *parent)
 {
     unsigned count = 1;
-    assert(!lv_obj_has_flag(parent, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE));
+    assert(!lv_obj_has_flag(parent, LV_OBJ_FLAG_SCROLLABLE));
+    if (parent != watch_menu_button) assert(!lv_obj_has_flag(parent, LV_OBJ_FLAG_CLICKABLE));
     lv_area_t area;
     lv_obj_get_coords(parent, &area);
     assert(area.x1 >= 0 && area.y1 >= 0 && area.x2 < width && area.y2 < height);
@@ -384,6 +405,7 @@ static void check_watch_home(const char *path)
     room_ui_store_facts(&facts);
     room_ui_set(ROOM_UI_IDLE, NULL);
     lv_obj_t *title = find_text(lv_layer_top(), "Ready when you are");
+    watch_menu_button = lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_BARS "  Menu"));
     assert(title && lv_obj_is_visible(title));
     assert(room_face_is_visible());
     lv_obj_update_layout(lv_layer_top());
@@ -440,6 +462,74 @@ static void check_watch_home(const char *path)
     for (int i = 0; i < 100; ++i) room_ui_refresh();
     assert(check_home_tree(lv_obj_get_parent(title)) == objects);
     room_ui_set(ROOM_UI_IDLE, NULL);
+}
+
+static void check_watch_navigation(void)
+{
+    room_ui_facts_t facts = {.wifi = ROOM_UI_WIFI_CONNECTED,
+        .gateway = ROOM_UI_GATEWAY_CONNECTED, .talk = ROOM_UI_TALK_READY};
+    room_ui_store_facts(&facts);
+    room_ui_set(ROOM_UI_IDLE, NULL);
+    assert(brightness == 0);
+    click_talk(watch_menu_button);
+    assert(!canvas_active && brightness > 0);
+    assert(!lv_obj_is_visible(find_text(lv_layer_top(), "Menu")));
+    click_talk(watch_menu_button);
+    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Menu")));
+    assert(!room_face_is_visible() && brightness == ROOM_CANVAS_ACTIVE_BRIGHTNESS);
+    room_ui_show_face_hint(1000);
+    assert(!room_face_is_visible() && brightness == ROOM_CANVAS_ACTIVE_BRIGHTNESS);
+    assert(!canvas_active);
+    lv_obj_t *connection = lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_WIFI "  Connection"));
+    click_talk(connection);
+    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Wi-Fi: Connected")));
+    facts.talk = ROOM_UI_TALK_ACTIVE;
+    room_ui_store_facts(&facts);
+    room_ui_set(ROOM_UI_SPEAKING, NULL);
+    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Talk: Active")));
+    lv_obj_t *stop = lv_obj_get_parent(find_text(lv_layer_top(), "Stop Talk"));
+    assert(lv_obj_is_visible(stop) && !room_face_is_visible());
+    unsigned stopped = talk_stops;
+    click_talk(stop);
+    assert(talk_stops == stopped + 1);
+    lv_obj_t *home_button = lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_LEFT " Home"));
+    click_talk(home_button);
+    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Conversation live")));
+    assert(room_face_is_visible());
+    click_talk(watch_menu_button);
+    click_talk(lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_SETTINGS "  Device status")));
+    assert(room_diagnostics_is_open());
+    room_diagnostics_close();
+    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Menu")));
+    click_talk(lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_IMAGE "  Canvas")));
+    assert(lv_obj_is_visible(find_text(lv_layer_top(), "No card yet\n\nAsk your assistant to show\na card on this watch.")));
+    click_talk(home_button);
+    facts.talk = ROOM_UI_TALK_READY;
+    room_ui_store_facts(&facts);
+    room_ui_set(ROOM_UI_IDLE, NULL);
+    assert(room_ui_watch_menu("invalid") == ESP_ERR_INVALID_ARG);
+    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Ready when you are")));
+    assert(room_ui_watch_menu("connection") == ESP_OK);
+    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Wi-Fi: Connected")));
+    assert(room_ui_watch_menu("home") == ESP_OK);
+    canvas_active = true;
+    room_ui_refresh();
+    assert(room_ui_watch_menu("menu") == ESP_OK);
+    assert(!canvas_active && lv_obj_is_visible(find_text(lv_layer_top(), "Menu")));
+    retained_kind = ROOM_CANVAS_RETAINED_IMAGE;
+    brightness = 0;
+    assert(room_ui_watch_menu("canvas") == ESP_OK && canvas_active);
+    unsigned turns = toggles;
+    assert(room_ui_watch_menu("canvas") == ESP_OK && canvas_active && toggles == turns);
+    assert(room_ui_watch_menu("home") == ESP_OK);
+    brightness = 0;
+    click_talk(watch_menu_button);
+    assert(!canvas_active && brightness > 0);
+    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Ready when you are")));
+    retained_kind = ROOM_CANVAS_RETAINED_NONE;
+    assert(!canvas_active);
+    room_ui_set(ROOM_UI_IDLE, NULL);
+    puts("watch menu, live connection, Talk and empty Canvas: passed");
 }
 
 static void check_watch_home_gesture(void)
@@ -570,6 +660,7 @@ int main(int argc, char **argv)
         room_diagnostics_close();
         assert(visible_text("Talk setup failed"));
         room_ui_set(ROOM_UI_IDLE, NULL);
+        fire_timer("text_hint");
         assert(!visible_text("Talk setup failed"));
         assert(visible_text("OpenClaw Room Node") && brightness == idle);
 
@@ -597,6 +688,7 @@ int main(int argc, char **argv)
     }
     if (watch) {
         check_watch_home(argc == 3 ? argv[2] : NULL);
+        check_watch_navigation();
         check_watch_home_gesture();
         check_watch_repaint();
     }

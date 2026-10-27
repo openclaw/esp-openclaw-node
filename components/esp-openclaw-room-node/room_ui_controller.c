@@ -1,6 +1,7 @@
 #include "room_ui_controller.h"
 
 #include <string.h>
+#include <stdlib.h>
 
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -12,10 +13,14 @@
 #include "room_face.h"
 #include "room_board.h"
 #include "room_watch_home.h"
+#include "room_watch_navigation.h"
+
+static bool watch_navigation_active(void);
 
 /* Tap toggles retained Canvas content; hold opens local diagnostics. */
 static void room_ui_status_clicked(lv_event_t *event)
 {
+    if (watch_navigation_active()) return;
     lv_event_code_t code = lv_event_get_code(event);
     if (code == LV_EVENT_LONG_PRESSED) {
         lv_indev_t *indev = lv_indev_active();
@@ -61,6 +66,98 @@ typedef enum { TALK_CONTROL_NONE, TALK_CONTROL_START, TALK_CONTROL_STOP } talk_c
 /* Painted intent is display-lock owned; a press is invalidated with the facts. */
 static talk_control_action_t painted_talk_action;
 static talk_control_action_t pressed_talk_action;
+static room_watch_page_t watch_page = ROOM_WATCH_HOME;
+static int pressed_watch_page = -1;
+
+static bool watch_navigation_active(void)
+{
+    taskENTER_CRITICAL(&state_mux);
+    bool active = watch_home_enabled && watch_page != ROOM_WATCH_HOME;
+    taskEXIT_CRITICAL(&state_mux);
+    return active;
+}
+
+static esp_err_t watch_navigation_show(room_watch_page_t page)
+{
+    if (!room_board_display_lock(100)) return ESP_ERR_TIMEOUT;
+    if (page == ROOM_WATCH_DEVICE_STATUS) {
+        esp_err_t err = room_diagnostics_open();
+        room_board_display_unlock();
+        return err;
+    }
+    room_canvas_diagnostics_snapshot_t canvas;
+    room_canvas_get_diagnostics(&canvas);
+    bool show_canvas = false;
+    if (page == ROOM_WATCH_CANVAS) show_canvas = canvas.retained_kind != ROOM_CANVAS_RETAINED_NONE;
+    if (canvas.active && !show_canvas) {
+        char *payload = NULL;
+        esp_openclaw_node_error_t error = {0};
+        esp_err_t err = room_canvas_hide(&payload, &error);
+        free(payload);
+        if (err != ESP_OK) {
+            room_board_display_unlock();
+            return err;
+        }
+    } else if (!canvas.active && show_canvas) {
+        room_canvas_view_toggle();
+        if (!room_canvas_is_active()) {
+            room_board_display_unlock();
+            return ESP_ERR_INVALID_STATE;
+        }
+    }
+    taskENTER_CRITICAL(&state_mux);
+    watch_page = show_canvas ? ROOM_WATCH_HOME : page;
+    pressed_watch_page = -1;
+    pressed_talk_action = TALK_CONTROL_NONE;
+    taskEXIT_CRITICAL(&state_mux);
+    room_board_display_unlock();
+    room_ui_refresh();
+    return ESP_OK;
+}
+
+esp_err_t room_ui_watch_menu(const char *page)
+{
+    room_watch_page_t requested;
+    if (page == NULL) return ESP_ERR_INVALID_ARG;
+    if (strcmp(page, "menu") == 0) requested = ROOM_WATCH_MENU;
+    else if (strcmp(page, "connection") == 0) requested = ROOM_WATCH_CONNECTION;
+    else if (strcmp(page, "canvas") == 0) requested = ROOM_WATCH_CANVAS;
+    else if (strcmp(page, "home") == 0) requested = ROOM_WATCH_HOME;
+    else return ESP_ERR_INVALID_ARG;
+    taskENTER_CRITICAL(&state_mux);
+    bool available = watch_home_enabled && !diagnostics_open;
+    taskEXIT_CRITICAL(&state_mux);
+    if (!available) return ESP_ERR_INVALID_STATE;
+    return watch_navigation_show(requested);
+}
+
+static void watch_navigation_input(lv_event_t *event, room_watch_page_t page)
+{
+    lv_event_code_t code = lv_event_get_code(event);
+    if (code != LV_EVENT_PRESSED && code != LV_EVENT_PRESS_LOST && code != LV_EVENT_SHORT_CLICKED) return;
+    bool wake = code == LV_EVENT_PRESSED && room_board_display_is_dark();
+    bool activate = false;
+    taskENTER_CRITICAL(&state_mux);
+    if (code == LV_EVENT_PRESSED) pressed_watch_page = wake || diagnostics_open ? -1 : (int)page;
+    else {
+        activate = code == LV_EVENT_SHORT_CLICKED && !diagnostics_open && pressed_watch_page == (int)page;
+        pressed_watch_page = -1;
+    }
+    taskEXIT_CRITICAL(&state_mux);
+    if (wake) { room_ui_show_face_hint(10000); return; }
+    if (!activate) return;
+    (void)watch_navigation_show(page);
+}
+
+static void watch_home_menu_clicked(lv_event_t *event)
+{
+    watch_navigation_input(event, ROOM_WATCH_MENU);
+}
+
+static void watch_navigation_clicked(lv_event_t *event)
+{
+    watch_navigation_input(event, (room_watch_page_t)(intptr_t)lv_event_get_user_data(event));
+}
 
 static talk_control_action_t talk_control_action(room_ui_talk_state_t talk)
 {
@@ -93,7 +190,7 @@ static void talk_control_clicked(lv_event_t *event)
     }
     taskEXIT_CRITICAL(&state_mux);
     if (wake) {
-        room_canvas_view_toggle();
+        room_ui_show_face_hint(10000);
     } else if (talk_action_handler != NULL && requested != TALK_CONTROL_NONE) {
         talk_action_handler(requested == TALK_CONTROL_START);
     }
@@ -301,7 +398,8 @@ void room_ui_init(void)
         lv_obj_set_style_bg_color(lv_screen_active(), lv_color_hex(0x15101b), 0);
         lv_obj_set_style_bg_grad_color(lv_screen_active(), lv_color_hex(0x362031), 0);
         lv_obj_set_style_bg_grad_dir(lv_screen_active(), LV_GRAD_DIR_VER, 0);
-        room_watch_home_create(lv_layer_top());
+        room_watch_home_create(lv_layer_top(), watch_home_menu_clicked);
+        room_watch_navigation_create(lv_layer_top(), watch_navigation_clicked);
     }
     bool board_has_animated_face = board != NULL && board->display.animated_face;
     idle_brightness = board != NULL ? board->display.idle_brightness : 0;
@@ -356,8 +454,9 @@ static int room_ui_target_brightness(room_ui_state_t state, bool canvas_active)
     bool overlay = diagnostics_open;
     bool text_hint = text_hint_active;
     bool camera = camera_indicator_active;
+    bool navigation = watch_home_enabled && watch_page != ROOM_WATCH_HOME;
     taskEXIT_CRITICAL(&state_mux);
-    int brightness = overlay || canvas_active ? ROOM_CANVAS_ACTIVE_BRIGHTNESS
+    int brightness = overlay || canvas_active || navigation ? ROOM_CANVAS_ACTIVE_BRIGHTNESS
         : state == ROOM_UI_IDLE ? (text_hint ? 18 : idle_brightness)
         : room_ui_state_uses_face(state) ? 40 : 18;
     return camera && brightness < ROOM_UI_CAMERA_MIN_BRIGHTNESS
@@ -378,9 +477,14 @@ static bool room_ui_render_locked(void)
     memcpy(gateway, gateway_text, sizeof(gateway));
     bool overlay = diagnostics_open;
     room_ui_facts_t facts = current_facts;
+    room_watch_page_t page = watch_page;
     taskEXIT_CRITICAL(&state_mux);
     bool canvas_active = room_canvas_is_active();
-    if (watch_home_enabled) room_watch_home_render(&facts, state, detail, canvas_active || overlay);
+    bool navigation = watch_home_enabled && page != ROOM_WATCH_HOME && !canvas_active;
+    if (watch_home_enabled) {
+        room_watch_home_render(&facts, state, detail, canvas_active || overlay || navigation);
+        room_watch_navigation_render(page, &facts, !navigation || overlay);
+    }
     if (talk_pill != NULL) {
         if (watch_home_enabled) {
             /* Retained Canvas content keeps its existing top action clearance. */
@@ -416,8 +520,9 @@ static bool room_ui_render_locked(void)
         }
         if (camera_indicator != NULL) lv_obj_move_foreground(camera_indicator);
     }
-    if (canvas_active) {
+    if (canvas_active || navigation) {
         room_face_hide();
+        lv_obj_set_hidden(status_label, true);
         if (state == ROOM_UI_IDLE) {
             /* A call that ended behind canvas must not leak its mood into the
              * next call. */
@@ -539,6 +644,10 @@ void room_ui_show_face_hint(uint32_t show_ms)
         return;
     }
     if (!room_board_display_lock(100)) {
+        return;
+    }
+    if (watch_navigation_active()) {
+        room_ui_paint_and_unlock();
         return;
     }
     /* The face tick owns the hint lifetime (expiry triggers a refresh), so
@@ -689,10 +798,14 @@ void room_ui_set_diagnostics_open(bool open)
 {
     taskENTER_CRITICAL(&state_mux);
     diagnostics_open = open;
-    if (open) pressed_talk_action = TALK_CONTROL_NONE;
+    if (open) {
+        pressed_talk_action = TALK_CONTROL_NONE;
+        pressed_watch_page = -1;
+    }
     taskEXIT_CRITICAL(&state_mux);
     if (open) {
         if (watch_home_enabled) room_watch_home_render(NULL, ROOM_UI_IDLE, "", true);
+        if (watch_home_enabled) room_watch_navigation_render(ROOM_WATCH_HOME, NULL, true);
         if (home != NULL) lv_obj_add_flag(home, LV_OBJ_FLAG_HIDDEN);
         if (talk_pill != NULL) lv_obj_add_flag(talk_pill, LV_OBJ_FLAG_HIDDEN);
         if (camera_indicator != NULL) lv_obj_move_foreground(camera_indicator);

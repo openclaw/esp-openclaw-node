@@ -114,6 +114,7 @@ def main():
             "-I", str(cjson), str(cjson / "cJSON.c"),
             str(component / "room_ui_controller.c"), str(component / "room_board.c"),
             str(component / "room_watch_home.c"),
+            str(component / "room_watch_navigation.c"),
             str(component / "room_face.c"),
             str(pixels), str(watch_pixels), str(component / "room_lobster.c"),
             *map(str, sorted((lvgl / "src").rglob("*.c"))),

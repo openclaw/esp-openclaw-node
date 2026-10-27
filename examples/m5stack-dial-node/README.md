@@ -35,6 +35,35 @@ command-allowlist requirements. Preserve existing allowlist entries when adding
 the commands below. Rebooting reuses the saved session; no rebuild is needed
 when Wi-Fi or the Gateway changes.
 
+### Read access
+
+The Dial also starts a separate operator connection after the node connects.
+It requests only `operator.read` and reuses the operator session handed off
+during pairing. It does not grant itself access or change the node connection's
+permissions. This is the connection foundation for agent and conversation
+browsing; those pickers are not yet part of the firmware UI.
+
+Run `reader` in the USB console to inspect it:
+
+```json
+{"state":"ready","readConnected":true}
+```
+
+The states are `offline`, `connecting`, `ready`, `access-needed`, `error`, and
+`unavailable`. `access-needed` means the saved operator session is missing,
+rejected, or belongs to a different Gateway. Pair again using the Gateway's
+supported operator handoff profile; a normal node-only pairing may not grant
+read access. Transport losses retry automatically; missing credentials and
+authentication rejections wait for a new node connection. An allocation error
+can temporarily report `error` while retrying; `unavailable` means the reader
+worker could not start. Numeric controls and node commands remain usable in
+every reader state.
+
+Read readiness requires both clients to be connected to the same Gateway in
+the current node connection. Node reconnects immediately invalidate the old
+reader state, and re-pairing reloads the role-specific saved session. The
+console status does not expose Gateway addresses or credentials.
+
 ## Controls
 
 The screen is upright with the USB connector on the right. The home screen

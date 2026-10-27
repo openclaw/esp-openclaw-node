@@ -13,6 +13,7 @@
 #include "dial_control.h"
 #include "dial_home.h"
 #include "dial_input.h"
+#include "dial_reader.h"
 #include "driver/gpio.h"
 #include "driver/ledc.h"
 #include "esp_check.h"
@@ -571,6 +572,7 @@ static void node_event(esp_openclaw_node_handle_t client, esp_openclaw_node_even
     atomic_store(&connected, action_state.connection_id != 0);
     xSemaphoreGive(action_lock);
     free(uri);
+    dial_reader_node_event(event);
     esp_openclaw_node_example_saved_session_reconnect_handle_event(&reconnect, event, data);
     ESP_LOGI(TAG, "Gateway %s", event == ESP_OPENCLAW_NODE_EVENT_CONNECTED ? "connected" : "offline");
 }
@@ -596,6 +598,22 @@ static int local_command(int argc, char **argv)
     else printf("%s: %s\n", esp_err_to_name(err), error.message != NULL ? error.message : "command failed");
     free(payload);
     return err == ESP_OK ? 0 : 1;
+}
+
+static int reader_command(int argc, char **argv)
+{
+    (void)argv;
+    if (argc != 1) {
+        printf("usage: reader\n");
+        return 1;
+    }
+    cJSON *status = dial_reader_status();
+    char *json = status != NULL ? cJSON_PrintUnformatted(status) : NULL;
+    cJSON_Delete(status);
+    if (json == NULL) return 1;
+    printf("%s\n", json);
+    free(json);
+    return 0;
 }
 
 void app_main(void)
@@ -639,10 +657,15 @@ void app_main(void)
         ESP_ERROR_CHECK(esp_openclaw_node_register_command_v2(node, &command));
     }
     ESP_ERROR_CHECK(xTaskCreate(action_worker, "dial_action", 4096, NULL, 5, NULL) == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
+    esp_err_t reader_err = dial_reader_start(node);
+    if (reader_err != ESP_OK) ESP_LOGW(TAG, "read access unavailable: %s", esp_err_to_name(reader_err));
     ESP_ERROR_CHECK(esp_openclaw_node_example_saved_session_reconnect_start(&reconnect, node, "dial_reconnect"));
     ESP_ERROR_CHECK(esp_openclaw_node_example_repl_start(node));
     const esp_console_cmd_t local = {.command = "local", .help = "Run a Dial command over USB (no agent session)",
         .hint = "<command> <JSON object>", .func = local_command};
     ESP_ERROR_CHECK(esp_console_cmd_register(&local));
+    const esp_console_cmd_t reader_status = {.command = "reader", .help = "Show this Dial's independent Gateway read access",
+        .func = reader_command};
+    ESP_ERROR_CHECK(esp_console_cmd_register(&reader_status));
     ESP_LOGI(TAG, "ready: provision Wi-Fi and Gateway from the USB console");
 }

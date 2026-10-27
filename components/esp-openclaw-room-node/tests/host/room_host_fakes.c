@@ -54,7 +54,7 @@ static QueueHandle_t queue;
 static TimerHandle_t timeout;
 static esp_timer_handle_t operator_timer;
 static esp_timer_handle_t node_timer;
-static esp_timer_handle_t directory_timer;
+static esp_timer_handle_t directory_timer, devices_timer;
 static esp_openclaw_node_handle_t nodes[4];
 static size_t node_count;
 static unsigned mutex_depth;
@@ -64,7 +64,7 @@ typedef struct {
     void *ctx;
     esp_openclaw_node_handle_t node;
 } pending_rpc_t;
-static pending_rpc_t config_rpc, create_rpc, scope_rpc, speech_rpc, agents_rpc;
+static pending_rpc_t config_rpc, create_rpc, scope_rpc, speech_rpc, agents_rpc, devices_rpc;
 
 typedef struct {
     esp_webrtc_cfg_t config;
@@ -377,7 +377,8 @@ void host_fire_timeout_generation(TimerHandle_t timer, uint32_t generation)
 esp_err_t esp_timer_create(const esp_timer_create_args_t *args, esp_timer_handle_t *out)
 {
     esp_timer_handle_t *slot = strcmp(args->name, "operator_start") == 0 ? &operator_timer
-        : strcmp(args->name, "agent_directory") == 0 ? &directory_timer : &node_timer;
+        : strcmp(args->name, "agent_directory") == 0 ? &directory_timer
+        : strcmp(args->name, "device_directory") == 0 ? &devices_timer : &node_timer;
     host_require(*slot == NULL, "one timer per connection");
     *slot = calloc(1, sizeof(**slot));
     host_require(*slot != NULL, "connection timer allocation");
@@ -395,6 +396,11 @@ void host_fire_operator_timer(esp_timer_handle_t timer)
     timer->active = false;
     timer->args.callback(timer->args.arg);
 }
+void host_fire_devices_timer(void)
+{
+    host_fire_operator_timer(devices_timer);
+}
+
 void host_fire_directory_timer(void)
 {
     host_fire_operator_timer(directory_timer);
@@ -527,7 +533,13 @@ esp_err_t esp_openclaw_node_gateway_request(esp_openclaw_node_handle_t node,
 {
     host_require(host.critical_depth == 0 && mutex_depth == 0, "RPC outside locks");
     pending_rpc_t request = {.callback = callback, .ctx = ctx, .node = node};
-    if (strcmp(method, "agents.list") == 0 || strcmp(method, "sessions.list") == 0 || strcmp(method, "sessions.preview") == 0) {
+    if (strcmp(method, "node.list") == 0) {
+        if (host.fail_device_submit) return ESP_FAIL;
+        host_require(devices_rpc.callback == NULL, "one device request outstanding");
+        host_require(strcmp(params, "{}") == 0, "node.list has no pagination or filters");
+        devices_rpc = request;
+        ++host.device_requests;
+    } else if (strcmp(method, "agents.list") == 0 || strcmp(method, "sessions.list") == 0 || strcmp(method, "sessions.preview") == 0) {
         if (host.fail_agent_submit) return ESP_FAIL;
         host_require(agents_rpc.callback == NULL, "one directory request outstanding");
         host_require(strlen(method) < sizeof(host.reader_method) && strlen(params) < sizeof(host.reader_params),
@@ -617,6 +629,10 @@ static void reply(pending_rpc_t *slot, bool ok, const char *payload)
 void host_reply_scope(bool ok, const char *payload)
 {
     reply(&scope_rpc, ok, payload);
+}
+void host_reply_devices(bool ok, const char *payload)
+{
+    reply(&devices_rpc, ok, payload);
 }
 void host_reply_agents(bool ok, const char *payload)
 {
@@ -931,6 +947,7 @@ void host_release_resources(void)
     free(operator_timer);
     free(node_timer);
     free(directory_timer);
+    free(devices_timer);
     free(recycled_rtc);
 }
 

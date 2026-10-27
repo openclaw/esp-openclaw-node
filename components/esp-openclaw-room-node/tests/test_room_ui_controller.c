@@ -29,6 +29,20 @@ static void select_agent(const char *id, unsigned revision)
     snprintf(selected_agent, sizeof(selected_agent), "%s", id);
     selected_revision = revision;
 }
+static unsigned conversation_requests, conversation_revision, conversation_generation;
+static room_ui_conversation_action_t conversation_action;
+static char conversation_agent[65];
+static size_t conversation_value;
+static void request_conversation(room_ui_conversation_action_t action, const char *id,
+    unsigned revision, size_t value, unsigned generation)
+{
+    ++conversation_requests;
+    conversation_action = action;
+    conversation_revision = revision;
+    conversation_value = value;
+    conversation_generation = generation;
+    snprintf(conversation_agent, sizeof(conversation_agent), "%s", id);
+}
 static bool agent_open;
 static size_t agent_offset;
 static void request_agents(bool open, size_t offset)
@@ -732,6 +746,128 @@ static void check_watch_agents(const char *path)
     puts("watch agents: acknowledged selection, next-call identity, paging and fenced pointer input passed");
 }
 
+static void check_watch_conversations(const char *path)
+{
+    assert(room_ui_watch_menu("agents") == ESP_OK);
+    room_agents_snapshot_t roster = {.state = ROOM_AGENTS_READY, .revision = 20,
+        .page = {.count = 1, .total = 1}};
+    strcpy(roster.page.agents[0].id, "fox");
+    strcpy(roster.page.agents[0].name, "Kitsune");
+    strcpy(roster.page.main_key, "agent:fox:main");
+    room_ui_store_agents(&roster);
+    click_talk(lv_obj_get_parent(find_text(lv_layer_top(), "Kitsune")));
+    unsigned selections = agent_selections, starts = talk_starts;
+    lv_obj_t *choose = lv_obj_get_parent(find_text(lv_layer_top(), "Use for next Talk"));
+    deny_display = true;
+    click_talk(lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_LIST "  Conversations")));
+    assert(choose != NULL && !lv_obj_has_state(choose, LV_STATE_DISABLED));
+    lv_obj_send_event(choose, LV_EVENT_PRESSED, NULL);
+    lv_obj_send_event(choose, LV_EVENT_SHORT_CLICKED, NULL);
+    assert(agent_selections == selections);
+    deny_display = false;
+    room_ui_refresh();
+    assert(room_ui_wants_conversations());
+    assert(conversation_action == ROOM_CONVERSATIONS_OPEN && conversation_revision == 20);
+    assert(strcmp(conversation_agent, "fox") == 0);
+    room_conversations_snapshot_t *view = calloc(1, sizeof(*view));
+    assert(view != NULL);
+    view->agent = roster.page.agents[0];
+    view->revision = 1;
+    view->state = ROOM_AGENTS_READY;
+    view->page.count = 2;
+    view->page.has_more = true;
+    view->page.next_offset = 2;
+    strcpy(view->page.sessions[0].title, "Planning a trip");
+    strcpy(view->page.sessions[0].last_message, "Let's choose the dates.");
+    strcpy(view->page.sessions[1].title, "Project notes");
+    unsigned generation = conversation_generation;
+    room_ui_store_conversations(view, generation - 1);
+    assert(!visible_text("Planning a trip"));
+    room_ui_conversations_failed(generation - 1);
+    assert(!visible_text("Couldn't load conversations.\n\nGo back and refresh to try again."));
+    room_ui_store_conversations(view, generation);
+    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Planning a trip")));
+    char output[1024];
+    if (path) { snprintf(output, sizeof(output), "%s-conversations.ppm", path); write_frame(output); }
+    lv_obj_t *row = lv_obj_get_parent(find_text(lv_layer_top(), "Planning a trip"));
+    touch_talk(row, true);
+    ++view->revision;
+    deny_display = true;
+    room_ui_store_conversations(view, conversation_generation);
+    touch_talk(row, false);
+    deny_display = false;
+    room_ui_refresh();
+    assert(conversation_action == ROOM_CONVERSATIONS_OPEN);
+    click_talk(row);
+    assert(conversation_action == ROOM_CONVERSATIONS_READ && conversation_value == 0);
+    view->preview_revision = 1;
+    view->preview_state = ROOM_AGENTS_READY;
+    view->preview.status = ESP_OPENCLAW_PREVIEW_OK;
+    view->preview.count = 4;
+    strcpy(view->preview.items[0].text, "What should we work on next?");
+    view->preview.items[1].role = ESP_OPENCLAW_PREVIEW_ASSISTANT;
+    strcpy(view->preview.items[1].text, "Start with a small working journey. Pick an agent, read a conversation, and return without losing your place. Then verify the same journey on the watch and the Dial.");
+    for (size_t i = 2; i < 4; ++i) {
+        view->preview.items[i].role = ESP_OPENCLAW_PREVIEW_ASSISTANT;
+        snprintf(view->preview.items[i].text, sizeof(view->preview.items[i].text),
+            "Keep one clear task per screen. A conversation keeps its agent and title while the user reads. Going back restores the same place in the list. Changing connectivity must remove stale content without changing the selected Talk target.");
+    }
+    room_ui_store_conversations(view, conversation_generation);
+    assert(lv_obj_is_visible(find_text(lv_layer_top(), LV_SYMBOL_LEFT " Chats")));
+    if (path) { snprintf(output, sizeof(output), "%s-preview.ppm", path); write_frame(output); }
+    lv_obj_update_layout(lv_layer_top());
+    touch_state = LV_INDEV_STATE_RELEASED; lv_indev_read(touchscreen);
+    touch_point = (lv_point_t){180, 250}; touch_state = LV_INDEV_STATE_PRESSED;
+    lv_indev_read(touchscreen); lv_tick_inc(40);
+    touch_point.y = 150; lv_indev_read(touchscreen); lv_tick_inc(40);
+    lv_obj_t *scrolled = lv_indev_get_scroll_obj(touchscreen);
+    touch_state = LV_INDEV_STATE_RELEASED; lv_indev_read(touchscreen); lv_tick_inc(40);
+    assert(scrolled != NULL && lv_obj_get_scroll_y(scrolled) > 0);
+    if (path) { snprintf(output, sizeof(output), "%s-scrolled.ppm", path); write_frame(output); }
+    lv_obj_t *back = lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_LEFT " Chats"));
+    deny_display = true;
+    lv_obj_send_event(back, LV_EVENT_PRESSED, NULL);
+    lv_obj_send_event(back, LV_EVENT_SHORT_CLICKED, NULL);
+    lv_obj_send_event(back, LV_EVENT_PRESSED, NULL);
+    lv_obj_send_event(back, LV_EVENT_SHORT_CLICKED, NULL);
+    assert(room_ui_wants_conversations());
+    lv_obj_send_event(back, LV_EVENT_PRESSED, NULL);
+    deny_display = false;
+    room_ui_refresh();
+    lv_obj_send_event(back, LV_EVENT_SHORT_CLICKED, NULL);
+    assert(room_ui_wants_conversations());
+    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Planning a trip")));
+    roster.state = ROOM_AGENTS_LOADING;
+    room_ui_store_agents(&roster);
+    deny_display = true;
+    roster.state = ROOM_AGENTS_READY;
+    room_ui_store_agents(&roster);
+    deny_display = false;
+    assert(room_ui_watch_reader(view, true, conversation_generation) == ESP_ERR_INVALID_STATE);
+    room_ui_refresh();
+    assert(room_ui_watch_reader(view, true, conversation_generation) == ESP_OK);
+    click_talk(lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_LEFT " Chats")));
+    click_talk(lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_RIGHT)));
+    assert(conversation_action == ROOM_CONVERSATIONS_LOAD && conversation_value == 2);
+    view->state = view->preview_state = ROOM_AGENTS_OFFLINE;
+    ++view->revision;
+    memset(&view->page, 0, sizeof(view->page));
+    memset(&view->preview, 0, sizeof(view->preview));
+    room_ui_store_conversations(view, conversation_generation);
+    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Gateway offline\n\nReconnect, then choose the agent again.")));
+    click_talk(lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_LEFT " Agent")));
+    assert(!room_ui_wants_conversations());
+    assert(conversation_action == ROOM_CONVERSATIONS_CLOSE);
+    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Agent ID\nfox")));
+    assert(agent_selections == selections && talk_starts == starts);
+    assert(room_ui_watch_menu("home") == ESP_OK);
+    room_ui_store_conversations(view, conversation_generation);
+    assert(!room_ui_wants_conversations());
+    assert(room_ui_watch_reader(view, true, conversation_generation) == ESP_ERR_INVALID_STATE);
+    free(view);
+    puts("watch conversations: open, read, stale press, paging, offline and Back passed");
+}
+
 static void check_watch_home_gesture(void)
 {
     esp_openclaw_node_handle_t node = (esp_openclaw_node_handle_t)(uintptr_t)1;
@@ -778,6 +914,7 @@ int main(int argc, char **argv)
     room_ui_set_talk_action_handler(talk_action);
     room_ui_set_agents_action_handler(request_agents);
     room_ui_set_agent_selection_handler(select_agent);
+    room_ui_set_conversation_handler(request_conversation);
     room_ui_init();
     assert(brightness == idle);
     check_talk_control();
@@ -893,6 +1030,7 @@ int main(int argc, char **argv)
         check_watch_home(argc == 3 ? argv[2] : NULL);
         check_watch_navigation();
         check_watch_agents(argc == 3 ? argv[2] : NULL);
+        check_watch_conversations(argc == 3 ? argv[2] : NULL);
         check_watch_home_gesture();
         check_watch_repaint();
     }

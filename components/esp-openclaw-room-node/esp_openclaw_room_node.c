@@ -426,6 +426,71 @@ static void apply_local_agent_selection(void)
     }
 }
 
+static struct {
+    bool pending;
+    room_ui_conversation_action_t action;
+    char id[65];
+    unsigned revision;
+    size_t value;
+    unsigned generation;
+} local_conversation;
+static atomic_uint published_conversation_generation;
+static portMUX_TYPE conversation_lock = portMUX_INITIALIZER_UNLOCKED;
+
+static void request_local_conversation(room_ui_conversation_action_t action, const char *id,
+    unsigned revision, size_t value, unsigned generation)
+{
+    if (id == NULL || strnlen(id, sizeof(local_conversation.id)) >= sizeof(local_conversation.id)) return;
+    portENTER_CRITICAL(&conversation_lock);
+    local_conversation.pending = true;
+    local_conversation.action = action;
+    local_conversation.revision = revision;
+    local_conversation.value = value;
+    local_conversation.generation = generation;
+    memcpy(local_conversation.id, id, strlen(id) + 1);
+    portEXIT_CRITICAL(&conversation_lock);
+    wake_talk_teardown();
+}
+
+static void apply_local_conversation(void)
+{
+    portENTER_CRITICAL(&conversation_lock);
+    bool pending = local_conversation.pending;
+    room_ui_conversation_action_t action = local_conversation.action;
+    char id[sizeof(local_conversation.id)];
+    memcpy(id, local_conversation.id, sizeof(id));
+    unsigned revision = local_conversation.revision;
+    size_t value = local_conversation.value;
+    unsigned generation = local_conversation.generation;
+    local_conversation.pending = false;
+    portEXIT_CRITICAL(&conversation_lock);
+    if (!pending) return;
+    esp_err_t err = ESP_OK;
+    if (action == ROOM_CONVERSATIONS_OPEN) err = room_conversations_open(id, revision);
+    else if (action == ROOM_CONVERSATIONS_LOAD) err = room_conversations_refresh(value);
+    else if (action == ROOM_CONVERSATIONS_READ) err = room_conversations_preview(value, revision);
+    else room_conversations_close();
+    atomic_store(&published_conversation_generation, generation);
+    if (err != ESP_OK) { room_conversations_close(); room_ui_conversations_failed(generation); }
+}
+
+static void publish_conversations(void)
+{
+    static room_conversations_snapshot_t *snapshot;
+    if (!room_ui_wants_conversations()) {
+        free(snapshot);
+        snapshot = NULL;
+        return;
+    }
+    if (snapshot == NULL) snapshot = malloc(sizeof(*snapshot));
+    if (snapshot == NULL) {
+        room_ui_conversations_failed(atomic_load(&published_conversation_generation));
+        return;
+    }
+    room_conversations_copy(snapshot);
+    room_ui_store_conversations(snapshot, atomic_load(&published_conversation_generation));
+}
+
 static void refresh_agents(void)
 {
     size_t request = atomic_exchange(&local_agents_request, SIZE_MAX);
@@ -538,10 +603,12 @@ static void talk_teardown_task(void *arg)
             bool defer_directory = talk_start_in_flight || talk_dialing || talk_closing;
             xSemaphoreGive(state_lock);
             refresh_agents();
+            apply_local_conversation();
             room_agent_directory_poll(defer_directory);
             static room_agents_snapshot_t agents;
             room_agent_directory_copy(&agents);
             room_ui_store_agents(&agents);
+            publish_conversations();
             continue;
         }
 
@@ -1601,11 +1668,19 @@ static int diagnostics_console_command(int argc, char **argv)
 static int menu_console_command(int argc, char **argv)
 {
     if (argc > 2) {
-        printf("usage: menu [menu|agents|connection|canvas|home]\n");
+        printf("usage: menu [menu|agents|conversations|preview|connection|canvas|home]\n");
         return 1;
     }
     const char *page = argc == 2 ? argv[1] : "menu";
-    esp_err_t err = room_ui_watch_menu(page);
+    esp_err_t err;
+    if (strcmp(page, "conversations") == 0 || strcmp(page, "preview") == 0) {
+        room_conversations_snapshot_t *snapshot = malloc(sizeof(*snapshot));
+        if (snapshot == NULL) return 1;
+        room_conversations_copy(snapshot);
+        err = room_ui_watch_reader(snapshot, strcmp(page, "preview") == 0,
+            atomic_load(&published_conversation_generation));
+        free(snapshot);
+    } else err = room_ui_watch_menu(page);
     printf("watch menu: %s\n", err == ESP_OK ? page : esp_err_to_name(err));
     return err == ESP_OK ? 0 : 1;
 }
@@ -1778,7 +1853,7 @@ static esp_err_t register_room_console_commands(void)
         {
             .command = "menu",
             .help = "Open a local watch menu page without starting Talk",
-            .hint = "[menu|agents|connection|canvas|home]",
+            .hint = "[menu|agents|conversations|preview|connection|canvas|home]",
             .func = menu_console_command,
         },
         {
@@ -1988,6 +2063,7 @@ esp_err_t esp_openclaw_room_node_start(const esp_openclaw_room_node_config_t *co
 
     room_ui_set_talk_action_handler(request_local_talk);
     room_ui_set_agents_action_handler(request_local_agents);
+    room_ui_set_conversation_handler(request_local_conversation);
     room_ui_set_agent_selection_handler(request_local_agent_selection);
     room_ui_init();
     ESP_ERROR_CHECK(room_canvas_init());

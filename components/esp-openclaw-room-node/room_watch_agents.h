@@ -4,10 +4,10 @@
 #include "lvgl.h"
 
 enum {
-    ROOM_AGENT_DEFAULT = -6, ROOM_AGENT_CHOOSE, ROOM_AGENT_BACK, ROOM_AGENT_PREVIOUS, ROOM_AGENT_NEXT, ROOM_AGENT_REFRESH,
+    ROOM_AGENT_CONVERSATIONS = -7, ROOM_AGENT_DEFAULT = -6, ROOM_AGENT_CHOOSE, ROOM_AGENT_BACK, ROOM_AGENT_PREVIOUS, ROOM_AGENT_NEXT, ROOM_AGENT_REFRESH,
 };
 
-typedef enum { ROOM_AGENT_STAY, ROOM_AGENT_LEAVE, ROOM_AGENT_LOAD, ROOM_AGENT_SELECT_TARGET, ROOM_AGENT_RESET_TARGET } room_agent_action_t;
+typedef enum { ROOM_AGENT_STAY, ROOM_AGENT_LEAVE, ROOM_AGENT_LOAD, ROOM_AGENT_SELECT_TARGET, ROOM_AGENT_RESET_TARGET, ROOM_AGENT_OPEN_CONVERSATIONS } room_agent_action_t;
 
 void room_watch_agents_create(lv_obj_t *parent, lv_event_cb_t handler);
 void room_watch_agents_reset(void);
@@ -17,3 +17,6 @@ void room_watch_agents_render(const room_agents_snapshot_t *snapshot, bool hidde
 room_agent_action_t room_watch_agents_activate(int action, size_t *offset);
 
 bool room_watch_agents_target(char id[65], unsigned *revision);
+
+/* Restore this already validated agent detail when returning from a reader. */
+void room_watch_agents_focus(const char *id);

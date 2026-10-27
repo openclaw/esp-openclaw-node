@@ -267,9 +267,16 @@ After `agents refresh` completes, run `conversations open <agentId>` for an
 agent in that current roster. `conversations` reports up to eight rows and the
 server's `nextOffset`; `conversations refresh <offset>` requests another page.
 `conversations preview <index>` reads up to four bounded messages from the
-current page. `conversations close` releases the local view. This supplies the
-reader boundary for the Watch conversation screens; it does not add those
-screens or a reply composer.
+current page. `conversations close` releases the local view. The Watch also
+opens this reader from **Agents → agent → Conversations**.
+Tap a row to read its preview; drag to scroll. Back returns to the list and then
+to the same agent. Reading never changes the next Talk target. The Talk control
+remains available below the reader. This is a bounded read-only preview, not a
+full history or a reply composer.
+
+For USB-assisted display checks, open `menu agents` and wait for its roster,
+then open a conversation with the commands above. `menu conversations` and
+`menu preview` show that existing, validated reader context.
 
 Browsing never selects an agent for Talk. Missing Talk routing metadata does
 not prevent read-only browsing. Refreshing the roster, leaving the view, or

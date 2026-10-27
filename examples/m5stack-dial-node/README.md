@@ -64,6 +64,38 @@ the current node connection. Node reconnects immediately invalidate the old
 reader state, and re-pairing reloads the role-specific saved session. The
 console status does not expose Gateway addresses or credentials.
 
+### Agent directory
+
+Use the read connection to fetch the Gateway's agent roster:
+
+```text
+agents refresh
+agents
+agents refresh 8
+agents
+```
+
+`refresh` starts an asynchronous `agents.list` read. `agents` inspects its result
+without restarting it. Each page contains at most eight IDs, names and identity
+emoji, plus the total count and local page offset. Identity names take precedence
+over configured names. Avatar URLs, workspace paths and other agent metadata
+are not returned by the device console. This is the data path for the upcoming
+on-screen picker; it does not select an agent or change any configured control.
+
+Directory states are `idle`, `loading`, `ready`, `empty`, `offline`, `connecting`,
+`access-needed`, `error`, and `too-large`. An empty successful response is not a
+failure. Reconnects free old pages before the next handshake and refresh a previously requested
+directory. A newer refresh supersedes an older result; only one request can be
+outstanding. A request with no response after 15 seconds closes only the reader
+connection and reports an error; run `agents refresh` to retry. Node commands
+and numeric controls remain independent.
+
+The Gateway currently sends the whole roster, so pages do not avoid receiving
+that response. The parser accepts at most 32 KiB; the transport's complete-frame
+limit may be reached earlier. Malformed, too deeply nested or memory-constrained
+responses produce an error instead of a partial roster. Listing an agent does
+not guarantee access to a later conversation or device action.
+
 ## Controls
 
 The screen is upright with the USB connector on the right. The home screen

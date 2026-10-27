@@ -1,4 +1,5 @@
 #include <ctype.h>
+#include <errno.h>
 #include <inttypes.h>
 #include <math.h>
 #include <stdatomic.h>
@@ -616,6 +617,46 @@ static int reader_command(int argc, char **argv)
     return 0;
 }
 
+static int agents_command(int argc, char **argv)
+{
+    if (argc > 1) {
+        char *end = NULL;
+        errno = 0;
+        unsigned long offset = argc == 3 ? strtoul(argv[2], &end, 10) : 0;
+        if (argc > 3 || strcmp(argv[1], "refresh") != 0 ||
+            (argc == 3 && (argv[2][0] < '0' || argv[2][0] > '9' || *end != '\0' || errno != 0))) {
+            printf("usage: agents [refresh [offset]]\n");
+            return 1;
+        }
+        if (dial_reader_agents_refresh(offset) != ESP_OK) return 1;
+    }
+    dial_agents_snapshot_t *snapshot = malloc(sizeof(*snapshot));
+    if (snapshot == NULL) return 1;
+    dial_reader_agents_copy(snapshot);
+    static const char *states[] = {"idle", "loading", "ready", "empty", "offline", "connecting", "access-needed", "error", "too-large"};
+    cJSON *result = cJSON_CreateObject();
+    cJSON *agents = result != NULL ? cJSON_AddArrayToObject(result, "agents") : NULL;
+    bool ok = agents != NULL && cJSON_AddStringToObject(result, "state", states[snapshot->state]) != NULL &&
+        cJSON_AddNumberToObject(result, "revision", snapshot->revision) != NULL &&
+        cJSON_AddNumberToObject(result, "offset", snapshot->page.offset) != NULL &&
+        cJSON_AddNumberToObject(result, "total", snapshot->page.total) != NULL;
+    for (size_t i = 0; ok && i < snapshot->page.count; ++i) {
+        const esp_openclaw_agent_t *agent = &snapshot->page.agents[i];
+        cJSON *row = cJSON_CreateObject();
+        if (row == NULL) { ok = false; break; }
+        if (!cJSON_AddItemToArray(agents, row)) { cJSON_Delete(row); ok = false; break; }
+        ok = cJSON_AddStringToObject(row, "id", agent->id) != NULL &&
+            cJSON_AddStringToObject(row, "name", agent->name) != NULL && cJSON_AddStringToObject(row, "emoji", agent->emoji) != NULL;
+    }
+    free(snapshot);
+    char *json = ok ? cJSON_PrintUnformatted(result) : NULL;
+    cJSON_Delete(result);
+    if (json == NULL) return 1;
+    printf("%s\n", json);
+    free(json);
+    return 0;
+}
+
 void app_main(void)
 {
     /* GPIO46 holds battery power. Backlight owns LEDC timer/channel 1; reserve
@@ -667,5 +708,8 @@ void app_main(void)
     const esp_console_cmd_t reader_status = {.command = "reader", .help = "Show this Dial's independent Gateway read access",
         .func = reader_command};
     ESP_ERROR_CHECK(esp_console_cmd_register(&reader_status));
+    const esp_console_cmd_t agents = {.command = "agents", .help = "Read or refresh the permitted agent roster",
+        .hint = "[refresh [offset]]", .func = agents_command};
+    ESP_ERROR_CHECK(esp_console_cmd_register(&agents));
     ESP_LOGI(TAG, "ready: provision Wi-Fi and Gateway from the USB console");
 }

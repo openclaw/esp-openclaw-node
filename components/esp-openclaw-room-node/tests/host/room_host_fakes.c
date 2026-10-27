@@ -522,12 +522,18 @@ esp_err_t esp_openclaw_node_gateway_request(esp_openclaw_node_handle_t node,
 {
     host_require(host.critical_depth == 0 && mutex_depth == 0, "RPC outside locks");
     pending_rpc_t request = {.callback = callback, .ctx = ctx, .node = node};
-    if (strcmp(method, "agents.list") == 0) {
+    if (strcmp(method, "agents.list") == 0 || strcmp(method, "sessions.list") == 0 || strcmp(method, "sessions.preview") == 0) {
         if (host.fail_agent_submit) return ESP_FAIL;
         host_require(agents_rpc.callback == NULL, "one directory request outstanding");
-        host_require(strcmp(params, "{}") == 0, "directory reads current roster without routing changes");
+        host_require(strlen(method) < sizeof(host.reader_method) && strlen(params) < sizeof(host.reader_params),
+            "reader request fits observation");
+        strcpy(host.reader_method, method);
+        strcpy(host.reader_params, params);
+        if (strcmp(method, "agents.list") == 0) {
+            host_require(strcmp(params, "{}") == 0, "directory reads current roster without routing changes");
+            ++host.agent_requests;
+        } else ++host.conversation_requests;
         agents_rpc = request;
-        ++host.agent_requests;
     } else if (strcmp(method, "device.scopes.requestUpgrade") == 0 || strcmp(method, "device.scopes.waitUpgrade") == 0) {
         if (host.fail_scope_submit) return ESP_FAIL;
         host_require(scope_rpc.callback == NULL, "one scope RPC outstanding");

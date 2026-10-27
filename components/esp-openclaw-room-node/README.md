@@ -259,3 +259,20 @@ openclaw devices rotate --device <device-id> --role operator \
 Keep the returned credential private. Use the voice-node setup code for USB
 provisioning; do not paste the raw token into the console. Wait for operator
 readiness before flashing the enabled build.
+
+## Conversation reader
+
+The USB `conversations` command uses the existing operator read connection.
+After `agents refresh` completes, run `conversations open <agentId>` for an
+agent in that current roster. `conversations` reports up to eight rows and the
+server's `nextOffset`; `conversations refresh <offset>` requests another page.
+`conversations preview <index>` reads up to four bounded messages from the
+current page. `conversations close` releases the local view. This supplies the
+reader boundary for the Watch conversation screens; it does not add those
+screens or a reply composer.
+
+Browsing never selects an agent for Talk. Missing Talk routing metadata does
+not prevent read-only browsing. Refreshing the roster, leaving the view, or
+replacing the operator connection invalidates pending results. A 15-second
+read timeout reports a visible state but leaves the shared Talk/Canvas
+connection intact; another read waits for the outstanding callback to finish.

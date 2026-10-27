@@ -24,7 +24,8 @@ typedef struct {
     unsigned speech_requests;
     char speech_params[1536];
     unsigned scope_requests, token_connects;
-    unsigned agent_requests;
+    unsigned agent_requests, conversation_requests;
+    char reader_method[32], reader_params[1024];
     room_agents_state_t agents_state;
     bool fail_agent_submit;
     int64_t now_us;

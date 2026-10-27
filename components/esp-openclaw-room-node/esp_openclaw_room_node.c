@@ -1684,9 +1684,97 @@ static int agents_console_command(int argc, char **argv)
     return 0;
 }
 
+static bool conversation_index(const char *text, size_t *value)
+{
+    *value = 0;
+    if (*text == '\0') return false;
+    for (const char *p = text; *p != '\0'; ++p) {
+        if (*p < '0' || *p > '9' || *value > (SIZE_MAX - (size_t)(*p - '0')) / 10) return false;
+        *value = *value * 10 + (size_t)(*p - '0');
+    }
+    return true;
+}
+
+static int conversations_console_command(int argc, char **argv)
+{
+    esp_err_t err = ESP_OK;
+    if (argc == 3 && strcmp(argv[1], "open") == 0) {
+        room_agents_snapshot_t *agents = malloc(sizeof(*agents));
+        if (agents == NULL) return 1;
+        room_agent_directory_copy(agents);
+        err = room_conversations_open(argv[2], agents->revision);
+        free(agents);
+    } else if (argc == 3 && strcmp(argv[1], "refresh") == 0) {
+        size_t offset;
+        err = conversation_index(argv[2], &offset) ? room_conversations_refresh(offset) : ESP_ERR_INVALID_ARG;
+    } else if (argc == 3 && strcmp(argv[1], "preview") == 0) {
+        size_t index;
+        if (!conversation_index(argv[2], &index)) return 1;
+        room_conversations_snapshot_t *view = malloc(sizeof(*view));
+        if (view == NULL) return 1;
+        room_conversations_copy(view);
+        err = room_conversations_preview(index, view->revision);
+        free(view);
+    } else if (argc == 2 && strcmp(argv[1], "close") == 0) {
+        room_conversations_close();
+    } else if (argc != 1) {
+        printf("usage: conversations [open <agentId> | refresh <offset> | preview <index> | close]\n");
+        return 1;
+    }
+    if (err != ESP_OK) {
+        printf("conversations: %s\n", esp_err_to_name(err));
+        return 1;
+    }
+    room_conversations_snapshot_t *view = malloc(sizeof(*view));
+    if (view == NULL) return 1;
+    room_conversations_copy(view);
+    const char *states[] = {"idle", "offline", "loading", "ready", "empty", "error", "too-large", "timeout"};
+    const char *statuses[] = {"ok", "empty", "missing", "error"};
+    cJSON *root = cJSON_CreateObject();
+    if (root != NULL) {
+        cJSON_AddStringToObject(root, "state", states[view->state]);
+        cJSON_AddStringToObject(root, "previewState", states[view->preview_state]);
+        cJSON_AddStringToObject(root, "agentId", view->agent.id);
+        cJSON_AddNumberToObject(root, "revision", view->revision);
+        cJSON_AddNumberToObject(root, "offset", view->page.offset);
+        cJSON_AddBoolToObject(root, "hasMore", view->page.has_more);
+        cJSON_AddNumberToObject(root, "nextOffset", view->page.next_offset);
+        cJSON *sessions = cJSON_AddArrayToObject(root, "sessions");
+        for (size_t i = 0; sessions != NULL && i < view->page.count; ++i) {
+            cJSON *item = cJSON_CreateObject();
+            if (item == NULL) break;
+            cJSON_AddStringToObject(item, "key", view->page.sessions[i].key);
+            cJSON_AddStringToObject(item, "title", view->page.sessions[i].title);
+            cJSON_AddItemToArray(sessions, item);
+        }
+        cJSON_AddStringToObject(root, "previewStatus", statuses[view->preview.status]);
+        cJSON *items = cJSON_AddArrayToObject(root, "items");
+        for (size_t i = 0; items != NULL && i < view->preview.count; ++i) {
+            cJSON *item = cJSON_CreateObject();
+            if (item == NULL) break;
+            cJSON_AddNumberToObject(item, "role", view->preview.items[i].role);
+            cJSON_AddStringToObject(item, "text", view->preview.items[i].text);
+            cJSON_AddItemToArray(items, item);
+        }
+    }
+    free(view);
+    char *json = root != NULL ? cJSON_PrintUnformatted(root) : NULL;
+    cJSON_Delete(root);
+    if (json == NULL) return 1;
+    printf("conversations=%s\n", json);
+    free(json);
+    return 0;
+}
+
 static esp_err_t register_room_console_commands(void)
 {
     static const esp_console_cmd_t COMMANDS[] = {
+        {
+            .command = "conversations",
+            .help = "Read an agent's conversations without changing Talk",
+            .hint = "open <agentId> | refresh <offset> | preview <index> | close",
+            .func = conversations_console_command,
+        },
         {
             .command = "menu",
             .help = "Open a local watch menu page without starting Talk",

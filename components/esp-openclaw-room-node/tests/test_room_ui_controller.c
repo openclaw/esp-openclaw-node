@@ -20,7 +20,14 @@ static room_canvas_retained_kind_t retained_kind;
 static esp_openclaw_node_command_handler_t face_gesture;
 static unsigned toggles, holds;
 static unsigned talk_starts, talk_stops, display_flushes;
-static unsigned agent_requests;
+static unsigned agent_requests, agent_selections, selected_revision;
+static char selected_agent[65];
+static void select_agent(const char *id, unsigned revision)
+{
+    ++agent_selections;
+    snprintf(selected_agent, sizeof(selected_agent), "%s", id);
+    selected_revision = revision;
+}
 static bool agent_open;
 static size_t agent_offset;
 static void request_agents(bool open, size_t offset)
@@ -555,7 +562,7 @@ static void check_watch_agents(const char *path)
     assert(lv_obj_is_visible(find_text(lv_layer_top(), "Loading agents...")));
     assert(lv_obj_is_visible(find_text(lv_layer_top(), "Start Talk")));
     room_agents_snapshot_t roster = {.state = ROOM_AGENTS_READY, .revision = 1,
-        .page = {.count = 8, .total = 10}};
+        .page = {.count = 8, .total = 10, .main_key = "main"}};
     for (unsigned i = 0; i < 8; ++i) {
         snprintf(roster.page.agents[i].id, sizeof(roster.page.agents[i].id), "agent-%u", i);
         snprintf(roster.page.agents[i].name, sizeof(roster.page.agents[i].name), "Assistant %u", i);
@@ -574,7 +581,32 @@ static void check_watch_agents(const char *path)
     if (path) { snprintf(output, sizeof(output), "%s-agents.ppm", path); write_frame(output); }
     click_talk(first);
     assert(lv_obj_is_visible(find_text(lv_layer_top(), "Agent ID\nagent-0")));
+    lv_obj_t *choose = lv_obj_get_parent(find_text(lv_layer_top(), "Use for next Talk"));
+    unsigned selections = agent_selections, starts = talk_starts;
+    click_talk(choose);
+    assert(agent_selections == selections + 1 && selected_revision == roster.revision);
+    assert(strcmp(selected_agent, "agent-0") == 0);
+    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Choosing...")));
+    click_talk(lv_obj_get_parent(find_text(lv_layer_top(), "Choosing agent...")));
+    assert(talk_starts == starts); // No start before the owner acknowledges its target.
+    room_ui_talk_target_t target = {.selected = true, .id = "agent-0", .name = "Kitsune"};
+    room_ui_store_talk_target(&target);
+    room_ui_agent_selection_complete(ESP_OK);
+    room_ui_refresh();
+    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Selected for next Talk")));
+    assert(talk_starts == starts);
     if (path) { snprintf(output, sizeof(output), "%s-agent-detail.ppm", path); write_frame(output); }
+    // Changing the target cancels a held Start press; release cannot start a different agent.
+    lv_obj_t *start = lv_obj_get_parent(find_text(lv_layer_top(), "Start Talk"));
+    touch_talk(start, true);
+    target.expired = true;
+    room_ui_store_talk_target(&target);
+    room_ui_refresh();
+    touch_talk(start, false);
+    assert(talk_starts == starts);
+    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Choose an agent")));
+    target.expired = false;
+    room_ui_store_talk_target(&target);
     facts.talk = ROOM_UI_TALK_ACTIVE;
     room_ui_store_facts(&facts);
     room_ui_refresh();
@@ -648,7 +680,12 @@ static void check_watch_agents(const char *path)
     facts.talk = ROOM_UI_TALK_READY;
     room_ui_store_facts(&facts);
     room_ui_set(ROOM_UI_IDLE, NULL);
-    puts("watch agents: asynchronous states, copied details, paging and fenced pointer input passed");
+    assert(room_ui_watch_menu("home") == ESP_OK);
+    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Next: Kitsune")));
+    target = (room_ui_talk_target_t){0};
+    room_ui_store_talk_target(&target);
+    room_ui_refresh();
+    puts("watch agents: acknowledged selection, next-call identity, paging and fenced pointer input passed");
 }
 
 static void check_watch_home_gesture(void)
@@ -695,6 +732,7 @@ int main(int argc, char **argv)
     assert(room_board_bind(&board) == ESP_OK);
     room_ui_set_talk_action_handler(talk_action);
     room_ui_set_agents_action_handler(request_agents);
+    room_ui_set_agent_selection_handler(select_agent);
     room_ui_init();
     assert(brightness == idle);
     check_talk_control();

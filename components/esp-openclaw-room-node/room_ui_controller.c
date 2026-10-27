@@ -71,6 +71,9 @@ static room_watch_page_t watch_page = ROOM_WATCH_HOME;
 static int pressed_watch_page = -1;
 static void (*agents_action_handler)(bool open, size_t offset);
 static room_agents_snapshot_t current_agents, painted_agents;
+static room_ui_talk_target_t current_target;
+static bool selection_pending, selection_failed;
+static void (*agent_selection_handler)(const char *id, unsigned revision);
 static int pressed_agent_action = -100;
 static unsigned pressed_agent_revision;
 static room_agents_state_t pressed_agent_state;
@@ -78,6 +81,31 @@ static room_agents_state_t pressed_agent_state;
 void room_ui_set_agents_action_handler(void (*handler)(bool open, size_t offset))
 {
     agents_action_handler = handler;
+}
+
+void room_ui_set_agent_selection_handler(void (*handler)(const char *id, unsigned revision))
+{
+    agent_selection_handler = handler;
+}
+
+void room_ui_store_talk_target(const room_ui_talk_target_t *target)
+{
+    taskENTER_CRITICAL(&state_mux);
+    if (target->selected != current_target.selected || target->expired != current_target.expired ||
+        strcmp(target->id, current_target.id) != 0 || strcmp(target->name, current_target.name) != 0) {
+        current_target = *target;
+        pressed_talk_action = TALK_CONTROL_NONE;
+    }
+    taskEXIT_CRITICAL(&state_mux);
+}
+
+void room_ui_agent_selection_complete(esp_err_t result)
+{
+    taskENTER_CRITICAL(&state_mux);
+    selection_pending = false;
+    selection_failed = result != ESP_OK;
+    pressed_talk_action = TALK_CONTROL_NONE;
+    taskEXIT_CRITICAL(&state_mux);
 }
 
 void room_ui_store_agents(const room_agents_snapshot_t *snapshot)
@@ -223,6 +251,21 @@ static void watch_agents_clicked(lv_event_t *event)
     if (!activate) return;
     size_t offset = 0;
     room_agent_action_t result = room_watch_agents_activate(action, &offset);
+    if (result == ROOM_AGENT_SELECT_TARGET && agent_selection_handler != NULL) {
+        char id[65];
+        unsigned source_revision;
+        if (room_watch_agents_target(id, &source_revision)) {
+            taskENTER_CRITICAL(&state_mux);
+            bool submit = !selection_pending;
+            if (submit) {
+                selection_pending = true;
+                selection_failed = false;
+                pressed_talk_action = TALK_CONTROL_NONE;
+            }
+            taskEXIT_CRITICAL(&state_mux);
+            if (submit) agent_selection_handler(id, source_revision);
+        }
+    }
     if (result == ROOM_AGENT_LEAVE) (void)watch_navigation_show(ROOM_WATCH_MENU);
     else {
         if (result == ROOM_AGENT_LOAD) request_agents_page(offset);
@@ -232,7 +275,8 @@ static void watch_agents_clicked(lv_event_t *event)
 
 static talk_control_action_t talk_control_action(room_ui_talk_state_t talk)
 {
-    if (talk == ROOM_UI_TALK_READY) return TALK_CONTROL_START;
+    if (talk == ROOM_UI_TALK_READY) return selection_pending || current_target.expired
+        ? TALK_CONTROL_NONE : TALK_CONTROL_START;
     if (talk == ROOM_UI_TALK_CONNECTING || talk == ROOM_UI_TALK_ACTIVE) return TALK_CONTROL_STOP;
     return TALK_CONTROL_NONE;
 }
@@ -549,6 +593,8 @@ static bool room_ui_render_locked(void)
     memcpy(gateway, gateway_text, sizeof(gateway));
     bool overlay = diagnostics_open;
     room_ui_facts_t facts = current_facts;
+    room_ui_talk_target_t target = current_target;
+    bool selecting = selection_pending, selection_error = selection_failed;
     room_watch_page_t page = watch_page;
     bool agents_changed = current_agents.revision != painted_agents.revision || current_agents.state != painted_agents.state;
     painted_agents = current_agents;
@@ -565,9 +611,10 @@ static bool room_ui_render_locked(void)
     bool canvas_active = room_canvas_is_active();
     bool navigation = watch_home_enabled && page != ROOM_WATCH_HOME && !canvas_active;
     if (watch_home_enabled) {
-        room_watch_home_render(&facts, state, detail, canvas_active || overlay || navigation);
+        room_watch_home_render(&facts, &target, state, detail, canvas_active || overlay || navigation);
         room_watch_navigation_render(page, &facts, !navigation || overlay || page == ROOM_WATCH_AGENTS);
-        room_watch_agents_render(&painted_agents, !navigation || overlay || page != ROOM_WATCH_AGENTS);
+        room_watch_agents_render(&painted_agents, !navigation || overlay || page != ROOM_WATCH_AGENTS,
+            target.selected ? target.id : "", target.expired, selecting, selection_error);
     }
     if (talk_pill != NULL) {
         if (watch_home_enabled) {
@@ -576,10 +623,13 @@ static bool room_ui_render_locked(void)
             lv_obj_align(talk_pill, canvas_active ? LV_ALIGN_TOP_MID : LV_ALIGN_BOTTOM_MID,
                 0, canvas_active ? 14 : -20);
         }
-        painted_talk_action = talk_control_action(facts.talk);
-        bool start = facts.talk == ROOM_UI_TALK_READY;
+        painted_talk_action = facts.talk == ROOM_UI_TALK_READY
+            ? selecting || target.expired ? TALK_CONTROL_NONE : TALK_CONTROL_START
+            : facts.talk == ROOM_UI_TALK_CONNECTING || facts.talk == ROOM_UI_TALK_ACTIVE ? TALK_CONTROL_STOP : TALK_CONTROL_NONE;
+        bool start = painted_talk_action == TALK_CONTROL_START;
         bool stop = facts.talk == ROOM_UI_TALK_CONNECTING || facts.talk == ROOM_UI_TALK_ACTIVE;
-        lv_label_set_text(talk_pill_label, start ? "Start Talk" : stop ? "Stop Talk" :
+        lv_label_set_text(talk_pill_label, start ? "Start Talk" : stop ? "Stop Talk"
+            : selecting ? "Choosing agent..." : target.expired ? "Choose an agent" :
             facts.talk == ROOM_UI_TALK_STOPPING ? "Stopping..." : "Talk unavailable");
         lv_obj_set_state(talk_pill, LV_STATE_DISABLED, !start && !stop);
         lv_obj_set_flag(talk_pill, LV_OBJ_FLAG_HIDDEN, overlay);
@@ -888,7 +938,7 @@ void room_ui_set_diagnostics_open(bool open)
     }
     taskEXIT_CRITICAL(&state_mux);
     if (open) {
-        if (watch_home_enabled) room_watch_home_render(NULL, ROOM_UI_IDLE, "", true);
+        if (watch_home_enabled) room_watch_home_render(NULL, NULL, ROOM_UI_IDLE, "", true);
         if (watch_home_enabled) room_watch_navigation_render(ROOM_WATCH_HOME, NULL, true);
         if (home != NULL) lv_obj_add_flag(home, LV_OBJ_FLAG_HIDDEN);
         if (talk_pill != NULL) lv_obj_add_flag(talk_pill, LV_OBJ_FLAG_HIDDEN);

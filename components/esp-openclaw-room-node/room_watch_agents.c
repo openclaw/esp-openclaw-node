@@ -7,7 +7,7 @@
 static lv_obj_t *root, *back_text, *heading, *list, *message, *counter;
 static lv_obj_t *rows[ESP_OPENCLAW_DIRECTORY_PAGE_SIZE], *names[ESP_OPENCLAW_DIRECTORY_PAGE_SIZE];
 static lv_obj_t *avatars[ESP_OPENCLAW_DIRECTORY_PAGE_SIZE], *ids[ESP_OPENCLAW_DIRECTORY_PAGE_SIZE];
-static lv_obj_t *previous, *next, *refresh, *detail_name, *detail_id, *detail_note, *detail_avatar;
+static lv_obj_t *previous, *next, *refresh, *detail_name, *detail_id, *detail_note, *detail_avatar, *choose, *choose_text;
 static const room_agents_snapshot_t *agents;
 static unsigned revision;
 static room_agents_state_t state;
@@ -104,8 +104,11 @@ void room_watch_agents_create(lv_obj_t *parent, lv_event_cb_t handler)
     lv_obj_set_height(detail_name, 72);
     detail_id = label(root, "", 32, 216, 304);
     lv_label_set_long_mode(detail_id, LV_LABEL_LONG_WRAP);
-    lv_obj_set_height(detail_id, 68);
-    detail_note = label(root, "Browsing only\nTalk keeps its current conversation.", 32, 300, 304);
+    lv_obj_set_height(detail_id, 44);
+    choose = button(root, 26, 270, 316, 44, ROOM_AGENT_CHOOSE, handler);
+    choose_text = label(choose, "Use for next Talk", 12, 14, 292);
+    lv_obj_set_style_text_align(choose_text, LV_TEXT_ALIGN_CENTER, 0);
+    detail_note = label(root, "Applies to your next call.\nThe current call stays with its agent.", 32, 326, 304);
     lv_label_set_long_mode(detail_note, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_color(detail_note, lv_color_hex(0xb9aabe), 0);
     lv_obj_add_flag(root, LV_OBJ_FLAG_HIDDEN);
@@ -137,7 +140,8 @@ static void avatar_text(lv_obj_t *label_obj, const esp_openclaw_agent_t *agent)
     }
 }
 
-void room_watch_agents_render(const room_agents_snapshot_t *snapshot, bool hidden)
+void room_watch_agents_render(const room_agents_snapshot_t *snapshot, bool hidden,
+    const char *target_id, bool expired, bool pending, bool failed)
 {
     if (root == NULL) return;
     lv_obj_set_hidden(root, hidden);
@@ -166,10 +170,18 @@ void room_watch_agents_render(const room_agents_snapshot_t *snapshot, bool hidde
     lv_obj_set_hidden(detail_name, !detail);
     lv_obj_set_hidden(detail_id, !detail);
     lv_obj_set_hidden(detail_note, !detail);
+    lv_obj_set_hidden(choose, !detail);
     if (detail) {
         avatar_text(detail_avatar, selected);
         lv_label_set_text(detail_name, selected->name);
         lv_label_set_text_fmt(detail_id, "Agent ID\n%s", selected->id);
+        bool chosen = !expired && strcmp(target_id, selected->id) == 0;
+        bool available = agents->page.main_key[0] != '\0';
+        lv_obj_set_state(choose, LV_STATE_DISABLED, pending || chosen || !available);
+        lv_label_set_text_static(choose_text, pending ? "Choosing..." : chosen ? "Selected for next Talk" : "Use for next Talk");
+        lv_label_set_text_static(detail_note, failed ? "Selection changed.\nRefresh agents and choose again."
+            : !available ? "Routing unavailable.\nUpdate your Gateway to choose an agent."
+            : "Applies to your next call.\nThe current call stays with its agent.");
         return;
     }
     bool loading = state == ROOM_AGENTS_LOADING;
@@ -208,6 +220,8 @@ room_agent_action_t room_watch_agents_activate(int action, size_t *offset)
         detail = false;
         return ROOM_AGENT_STAY;
     }
+    if (action == ROOM_AGENT_CHOOSE && detail && agents != NULL &&
+        state == ROOM_AGENTS_READY && agents->page.main_key[0] != '\0') return ROOM_AGENT_SELECT_TARGET;
     if (agents == NULL || detail) return ROOM_AGENT_STAY;
     if (action >= 0 && (size_t)action < agents->page.count && state == ROOM_AGENTS_READY) {
         snprintf(selected_id, sizeof(selected_id), "%s", agents->page.agents[action].id);
@@ -225,4 +239,12 @@ room_agent_action_t room_watch_agents_activate(int action, size_t *offset)
         return ROOM_AGENT_LOAD;
     }
     return ROOM_AGENT_STAY;
+}
+
+bool room_watch_agents_target(char id[65], unsigned *source_revision)
+{
+    if (!detail || agents == NULL || state != ROOM_AGENTS_READY) return false;
+    memcpy(id, selected_id, sizeof(selected_id));
+    *source_revision = revision;
+    return true;
 }

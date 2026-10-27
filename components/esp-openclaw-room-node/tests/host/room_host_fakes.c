@@ -771,7 +771,10 @@ void room_ui_set(room_ui_state_t state, const char *detail)
 void room_ui_store_facts(const room_ui_facts_t *facts) { host.home = *facts; }
 void room_ui_set_agents_action_handler(void (*handler)(bool, size_t)) { (void)handler; }
 void room_ui_store_agents(const room_agents_snapshot_t *snapshot) { host.agents_state = snapshot->state; }
-void room_ui_refresh(void) {}
+void room_ui_set_agent_selection_handler(void (*handler)(const char *, unsigned)) { (void)handler; }
+void room_ui_store_talk_target(const room_ui_talk_target_t *target) { host.ui_target = *target; }
+void room_ui_agent_selection_complete(esp_err_t result) { ++host.selection_completions; host.selection_result = result; }
+void room_ui_refresh(void) { ++host.ui_refreshes; }
 esp_err_t room_ui_watch_menu(const char *page) { (void)page; return ESP_ERR_INVALID_STATE; }
 const char *WIFI_EVENT = "wifi";
 const char *IP_EVENT = "ip";

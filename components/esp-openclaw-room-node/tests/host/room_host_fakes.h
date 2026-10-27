@@ -18,6 +18,9 @@ typedef struct {
     unsigned opens, starts, closes, media_begins, media_ends, ambient_restores;
     unsigned config_requests, create_requests, close_requests;
     char create_key[257];
+    unsigned selection_completions, ui_refreshes;
+    room_ui_talk_target_t ui_target;
+    esp_err_t selection_result;
     unsigned speech_requests;
     char speech_params[1536];
     unsigned scope_requests, token_connects;

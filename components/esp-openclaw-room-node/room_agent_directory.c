@@ -46,6 +46,7 @@ static struct {
     bool sessions_pending, preview_pending;
 } directory;
 static _Atomic(directory_request_t *) completed;
+static atomic_uint reader_epoch;
 
 static void deadline_fired(void *arg)
 {
@@ -63,6 +64,7 @@ esp_err_t room_agent_directory_init(SemaphoreHandle_t owner_lock, void (*wake)(v
 
 static void clear_conversations(void)
 {
+    atomic_fetch_add(&reader_epoch, 1);
     ++directory.conversations_revision;
     ++directory.preview_revision;
     directory.sessions_pending = directory.preview_pending = false;
@@ -113,6 +115,16 @@ void room_agent_directory_cancel(void)
     xSemaphoreTake(directory.lock, portMAX_DELAY);
     directory.interested = false;
     invalidate();
+    xSemaphoreGive(directory.lock);
+    directory.wake();
+}
+
+void room_agent_directory_suspend(void)
+{
+    if (directory.lock == NULL) return;
+    xSemaphoreTake(directory.lock, portMAX_DELAY);
+    directory.interested = false;
+    directory.pending = false;
     xSemaphoreGive(directory.lock);
     directory.wake();
 }
@@ -173,6 +185,7 @@ esp_err_t room_conversations_refresh(size_t offset)
     room_conversations_snapshot_t *view = directory.conversations;
     esp_err_t err = view != NULL && directory.ready ? ESP_OK : ESP_ERR_INVALID_STATE;
     if (err == ESP_OK) {
+        atomic_fetch_add(&reader_epoch, 1);
         ++directory.conversations_revision;
         ++directory.preview_revision;
         view->page = (esp_openclaw_session_page_t){.offset = offset};
@@ -196,6 +209,7 @@ esp_err_t room_conversations_preview(size_t index, unsigned revision)
         revision == directory.conversations_revision && index < view->page.count
         ? ESP_OK : ESP_ERR_INVALID_STATE;
     if (err == ESP_OK) {
+        atomic_fetch_add(&reader_epoch, 1);
         ++directory.preview_revision;
         view->selected = index;
         view->preview = (esp_openclaw_session_preview_t){0};
@@ -226,6 +240,40 @@ void room_conversations_copy(room_conversations_snapshot_t *snapshot)
     snapshot->revision = directory.conversations_revision;
     snapshot->preview_revision = directory.preview_revision;
     xSemaphoreGive(directory.lock);
+}
+
+esp_err_t room_conversations_copy_resume(room_agents_snapshot_t *agents,
+    room_conversations_snapshot_t *reader, unsigned *epoch)
+{
+    if (agents == NULL || reader == NULL || epoch == NULL) return ESP_ERR_INVALID_ARG;
+    *agents = (room_agents_snapshot_t){0};
+    *reader = (room_conversations_snapshot_t){0};
+    *epoch = 0;
+    if (directory.lock == NULL) return ESP_ERR_INVALID_STATE;
+    xSemaphoreTake(directory.lock, portMAX_DELAY);
+    bool member = false;
+    if (directory.ready && directory.state == ROOM_AGENTS_READY &&
+        directory.page != NULL && directory.conversations != NULL) {
+        for (size_t i = 0; i < directory.page->count; ++i)
+            if (strcmp(directory.page->agents[i].id, directory.conversations->agent.id) == 0)
+                member = true;
+    }
+    if (member) {
+        agents->state = directory.state;
+        agents->revision = directory.revision;
+        agents->page = *directory.page;
+        *reader = *directory.conversations;
+        reader->revision = directory.conversations_revision;
+        reader->preview_revision = directory.preview_revision;
+        *epoch = atomic_load(&reader_epoch);
+    }
+    xSemaphoreGive(directory.lock);
+    return member ? ESP_OK : ESP_ERR_INVALID_STATE;
+}
+
+bool room_conversations_resume_current(unsigned epoch)
+{
+    return epoch != 0 && epoch == atomic_load(&reader_epoch);
 }
 
 esp_err_t room_agent_directory_resolve_locked(unsigned revision, const char *id,
@@ -293,6 +341,7 @@ static char *request_params(const directory_request_t *request)
 
 static void publish(directory_request_t *request, const directory_page_t *page)
 {
+    if (request->kind != AGENTS) atomic_fetch_add(&reader_epoch, 1);
     if (request->kind == AGENTS) {
         directory.state = request->state;
         if (page != NULL && (request->state == ROOM_AGENTS_READY || request->state == ROOM_AGENTS_EMPTY)) {

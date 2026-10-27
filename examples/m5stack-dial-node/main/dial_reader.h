@@ -18,3 +18,7 @@ esp_err_t dial_reader_conversations_refresh(size_t offset);
 esp_err_t dial_reader_preview_open(size_t index, unsigned revision);
 void dial_reader_conversations_close(void);
 void dial_reader_conversations_copy(dial_conversations_snapshot_t *snapshot);
+
+/* Never allocates or copies transcript pages. An unavailable connection clears
+ * the Home context immediately, before the reader worker repaints its state. */
+void dial_reader_home_copy(dial_home_context_t *context);

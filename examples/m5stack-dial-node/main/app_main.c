@@ -72,6 +72,8 @@ static struct {
     int brightness;
     lv_obj_t *arc, *title, *value, *message, *footer, *eyes[2], *mouth;
     dial_home_t home;
+    dial_home_context_t home_context;
+    bool home_online, home_dirty;
     dial_input_t input;
     dial_navigation_t navigation;
     dial_agents_snapshot_t *agents;
@@ -131,6 +133,7 @@ static void show_view(dial_view_t view)
         ui.navigation.snapshot = NULL;
     }
     ui.view = view;
+    if (view == VIEW_FACE) ui.home_dirty = true;
     lv_obj_set_hidden(ui.home.root, view != VIEW_FACE);
     lv_obj_set_hidden(ui.navigation.root, view != VIEW_NAVIGATION);
     lv_obj_set_hidden(ui.title, view == VIEW_FACE || view == VIEW_NAVIGATION);
@@ -177,7 +180,14 @@ static void navigation_event(dial_navigation_event_t event, size_t offset, void 
         else if (event == DIAL_NAV_READ) dial_reader_preview_open(offset, ui.conversations->revision);
         dial_reader_conversations_copy(ui.conversations);
         if (event == DIAL_NAV_RESUME) {
-            if (!dial_navigation_show_reader(&ui.navigation, ui.agents, ui.conversations, false))
+            /* Home passes its destination; Menu uses zero and the latest reader.
+             * Copies taken after a Home press must still match its visible context. */
+            bool same_context = offset == 0 ||
+                (ui.agents->revision == ui.home_context.directory_revision &&
+                 ui.conversations->revision == ui.home_context.conversation_revision &&
+                 ui.conversations->preview_revision == ui.home_context.preview_revision);
+            if (!same_context || !dial_navigation_show_reader(&ui.navigation, ui.agents,
+                    ui.conversations, offset == DIAL_HOME_PREVIEW))
                 dial_navigation_open(&ui.navigation, true);
         } else dial_navigation_conversations_update(&ui.navigation, ui.conversations);
     } else dial_input_set_control(&ui.input, false);
@@ -305,6 +315,13 @@ static void commit_action(void)
     xSemaphoreGive(action_lock);
 }
 
+static bool same_home_context(const dial_home_context_t *a, const dial_home_context_t *b)
+{
+    return a->available == b->available && a->preview == b->preview &&
+        a->directory_revision == b->directory_revision &&
+        a->conversation_revision == b->conversation_revision && a->preview_revision == b->preview_revision;
+}
+
 static void input_event(dial_input_event_t event, int value, bool pointer, void *context)
 {
     (void)context;
@@ -322,7 +339,22 @@ static void input_event(dial_input_event_t event, int value, bool pointer, void 
     } else {
         if (pointer) ++ui.touches;
         if (event == DIAL_INPUT_CONFIRM) commit_action();
-        else open_navigation(false);
+        else if (ui.view == VIEW_FACE && event == DIAL_INPUT_OPEN) {
+            dial_home_context_t context;
+            dial_reader_home_copy(&context);
+            xSemaphoreTake(action_lock, portMAX_DELAY);
+            bool online = action_state.connection_id != 0;
+            xSemaphoreGive(action_lock);
+            /* A press belongs to the context that was visible when it began. */
+            if (!same_home_context(&context, &ui.home_context) || online != ui.home_online) {
+                ui.home_dirty = true;
+                dial_input_set_control(&ui.input, false);
+                return;
+            }
+            open_navigation(online && !context.available);
+            if (online && context.available && ui.view == VIEW_NAVIGATION)
+                navigation_event(DIAL_NAV_RESUME, ui.home.destination, NULL);
+        } else open_navigation(false);
     }
 }
 
@@ -344,9 +376,12 @@ static void refresh_ui(lv_timer_t *timer)
     }
     bool assigned = action_state.configured_uri != NULL;
     bool online = action_state.connection_id != 0;
-    const char *activity = ui.request_id[0] != '\0' &&
-        ui.last_action.connection_id == action_state.connection_id
-        ? lv_label_get_text(ui.footer) : NULL;
+    const char *activity = NULL;
+    if (ui.request_id[0] != '\0' && ui.last_action.connection_id == action_state.connection_id) {
+        activity = ui.action_completed ? (ui.action_succeeded ? "Action completed" : "Action failed")
+            : action_state.pending_attempt != 0 ? "Sending action"
+            : action_state.result_attempt == ui.last_action.attempt ? "Action sent" : "Action failed";
+    }
     xSemaphoreGive(action_lock);
     if (ui.view == VIEW_NAVIGATION) {
         dial_navigation_set_connection(&ui.navigation, esp_openclaw_node_wifi_is_connected(), online);
@@ -362,10 +397,17 @@ static void refresh_ui(lv_timer_t *timer)
     static uint32_t status_at;
     static bool status_sampled;
     uint32_t now = lv_tick_get();
-    if (!status_sampled || now - status_at >= 1000) {
-        dial_home_render(&ui.home, esp_openclaw_node_wifi_is_connected(), online, assigned, activity);
+    if (ui.home_dirty || !status_sampled || now - status_at >= 1000) {
+        dial_home_context_t context;
+        dial_reader_home_copy(&context);
+        if (!same_home_context(&context, &ui.home_context) || online != ui.home_online)
+            dial_input_set_control(&ui.input, false);
+        ui.home_context = context;
+        ui.home_online = online;
+        dial_home_render(&ui.home, esp_openclaw_node_wifi_is_connected(), online, assigned, activity, &context);
         status_at = now;
         status_sampled = true;
+        ui.home_dirty = false;
     }
     uint32_t phase = lv_tick_get() % 4400;
     int height = 28;

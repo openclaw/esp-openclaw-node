@@ -24,3 +24,10 @@ typedef struct {
     esp_openclaw_session_preview_t preview;
     size_t selected;
 } dial_conversations_snapshot_t;
+
+/* Small Home projection; selection remains owned by the reader. */
+typedef struct {
+    bool available, preview;
+    unsigned directory_revision, conversation_revision, preview_revision;
+    char agent_name[65];
+} dial_home_context_t;

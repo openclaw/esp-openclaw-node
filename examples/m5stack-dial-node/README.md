@@ -101,10 +101,17 @@ not guarantee access to a later conversation or device action.
 The screen is upright with the USB connector on the right. The home screen
 shows a compact connection strip, a blinking face, and one action. Wi-Fi and
 Gateway status are separate; no battery level is invented. Home shows whether
-an agent action is assigned and retains the current action's feedback in its
-headline. **Open menu** leads to Agents, Conversations, Controls, and Settings. Turn to move the
-highlight and press to open; touch rows directly. Hold the encoder or a
-stationary touch to return Home. The menu stays available offline.
+an agent action is assigned and retains a short status for the latest action.
+With a retained reader selection, Home shows the agent name: press or tap
+**Continue** to return to its preview, or **Conversations** to return
+to its list. With no selection, **Choose agent** opens Agents. Offline,
+**Open menu** keeps local settings and controls reachable.
+
+Turning on Home always opens the menu, which contains Agents, Conversations,
+Controls, and Settings. Turn to move the highlight and press to open; touch
+rows directly. Hold the encoder or a stationary touch to return Home. A reader
+refresh, replacement, or disconnect invalidates an in-progress Home press;
+continuing never submits a numeric control or changes its owning agent.
 
 Settings → Display adjusts this Dial's screen brightness. Turn the encoder or
 tap − / + for five-point steps between 10% and 100%; press to return to Settings.

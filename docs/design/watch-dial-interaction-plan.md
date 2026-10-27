@@ -1,6 +1,6 @@
 # Watch and Dial: interaction plan
 
-**Revision 07 · quiet Home, mobile pairing and Talk · design proposal · no firmware changes**
+**Revision 08 · Home visual design, mobile pairing and Talk · design proposal · no firmware changes**
 
 Start with the [interactive flow explorer](watch-dial-ux-flows.html), then use
 the [annotated layout board](watch-dial-ux-plan.html) for the spatial overview. The
@@ -81,7 +81,7 @@ the watch presents the list. Both expose every destination.
 | Activity | History / completed item | Read outcomes, incoming content and pending work with its original owner |
 | Settings | Gear | Display, connection, capabilities, local audio where present, help and recovery |
 
-Home shows the selected agent, a quiet lobster, one short status line and
+Home shows the selected agent, a quiet lobster, one short headline and
 a capability-aware primary action. Conversation titles, previews and device
 shortcuts live in their destinations behind Menu. On a voice-ready watch the
 primary action is Hold to talk; on the current Dial it is Continue, opening the
@@ -151,45 +151,48 @@ budgets to test on hardware, not claims about accessible physical size.
 
 | Template | Header | Main region | Bottom region |
 | --- | --- | --- | --- |
-| Home | y34–78: 44 px | y96–352: 256 px | y376–432: one 56 px action |
+| Home | y39–83: 44 px | y99–358: 259 px | y376–428: one 52 px action |
 | Menu / choose | y34–78: 44 px | y90–432: 342 px scroll region | No fixed footer |
 | Reader / card | y34–78: 44 px | y90–432: 342 px; reserve action space only when needed | Optional 56 px content action |
 | Call | y34–78: 44 px, assistant identity | y90–364: 274 px, lobster plus truthful connection state | y376–432: End |
 | Setup / confirmation | y34–78: 44 px, step or consequence | y90–364: 274 px, explanation and target | y376–432: primary action; Back/Cancel in header |
 
-### Quiet Home (revision 07)
+### Home visual design (revision 08)
 
-Home is an entry point, not a dashboard. The previous proposal stacked a brand
-header, agent row, mascot/status, recent card, shortcuts and primary action.
-Each was defensible alone; together they competed for attention. Remove the
-brand heading, separate agent row, recent card and shortcut row. Keep all five
-menu destinations and the current conversation; moving their entry points does
-not remove their capabilities.
+Home is an entry point, not a dashboard. Revision 07 reduced the clutter but
+left a flat icon, blank background and generic button. Revision 08 keeps the
+same three targets and gives the page a deliberate visual hierarchy: compact
+agent and Menu controls, a shaded mascot in a restrained circular frame, a
+large short headline, and a floating primary pill. Keep recent cards and
+shortcut rows in their existing destinations behind Menu.
 
 | Region | Watch | Dial |
 | --- | --- | --- |
-| System status | y10–26, unchanged | y20–36, unchanged |
-| Agent and Menu | y34–78: avatar/name opens Agents; Menu at right | x40–200, y40–84: same two labeled controls |
-| Quiet center | y96–352: 140 px lobster, 22 px gap, one 16 px status line | y88–183: 68 px lobster, 5 px gap, one 13 px status line |
-| One primary action | y376–432: 56 px target | x54–186, y187–217: 30 px pill; encoder press is equivalent |
+| System status | y10–26, sample clock left, connectivity right | y20–36, sample clock and connectivity |
+| Agent and Menu | y39–83: avatar/name capsule and circular Menu | x40–200, y39–83: 44 px touch targets with inset surfaces |
+| Main composition | y99–358: 174 px circular frame, 144 px mascot, 29 px headline | y84–184: 72 px frame, 65 px mascot, 15 px headline |
+| One primary action | x26–342, y376–428: 52 px pill with action icon | x54–186, y191–220: 29 px pill; encoder press is equivalent |
 
-Kitsune's fox identifies who handles the request. The lobster supplies product
-personality, with subtle idle motion and a reduced-motion alternative. The
-center is not another button. Do not repeat the agent, thread, brand or action
-in a second panel. Home hides conversation content by default. Opting into
+Kitsune's fox identifies who handles the request. The lobster shape follows
+[OpenClaw's maintained mascot](https://github.com/openclaw/openclaw/blob/main/apps/linux/ui/mascot.svg),
+with a shaded shell and curved antennae instead of the former flat substitute.
+Color, a fine edge highlight and a ground shadow separate the mascot from the
+background. Warm near-white text and controls carry contrast; the coral accent
+belongs mainly to the mascot. The center is decorative, not another button.
+Do not repeat the agent, thread, brand or action in a second panel. Home hides conversation content by default. Opting into
 message previews replaces the reply-ready status with a bounded summary; it
 never adds another row or card.
 
-| State | Single status line | Watch action | Dial action |
+| State | Headline | Watch action | Dial action |
 | --- | --- | --- | --- |
-| Ready | Ready | Hold to talk; Continue if voice is unavailable | Continue to current conversation |
-| First conversation | Ready when you are | Hold to talk; Continue if voice is unavailable | Start |
-| Working | Working on your request | View progress | View progress |
-| Reply | Reply ready | Read reply | Read reply |
-| Offline | OpenClaw offline | Connection | Connection |
-| Live call | Microphone active | Return to call | No call state on this hardware |
+| Ready | Ready when you are. / Ready for you. | Hold to talk; Continue if voice is unavailable | Continue to current conversation |
+| First conversation | Say hello. | Hold to talk; Continue if voice is unavailable | Start |
+| Working | On it. | View progress | View progress |
+| Reply | Your reply is ready. / Reply ready. | Read reply | Read reply |
+| Offline | Let’s reconnect. / Offline. | Connection | Connection |
+| Live call | I’m listening. | Return to call | No call state on this hardware |
 
-The status line and action change in place; no banners or cards accumulate.
+The headline and action change in place; no banners or cards accumulate.
 A working request leads back to its progress instead of inviting a duplicate.
 Offline keeps Agents, Menu and local controls reachable. A live call retains
 explicit End in the call view.
@@ -202,8 +205,18 @@ device. The explorer's control hint teaches the encoder mapping; firmware
 onboarding must teach it once without adding permanent Home instructions.
 
 This applies [Apple's watchOS guidance](https://developer.apple.com/design/human-interface-guidelines/designing-for-watchos)
-on glanceable information and brief interactions to our own device UI; it is
-not a copied platform skin.
+on glanceable information and brief interactions, and its
+[material guidance](https://developer.apple.com/design/human-interface-guidelines/materials)
+on separating controls from content. The design borrows hierarchy and careful
+layering rather than recreating a platform skin.
+
+The color field, frame and highlights must be precomposed for the ESP renderer;
+this proposal does not require runtime blur, a shader or continuous full-screen
+repainting. The browser demonstrates a slow float, a brief blink and a working
+ring. Firmware must qualify their power/frame budget and settle when idle;
+Reduced motion disables all three. The ring is decorative activity, not a
+percentage or measured progress. The 9:41 clock is a fixed layout fixture;
+firmware must use its actual clock or omit it when time is unknown.
 
 Five 64 px icon-and-label rows fit in the 342 px browse region. Comfortable
 spacing uses 68 px rows; larger text scrolls rather than hiding a destination.
@@ -534,7 +547,7 @@ result and recovery. The same scene model renders both devices and the sheets.
 
 | Panes | Finding | Current decision |
 | --- | --- | --- |
-| Home, menu | Brand, agent row, recent card and shortcuts compete with the primary action | Agent/Menu header, centered lobster, one status line, one action; encoder turn opens Menu |
+| Home, menu | Brand, agent row, recent card and shortcuts compete with the primary action | Compact agent/Menu surfaces, shaded mascot and color field, one headline and floating action; encoder turn opens Menu |
 | Agents and profiles | Current markers and profile actions could contradict selection | Resolve Current and Use/Conversations from the selected agent; preserve fox/cube/compass/initials |
 | Conversations | Reply required another menu; titles could drift from selection | One-hold watch reply; Dial Reply; carry selected thread and pending-turn owner separately |
 | Talk, review, replies | Similar generic panels, unclear recording time, accidental tap capture | Distinct recording stage, elapsed/cap timer, slide-up cancel, tap rejection, automatic demo transcription, recipient and unsent transcript card |

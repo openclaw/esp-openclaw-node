@@ -2,7 +2,7 @@
 
 **Research baseline · revision 02 · 27 October 2026 · no firmware changes.**
 
-**Current direction:** [revision 07 shared interaction plan](watch-dial-interaction-plan.md)
+**Current direction:** [revision 08 shared interaction plan](watch-dial-interaction-plan.md)
 and its [interactive flow explorer](watch-dial-ux-flows.html) and
 [annotated layout board](watch-dial-ux-plan.html). The revision 02
 product split, visual rules and explorer below are retained as a superseded
@@ -139,7 +139,7 @@ executed. Implemented patterns and proposed adaptations are separated here.
 
 ## First use and pairing
 
-### Current setup direction (revision 07)
+### Current setup direction (revision 08)
 
 The [current interaction plan](watch-dial-interaction-plan.md#mobile-pairing-qr-discovery-and-bluetooth-setup)
 supersedes the original Wi-Fi-first recommendation: **scan the device QR in
@@ -155,7 +155,7 @@ firmware capabilities. Espressif provides
 and [mobile QR/discovery primitives](https://github.com/espressif/esp-idf-provisioning-ios).
 
 The historical sequence below records the initial browser-first study. Use
-revision 07 for the current mobile flow, screen review and implementation gates.
+revision 08 for the current mobile flow, screen review and implementation gates.
 
 ### Complete first-use journey, on either device
 

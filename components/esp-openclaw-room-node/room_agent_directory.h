@@ -47,6 +47,13 @@ void room_conversations_copy(room_conversations_snapshot_t *snapshot);
  * epoch again after acquiring its own lock, without reversing lock order. */
 esp_err_t room_conversations_copy_resume(room_agents_snapshot_t *agents,
     room_conversations_snapshot_t *reader, unsigned *epoch);
+typedef struct {
+    unsigned epoch;
+    char agent_name[65];
+} room_conversation_context_t;
+/* Bounded Home projection; no messages, allocation, or directory request.
+ * Revalidate its epoch before admitting a later Continue action. */
+esp_err_t room_conversations_copy_context(room_conversation_context_t *context);
 bool room_conversations_resume_current(unsigned epoch);
 typedef struct {
     esp_openclaw_agent_t agent;

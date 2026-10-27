@@ -32,11 +32,16 @@ display; tap the visible control again to start or stop Talk. If the
 button's action changes during a press, release and press again; a held Start
 press cannot become Stop when wake word or a remote command starts Talk.
 
-On the 1.8-inch Watch, **Menu → Agents** opens the same read-only directory.
+On the 1.8-inch Watch, **Menu → Agents** opens the agent directory.
 Swipe the list to browse up to eight agents per page; use the arrows for more
 pages, and tap a row to inspect its name and exact ID. Initials replace emoji
 that the embedded font cannot display. Back returns to the list or menu, and
-Start Talk / Stop Talk remains available without changing the conversation.
+Start Talk / Stop Talk remains available. **Use for next Talk** chooses the
+agent without starting a call or changing an active conversation. The button
+confirms the choice after the room owner accepts it; Home shows the next
+agent. While selection is pending, Start Talk is disabled. A lost operator
+connection expires the choice and disables Start until an agent is chosen
+again, or USB `agents default` restores Gateway-default routing.
 Loading, offline, empty, denied, oversized, and timed-out requests have visible
 outcomes. USB `menu agents` opens this screen for hardware inspection.
 

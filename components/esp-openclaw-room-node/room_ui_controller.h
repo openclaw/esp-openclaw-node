@@ -49,6 +49,11 @@ typedef struct {
 } room_ui_facts_t;
 
 typedef struct {
+    bool selected, expired;
+    char id[65], name[65];
+} room_ui_talk_target_t;
+
+typedef struct {
     room_ui_state_t state;
     bool diagnostics_open;
     char detail[48];
@@ -62,6 +67,11 @@ void room_ui_set_talk_action_handler(void (*handler)(bool start));
 void room_ui_set_agents_action_handler(void (*handler)(bool open, size_t offset));
 /** Copy a directory result outside the room owner lock; repaint retries on contention. */
 void room_ui_store_agents(const room_agents_snapshot_t *snapshot);
+/** Selection intent is copied by the owner; this callback must not wait for it. */
+void room_ui_set_agent_selection_handler(void (*handler)(const char *id, unsigned revision));
+void room_ui_store_talk_target(const room_ui_talk_target_t *target);
+/** Acknowledge only after the owner has accepted or rejected the selection. */
+void room_ui_agent_selection_complete(esp_err_t result);
 void room_ui_set(room_ui_state_t state, const char *detail);
 /** Store one coherent snapshot without taking the display lock. Refresh after releasing owner locks. */
 void room_ui_store_facts(const room_ui_facts_t *facts);

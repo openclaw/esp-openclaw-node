@@ -83,8 +83,14 @@ static bool operator_ui_pending;
 static _Atomic size_t local_agents_request = SIZE_MAX;
 static struct {
     bool selected, expired;
-    char id[65], session_key[200];
+    char id[65], name[65], session_key[200];
 } talk_target;
+static portMUX_TYPE selection_lock = portMUX_INITIALIZER_UNLOCKED;
+static struct {
+    bool pending;
+    unsigned revision;
+    char id[65];
+} local_agent_selection;
 static bool node_reconnect_scheduled;
 static bool node_reconnect_pending;
 static esp_timer_handle_t node_reconnect_timer;
@@ -141,6 +147,10 @@ static void refresh_home_facts(void)
     };
     /* Store while the owner is locked, but never wait for LVGL under that lock. */
     room_ui_store_facts(&facts);
+    room_ui_talk_target_t target = {.selected = talk_target.selected, .expired = talk_target.expired};
+    memcpy(target.id, talk_target.id, sizeof(target.id));
+    memcpy(target.name, talk_target.name, sizeof(target.name));
+    room_ui_store_talk_target(&target);
     xSemaphoreGive(state_lock);
     room_ui_refresh();
 }
@@ -372,12 +382,36 @@ static esp_err_t select_talk_agent(const char *id, unsigned revision)
     }
     if (err == ESP_OK) {
         memcpy(talk_target.id, target.agent.id, sizeof(talk_target.id));
+        memcpy(talk_target.name, target.agent.name, sizeof(talk_target.name));
         memcpy(talk_target.session_key, key, strlen(key) + 1);
         talk_target.selected = true;
         talk_target.expired = false;
     }
     xSemaphoreGive(state_lock);
     return err;
+}
+
+static void request_local_agent_selection(const char *id, unsigned revision)
+{
+    if (id == NULL || strnlen(id, sizeof(local_agent_selection.id)) >= sizeof(local_agent_selection.id)) return;
+    portENTER_CRITICAL(&selection_lock);
+    local_agent_selection.pending = true;
+    local_agent_selection.revision = revision;
+    memcpy(local_agent_selection.id, id, strlen(id) + 1);
+    portEXIT_CRITICAL(&selection_lock);
+    wake_talk_teardown();
+}
+
+static void apply_local_agent_selection(void)
+{
+    char id[sizeof(local_agent_selection.id)];
+    portENTER_CRITICAL(&selection_lock);
+    bool pending = local_agent_selection.pending;
+    unsigned revision = local_agent_selection.revision;
+    memcpy(id, local_agent_selection.id, sizeof(id));
+    local_agent_selection.pending = false;
+    portEXIT_CRITICAL(&selection_lock);
+    if (pending) room_ui_agent_selection_complete(select_talk_agent(id, revision));
 }
 
 static void refresh_agents(void)
@@ -426,6 +460,8 @@ static void talk_teardown_task(void *arg)
     for (;;) {
         talk_teardown_request_t wake;
         if (xQueueReceive(talk_teardown_queue, &wake, portMAX_DELAY) != pdTRUE) continue;
+        /* Publish the target and repaint once below, after selection and Talk work. */
+        apply_local_agent_selection();
         portENTER_CRITICAL(&talk_timeout_lock);
         uint32_t expired_generation = talk_timeout_generation;
         talk_timeout_generation = 0;
@@ -1570,6 +1606,7 @@ static int agents_console_command(int argc, char **argv)
         room_agent_directory_copy(snapshot);
         esp_err_t err = select_talk_agent(argv[2], snapshot->revision);
         free(snapshot);
+        refresh_home_facts();
         printf("next Talk agent: %s\n", err == ESP_OK ? argv[2] : "selection unavailable; refresh agents and retry");
         return err == ESP_OK ? 0 : 1;
     }
@@ -1577,6 +1614,7 @@ static int agents_console_command(int argc, char **argv)
         xSemaphoreTake(state_lock, portMAX_DELAY);
         memset(&talk_target, 0, sizeof(talk_target));
         xSemaphoreGive(state_lock);
+        refresh_home_facts();
         printf("next Talk uses the Gateway default; current call is unchanged\n");
         return 0;
     }
@@ -1852,6 +1890,7 @@ esp_err_t esp_openclaw_room_node_start(const esp_openclaw_room_node_config_t *co
 
     room_ui_set_talk_action_handler(request_local_talk);
     room_ui_set_agents_action_handler(request_local_agents);
+    room_ui_set_agent_selection_handler(request_local_agent_selection);
     room_ui_init();
     ESP_ERROR_CHECK(room_canvas_init());
     if (config->display.setup_local_input != NULL) {

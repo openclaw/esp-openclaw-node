@@ -1104,7 +1104,14 @@ static unsigned load_target_roster(const char *json)
 static void target_selection(void)
 {
     unsigned revision = load_target_roster(target_roster);
-    CHECK(select_talk_agent("builder", revision) == ESP_OK, "select a current agent");
+    unsigned refreshes = host.ui_refreshes;
+    request_local_agent_selection("builder", revision);
+    CHECK(!talk_target.selected && host.selection_completions == 0, "display callback only records intent");
+    host_run_task("talk_teardown");
+    CHECK(talk_target.selected && host.selection_completions == 1 && host.selection_result == ESP_OK,
+        "owner acknowledges a current agent before Talk admission");
+    CHECK(host.ui_target.selected && strcmp(host.ui_target.id, "builder") == 0 && host.ui_refreshes > refreshes,
+        "selection is published and repainted in the same supervisor turn");
     host_emit_node(node_client, ESP_OPENCLAW_NODE_EVENT_DISCONNECTED);
     CHECK(!talk_target.expired, "primary node loss does not replace operator authority");
     admit();

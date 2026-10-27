@@ -1,6 +1,7 @@
 #include "room_watch_home.h"
 
 #include <string.h>
+#include <stdio.h>
 
 static lv_obj_t *root, *wifi_label, *gateway_label, *title_label, *detail_label;
 
@@ -49,7 +50,7 @@ void room_watch_home_create(lv_obj_t *parent, lv_event_cb_t menu_handler)
     lv_obj_set_style_text_align(detail_label, LV_TEXT_ALIGN_CENTER, 0);
 }
 
-void room_watch_home_render(const room_ui_facts_t *facts, room_ui_state_t state,
+void room_watch_home_render(const room_ui_facts_t *facts, const room_ui_talk_target_t *target, room_ui_state_t state,
                             const char *detail, bool hidden)
 {
     if (root == NULL) return;
@@ -95,6 +96,17 @@ void room_watch_home_render(const room_ui_facts_t *facts, room_ui_state_t state,
         subtitle = facts->talk == ROOM_UI_TALK_NO_SESSION ? "Talk needs an operator session"
             : facts->talk == ROOM_UI_TALK_WAITING ? "Waiting for the operator session"
             : "Talk is unavailable";
+    }
+    char next_agent[80];
+    if (target->selected && state != ROOM_UI_ERROR && state != ROOM_UI_SETUP &&
+        (facts->talk == ROOM_UI_TALK_READY || facts->talk == ROOM_UI_TALK_ACTIVE)) {
+        if (target->expired) {
+            if (facts->talk == ROOM_UI_TALK_READY) title = "Choose an agent";
+            subtitle = "Refresh Agents to choose again";
+        } else {
+            snprintf(next_agent, sizeof(next_agent), "Next: %s", target->name);
+            subtitle = next_agent;
+        }
     }
     lv_label_set_text_static(title_label, title);
     /* Setup details can contain line breaks; keep them above the action. */

@@ -48,6 +48,8 @@ void xSemaphoreTake(SemaphoreHandle_t, uint32_t);
 void xSemaphoreGive(SemaphoreHandle_t);
 void vSemaphoreDelete(SemaphoreHandle_t);
 """)
+        (work / "esp_timer.h").write_text("#include <stdint.h>\nint64_t esp_timer_get_time(void);\n")
+        directory = root / "components/esp-openclaw-directory"
         binary = work / "reader-test"
         cjson_object = work / "cjson.o"
         subprocess.run(["cc", "-std=gnu11", "-g", "-fsanitize=address,undefined",
@@ -58,11 +60,20 @@ void vSemaphoreDelete(SemaphoreHandle_t);
             "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
             "-I", str(work), "-I", str(tests.parent / "main"),
             "-I", str(root / "components/esp-openclaw-node/include"),
+            "-I", str(directory / "include"),
             "-I", str(args.cjson_dir), str(tests / "test_dial_reader.c"),
-            str(tests.parent / "main/dial_reader.c"),
+            str(tests.parent / "main/dial_reader.c"), str(directory / "esp_openclaw_directory.c"),
             str(cjson_object), "-lm", "-o", str(binary),
         ], check=True)
         subprocess.run([str(binary)], check=True)
+        parser_test = work / "directory-test"
+        subprocess.run(["cc", "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-g",
+                        "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
+                        "-I", str(directory / "include"), "-I", str(args.cjson_dir),
+                        str(directory / "esp_openclaw_directory.c"),
+                        str(directory / "tests/test_directory.c"), str(cjson_object),
+                        "-lm", "-o", str(parser_test)], check=True)
+        subprocess.run([str(parser_test)], check=True)
 
 
 if __name__ == "__main__":

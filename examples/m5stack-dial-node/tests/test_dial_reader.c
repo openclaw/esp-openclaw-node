@@ -18,6 +18,21 @@ static int waits, locked, creates, connects, disconnects, destroys, scopes, dela
 static esp_err_t create_result = ESP_OK, connect_result = ESP_ERR_NOT_FOUND, disconnect_result = ESP_OK;
 static bool disconnect_during_delay, in_callback;
 static esp_openclaw_node_handle_t fail_uri;
+static int64_t now;
+static int queries;
+static esp_err_t query_result = ESP_OK;
+static esp_openclaw_node_gateway_request_cb_t response;
+static void *response_context;
+int64_t esp_timer_get_time(void) { return now; }
+esp_err_t esp_openclaw_node_gateway_request_on_connection(esp_openclaw_node_handle_t handle,
+    uint32_t connection, const char *method, const char *params,
+    esp_openclaw_node_gateway_request_cb_t callback, void *context) {
+    assert(!locked && !in_callback && handle == &client && connection == client.id);
+    assert(strcmp(method, "agents.list") == 0 && strcmp(params, "{}") == 0);
+    ++queries;
+    if (query_result == ESP_OK) { assert(response == NULL); response = callback; response_context = context; }
+    return query_result;
+}
 
 SemaphoreHandle_t xSemaphoreCreateMutex(void) { return &locked; }
 void xSemaphoreTake(SemaphoreHandle_t sem, uint32_t ticks) {
@@ -73,6 +88,18 @@ static void status(const char *expected, bool ready) {
     assert(strcmp(cJSON_GetObjectItem(result, "state")->valuestring, expected) == 0);
     assert(cJSON_IsTrue(cJSON_GetObjectItem(result, "readConnected")) == ready);
     cJSON_Delete(result);
+}
+static void agent_status(dial_agents_state_t expected, size_t count) {
+    dial_agents_snapshot_t snapshot;
+    dial_reader_agents_copy(&snapshot);
+    assert(snapshot.state == expected && snapshot.page.count == count);
+}
+static void respond(const char *json) {
+    assert(response != NULL);
+    esp_openclaw_node_gateway_result_t result = {.ok = json != NULL, .payload_json = json};
+    locked = 1; in_callback = true;
+    response(&client, &result, response_context);
+    in_callback = false; locked = 0; response = NULL; response_context = NULL;
 }
 static void node_connected(uint32_t id) {
     node.id = id; locked = 1; in_callback = true;
@@ -143,6 +170,50 @@ int main(void) {
     before = connects; step(); assert(connects == before + 1);
     connected(78); step(); status("ready", true);
     assert(delays >= connects && destroys == 0);
+    agent_status(DIAL_AGENTS_IDLE, 0);
+    assert(dial_reader_agents_refresh(0) == ESP_OK); step();
+    agent_status(DIAL_AGENTS_LOADING, 0); assert(queries == 1);
+    char roster[] = "{\"agents\":[{\"id\":\"kitsune\",\"identity\":{\"name\":\"Kitsune\",\"emoji\":\"🦊\"}}]}";
+    respond(roster); memset(roster, 'x', sizeof(roster) - 1); step();
+    agent_status(DIAL_AGENTS_READY, 1);
+    dial_agents_snapshot_t snapshot; dial_reader_agents_copy(&snapshot);
+    assert(strcmp(snapshot.page.agents[0].name, "Kitsune") == 0);
+
+    assert(dial_reader_agents_refresh(1) == ESP_OK); step();
+    assert(dial_reader_agents_refresh(0) == ESP_OK);
+    respond("{\"agents\":[{\"id\":\"old\"}]}"); step();
+    agent_status(DIAL_AGENTS_LOADING, 0); assert(queries == 3);
+    respond("{\"agents\":[]}"); step(); agent_status(DIAL_AGENTS_EMPTY, 0);
+
+    assert(dial_reader_agents_refresh(0) == ESP_OK); step();
+    node.id = 0; dial_reader_node_event(ESP_OPENCLAW_NODE_EVENT_DISCONNECTED);
+    agent_status(DIAL_AGENTS_OFFLINE, 0);
+    node.uri = "ws://gateway-c.example"; node_connected(19); step();
+    respond("{\"agents\":[{\"id\":\"old\"}]}");
+    disconnected(ESP_OPENCLAW_NODE_DISCONNECTED_REASON_REQUESTED); step();
+    client.uri = node.uri; connected(79); step(); agent_status(DIAL_AGENTS_LOADING, 0);
+    respond("{\"agents\":[{\"id\":\"new\"}]}"); step();
+    agent_status(DIAL_AGENTS_READY, 1); dial_reader_agents_copy(&snapshot);
+    assert(strcmp(snapshot.page.agents[0].id, "new") == 0);
+
+    query_result = ESP_ERR_NO_MEM;
+    assert(dial_reader_agents_refresh(0) == ESP_OK); step(); step();
+    agent_status(DIAL_AGENTS_ERROR, 0); query_result = ESP_OK;
+    assert(dial_reader_agents_refresh(0) == ESP_OK); step(); respond("invalid"); step();
+    agent_status(DIAL_AGENTS_ERROR, 0);
+    assert(dial_reader_agents_refresh(0) == ESP_OK); step();
+    char *oversized = malloc(ESP_OPENCLAW_DIRECTORY_MAX_JSON_BYTES + 2);
+    memset(oversized, 'x', ESP_OPENCLAW_DIRECTORY_MAX_JSON_BYTES + 1);
+    oversized[ESP_OPENCLAW_DIRECTORY_MAX_JSON_BYTES + 1] = '\0';
+    respond(oversized); free(oversized); step(); agent_status(DIAL_AGENTS_TOO_LARGE, 0);
+
+    assert(dial_reader_agents_refresh(0) == ESP_OK); step(); now += 15000000;
+    before = disconnects; step(); assert(disconnects == before + 1);
+    respond(NULL); disconnected(ESP_OPENCLAW_NODE_DISCONNECTED_REASON_REQUESTED); step();
+    connected(80); step(); agent_status(DIAL_AGENTS_ERROR, 0);
+    before = queries; step(); assert(queries == before); // Explicit refresh after a timed-out request.
+    assert(dial_reader_agents_refresh(0) == ESP_OK); step();
+    respond("{\"agents\":[]}"); step(); agent_status(DIAL_AGENTS_EMPTY, 0);
     puts("Dial reader: role, handoff, loss, auth, origin and stale-connection cases passed");
     return 0;
 }

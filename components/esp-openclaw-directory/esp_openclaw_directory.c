@@ -96,6 +96,10 @@ esp_openclaw_directory_result_t esp_openclaw_directory_parse(
     while (end != NULL && end < json + length && (*end == ' ' || *end == '\n' || *end == '\r' || *end == '\t')) ++end;
     const cJSON *agents = cJSON_GetObjectItemCaseSensitive(root, "agents");
     bool valid = cJSON_IsObject(root) && cJSON_IsArray(agents) && end == json + length;
+    const char *main_key = string_field(root, "mainKey");
+    if (main_key != NULL && strlen(main_key) < sizeof(page->main_key)) {
+        memcpy(page->main_key, main_key, strlen(main_key) + 1);
+    }
     size_t index = 0;
     const cJSON *row;
     cJSON_ArrayForEach(row, agents) {

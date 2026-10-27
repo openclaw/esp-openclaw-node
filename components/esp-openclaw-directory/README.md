@@ -5,6 +5,13 @@ It retains eight rows at a time: canonical ID, display name and identity emoji.
 The identity name takes precedence over the configured name; a missing name
 falls back to the ID. Remote avatar URLs and unrelated metadata are not retained.
 
+The page also retains the Gateway's `mainKey` suffix, unchanged, up to 128 UTF-8
+bytes. Missing, empty, mistyped, or longer keys remain unavailable; the roster
+can still be browsed. Routing keys are never shortened or replaced with a
+guessed `main` value. This metadata does not select an agent or start a call.
+The suffix comes from the Gateway's
+[agent-list projection](https://github.com/openclaw/openclaw/blob/5a4472678cfc08d5d286bcebec8889f8cb414fb7/src/gateway/agent-list.ts#L81).
+
 `esp_openclaw_directory_parse` accepts at most 32 KiB and 16 levels of JSON
 nesting. Names and emoji have UTF-8-safe byte limits. IDs must already be
 canonical lowercase identifiers of at most 64 bytes; they are never shortened.

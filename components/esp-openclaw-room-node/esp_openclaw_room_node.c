@@ -1665,10 +1665,23 @@ static int diagnostics_console_command(int argc, char **argv)
     return 1;
 }
 
+static int brightness_console_command(int argc, char **argv)
+{
+    char *end = NULL;
+    long percent = argc == 2 ? strtol(argv[1], &end, 10) : -1;
+    if (argc != 2 || end == argv[1] || *end != '\0' || percent < 10 || percent > 100) {
+        printf("usage: brightness <10..100>\n");
+        return 1;
+    }
+    esp_err_t err = room_ui_watch_brightness((int)percent);
+    printf("watch brightness: %s\n", esp_err_to_name(err));
+    return err == ESP_OK ? 0 : 1;
+}
+
 static int menu_console_command(int argc, char **argv)
 {
     if (argc > 2) {
-        printf("usage: menu [menu|agents|conversations|preview|connection|canvas|home]\n");
+        printf("usage: menu [menu|agents|conversations|preview|settings|display|connection|canvas|home]\n");
         return 1;
     }
     const char *page = argc == 2 ? argv[1] : "menu";
@@ -1851,9 +1864,15 @@ static esp_err_t register_room_console_commands(void)
             .func = conversations_console_command,
         },
         {
+            .command = "brightness",
+            .help = "Set Watch awake brightness until restart; idle sleep and camera minimum stay enabled",
+            .hint = "<10..100>",
+            .func = brightness_console_command,
+        },
+        {
             .command = "menu",
             .help = "Open a local watch menu page without starting Talk",
-            .hint = "[menu|agents|conversations|preview|connection|canvas|home]",
+            .hint = "[menu|agents|conversations|preview|settings|display|connection|canvas|home]",
             .func = menu_console_command,
         },
         {

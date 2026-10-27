@@ -16,7 +16,7 @@ static lv_display_t *display;
 static uint8_t *frame, *draw_buffer;
 static int width, height, brightness, display_depth, critical_depth;
 static int64_t now_us = 1000000;
-static bool deny_display, canvas_active;
+static bool deny_display, canvas_active, fail_brightness;
 static room_canvas_retained_kind_t retained_kind;
 static esp_openclaw_node_command_handler_t face_gesture;
 static unsigned toggles, holds;
@@ -163,6 +163,7 @@ static esp_err_t set_brightness(void *ctx, int value)
 {
     (void)ctx;
     assert(critical_depth == 0 && value >= 0 && value <= 100);
+    if (fail_brightness) return ESP_ERR_TIMEOUT;
     brightness = value;
     return ESP_OK;
 }
@@ -543,10 +544,12 @@ static void check_watch_navigation(void)
     assert(brightness == 40); // A call ending must not cancel the Home wake period.
     room_ui_set(ROOM_UI_SPEAKING, NULL);
     click_talk(watch_menu_button);
+    click_talk(lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_SETTINGS "  Settings")));
     click_talk(lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_SETTINGS "  Device status")));
     assert(room_diagnostics_is_open());
     room_diagnostics_close();
-    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Menu")));
+    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Settings")));
+    click_talk(lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_LEFT " Menu")));
     click_talk(lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_IMAGE "  Canvas")));
     assert(lv_obj_is_visible(find_text(lv_layer_top(), "No card yet\n\nAsk your assistant to show\na card on this watch.")));
     click_talk(home_button);
@@ -896,6 +899,99 @@ static void check_watch_home_gesture(void)
     room_ui_set(ROOM_UI_IDLE, NULL);
 }
 
+static void check_watch_display_settings(const char *path)
+{
+    room_ui_facts_t facts = {.wifi = ROOM_UI_WIFI_CONNECTED,
+        .gateway = ROOM_UI_GATEWAY_CONNECTED, .talk = ROOM_UI_TALK_ACTIVE};
+    unsigned starts = talk_starts, stops = talk_stops, selections = agent_selections;
+    room_ui_store_facts(&facts);
+    room_ui_set(ROOM_UI_IDLE, NULL);
+    assert(room_ui_watch_menu("menu") == ESP_OK);
+    click_talk(lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_SETTINGS "  Settings")));
+    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Settings")));
+    click_talk(lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_IMAGE "  Display")));
+    assert(lv_obj_is_visible(find_text(lv_layer_top(), "80%")) && brightness == 80);
+    lv_obj_t *minus = lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_MINUS "  5%"));
+    lv_obj_t *plus = lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_PLUS "  5%"));
+    click_talk(minus);
+    assert(brightness == 75 && lv_obj_is_visible(find_text(lv_layer_top(), "75%")));
+    fail_brightness = true;
+    assert(room_ui_watch_brightness(50) == ESP_ERR_TIMEOUT && brightness == 75);
+    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Couldn't change. Try again.")));
+    fail_brightness = false;
+    assert(room_ui_watch_brightness(50) == ESP_OK && brightness == 50);
+    assert(!lv_obj_is_visible(find_text(lv_layer_top(), "Couldn't change. Try again.")));
+    assert(room_ui_camera_indicator_begin() == ESP_OK);
+    assert(room_ui_watch_brightness(10) == ESP_OK && brightness == 40);
+    assert(lv_obj_is_visible(find_text(lv_layer_top(), "10%")));
+    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Camera needs at least 40%")));
+    assert(room_ui_apply_display_brightness(0) == ESP_OK && brightness == 40);
+    room_ui_camera_indicator_end();
+    assert(brightness == 10);
+    click_talk(minus);
+    assert(brightness == 10);
+    assert(room_ui_watch_brightness(100) == ESP_OK);
+    click_talk(plus);
+    assert(brightness == 100);
+    assert(room_ui_watch_brightness(10) == ESP_OK);
+    // Canvas writers and diagnostics use the same accepted preference.
+    canvas_active = true;
+    assert(room_ui_apply_display_brightness(80) == ESP_OK && brightness == 10);
+    room_ui_refresh();
+    canvas_active = false;
+    room_ui_refresh();
+    assert(room_diagnostics_open() == ESP_OK && brightness == 10);
+    room_diagnostics_close();
+    assert(brightness == 10);
+    touch_talk(plus, true);
+    assert(room_ui_watch_menu("home") == ESP_OK);
+    touch_talk(plus, false);
+    assert(brightness == 10);
+    expire_watch_hint();
+    room_ui_show_face_hint(10000);
+    assert(brightness == 10);
+    expire_watch_hint();
+    assert(room_ui_watch_brightness(45) == ESP_OK && brightness == 0);
+    assert(room_ui_watch_menu("display") == ESP_OK && brightness == 45);
+    // A newer accepted setting consumes an already-held old button press.
+    touch_talk(plus, true);
+    assert(room_ui_watch_brightness(55) == ESP_OK && brightness == 55);
+    touch_talk(plus, false);
+    assert(brightness == 55);
+    deny_display = true;
+    assert(room_ui_watch_brightness(20) == ESP_ERR_TIMEOUT);
+    deny_display = false;
+    fire_timer("ui_repaint");
+    assert(brightness == 55);
+    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Couldn't change. Try again.")));
+    deny_display = true;
+    room_ui_refresh();
+    deny_display = false;
+    assert(room_ui_watch_brightness(65) == ESP_OK);
+    fire_timer("ui_repaint");
+    assert(brightness == 65);
+    assert(!lv_obj_is_visible(find_text(lv_layer_top(), "Couldn't change. Try again.")));
+    assert(room_ui_watch_brightness(0) == ESP_ERR_INVALID_ARG && brightness == 65);
+    facts.wifi = ROOM_UI_WIFI_OFFLINE;
+    facts.gateway = ROOM_UI_GATEWAY_OFFLINE;
+    room_ui_store_facts(&facts);
+    room_ui_refresh();
+    assert(lv_obj_is_visible(find_text(lv_layer_top(), "65%")));
+    assert(talk_starts == starts && talk_stops == stops && agent_selections == selections);
+    if (path) {
+        char output[1024];
+        snprintf(output, sizeof(output), "%s-display.ppm", path);
+        write_frame(output);
+    }
+    click_talk(lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_LEFT " Settings")));
+    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Settings")));
+    click_talk(lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_LEFT " Menu")));
+    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Menu")));
+    assert(room_ui_watch_menu("home") == ESP_OK);
+    expire_watch_hint();
+    puts("watch display: accepted writes, failures, camera floor, sleep, stale presses and offline navigation passed");
+}
+
 int main(int argc, char **argv)
 {
     assert(argc >= 2);
@@ -1044,6 +1140,8 @@ int main(int argc, char **argv)
         check_watch_agents(argc == 3 ? argv[2] : NULL);
         check_watch_conversations(argc == 3 ? argv[2] : NULL);
         check_watch_home_gesture();
+        check_watch_display_settings(argc == 3 ? argv[2] : NULL);
+        // This isolated fixture replaces and destroys the mascot singleton.
         check_watch_repaint();
     }
     assert(room_board_display_brightness_set(0) == ESP_OK && brightness == 0);

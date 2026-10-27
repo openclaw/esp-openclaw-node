@@ -87,8 +87,12 @@ void room_ui_set(room_ui_state_t state, const char *detail);
 void room_ui_store_facts(const room_ui_facts_t *facts);
 /** Repaint the most recently set state, e.g. after leaving canvas mode. */
 void room_ui_refresh(void);
-/** Open a local watch page (menu, agents, connection, canvas, home) without changing Talk. */
+/** Open a local watch page (menu, agents, settings, display, connection, canvas, home) without changing Talk. */
 esp_err_t room_ui_watch_menu(const char *page);
+/** Runtime Watch preference; sleep and camera visibility remain controller-owned. */
+esp_err_t room_ui_watch_brightness(int percent);
+/** Apply the requested UI state through the Watch preference and camera floor. */
+esp_err_t room_ui_apply_display_brightness(int percent);
 /** Show the idle face for `show_ms` (tap wake-up or agent face.set outside a call). */
 void room_ui_show_face_hint(uint32_t show_ms);
 /** Record the connected gateway (host:port); shown under the face. NULL clears. */

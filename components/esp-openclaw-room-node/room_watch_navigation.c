@@ -37,8 +37,8 @@ void room_watch_navigation_create(lv_obj_t *parent, lv_event_cb_t handler)
 #if LV_FONT_MONTSERRAT_28
     lv_obj_set_style_text_font(heading, &lv_font_montserrat_28, 0);
 #endif
-    const char *names[] = {LV_SYMBOL_LIST "  Agents", LV_SYMBOL_IMAGE "  Canvas", LV_SYMBOL_WIFI "  Connection", LV_SYMBOL_SETTINGS "  Device status"};
-    const room_watch_page_t pages[] = {ROOM_WATCH_AGENTS, ROOM_WATCH_CANVAS, ROOM_WATCH_CONNECTION, ROOM_WATCH_DEVICE_STATUS};
+    const char *names[] = {LV_SYMBOL_LIST "  Agents", LV_SYMBOL_IMAGE "  Canvas", LV_SYMBOL_WIFI "  Connection", LV_SYMBOL_SETTINGS "  Settings"};
+    const room_watch_page_t pages[] = {ROOM_WATCH_AGENTS, ROOM_WATCH_CANVAS, ROOM_WATCH_CONNECTION, ROOM_WATCH_SETTINGS};
     for (unsigned i = 0; i < 4; ++i) {
         rows[i] = lv_obj_create(root);
         lv_obj_remove_style_all(rows[i]);
@@ -82,7 +82,7 @@ void room_watch_navigation_render(room_watch_page_t page, const room_ui_facts_t 
         lv_obj_set_clickable(rows[i], !connection);
         if (connection && i < 3) lv_label_set_text_fmt(values[i], "%s: %s", names[i], states[i]);
         else {
-            const char *menu[] = {LV_SYMBOL_LIST "  Agents", LV_SYMBOL_IMAGE "  Canvas", LV_SYMBOL_WIFI "  Connection", LV_SYMBOL_SETTINGS "  Device status"};
+            const char *menu[] = {LV_SYMBOL_LIST "  Agents", LV_SYMBOL_IMAGE "  Canvas", LV_SYMBOL_WIFI "  Connection", LV_SYMBOL_SETTINGS "  Settings"};
             lv_label_set_text_static(values[i], menu[i]);
         }
     }

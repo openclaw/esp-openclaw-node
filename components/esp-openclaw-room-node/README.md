@@ -42,10 +42,18 @@ outcomes. USB `menu agents` opens this screen for hardware inspection.
 
 The local USB command `agents refresh [offset]` reads a page of up to eight
 agents through the existing operator connection. `agents` reports its state
-and copied identities; `agents close` releases the page. This is read-only:
-it does not select an agent or change an existing Talk session. The Gateway
-currently returns the entire roster, so responses larger than 32 KiB are
+and copied identities; `agents close` releases the page. Browsing does not
+change the Talk target. The Gateway currently returns the entire roster, so responses larger than 32 KiB are
 rejected before parsing.
+
+`agents select <id>` chooses a current-page agent for the next Talk session.
+The selection uses the exact `agents.list.mainKey` returned by the Gateway;
+missing routing metadata leaves the roster browsable but prevents selection.
+The admitted session keeps its target when another agent is chosen or the
+browser closes. `agents selection` reports the next target, and `agents default`
+explicitly restores Gateway-default routing. A lost or replaced operator
+connection, or a changed Gateway URI, expires the selection: choose again
+from a refreshed roster before starting Talk. This choice is not persisted.
 
 Directory requests wait during Talk startup and teardown. A 15-second
 directory timeout does not disconnect the shared operator or interrupt Talk

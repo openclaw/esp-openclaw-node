@@ -547,8 +547,9 @@ esp_err_t esp_openclaw_node_gateway_request(esp_openclaw_node_handle_t node,
         host_require(create_rpc.callback == NULL, "one create request outstanding");
         cJSON *json = cJSON_Parse(params);
         cJSON *key = cJSON_GetObjectItemCaseSensitive(json, "sessionKey");
-        host_require(cJSON_IsString(key) && strcmp(key->valuestring, "agent:fixture:main") == 0,
-            "real Talk resolves synthetic Gateway routing");
+        host_require(cJSON_IsString(key) && strlen(key->valuestring) < sizeof(host.create_key),
+            "Talk create carries a bounded session key");
+        strcpy(host.create_key, key->valuestring);
         cJSON_Delete(json);
         create_rpc = request;
         ++host.create_requests;

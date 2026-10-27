@@ -78,6 +78,7 @@ static void connect_call(void)
 {
     start_pending_config();
     host_reply_config();
+    CHECK(strcmp(host.create_key, "agent:fixture:main") == 0, "default Talk uses Gateway routing");
     host_reply_create(true);
     host_require(host.create_requests == host.opens && host.ice_callbacks == host.opens && host.signaling_connected == host.opens,
         "real Talk accepted Gateway-owned voice-a");
@@ -1064,6 +1065,7 @@ static void capture_source_scheduler(void)
 }
 
 static const char *agent_roster = "{\"agents\":[{\"id\":\"fixture\",\"name\":\"Fixture\"}]}";
+static const char *target_roster = "{\"mainKey\":\"work\",\"agents\":[{\"id\":\"fixture\",\"name\":\"Fixture\"},{\"id\":\"builder\",\"name\":\"Builder\"}]}";
 
 static room_agents_snapshot_t agents_snapshot(void)
 {
@@ -1088,6 +1090,77 @@ static void directory_ready(void)
     request_local_agents(false, 0);
     host_run_task("talk_teardown");
     CHECK(agents_snapshot().state == ROOM_AGENTS_IDLE, "leaving browser releases directory interest");
+}
+
+static unsigned load_target_roster(const char *json)
+{
+    room_agent_directory_refresh(0);
+    host_run_task("talk_teardown");
+    host_reply_agents(true, json);
+    host_run_task("talk_teardown");
+    return agents_snapshot().revision;
+}
+
+static void target_selection(void)
+{
+    unsigned revision = load_target_roster(target_roster);
+    CHECK(select_talk_agent("builder", revision) == ESP_OK, "select a current agent");
+    host_emit_node(node_client, ESP_OPENCLAW_NODE_EVENT_DISCONNECTED);
+    CHECK(!talk_target.expired, "primary node loss does not replace operator authority");
+    admit();
+    CHECK(select_talk_agent("fixture", revision) == ESP_OK, "choose next agent after admission");
+    request_local_agents(false, 0);
+    host_run_task("talk_teardown");
+    host_run_task("talk_start");
+    CHECK(host.config_requests == 0 && strcmp(host.create_key, "agent:builder:work") == 0,
+        "admission freezes explicit target and bypasses default discovery");
+    host_reply_create(true);
+    host_emit_peer(webrtc, ESP_WEBRTC_EVENT_CONNECTED);
+    host_run_task("talk_teardown");
+    CHECK(talk_active, "changing next target leaves current call active");
+    host_command(node_client, "talk.stop");
+    host_run_task("talk_teardown");
+    CHECK(strcmp(host.close_key, "agent:builder:work") == 0, "close retains admitted owner");
+    admit();
+    host_run_task("talk_start");
+    CHECK(strcmp(host.create_key, "agent:fixture:work") == 0 && host.config_requests == 0,
+        "next choice survives closing the directory and previous call");
+    host_reply_create(true);
+    host_emit_peer(webrtc, ESP_WEBRTC_EVENT_CONNECTED);
+}
+
+static void target_stale(void)
+{
+    unsigned revision = load_target_roster(target_roster);
+    CHECK(select_talk_agent("builder", revision) == ESP_OK, "select before reconnect");
+    host_emit_node(operator_client, ESP_OPENCLAW_NODE_EVENT_DISCONNECTED);
+    host_emit_node(operator_client, ESP_OPENCLAW_NODE_EVENT_CONNECTED);
+    CHECK(select_talk_agent("fixture", revision) == ESP_ERR_INVALID_STATE, "stale roster cannot retarget");
+    room_agent_directory_cancel();
+    CHECK(host_command_params(node_client, "talk.start", "{}") == ESP_ERR_INVALID_STATE && host.opens == 0,
+        "expired choice cannot silently fall back to Gateway default");
+    char *args[] = {"agents", "default"};
+    CHECK(agents_console_command(2, args) == 0, "explicit reset chooses Gateway default");
+    connect_call();
+}
+
+static void target_metadata(void)
+{
+    unsigned revision = load_target_roster(agent_roster);
+    CHECK(select_talk_agent("fixture", revision) == ESP_ERR_INVALID_STATE && !talk_target.selected,
+        "missing mainKey cannot create a guessed target");
+    revision = load_target_roster(target_roster);
+    CHECK(select_talk_agent("missing", revision) == ESP_ERR_NOT_FOUND && !talk_target.selected,
+        "target must belong to the visible roster");
+}
+
+static void target_origin(void)
+{
+    unsigned revision = load_target_roster(target_roster);
+    CHECK(select_talk_agent("builder", revision) == ESP_OK, "select before Gateway change");
+    host.node_uri = "wss://gateway.example/changed-path";
+    host_emit_node(node_client, ESP_OPENCLAW_NODE_EVENT_CONNECTED);
+    CHECK(talk_target.expired && !operator_ready, "full Gateway URI change revokes choice");
 }
 
 static void directory_reconnect(void)
@@ -1223,6 +1296,10 @@ static void directory_errors(void)
 
 static const struct { const char *name; void (*run)(void); } cases[] = {
     {"directory-ready", directory_ready},
+    {"target-selection", target_selection},
+    {"target-stale", target_stale},
+    {"target-metadata", target_metadata},
+    {"target-origin", target_origin},
     {"directory-reconnect", directory_reconnect},
     {"directory-gateway-rebind", directory_gateway_rebind},
     {"directory-superseded", directory_superseded},

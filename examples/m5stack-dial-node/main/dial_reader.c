@@ -17,17 +17,25 @@ typedef enum { NONE, UP, LOST, AUTH_REJECTED, FAILED, CLOSED } reader_event_t;
 static atomic_uint node_generation;
 static atomic_uint pending_event;
 
+typedef enum { AGENTS, SESSIONS, PREVIEW } request_kind_t;
+
 typedef struct {
+    request_kind_t kind;
+    char agent_id[65], key[ESP_OPENCLAW_SESSION_KEY_BYTES];
     unsigned generation, revision;
     uint32_t connection;
     size_t offset;
     int64_t started;
     bool ok, too_large;
     char *json;
-    esp_openclaw_agent_page_t page;
-} agents_request_t;
+    union {
+        esp_openclaw_agent_page_t agents;
+        esp_openclaw_session_page_t sessions;
+        esp_openclaw_session_preview_t preview;
+    } page;
+} reader_request_t;
 
-static _Atomic(agents_request_t *) completed_request;
+static _Atomic(reader_request_t *) completed_request;
 
 static struct {
     SemaphoreHandle_t lock;
@@ -44,7 +52,10 @@ static struct {
     dial_agents_state_t directory_state;
     unsigned directory_revision;
     esp_openclaw_agent_page_t *directory_page;
-    agents_request_t *inflight;
+    reader_request_t *inflight;
+    dial_conversations_snapshot_t *conversations;
+    unsigned conversations_revision, preview_revision;
+    bool sessions_pending, preview_pending;
 } reader;
 
 static bool current_node(void)
@@ -62,9 +73,19 @@ static bool current_reader(void)
         reader.reader_id != 0 && reader.reader_id == esp_openclaw_node_get_connection_id(reader.client);
 }
 
+static void clear_conversations(void)
+{
+    ++reader.conversations_revision;
+    ++reader.preview_revision;
+    reader.sessions_pending = reader.preview_pending = false;
+    free(reader.conversations);
+    reader.conversations = NULL;
+}
+
 static void invalidate_directory(void)
 {
     ++reader.directory_revision;
+    clear_conversations();
     free(reader.directory_page);
     reader.directory_page = NULL;
     reader.directory_pending = reader.directory_enabled;
@@ -150,11 +171,11 @@ static void consume_event(void)
     free(uri);
 }
 
-static void agents_response(esp_openclaw_node_handle_t client,
+static void reader_response(esp_openclaw_node_handle_t client,
                             const esp_openclaw_node_gateway_result_t *result, void *context)
 {
     (void)client;
-    agents_request_t *request = context;
+    reader_request_t *request = context;
     request->ok = result->ok && result->payload_json != NULL;
     if (request->ok) {
         size_t length = strnlen(result->payload_json, ESP_OPENCLAW_DIRECTORY_MAX_JSON_BYTES + 1);
@@ -170,59 +191,135 @@ static void agents_response(esp_openclaw_node_handle_t client,
     xTaskNotifyGive(reader.task);
 }
 
-static void consume_agents(void)
+static void consume_response(void)
 {
-    agents_request_t *request = atomic_exchange(&completed_request, NULL);
+    reader_request_t *request = atomic_exchange(&completed_request, NULL);
     if (request == NULL) return;
     dial_agents_state_t state = request->too_large ? DIAL_AGENTS_TOO_LARGE : DIAL_AGENTS_ERROR;
     if (request->ok && request->json != NULL) {
-        esp_openclaw_directory_result_t parsed = esp_openclaw_directory_parse(
-            request->json, strlen(request->json), request->offset, &request->page);
-        if (parsed == ESP_OPENCLAW_DIRECTORY_OK)
-            state = request->page.count == 0 ? DIAL_AGENTS_EMPTY : DIAL_AGENTS_READY;
-        else if (parsed == ESP_OPENCLAW_DIRECTORY_TOO_LARGE) state = DIAL_AGENTS_TOO_LARGE;
+        esp_openclaw_directory_result_t parsed;
+        size_t length = strlen(request->json);
+        if (request->kind == AGENTS) {
+            parsed = esp_openclaw_directory_parse(request->json, length, request->offset, &request->page.agents);
+            if (parsed == ESP_OPENCLAW_DIRECTORY_OK)
+                state = request->page.agents.count == 0 ? DIAL_AGENTS_EMPTY : DIAL_AGENTS_READY;
+        } else if (request->kind == SESSIONS) {
+            parsed = esp_openclaw_sessions_parse(request->json, length, request->agent_id,
+                                                request->offset, &request->page.sessions);
+            if (parsed == ESP_OPENCLAW_DIRECTORY_OK)
+                state = request->page.sessions.count == 0 ? DIAL_AGENTS_EMPTY : DIAL_AGENTS_READY;
+        } else {
+            parsed = esp_openclaw_preview_parse(request->json, length, request->key, &request->page.preview);
+            if (parsed == ESP_OPENCLAW_DIRECTORY_OK) state = DIAL_AGENTS_READY;
+        }
+        if (parsed == ESP_OPENCLAW_DIRECTORY_TOO_LARGE) state = DIAL_AGENTS_TOO_LARGE;
     }
     xSemaphoreTake(reader.lock, portMAX_DELAY);
     reader.inflight = NULL;
-    if (request->generation == reader.generation && request->revision == reader.directory_revision &&
-        current_reader() && request->connection == reader.reader_id) {
-        free(reader.directory_page);
-        reader.directory_page = NULL;
-        if (state == DIAL_AGENTS_READY || state == DIAL_AGENTS_EMPTY) {
-            reader.directory_page = malloc(sizeof(*reader.directory_page));
-            if (reader.directory_page != NULL) *reader.directory_page = request->page;
-            else state = DIAL_AGENTS_ERROR;
+    if (request->generation == reader.generation && current_reader() &&
+        request->connection == reader.reader_id) {
+        dial_conversations_snapshot_t *view = reader.conversations;
+        if (request->kind == AGENTS && request->revision == reader.directory_revision) {
+            free(reader.directory_page);
+            reader.directory_page = NULL;
+            if (state == DIAL_AGENTS_READY || state == DIAL_AGENTS_EMPTY) {
+                reader.directory_page = malloc(sizeof(*reader.directory_page));
+                if (reader.directory_page != NULL) *reader.directory_page = request->page.agents;
+                else state = DIAL_AGENTS_ERROR;
+            }
+            reader.directory_state = state;
+        } else if (request->kind == SESSIONS && view != NULL &&
+                   request->revision == reader.conversations_revision) {
+            if (state == DIAL_AGENTS_READY || state == DIAL_AGENTS_EMPTY) view->page = request->page.sessions;
+            view->state = state;
+        } else if (request->kind == PREVIEW && view != NULL &&
+                   request->revision == reader.preview_revision) {
+            if (state == DIAL_AGENTS_READY) view->preview = request->page.preview;
+            view->preview_state = state;
         }
-        reader.directory_state = state;
     }
     xSemaphoreGive(reader.lock);
     free(request->json);
     free(request);
 }
 
-static void request_agents(void)
+static char *request_params(const reader_request_t *request)
+{
+    cJSON *root = cJSON_CreateObject();
+    if (root == NULL) return NULL;
+    bool ok = true;
+    if (request->kind == SESSIONS) {
+        ok = cJSON_AddStringToObject(root, "agentId", request->agent_id) != NULL &&
+            cJSON_AddNumberToObject(root, "limit", ESP_OPENCLAW_DIRECTORY_PAGE_SIZE) != NULL &&
+            cJSON_AddNumberToObject(root, "offset", request->offset) != NULL &&
+            cJSON_AddBoolToObject(root, "includeGlobal", false) != NULL &&
+            cJSON_AddBoolToObject(root, "includeDerivedTitles", true) != NULL &&
+            cJSON_AddBoolToObject(root, "includeLastMessage", true) != NULL;
+    } else if (request->kind == PREVIEW) {
+        cJSON *keys = cJSON_AddArrayToObject(root, "keys");
+        cJSON *key = cJSON_CreateString(request->key);
+        if (keys == NULL || key == NULL || !cJSON_AddItemToArray(keys, key)) {
+            cJSON_Delete(key);
+            ok = false;
+        }
+        ok = ok && cJSON_AddNumberToObject(root, "limit", ESP_OPENCLAW_PREVIEW_ITEMS) != NULL &&
+            cJSON_AddNumberToObject(root, "maxChars", 160) != NULL;
+    }
+    char *json = ok ? cJSON_PrintUnformatted(root) : NULL;
+    cJSON_Delete(root);
+    return json;
+}
+
+static void request_next(void)
 {
     xSemaphoreTake(reader.lock, portMAX_DELAY);
-    if (!reader.directory_pending || reader.inflight != NULL || !current_reader()) {
+    bool pending = reader.directory_pending || reader.sessions_pending || reader.preview_pending;
+    if (!pending || reader.inflight != NULL || !current_reader()) {
         xSemaphoreGive(reader.lock);
         return;
     }
-    agents_request_t *request = calloc(1, sizeof(*request));
-    reader.directory_pending = false;
+    request_kind_t kind = reader.preview_pending ? PREVIEW : reader.sessions_pending ? SESSIONS : AGENTS;
+    reader_request_t *request = calloc(1, sizeof(*request));
     if (request == NULL) {
-        reader.directory_state = DIAL_AGENTS_ERROR;
+        if (kind == AGENTS) {
+            reader.directory_pending = false;
+            reader.directory_state = DIAL_AGENTS_ERROR;
+        } else if (kind == SESSIONS) {
+            reader.sessions_pending = false;
+            reader.conversations->state = DIAL_AGENTS_ERROR;
+        } else {
+            reader.preview_pending = false;
+            reader.conversations->preview_state = DIAL_AGENTS_ERROR;
+        }
         xSemaphoreGive(reader.lock);
         return;
     }
+    request->kind = kind;
     request->generation = reader.generation;
-    request->revision = reader.directory_revision;
     request->connection = reader.reader_id;
-    request->offset = reader.directory_offset;
     request->started = esp_timer_get_time();
+    if (kind == AGENTS) {
+        reader.directory_pending = false;
+        request->revision = reader.directory_revision;
+        request->offset = reader.directory_offset;
+    } else if (kind == SESSIONS) {
+        reader.sessions_pending = false;
+        request->revision = reader.conversations_revision;
+        request->offset = reader.conversations->page.offset;
+        memcpy(request->agent_id, reader.conversations->agent.id, sizeof(request->agent_id));
+    } else {
+        reader.preview_pending = false;
+        request->revision = reader.preview_revision;
+        memcpy(request->key, reader.conversations->page.sessions[reader.conversations->selected].key,
+               sizeof(request->key));
+    }
     reader.inflight = request;
     xSemaphoreGive(reader.lock);
-    esp_err_t err = esp_openclaw_node_gateway_request_on_connection(
-        reader.client, request->connection, "agents.list", "{}", agents_response, request);
+    char *params = request_params(request);
+    const char *method = kind == AGENTS ? "agents.list" : kind == SESSIONS ? "sessions.list" : "sessions.preview";
+    esp_err_t err = params != NULL ? esp_openclaw_node_gateway_request_on_connection(
+        reader.client, request->connection, method, params, reader_response, request) : ESP_ERR_NO_MEM;
+    free(params);
     if (err != ESP_OK) {
         /* Immediate rejection owns no callback; use the same completion path. */
         atomic_store(&completed_request, request);
@@ -258,13 +355,14 @@ static void reader_task(void *context)
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
         refresh_node();
         consume_event();
-        consume_agents();
+        consume_response();
         xSemaphoreTake(reader.lock, portMAX_DELAY);
         if (reader.inflight != NULL && !reader.force_disconnect &&
             esp_timer_get_time() - reader.inflight->started >= 15000000) {
             /* SDK requests have no response deadline. Closing this read-only
              * transport completes its callbacks before another request starts. */
             ++reader.directory_revision;
+            clear_conversations();
             reader.directory_state = DIAL_AGENTS_ERROR;
             reader.directory_enabled = reader.directory_pending = false;
             reader.force_disconnect = reader.retry = true;
@@ -317,7 +415,7 @@ static void reader_task(void *context)
                 xSemaphoreGive(reader.lock);
             }
         }
-        request_agents();
+        request_next();
     }
 }
 
@@ -370,6 +468,7 @@ esp_err_t dial_reader_agents_refresh(size_t offset)
 {
     if (reader.lock == NULL) return ESP_ERR_INVALID_STATE;
     xSemaphoreTake(reader.lock, portMAX_DELAY);
+    clear_conversations();
     reader.directory_enabled = reader.directory_pending = true;
     reader.directory_offset = offset;
     ++reader.directory_revision;
@@ -393,6 +492,102 @@ void dial_reader_agents_copy(dial_agents_snapshot_t *snapshot)
         if (reader.directory_page != NULL) snapshot->page = *reader.directory_page;
     } else {
         snapshot->state = !current_node() ? DIAL_AGENTS_OFFLINE :
+            reader.status == ACCESS_NEEDED ? DIAL_AGENTS_ACCESS_NEEDED :
+            reader.status == ERROR ? DIAL_AGENTS_ERROR : DIAL_AGENTS_CONNECTING;
+    }
+    xSemaphoreGive(reader.lock);
+}
+
+static void refresh_conversations(size_t offset)
+{
+    dial_conversations_snapshot_t *view = reader.conversations;
+    view->revision = ++reader.conversations_revision;
+    view->preview_revision = ++reader.preview_revision;
+    memset(&view->page, 0, sizeof(view->page));
+    memset(&view->preview, 0, sizeof(view->preview));
+    view->page.offset = offset;
+    view->selected = 0;
+    view->state = DIAL_AGENTS_LOADING;
+    view->preview_state = DIAL_AGENTS_IDLE;
+    reader.sessions_pending = true;
+    reader.preview_pending = false;
+}
+
+esp_err_t dial_reader_conversations_open(const char *agent_id, unsigned revision)
+{
+    if (reader.lock == NULL || agent_id == NULL) return ESP_ERR_INVALID_ARG;
+    xSemaphoreTake(reader.lock, portMAX_DELAY);
+    const esp_openclaw_agent_t *agent = NULL;
+    if (current_reader() && revision == reader.directory_revision && reader.directory_page != NULL &&
+        reader.directory_state == DIAL_AGENTS_READY) {
+        for (size_t i = 0; i < reader.directory_page->count; ++i) {
+            if (strcmp(reader.directory_page->agents[i].id, agent_id) == 0) agent = &reader.directory_page->agents[i];
+        }
+    }
+    if (agent == NULL) { xSemaphoreGive(reader.lock); return ESP_ERR_INVALID_STATE; }
+    if (reader.conversations == NULL) reader.conversations = calloc(1, sizeof(*reader.conversations));
+    if (reader.conversations == NULL) { xSemaphoreGive(reader.lock); return ESP_ERR_NO_MEM; }
+    reader.conversations->agent = *agent;
+    refresh_conversations(0);
+    xSemaphoreGive(reader.lock);
+    xTaskNotifyGive(reader.task);
+    return ESP_OK;
+}
+
+esp_err_t dial_reader_conversations_refresh(size_t offset)
+{
+    if (reader.lock == NULL) return ESP_ERR_INVALID_STATE;
+    if (offset > 2147483647u) return ESP_ERR_INVALID_ARG;
+    xSemaphoreTake(reader.lock, portMAX_DELAY);
+    if (!current_reader() || reader.conversations == NULL) {
+        xSemaphoreGive(reader.lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    refresh_conversations(offset);
+    xSemaphoreGive(reader.lock);
+    xTaskNotifyGive(reader.task);
+    return ESP_OK;
+}
+
+esp_err_t dial_reader_preview_open(size_t index, unsigned revision)
+{
+    if (reader.lock == NULL) return ESP_ERR_INVALID_STATE;
+    xSemaphoreTake(reader.lock, portMAX_DELAY);
+    dial_conversations_snapshot_t *view = reader.conversations;
+    if (!current_reader() || view == NULL || view->state != DIAL_AGENTS_READY ||
+        revision != reader.conversations_revision || index >= view->page.count) {
+        xSemaphoreGive(reader.lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    memset(&view->preview, 0, sizeof(view->preview));
+    view->selected = index;
+    view->preview_revision = ++reader.preview_revision;
+    view->preview_state = DIAL_AGENTS_LOADING;
+    reader.preview_pending = true;
+    xSemaphoreGive(reader.lock);
+    xTaskNotifyGive(reader.task);
+    return ESP_OK;
+}
+
+void dial_reader_conversations_close(void)
+{
+    if (reader.lock == NULL) return;
+    xSemaphoreTake(reader.lock, portMAX_DELAY);
+    clear_conversations();
+    xSemaphoreGive(reader.lock);
+}
+
+void dial_reader_conversations_copy(dial_conversations_snapshot_t *snapshot)
+{
+    memset(snapshot, 0, sizeof(*snapshot));
+    snapshot->state = snapshot->preview_state = DIAL_AGENTS_ERROR;
+    if (reader.lock == NULL) return;
+    xSemaphoreTake(reader.lock, portMAX_DELAY);
+    if (current_reader()) {
+        if (reader.conversations != NULL) *snapshot = *reader.conversations;
+        else snapshot->state = snapshot->preview_state = DIAL_AGENTS_IDLE;
+    } else {
+        snapshot->state = snapshot->preview_state = !current_node() ? DIAL_AGENTS_OFFLINE :
             reader.status == ACCESS_NEEDED ? DIAL_AGENTS_ACCESS_NEEDED :
             reader.status == ERROR ? DIAL_AGENTS_ERROR : DIAL_AGENTS_CONNECTING;
     }

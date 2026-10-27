@@ -217,3 +217,18 @@ python3 tests/run_input_host_tests.py --lvgl-dir managed_components/lvgl__lvgl
 
 Physical qualification additionally checks boot/pair/reconnect,
 touch and rotary operation, screen output, and audible buzzer playback.
+
+### Read-only conversations over USB
+
+Refresh `agents`, then use `conversations open <agent-id>` to request that
+agent's first page. `conversations` prints the last result; `conversations
+refresh <offset>` requests another page using the returned `nextOffset`.
+`conversations preview <index>` requests up to four messages for that exact
+returned row. `conversations close` clears the browser state.
+
+This uses the existing independent `operator.read` client. It neither changes
+the session assigned by `dial.configure` nor sends a message. Opening requires
+a current agent-directory row; reconnects, a new roster, and leaving the
+browser invalidate old replies. Missing previews remain distinct from empty
+transcripts. Pages and previews share a single bounded request slot and its
+15-second response deadline. The on-screen browser is a subsequent UI slice.

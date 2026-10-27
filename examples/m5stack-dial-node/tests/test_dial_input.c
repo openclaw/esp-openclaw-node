@@ -90,6 +90,10 @@ static void navigation_event(dial_navigation_event_t kind, size_t offset, void *
     }
     else if (kind == DIAL_NAV_CONVERSATIONS) { ++opens; requested_offset = offset; }
     else if (kind == DIAL_NAV_READ) { ++reads; requested_offset = offset; }
+    else if (kind == DIAL_NAV_RESUME) {
+        if (!dial_navigation_show_reader(&navigation, &roster, &conversations, false))
+            dial_navigation_open(&navigation, true);
+    }
     else if (kind == DIAL_NAV_REFRESH || kind == DIAL_NAV_SESSIONS_REFRESH) { ++refreshes; requested_offset = offset; }
     else if (kind == DIAL_NAV_HOME || kind == DIAL_NAV_CONTROL) {
         navigating = false;
@@ -470,6 +474,33 @@ int main(int argc, char **argv)
     advance(40);
     assert(lv_obj_get_scroll_y(navigation.preview_body) > 0);
     snapshot("scrolled");
+    // Home and the menu retain the last read row without another list request.
+    unsigned before_resume = refreshes;
+    encoder_state = LV_INDEV_STATE_PRESSED;
+    lv_indev_read(encoder); advance(1000);
+    encoder_state = LV_INDEV_STATE_RELEASED;
+    lv_indev_read(encoder); advance(40);
+    assert(!navigating);
+    navigating = true;
+    lv_obj_set_hidden(home.root, true);
+    dial_navigation_open(&navigation, false);
+    snapshot("resume-menu");
+    touch(120, 126, true); touch(120, 126, false);
+    assert(navigation.view == DIAL_NAV_SESSIONS && navigation.focus == 1);
+    assert(refreshes == before_resume && confirmations == 4);
+    assert(strcmp(lv_label_get_text(navigation.heading), "Beta") == 0);
+    snapshot("resumed");
+    // Selection indexes the returned page, even when that page has an offset.
+    conversations.page.offset = 8;
+    conversations.page.next_offset = 10;
+    ++conversations.revision;
+    dial_navigation_conversations_update(&navigation, &conversations);
+    dial_navigation_open(&navigation, false);
+    touch(120, 126, true); touch(120, 126, false);
+    assert(navigation.view == DIAL_NAV_SESSIONS && navigation.focus == 1);
+    assert(strstr(lv_label_get_text(navigation.names[1]), "A question for") != NULL);
+    dial_navigation_activate(&navigation);
+    assert(navigation.view == DIAL_NAV_PREVIEW && requested_offset == 1);
     touch(68, 44, true); touch(68, 44, false);
     assert(navigation.view == DIAL_NAV_SESSIONS && navigation.focus == 1);
     dial_navigation_activate(&navigation);
@@ -502,6 +533,17 @@ int main(int argc, char **argv)
     assert(changes == before_rejection + 1);
     puts("rejected reader page preserves active control input: passed");
 
+    // An invalidated selection routes back to agent selection, never old rows.
+    navigating = true;
+    lv_obj_set_hidden(home.root, true);
+    lv_obj_set_hidden(arc, true);
+    dial_navigation_open(&navigation, false);
+    before_resume = refreshes;
+    touch(120, 126, true); touch(120, 126, false);
+    assert(navigation.view == DIAL_NAV_AGENTS && refreshes == before_resume + 1);
+    assert(confirmations == 4);
+    puts("conversation resume and invalidated selection: passed");
+
     // Local settings use real encoder/touch input and never send the numeric
     // control. Network refreshes must not replace this local page.
     navigating = true;
@@ -510,6 +552,14 @@ int main(int argc, char **argv)
     dial_input_set_control(&input, false);
     dial_navigation_set_brightness(&navigation, brightness, false);
     dial_navigation_open(&navigation, false);
+    for (unsigned i = 0; i < 3; ++i) {
+        encoder_diff = 1;
+        lv_indev_read(encoder); advance(40);
+    }
+    snapshot("menu-settings");
+    assert(strcmp(lv_label_get_text(navigation.names[0]), "Conversations") == 0);
+    assert(strcmp(lv_label_get_text(navigation.names[1]), "Controls") == 0);
+    assert(strcmp(lv_label_get_text(navigation.names[2]), "Settings") == 0);
     touch(120, 168, true); touch(120, 168, false);
     assert(navigation.view == DIAL_NAV_SETTINGS);
     snapshot("settings");

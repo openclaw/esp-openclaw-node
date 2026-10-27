@@ -1,9 +1,12 @@
 #include "dial_input.h"
+#include "dial_home.h"
 
 #include <assert.h>
 #include <stdio.h>
+#include <string.h>
 
 static dial_input_t input;
+static dial_home_t home;
 static lv_indev_state_t encoder_state, pointer_state;
 static int encoder_diff;
 static lv_point_t pointer_point;
@@ -45,6 +48,7 @@ static void event(dial_input_event_t kind, int value, bool pointer, void *contex
         if (kind == DIAL_INPUT_HOME) ++homes;
         bool control = kind == DIAL_INPUT_OPEN;
         lv_obj_set_flag(input.arc, LV_OBJ_FLAG_HIDDEN, !control);
+        lv_obj_set_hidden(home.root, control);
         dial_input_set_control(&input, control);
     }
 }
@@ -59,10 +63,24 @@ static void advance(unsigned milliseconds)
 
 static void control(void)
 {
+    lv_obj_set_hidden(home.root, true);
     lv_obj_set_hidden(input.arc, false);
     dial_input_set_control(&input, true);
     lv_arc_set_value(input.arc, 50);
     advance(40);
+}
+
+static void check_home_bounds(lv_obj_t *object)
+{
+    lv_area_t area;
+    lv_obj_get_coords(object, &area);
+    const int x[] = {area.x1 - 120, area.x2 - 120};
+    const int y[] = {area.y1 - 120, area.y2 - 120};
+    for (int i = 0; i < 2; ++i)
+        for (int j = 0; j < 2; ++j)
+            assert(x[i] * x[i] + y[j] * y[j] <= 112 * 112);
+    for (unsigned i = 0; i < lv_obj_get_child_count(object); ++i)
+        check_home_bounds(lv_obj_get_child(object, i));
 }
 
 static void touch(int x, int y, bool pressed)
@@ -82,6 +100,24 @@ int main(void)
     lv_obj_t *screen = lv_screen_active();
     lv_obj_set_scrollable(screen, false);
     lv_obj_set_clickable(screen, true);
+    dial_home_create(&home, screen);
+    dial_home_render(&home, true, true, true, NULL);
+    lv_obj_update_layout(screen);
+    for (unsigned i = 0; i < lv_obj_get_child_count(home.root); ++i)
+        check_home_bounds(lv_obj_get_child(home.root, i));
+    assert(strcmp(lv_label_get_text(home.action), "Open control") == 0);
+    dial_home_render(&home, true, false, false, NULL);
+    assert(strcmp(lv_label_get_text(home.link), "Offline") == 0);
+    assert(strcmp(lv_label_get_text(home.headline), "Gateway offline") == 0);
+    dial_home_render(&home, true, true, false, NULL);
+    assert(strcmp(lv_label_get_text(home.headline), "No action assigned") == 0);
+    assert(strcmp(lv_label_get_text(home.action), "Open dial") == 0);
+    char activity[] = "Action failed; press to retry";
+    dial_home_render(&home, true, true, true, activity);
+    memset(activity, 'x', strlen(activity));
+    assert(strcmp(lv_label_get_text(home.headline), "Action failed; press to retry") == 0);
+    lv_obj_update_layout(screen);
+    check_home_bounds(home.headline);
     lv_obj_t *arc = lv_arc_create(screen);
     lv_obj_set_size(arc, 218, 218);
     lv_obj_center(arc);
@@ -185,6 +221,7 @@ int main(void)
     // A remote view change also consumes an in-progress touch gesture.
     touch(120, 120, true);
     lv_obj_set_hidden(input.arc, true);
+    lv_obj_set_hidden(home.root, false);
     dial_input_set_control(&input, false);
     touch(120, 120, false);
     assert(!input.control && confirmations == 3);

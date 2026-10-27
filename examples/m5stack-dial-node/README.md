@@ -38,7 +38,11 @@ when Wi-Fi or the Gateway changes.
 ## Controls
 
 The screen is upright with the USB connector on the right. The home screen
-shows a blinking face and connection status. Turn the encoder
+shows a compact connection strip, a blinking face, and one action. Wi-Fi and
+Gateway status are separate; no battery level is invented. Home shows whether
+an agent action is assigned and retains the current action's feedback in its
+headline. Open dial works locally; Open control returns to an assigned control.
+Turn the encoder
 or tap to open the numeric control. Turn or drag its arc to change the value;
 press the encoder or tap the center to confirm. Hold the encoder or the center
 of the screen to return to the face. Dragging the arc never confirms an action

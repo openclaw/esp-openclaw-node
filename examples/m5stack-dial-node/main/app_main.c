@@ -11,6 +11,7 @@
 #include "cJSON.h"
 #include "dial_action.h"
 #include "dial_control.h"
+#include "dial_home.h"
 #include "dial_input.h"
 #include "driver/gpio.h"
 #include "driver/ledc.h"
@@ -67,6 +68,7 @@ static struct {
     uint32_t changes, presses, touches;
     int brightness;
     lv_obj_t *arc, *title, *value, *message, *footer, *eyes[2], *mouth;
+    dial_home_t home;
     dial_input_t input;
 } ui;
 
@@ -114,6 +116,9 @@ static bool only_fields(cJSON *params, const char *const *names, size_t count)
 static void show_view(dial_view_t view)
 {
     ui.view = view;
+    lv_obj_set_hidden(ui.home.root, view != VIEW_FACE);
+    lv_obj_set_hidden(ui.title, view == VIEW_FACE);
+    lv_obj_set_hidden(ui.footer, view == VIEW_FACE);
     lv_obj_set_flag(ui.arc, LV_OBJ_FLAG_HIDDEN, view != VIEW_CONTROL);
     lv_obj_set_flag(ui.value, LV_OBJ_FLAG_HIDDEN, view != VIEW_CONTROL);
     lv_obj_set_flag(ui.message, LV_OBJ_FLAG_HIDDEN, view != VIEW_MESSAGE);
@@ -262,21 +267,34 @@ static void refresh_ui(lv_timer_t *timer)
             ui.action[0] != '\0' && action_state.configured_uri == NULL ? "Configure action again" :
             "Connected | turn + press");
     }
+    bool assigned = action_state.configured_uri != NULL;
+    bool online = action_state.connection_id != 0;
+    const char *activity = ui.request_id[0] != '\0' &&
+        ui.last_action.connection_id == action_state.connection_id
+        ? lv_label_get_text(ui.footer) : NULL;
     xSemaphoreGive(action_lock);
     if (ui.view != VIEW_FACE) return;
+    static uint32_t status_at;
+    static bool status_sampled;
+    uint32_t now = lv_tick_get();
+    if (!status_sampled || now - status_at >= 1000) {
+        dial_home_render(&ui.home, esp_openclaw_node_wifi_is_connected(), online, assigned, activity);
+        status_at = now;
+        status_sampled = true;
+    }
     uint32_t phase = lv_tick_get() % 4400;
-    int height = 42;
+    int height = 28;
     if (strcmp(ui.mood, "sleepy") == 0) height = 10;
     else if (strcmp(ui.mood, "happy") == 0) height = 18;
     else if (strcmp(ui.mood, "sad") == 0) height = 24;
-    else if (strcmp(ui.mood, "excited") == 0) height = 52;
+    else if (strcmp(ui.mood, "excited") == 0) height = 32;
     int gaze = (int)((lv_tick_get() / 1800) % 3) * 4 - 4;
     bool thinking = strcmp(ui.mood, "thinking") == 0;
     for (int i = 0; i < 2; ++i) {
         int eye_height = phase < 140 ? 4 : thinking && i == 0 ? 22 : height;
-        lv_obj_set_size(ui.eyes[i], 29, eye_height);
-        lv_obj_align(ui.eyes[i], LV_ALIGN_CENTER, (i == 0 ? -36 : 36) + gaze,
-                     thinking ? -16 : strcmp(ui.mood, "sad") == 0 ? 0 : -8);
+        lv_obj_set_size(ui.eyes[i], 19, eye_height);
+        lv_obj_align(ui.eyes[i], LV_ALIGN_CENTER, (i == 0 ? -21 : 21) + gaze,
+                     thinking ? -17 : strcmp(ui.mood, "sad") == 0 ? -9 : -13);
     }
 }
 
@@ -308,7 +326,9 @@ static esp_err_t start_display(void)
     ui.mood = "neutral";
     strlcpy(ui.label, "Dial", sizeof(ui.label));
     lv_obj_t *screen = lv_screen_active();
-    lv_obj_set_style_bg_color(screen, lv_color_hex(0x10151f), 0);
+    lv_obj_set_style_bg_color(screen, lv_color_hex(0x15101b), 0);
+    lv_obj_set_style_bg_grad_color(screen, lv_color_hex(0x362031), 0);
+    lv_obj_set_style_bg_grad_dir(screen, LV_GRAD_DIR_VER, 0);
     lv_obj_set_style_text_color(screen, lv_color_white(), 0);
     lv_obj_remove_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(screen, LV_OBJ_FLAG_CLICKABLE);
@@ -326,6 +346,7 @@ static esp_err_t start_display(void)
     lv_obj_set_height(ui.message, 90);
     ui.footer = label(screen, 158, 70, &lv_font_montserrat_16);
     lv_label_set_text(ui.footer, "USB setup");
+    dial_home_create(&ui.home, screen);
     for (int i = 0; i < 2; ++i) {
         ui.eyes[i] = lv_obj_create(screen);
         lv_obj_set_style_bg_color(ui.eyes[i], lv_color_hex(0x58d5c4), 0);
@@ -333,7 +354,7 @@ static esp_err_t start_display(void)
         lv_obj_set_style_radius(ui.eyes[i], LV_RADIUS_CIRCLE, 0);
         lv_obj_remove_flag(ui.eyes[i], LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
     }
-    ui.mouth = label(screen, 90, 30, &lv_font_montserrat_24);
+    ui.mouth = label(screen, 60, 12, &lv_font_montserrat_24);
     lv_label_set_text(ui.mouth, "~");
     update_value();
     show_view(VIEW_FACE);

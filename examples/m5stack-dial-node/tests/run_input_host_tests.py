@@ -20,8 +20,10 @@ def main():
             "-fno-sanitize-recover=all", "-fno-omit-frame-pointer",
             "-DLV_CONF_SKIP", "-DLV_USE_OS=LV_OS_NONE", "-DLV_USE_LOG=0",
             "-DLV_USE_STDLIB_MALLOC=LV_STDLIB_CLIB",
+            "-DLV_FONT_MONTSERRAT_16=1",
             "-I", str(tests.parent / "main"), "-I", str(lvgl),
             str(tests / "test_dial_input.c"), str(tests.parent / "main/dial_input.c"),
+            str(tests.parent / "main/dial_home.c"),
             *map(str, sorted((lvgl / "src").rglob("*.c"))), "-lm", "-o", str(binary),
         ]
         subprocess.run(command, check=True)

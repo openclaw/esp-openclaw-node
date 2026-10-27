@@ -2,9 +2,9 @@
 
 #include <stdint.h>
 
-static lv_obj_t *root, *heading, *rows[5], *values[5], *empty;
+static lv_obj_t *root, *heading, *back_label, *local_device, *rows[5], *values[5], *empty;
 static const char *menu[] = {LV_SYMBOL_LIST "  Agents", LV_SYMBOL_ENVELOPE "  Conversations",
-    LV_SYMBOL_IMAGE "  Canvas", LV_SYMBOL_WIFI "  Connection", LV_SYMBOL_SETTINGS "  Settings"};
+    LV_SYMBOL_IMAGE "  Canvas", LV_SYMBOL_CHARGE "  Devices", LV_SYMBOL_SETTINGS "  Settings"};
 
 static lv_obj_t *label(lv_obj_t *parent, const char *value, int x, int y, int width)
 {
@@ -30,17 +30,17 @@ void room_watch_navigation_create(lv_obj_t *parent, lv_event_cb_t handler)
     lv_obj_t *back = lv_obj_create(root);
     lv_obj_remove_style_all(back);
     lv_obj_set_pos(back, 26, 18);
-    lv_obj_set_size(back, 80, 44);
+    lv_obj_set_size(back, 164, 44);
     lv_obj_set_clickable(back, true);
     lv_obj_set_scrollable(back, false);
-    label(back, LV_SYMBOL_LEFT " Home", 0, 14, 80);
-    lv_obj_add_event_cb(back, handler, LV_EVENT_ALL, (void *)(intptr_t)ROOM_WATCH_HOME);
+    back_label = label(back, LV_SYMBOL_LEFT " Home", 0, 14, 164);
+    lv_obj_add_event_cb(back, handler, LV_EVENT_ALL, (void *)(intptr_t)ROOM_WATCH_BACK);
     heading = label(root, "Menu", 26, 72, 316);
 #if LV_FONT_MONTSERRAT_28
     lv_obj_set_style_text_font(heading, &lv_font_montserrat_28, 0);
 #endif
     const room_watch_page_t pages[] = {ROOM_WATCH_AGENTS, ROOM_WATCH_CONVERSATIONS,
-        ROOM_WATCH_CANVAS, ROOM_WATCH_CONNECTION, ROOM_WATCH_SETTINGS};
+        ROOM_WATCH_CANVAS, ROOM_WATCH_DEVICES, ROOM_WATCH_SETTINGS};
     for (unsigned i = 0; i < 5; ++i) {
         rows[i] = lv_obj_create(root);
         lv_obj_remove_style_all(rows[i]);
@@ -54,6 +54,17 @@ void room_watch_navigation_create(lv_obj_t *parent, lv_event_cb_t handler)
         values[i] = label(rows[i], menu[i], 18, 14, 280);
         lv_obj_add_event_cb(rows[i], handler, LV_EVENT_ALL, (void *)(intptr_t)pages[i]);
     }
+    local_device = lv_obj_create(root);
+    lv_obj_remove_style_all(local_device);
+    lv_obj_set_pos(local_device, 26, 116);
+    lv_obj_set_size(local_device, 316, 52);
+    lv_obj_set_style_bg_color(local_device, lv_color_hex(0x302535), 0);
+    lv_obj_set_style_bg_opa(local_device, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(local_device, 16, 0);
+    lv_obj_set_scrollable(local_device, false);
+    lv_obj_set_clickable(local_device, true);
+    label(local_device, LV_SYMBOL_HOME "  This Watch", 18, 18, 280);
+    lv_obj_add_event_cb(local_device, handler, LV_EVENT_ALL, (void *)(intptr_t)ROOM_WATCH_LOCAL_DEVICE);
     empty = label(root, "No card yet\n\nAsk your assistant to show\na card on this watch.", 26, 156, 316);
     lv_label_set_long_mode(empty, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(empty, LV_TEXT_ALIGN_CENTER, 0);
@@ -61,15 +72,20 @@ void room_watch_navigation_create(lv_obj_t *parent, lv_event_cb_t handler)
 }
 
 void room_watch_navigation_render(room_watch_page_t page, const room_ui_facts_t *facts,
-                                  bool hidden, bool resume_failed)
+                                  bool hidden, bool resume_failed, room_watch_page_t parent)
 {
     if (root == NULL) return;
     lv_obj_set_hidden(root, hidden);
     if (hidden) return;
+    lv_label_set_text_static(back_label, parent == ROOM_WATCH_LOCAL_DEVICE ? LV_SYMBOL_LEFT " This Watch" :
+        parent == ROOM_WATCH_SETTINGS ? LV_SYMBOL_LEFT " Settings" :
+        parent == ROOM_WATCH_MENU ? LV_SYMBOL_LEFT " Menu" : LV_SYMBOL_LEFT " Home");
+    bool devices = page == ROOM_WATCH_DEVICES;
+    lv_obj_set_hidden(local_device, !devices);
     bool connection = page == ROOM_WATCH_CONNECTION;
     bool canvas = page == ROOM_WATCH_CANVAS;
     bool resuming = page == ROOM_WATCH_CONVERSATIONS;
-    lv_label_set_text_static(heading, connection ? "Connection" : canvas ? "Canvas" : resuming ? "Conversations" : "Menu");
+    lv_label_set_text_static(heading, devices ? "Devices" : connection ? "Connection" : canvas ? "Canvas" : resuming ? "Conversations" : "Menu");
     lv_label_set_text_static(empty, resuming ? resume_failed ? "Reader unavailable.\n\nRetrying...\nYou can return Home."
         : "Opening your last conversation..."
         : "No card yet\n\nAsk your assistant to show\na card on this watch.");
@@ -84,7 +100,7 @@ void room_watch_navigation_render(room_watch_page_t page, const room_ui_facts_t 
     };
     const char *names[] = {"Wi-Fi", "Gateway", "Talk"};
     for (unsigned i = 0; i < 5; ++i) {
-        lv_obj_set_hidden(rows[i], canvas || resuming || (connection && i >= 3));
+        lv_obj_set_hidden(rows[i], devices || canvas || resuming || (connection && i >= 3));
         lv_obj_set_clickable(rows[i], !connection);
         lv_obj_set_y(rows[i], 116 + (int)i * (connection ? 60 : 48));
         lv_obj_set_height(rows[i], connection ? 52 : 44);

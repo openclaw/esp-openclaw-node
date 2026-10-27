@@ -1724,7 +1724,7 @@ static int brightness_console_command(int argc, char **argv)
 static int menu_console_command(int argc, char **argv)
 {
     if (argc > 2) {
-        printf("usage: menu [menu|agents|conversations|preview|settings|display|connection|canvas|home]\n");
+        printf("usage: menu [menu|agents|conversations|preview|devices|device|settings|display|connection|canvas|home]\n");
         return 1;
     }
     const char *page = argc == 2 ? argv[1] : "menu";
@@ -1915,7 +1915,7 @@ static esp_err_t register_room_console_commands(void)
         {
             .command = "menu",
             .help = "Open a local watch menu page without starting Talk",
-            .hint = "[menu|agents|conversations|preview|settings|display|connection|canvas|home]",
+            .hint = "[menu|agents|conversations|preview|devices|device|settings|display|connection|canvas|home]",
             .func = menu_console_command,
         },
         {

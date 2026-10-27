@@ -3,7 +3,7 @@
 #include <stdint.h>
 #include "room_watch_navigation.h"
 
-static lv_obj_t *root, *heading, *menu_back, *settings_back;
+static lv_obj_t *root, *heading, *back;
 static lv_obj_t *rows[3], *level, *detail, *adjust[2];
 
 static lv_obj_t *label(lv_obj_t *parent, const char *value, int y, int width)
@@ -43,8 +43,7 @@ void room_watch_settings_create(lv_obj_t *parent, lv_event_cb_t handler)
     lv_obj_set_scrollable(root, false);
     lv_obj_set_style_bg_color(root, lv_color_hex(0x15101b), 0);
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
-    menu_back = button(LV_SYMBOL_LEFT " Menu", 26, 12, 112, ROOM_WATCH_MENU, handler);
-    settings_back = button(LV_SYMBOL_LEFT " Settings", 26, 12, 128, ROOM_WATCH_SETTINGS, handler);
+    back = button(LV_SYMBOL_LEFT " Menu", 26, 12, 164, ROOM_WATCH_BACK, handler);
     heading = label(root, "Settings", 76, 316);
     lv_obj_set_x(heading, 26);
 #if LV_FONT_MONTSERRAT_28
@@ -68,14 +67,16 @@ void room_watch_settings_create(lv_obj_t *parent, lv_event_cb_t handler)
     lv_obj_set_hidden(root, true);
 }
 
-void room_watch_settings_render(bool display, int brightness, bool failed, bool camera_minimum, bool hidden)
+void room_watch_settings_render(room_watch_page_t page, room_watch_page_t parent, int brightness, bool failed, bool camera_minimum, bool hidden)
 {
     if (root == NULL) return;
     lv_obj_set_hidden(root, hidden);
     if (hidden) return;
-    lv_label_set_text_static(heading, display ? "Display" : "Settings");
-    lv_obj_set_hidden(menu_back, display);
-    lv_obj_set_hidden(settings_back, !display);
+    bool display = page == ROOM_WATCH_DISPLAY;
+    lv_label_set_text_static(heading, display ? "Display" : page == ROOM_WATCH_LOCAL_DEVICE ? "This Watch" : "Settings");
+    lv_label_set_text_static(lv_obj_get_child(back, 0), parent == ROOM_WATCH_LOCAL_DEVICE ? LV_SYMBOL_LEFT " This Watch" :
+        parent == ROOM_WATCH_SETTINGS ? LV_SYMBOL_LEFT " Settings" :
+        parent == ROOM_WATCH_DEVICES ? LV_SYMBOL_LEFT " Devices" : LV_SYMBOL_LEFT " Menu");
     for (unsigned i = 0; i < 3; ++i) lv_obj_set_hidden(rows[i], display);
     lv_obj_set_hidden(level, !display);
     lv_obj_set_hidden(detail, !display);

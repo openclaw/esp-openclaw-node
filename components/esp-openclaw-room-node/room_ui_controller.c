@@ -77,6 +77,18 @@ typedef enum { TALK_CONTROL_NONE, TALK_CONTROL_START, TALK_CONTROL_STOP } talk_c
 static talk_control_action_t painted_talk_action;
 static talk_control_action_t pressed_talk_action;
 static room_watch_page_t watch_page = ROOM_WATCH_HOME;
+static room_watch_page_t watch_display_parent = ROOM_WATCH_SETTINGS;
+static room_watch_page_t watch_connection_parent = ROOM_WATCH_MENU;
+
+/* Called with state_mux held; subpages return to their actual entry point. */
+static room_watch_page_t watch_parent(room_watch_page_t page)
+{
+    if (page == ROOM_WATCH_DISPLAY) return watch_display_parent;
+    if (page == ROOM_WATCH_CONNECTION) return watch_connection_parent;
+    if (page == ROOM_WATCH_LOCAL_DEVICE) return ROOM_WATCH_DEVICES;
+    if (page == ROOM_WATCH_DEVICES || page == ROOM_WATCH_SETTINGS) return ROOM_WATCH_MENU;
+    return ROOM_WATCH_HOME;
+}
 static int pressed_watch_page = -1;
 static void (*agents_action_handler)(bool open, size_t offset);
 static room_agents_snapshot_t current_agents, painted_agents;
@@ -279,6 +291,11 @@ static esp_err_t watch_navigation_show_context(room_watch_page_t page, unsigned 
         }
     }
     taskENTER_CRITICAL(&state_mux);
+    if (page == ROOM_WATCH_DISPLAY && watch_page != ROOM_WATCH_DISPLAY)
+        watch_display_parent = watch_page == ROOM_WATCH_LOCAL_DEVICE ? ROOM_WATCH_LOCAL_DEVICE : ROOM_WATCH_SETTINGS;
+    if (page == ROOM_WATCH_CONNECTION && watch_page != ROOM_WATCH_CONNECTION)
+        watch_connection_parent = watch_page == ROOM_WATCH_LOCAL_DEVICE ? ROOM_WATCH_LOCAL_DEVICE :
+            watch_page == ROOM_WATCH_SETTINGS ? ROOM_WATCH_SETTINGS : ROOM_WATCH_MENU;
     bool leaving_agents = watch_page == ROOM_WATCH_AGENTS && page != ROOM_WATCH_AGENTS;
     bool entering_agents = watch_page != ROOM_WATCH_AGENTS && page == ROOM_WATCH_AGENTS;
     bool suspend_reader = leaving_agents && conversations_open;
@@ -318,6 +335,8 @@ esp_err_t room_ui_watch_menu(const char *page)
     if (strcmp(page, "menu") == 0) requested = ROOM_WATCH_MENU;
     else if (strcmp(page, "agents") == 0) requested = ROOM_WATCH_AGENTS;
     else if (strcmp(page, "conversations") == 0) requested = ROOM_WATCH_CONVERSATIONS;
+    else if (strcmp(page, "devices") == 0) requested = ROOM_WATCH_DEVICES;
+    else if (strcmp(page, "device") == 0) requested = ROOM_WATCH_LOCAL_DEVICE;
     else if (strcmp(page, "settings") == 0) requested = ROOM_WATCH_SETTINGS;
     else if (strcmp(page, "display") == 0) requested = ROOM_WATCH_DISPLAY;
     else if (strcmp(page, "connection") == 0) requested = ROOM_WATCH_CONNECTION;
@@ -489,7 +508,13 @@ static void watch_home_continue_clicked(lv_event_t *event)
 
 static void watch_navigation_clicked(lv_event_t *event)
 {
-    watch_navigation_input(event, (room_watch_page_t)(intptr_t)lv_event_get_user_data(event));
+    room_watch_page_t page = (room_watch_page_t)(intptr_t)lv_event_get_user_data(event);
+    if (page == ROOM_WATCH_BACK) {
+        taskENTER_CRITICAL(&state_mux);
+        page = watch_parent(watch_page);
+        taskEXIT_CRITICAL(&state_mux);
+    }
+    watch_navigation_input(event, page);
 }
 
 static void watch_agents_clicked(lv_event_t *event)
@@ -1001,6 +1026,7 @@ static bool room_ui_render_locked(void)
     room_conversation_context_t reader_context = current_reader_context;
     bool selecting = selection_pending, selection_error = selection_failed;
     room_watch_page_t page = watch_page;
+    room_watch_page_t parent = watch_parent(page);
     int brightness = watch_brightness < 0 ? ROOM_CANVAS_ACTIVE_BRIGHTNESS : watch_brightness;
     bool brightness_failed = watch_brightness_failed;
     bool camera_minimum = camera_indicator_active && brightness < ROOM_UI_CAMERA_MIN_BRIGHTNESS;
@@ -1035,9 +1061,9 @@ static bool room_ui_render_locked(void)
         painted_reader_epoch = continue_visible ? reader_context.epoch : 0;
         if (pressed_reader_epoch != painted_reader_epoch) pressed_reader_epoch = 0;
         taskEXIT_CRITICAL(&state_mux);
-        bool settings = page == ROOM_WATCH_SETTINGS || page == ROOM_WATCH_DISPLAY;
-        room_watch_navigation_render(page, &facts, !navigation || overlay || page == ROOM_WATCH_AGENTS || settings, resume_failed);
-        room_watch_settings_render(page == ROOM_WATCH_DISPLAY, brightness, brightness_failed, camera_minimum,
+        bool settings = page == ROOM_WATCH_SETTINGS || page == ROOM_WATCH_LOCAL_DEVICE || page == ROOM_WATCH_DISPLAY;
+        room_watch_navigation_render(page, &facts, !navigation || overlay || page == ROOM_WATCH_AGENTS || settings, resume_failed, parent);
+        room_watch_settings_render(page, parent, brightness, brightness_failed, camera_minimum,
             !navigation || overlay || !settings);
         room_watch_agents_render(&painted_agents, !navigation || overlay || page != ROOM_WATCH_AGENTS || chats,
             target.selected ? target.id : "", target.expired, selecting, selection_error);
@@ -1376,8 +1402,8 @@ void room_ui_set_diagnostics_open(bool open)
     if (open) {
         if (watch_home_enabled) room_watch_home_render(NULL, NULL, ROOM_UI_IDLE, "", NULL, true);
         if (watch_home_enabled) {
-            room_watch_navigation_render(ROOM_WATCH_HOME, NULL, true, false);
-            room_watch_settings_render(false, 0, false, false, true);
+            room_watch_navigation_render(ROOM_WATCH_HOME, NULL, true, false, ROOM_WATCH_HOME);
+            room_watch_settings_render(ROOM_WATCH_HOME, ROOM_WATCH_HOME, 0, false, false, true);
         }
         if (home != NULL) lv_obj_add_flag(home, LV_OBJ_FLAG_HIDDEN);
         if (talk_pill != NULL) lv_obj_add_flag(talk_pill, LV_OBJ_FLAG_HIDDEN);

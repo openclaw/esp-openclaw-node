@@ -1,6 +1,7 @@
 idf_component_register(
     SRCS
         "esp_openclaw_room_node.c"
+        "room_agent_directory.c"
         "room_aec_src.c"
         "room_audio_gate.c"
         "room_board.c"
@@ -30,6 +31,7 @@ idf_component_register(
         av_render
         console
         esp-openclaw-node
+        esp-openclaw-directory
         esp-openclaw-node-provisioning
         esp-openclaw-talk
         esp_app_format

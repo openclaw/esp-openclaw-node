@@ -1063,7 +1063,161 @@ static void capture_source_scheduler(void)
     }
 }
 
+static const char *agent_roster = "{\"agents\":[{\"id\":\"fixture\",\"name\":\"Fixture\"}]}";
+
+static room_agents_snapshot_t agents_snapshot(void)
+{
+    room_agents_snapshot_t snapshot;
+    room_agent_directory_copy(&snapshot);
+    return snapshot;
+}
+
+static void directory_ready(void)
+{
+    CHECK(room_agent_directory_refresh(0) == ESP_OK, "directory refresh admitted");
+    host_run_task("talk_teardown");
+    CHECK(host.agent_requests == 1, "one bounded request");
+    host_emit_node(node_client, ESP_OPENCLAW_NODE_EVENT_DISCONNECTED);
+    host_reply_agents(true, agent_roster);
+    host_run_task("talk_teardown");
+    room_agents_snapshot_t snapshot = agents_snapshot();
+    CHECK(snapshot.state == ROOM_AGENTS_READY && snapshot.page.count == 1 &&
+        strcmp(snapshot.page.agents[0].id, "fixture") == 0, "operator roster survives primary node loss");
+    CHECK(operator_ready, "directory does not reconnect operator");
+}
+
+static void directory_reconnect(void)
+{
+    room_agent_directory_refresh(0);
+    host_run_task("talk_teardown");
+    host_emit_node(operator_client, ESP_OPENCLAW_NODE_EVENT_DISCONNECTED);
+    host_emit_node(operator_client, ESP_OPENCLAW_NODE_EVENT_CONNECTED);
+    host_reply_agents(true, agent_roster);
+    host_run_task("talk_teardown");
+    CHECK(agents_snapshot().state == ROOM_AGENTS_LOADING && host.agent_requests == 2,
+        "old response cannot populate same-handle replacement connection");
+    host_reply_agents(true, "{\"agents\":[]}");
+    host_run_task("talk_teardown");
+    CHECK(agents_snapshot().state == ROOM_AGENTS_EMPTY, "fresh response populates replacement");
+}
+
+static void directory_gateway_rebind(void)
+{
+    room_agent_directory_refresh(0);
+    host_run_task("talk_teardown");
+    host.node_uri = "wss://gateway.example/replacement";
+    host_emit_node(node_client, ESP_OPENCLAW_NODE_EVENT_CONNECTED);
+    CHECK(agents_snapshot().state == ROOM_AGENTS_OFFLINE, "full URI change immediately revokes directory");
+    host_reply_agents(true, agent_roster);
+    host_run_task("talk_teardown");
+    CHECK(agents_snapshot().state == ROOM_AGENTS_OFFLINE && host.agent_requests == 1,
+        "late old Gateway response cannot repopulate roster");
+}
+
+static void directory_superseded(void)
+{
+    room_agent_directory_refresh(0);
+    host_run_task("talk_teardown");
+    room_agent_directory_refresh(1);
+    host_run_task("talk_teardown");
+    CHECK(host.agent_requests == 1, "refresh cannot accumulate pending RPCs");
+    host_reply_agents(true, agent_roster);
+    host_run_task("talk_teardown");
+    CHECK(host.agent_requests == 2 && agents_snapshot().state == ROOM_AGENTS_LOADING,
+        "old response is discarded before latest offset starts");
+    host_reply_agents(true, agent_roster);
+    host_run_task("talk_teardown");
+    room_agents_snapshot_t snapshot = agents_snapshot();
+    CHECK(snapshot.state == ROOM_AGENTS_EMPTY && snapshot.page.offset == 1 && snapshot.page.total == 1,
+        "latest requested page wins");
+}
+
+static void directory_timeout_during_talk(void)
+{
+    connect_call();
+    room_agent_directory_refresh(0);
+    host_run_task("talk_teardown");
+    host.now_us += 15000000;
+    host_fire_directory_timer();
+    host_run_task("talk_teardown");
+    CHECK(agents_snapshot().state == ROOM_AGENTS_TIMEOUT, "deadline has visible outcome");
+    CHECK(talk_active && operator_ready && host.closes == 0, "directory deadline leaves Talk live");
+    room_agent_directory_refresh(0);
+    host_run_task("talk_teardown");
+    CHECK(host.agent_requests == 1, "timeout retains context without duplicate RPC");
+    host_reply_agents(true, agent_roster);
+    host_run_task("talk_teardown");
+    CHECK(host.agent_requests == 2, "late completion releases pending refresh");
+    host_reply_agents(true, agent_roster);
+    host_run_task("talk_teardown");
+    CHECK(agents_snapshot().state == ROOM_AGENTS_READY && talk_active, "fresh roster keeps original Talk owner");
+}
+
+static void directory_cancel(void)
+{
+    room_agent_directory_refresh(0);
+    host_run_task("talk_teardown");
+    room_agent_directory_cancel();
+    host_reply_agents(true, agent_roster);
+    host_run_task("talk_teardown");
+    CHECK(agents_snapshot().state == ROOM_AGENTS_IDLE && host.agent_requests == 1 && operator_ready,
+        "leaving directory discards late reply without closing shared connection");
+}
+
+static void directory_deferred_start(void)
+{
+    start_pending_config();
+    room_agent_directory_refresh(0);
+    host_run_task("talk_teardown");
+    CHECK(host.agent_requests == 0, "Talk startup has priority over directory submission");
+    host_reply_config();
+    host_reply_create(true);
+    host_emit_peer(webrtc, ESP_WEBRTC_EVENT_CONNECTED);
+    host_run_task("talk_teardown");
+    CHECK(host.agent_requests == 1 && talk_active, "directory can load alongside established Talk");
+    host.now_us += 15000000;
+    host_reply_agents(true, agent_roster);
+    host_run_task("talk_teardown");
+    CHECK(agents_snapshot().state == ROOM_AGENTS_TIMEOUT && talk_active,
+        "late success cannot bypass the deadline before its timer is consumed");
+}
+
+static void directory_errors(void)
+{
+    host.fail_agent_submit = true;
+    room_agent_directory_refresh(0);
+    host_run_task("talk_teardown");
+    CHECK(agents_snapshot().state == ROOM_AGENTS_ERROR, "immediate submission failure completes");
+    host.fail_agent_submit = false;
+    const char *payloads[] = {"{\"agents\":[{\"id\":\"invalid id\"}]}", NULL};
+    for (unsigned i = 0; i < 2; ++i) {
+        room_agent_directory_refresh(0);
+        host_run_task("talk_teardown");
+        host_reply_agents(i == 0, payloads[i]);
+        host_run_task("talk_teardown");
+        CHECK(agents_snapshot().state == ROOM_AGENTS_ERROR, "malformed or denied response stays empty");
+    }
+    char *large = malloc(ESP_OPENCLAW_DIRECTORY_MAX_JSON_BYTES + 2);
+    host_require(large != NULL, "oversized response fixture allocation");
+    memset(large, ' ', ESP_OPENCLAW_DIRECTORY_MAX_JSON_BYTES + 1);
+    large[ESP_OPENCLAW_DIRECTORY_MAX_JSON_BYTES + 1] = '\0';
+    room_agent_directory_refresh(0);
+    host_run_task("talk_teardown");
+    host_reply_agents(true, large);
+    free(large);
+    host_run_task("talk_teardown");
+    CHECK(agents_snapshot().state == ROOM_AGENTS_TOO_LARGE, "oversized response is bounded");
+}
+
 static const struct { const char *name; void (*run)(void); } cases[] = {
+    {"directory-ready", directory_ready},
+    {"directory-reconnect", directory_reconnect},
+    {"directory-gateway-rebind", directory_gateway_rebind},
+    {"directory-superseded", directory_superseded},
+    {"directory-timeout-during-talk", directory_timeout_during_talk},
+    {"directory-cancel", directory_cancel},
+    {"directory-deferred-start", directory_deferred_start},
+    {"directory-errors", directory_errors},
     {"capture-source-scheduler", capture_source_scheduler},
     {"speech-confirmation", speech_confirmation},
     {"operator-scopes", operator_scopes},
@@ -1142,6 +1296,7 @@ int main(int argc, char **argv)
             }
             free(gateway_http_base);
             gateway_http_base = NULL;
+            room_agent_directory_cancel();
             host_release_resources();
             printf("%s: %s (%u failed assertions)\n", cases[i].name, failures ? "FAIL" : "PASS", failures);
             return failures ? 1 : 0;

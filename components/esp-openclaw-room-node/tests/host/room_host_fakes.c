@@ -25,6 +25,7 @@
 
 room_host_observations_t host = {
     .ambient = true, .global_log_level = ESP_LOG_INFO, .sdk_log_level = ESP_LOG_INFO,
+    .now_us = 123000000,
 };
 struct host_mutex { bool held; bool binary; bool available; };
 struct host_queue { size_t capacity, size, count, storage_size; unsigned char *data; };
@@ -37,6 +38,7 @@ struct host_task {
     unsigned notifications;
 };
 struct esp_openclaw_node {
+    uint32_t connection, sequence;
     esp_openclaw_node_config_t config;
     esp_openclaw_node_command_t commands[3];
     unsigned command_count;
@@ -52,6 +54,7 @@ static QueueHandle_t queue;
 static TimerHandle_t timeout;
 static esp_timer_handle_t operator_timer;
 static esp_timer_handle_t node_timer;
+static esp_timer_handle_t directory_timer;
 static esp_openclaw_node_handle_t nodes[4];
 static size_t node_count;
 static unsigned mutex_depth;
@@ -61,7 +64,7 @@ typedef struct {
     void *ctx;
     esp_openclaw_node_handle_t node;
 } pending_rpc_t;
-static pending_rpc_t config_rpc, create_rpc, scope_rpc, speech_rpc;
+static pending_rpc_t config_rpc, create_rpc, scope_rpc, speech_rpc, agents_rpc;
 
 typedef struct {
     esp_webrtc_cfg_t config;
@@ -368,7 +371,8 @@ void host_fire_timeout_generation(TimerHandle_t timer, uint32_t generation)
 
 esp_err_t esp_timer_create(const esp_timer_create_args_t *args, esp_timer_handle_t *out)
 {
-    esp_timer_handle_t *slot = strcmp(args->name, "operator_start") == 0 ? &operator_timer : &node_timer;
+    esp_timer_handle_t *slot = strcmp(args->name, "operator_start") == 0 ? &operator_timer
+        : strcmp(args->name, "agent_directory") == 0 ? &directory_timer : &node_timer;
     host_require(*slot == NULL, "one timer per connection");
     *slot = calloc(1, sizeof(**slot));
     host_require(*slot != NULL, "connection timer allocation");
@@ -385,6 +389,10 @@ void host_fire_operator_timer(esp_timer_handle_t timer)
     host_require(timer != NULL && timer->active, "operator retry was armed");
     timer->active = false;
     timer->args.callback(timer->args.arg);
+}
+void host_fire_directory_timer(void)
+{
+    host_fire_operator_timer(directory_timer);
 }
 
 void esp_openclaw_node_config_init_default(esp_openclaw_node_config_t *config)
@@ -458,6 +466,7 @@ char *esp_openclaw_node_dup_gateway_uri(esp_openclaw_node_handle_t node)
 
 void host_emit_node(esp_openclaw_node_handle_t node, esp_openclaw_node_event_t event)
 {
+    node->connection = event == ESP_OPENCLAW_NODE_EVENT_CONNECTED ? ++node->sequence : 0;
     const esp_openclaw_node_disconnected_event_t disconnected = {
         .reason = ESP_OPENCLAW_NODE_DISCONNECTED_REASON_CONNECTION_LOST,
     };
@@ -513,7 +522,13 @@ esp_err_t esp_openclaw_node_gateway_request(esp_openclaw_node_handle_t node,
 {
     host_require(host.critical_depth == 0 && mutex_depth == 0, "RPC outside locks");
     pending_rpc_t request = {.callback = callback, .ctx = ctx, .node = node};
-    if (strcmp(method, "device.scopes.requestUpgrade") == 0 || strcmp(method, "device.scopes.waitUpgrade") == 0) {
+    if (strcmp(method, "agents.list") == 0) {
+        if (host.fail_agent_submit) return ESP_FAIL;
+        host_require(agents_rpc.callback == NULL, "one directory request outstanding");
+        host_require(strcmp(params, "{}") == 0, "directory reads current roster without routing changes");
+        agents_rpc = request;
+        ++host.agent_requests;
+    } else if (strcmp(method, "device.scopes.requestUpgrade") == 0 || strcmp(method, "device.scopes.waitUpgrade") == 0) {
         if (host.fail_scope_submit) return ESP_FAIL;
         host_require(scope_rpc.callback == NULL, "one scope RPC outstanding");
         host_require(strlen(method) < sizeof(host.scope_method) && strlen(params) < sizeof(host.scope_params),
@@ -560,6 +575,19 @@ esp_err_t esp_openclaw_node_gateway_request(esp_openclaw_node_handle_t node,
     return ESP_OK;
 }
 
+uint32_t esp_openclaw_node_get_connection_id(esp_openclaw_node_handle_t node)
+{
+    return node != NULL ? node->connection : 0;
+}
+
+esp_err_t esp_openclaw_node_gateway_request_on_connection(esp_openclaw_node_handle_t node,
+    uint32_t connection, const char *method, const char *params,
+    esp_openclaw_node_gateway_request_cb_t callback, void *ctx)
+{
+    if (connection == 0 || connection != node->connection) return ESP_ERR_INVALID_STATE;
+    return esp_openclaw_node_gateway_request(node, method, params, callback, ctx);
+}
+
 static void reply(pending_rpc_t *slot, bool ok, const char *payload)
 {
     pending_rpc_t request = *slot;
@@ -577,6 +605,10 @@ static void reply(pending_rpc_t *slot, bool ok, const char *payload)
 void host_reply_scope(bool ok, const char *payload)
 {
     reply(&scope_rpc, ok, payload);
+}
+void host_reply_agents(bool ok, const char *payload)
+{
+    reply(&agents_rpc, ok, payload);
 }
 void host_reply_config(void)
 {
@@ -838,8 +870,7 @@ size_t heap_caps_get_largest_free_block(uint32_t caps)
 }
 int64_t esp_timer_get_time(void)
 {
-    if (!host.console_snapshots) unsupported_boundary(__func__);
-    return 123000000;
+    return host.now_us;
 }
 size_t strlcpy(char *destination, const char *source, size_t capacity)
 {
@@ -869,7 +900,8 @@ esp_err_t esp_http_client_cleanup(esp_http_client_handle_t client)
 
 void host_release_resources(void)
 {
-    host_require(config_rpc.callback == NULL && create_rpc.callback == NULL && scope_rpc.callback == NULL,
+    host_require(config_rpc.callback == NULL && create_rpc.callback == NULL && scope_rpc.callback == NULL &&
+        agents_rpc.callback == NULL,
         "all real RPC references drained");
     host_require(!host.media_owned && mutex_depth == 0 && host.critical_depth == 0, "fixture leaves no ownership");
     for (size_t i = 0; i < node_count; ++i) free(nodes[i]);
@@ -879,5 +911,6 @@ void host_release_resources(void)
     free(timeout);
     free(operator_timer);
     free(node_timer);
+    free(directory_timer);
     free(recycled_rtc);
 }

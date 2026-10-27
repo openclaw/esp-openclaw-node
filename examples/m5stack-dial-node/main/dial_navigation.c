@@ -246,7 +246,10 @@ static void render(dial_navigation_t *nav)
             if (view->preview.status == ESP_OPENCLAW_PREVIEW_OK) {
                 for (size_t i = 0; i < view->preview.count; ++i) {
                     const esp_openclaw_preview_item_t *entry = &view->preview.items[i];
-                    used += snprintf(content + used, sizeof(content) - used, "%s\n%s\n\n", roles[entry->role], entry->text);
+                    size_t remaining = sizeof(content) - used;
+                    int written = snprintf(content + used, remaining, "%s\n%s\n\n", roles[entry->role], entry->text);
+                    if (written < 0 || (size_t)written >= remaining) break;
+                    used += (size_t)written;
                 }
             } else {
                 snprintf(content, sizeof(content), "%s", view->preview.status == ESP_OPENCLAW_PREVIEW_EMPTY ? "No messages yet" :

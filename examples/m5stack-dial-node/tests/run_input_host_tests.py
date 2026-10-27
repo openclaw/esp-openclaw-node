@@ -13,6 +13,7 @@ def main():
     args = parser.parse_args()
     lvgl = args.lvgl_dir.resolve()
     tests = Path(__file__).resolve().parent
+    root = tests.parents[2]
     with tempfile.TemporaryDirectory(prefix="dial-input-") as directory:
         binary = Path(directory) / "dial-input-test"
         command = [
@@ -22,8 +23,10 @@ def main():
             "-DLV_USE_STDLIB_MALLOC=LV_STDLIB_CLIB",
             "-DLV_FONT_MONTSERRAT_16=1",
             "-I", str(tests.parent / "main"), "-I", str(lvgl),
+            "-I", str(root / "components/esp-openclaw-directory/include"),
             str(tests / "test_dial_input.c"), str(tests.parent / "main/dial_input.c"),
             str(tests.parent / "main/dial_home.c"),
+            str(tests.parent / "main/dial_navigation.c"),
             *map(str, sorted((lvgl / "src").rglob("*.c"))), "-lm", "-o", str(binary),
         ]
         subprocess.run(command, check=True)

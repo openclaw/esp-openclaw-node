@@ -51,7 +51,7 @@ void dial_home_create(dial_home_t *home, lv_obj_t *parent)
     lv_obj_set_style_bg_opa(pill, LV_OPA_COVER, 0);
     lv_obj_set_clickable(pill, false);
     lv_obj_set_scrollable(pill, false);
-    home->action = label(pill, "Open dial", 0, 0, 124);
+    home->action = label(pill, "Open menu", 0, 0, 124);
     lv_obj_set_style_text_color(home->action, lv_color_hex(0x302131), 0);
     lv_obj_center(home->action);
 }
@@ -65,5 +65,4 @@ void dial_home_render(dial_home_t *home, bool wifi, bool connected, bool assigne
         : assigned ? "Control ready" : "No action assigned";
     if (strcmp(lv_label_get_text(home->headline), headline) != 0)
         lv_label_set_text(home->headline, headline);
-    lv_label_set_text_static(home->action, assigned ? "Open control" : "Open dial");
 }

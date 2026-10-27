@@ -1,0 +1,31 @@
+#pragma once
+
+#include "dial_directory.h"
+#include "lvgl.h"
+
+typedef enum { DIAL_NAV_MENU, DIAL_NAV_AGENTS, DIAL_NAV_DETAIL } dial_navigation_view_t;
+typedef enum { DIAL_NAV_HOME, DIAL_NAV_CONTROL, DIAL_NAV_REFRESH, DIAL_NAV_CHANGED } dial_navigation_event_t;
+/* CHANGED asks the input owner to cancel active gestures before replacing rows. */
+typedef void (*dial_navigation_handler_t)(dial_navigation_event_t event, size_t offset, void *context);
+
+typedef struct {
+    lv_obj_t *root, *heading, *back, *rows[3], *icons[3], *names[3], *hint, *description;
+    lv_obj_t *id_caption, *identity;
+    dial_navigation_view_t view;
+    unsigned focus, first, count;
+    unsigned revision;
+    dial_agents_state_t state;
+    lv_point_t press_point;
+    bool moved;
+    /* Owned by the application and refreshed only on the LVGL task. */
+    const dial_agents_snapshot_t *snapshot;
+    dial_navigation_handler_t handler;
+    void *context;
+} dial_navigation_t;
+
+void dial_navigation_create(dial_navigation_t *nav, lv_obj_t *parent,
+                            dial_navigation_handler_t handler, void *context);
+void dial_navigation_open(dial_navigation_t *nav, bool agents);
+void dial_navigation_update(dial_navigation_t *nav, const dial_agents_snapshot_t *snapshot);
+void dial_navigation_move(dial_navigation_t *nav, int direction);
+void dial_navigation_activate(dial_navigation_t *nav);

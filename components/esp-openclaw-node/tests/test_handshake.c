@@ -44,18 +44,22 @@ int main(void)
 {
     cJSON_Hooks hooks = {.malloc_fn = limited_malloc, .free_fn = limited_free};
     cJSON_InitHooks(&hooks);
-    char json[30000];
-    size_t length = (size_t)snprintf(json, sizeof(json), "{\"payload\":{\"snapshot\":[");
-    for (unsigned i = 0; i < 400; ++i) {
-        length += (size_t)snprintf(json + length, sizeof(json) - length,
-            "%s{\"name\":\"ignored\",\"cap\":true,\"value\":123}", i == 0 ? "" : ",");
-    }
-    length += (size_t)snprintf(json + length, sizeof(json) - length,
-        "],\"type\":\"hello-ok\",\"auth\":{\"deviceToken\":\"synthetic-node-token\","
+    const char prefix[] = "{\"payload\":{\"snapshot\":[null";
+    const char row[] = ",{\"name\":\"ignored\",\"cap\":true,\"value\":123}";
+    const char suffix[] = "] ,\"type\":\"hello-ok\",\"auth\":{\"deviceToken\":\"synthetic-node-token\","
         "\"deviceTokens\":[{\"role\":\"operator\",\"deviceToken\":\"synthetic-reader-token\"}]},"
         "\"pluginSurfaceUrls\":{\"canvas\":\"https://example.com/canvas\"}},"
-        "\"id\":\"connect-1\",\"ok\":true,\"type\":\"res\"}");
-    assert(length < sizeof(json));
+        "\"id\":\"connect-1\",\"ok\":true,\"type\":\"res\"}";
+    enum { ROWS = 400 };
+    char json[sizeof(prefix) - 1 + ROWS * (sizeof(row) - 1) + sizeof(suffix)];
+    char *next = json;
+    memcpy(next, prefix, sizeof(prefix) - 1);
+    next += sizeof(prefix) - 1;
+    for (unsigned i = 0; i < ROWS; ++i) {
+        memcpy(next, row, sizeof(row) - 1);
+        next += sizeof(row) - 1;
+    }
+    memcpy(next, suffix, sizeof(suffix));
     assert(cJSON_Parse(json) == NULL && allocated == 0);
     peak = 0;
     cJSON *root = parse(json);

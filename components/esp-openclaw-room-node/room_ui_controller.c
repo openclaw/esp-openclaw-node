@@ -71,7 +71,7 @@ static bool text_hint_active;
 static bool camera_indicator_active;
 static room_ui_facts_t current_facts;
 static esp_timer_handle_t text_hint_timer;
-static void (*talk_action_handler)(bool start);
+static void (*talk_action_handler)(bool start, uint64_t recipient_revision);
 typedef enum { TALK_CONTROL_NONE, TALK_CONTROL_START, TALK_CONTROL_STOP } talk_control_action_t;
 /* Painted intent is display-lock owned; a press is invalidated with the facts. */
 static talk_control_action_t painted_talk_action;
@@ -82,7 +82,7 @@ static void (*agents_action_handler)(bool open, size_t offset);
 static room_agents_snapshot_t current_agents, painted_agents;
 static room_ui_talk_target_t current_target;
 /* A changed recipient must reach the display before accepting a new Start. */
-static unsigned target_revision, painted_target_revision;
+static uint64_t painted_target_revision;
 static bool selection_pending, selection_failed;
 static void (*agent_selection_handler)(const char *id, unsigned revision);
 static int pressed_agent_action = -100;
@@ -200,10 +200,10 @@ void room_ui_set_agent_selection_handler(void (*handler)(const char *id, unsigne
 void room_ui_store_talk_target(const room_ui_talk_target_t *target)
 {
     taskENTER_CRITICAL(&state_mux);
-    if (target->selected != current_target.selected || target->expired != current_target.expired ||
+    if (target->revision != current_target.revision ||
+        target->selected != current_target.selected || target->expired != current_target.expired ||
         strcmp(target->id, current_target.id) != 0 || strcmp(target->name, current_target.name) != 0) {
         current_target = *target;
-        ++target_revision;
         pressed_talk_action = TALK_CONTROL_NONE;
     }
     taskEXIT_CRITICAL(&state_mux);
@@ -595,7 +595,7 @@ static talk_control_action_t talk_control_action(room_ui_talk_state_t talk)
     return TALK_CONTROL_NONE;
 }
 
-void room_ui_set_talk_action_handler(void (*handler)(bool start))
+void room_ui_set_talk_action_handler(void (*handler)(bool start, uint64_t recipient_revision))
 {
     talk_action_handler = handler;
 }
@@ -606,15 +606,17 @@ static void talk_control_clicked(lv_event_t *event)
     if (code != LV_EVENT_PRESSED && code != LV_EVENT_PRESS_LOST && code != LV_EVENT_SHORT_CLICKED) return;
     bool wake = code == LV_EVENT_PRESSED && room_board_display_is_dark();
     talk_control_action_t requested = TALK_CONTROL_NONE;
+    uint64_t recipient_revision = 0;
     taskENTER_CRITICAL(&state_mux);
     talk_control_action_t action = talk_control_action(current_facts.talk);
     if (code == LV_EVENT_PRESSED) {
-        bool target_current = action != TALK_CONTROL_START || target_revision == painted_target_revision;
+        bool target_current = action != TALK_CONTROL_START || current_target.revision == painted_target_revision;
         pressed_talk_action = !wake && !diagnostics_open && target_current && action == painted_talk_action
             ? action : TALK_CONTROL_NONE;
     } else {
         if (code == LV_EVENT_SHORT_CLICKED && !diagnostics_open && pressed_talk_action == action) {
             requested = pressed_talk_action;
+            if (requested == TALK_CONTROL_START) recipient_revision = painted_target_revision;
         }
         pressed_talk_action = TALK_CONTROL_NONE;
     }
@@ -622,7 +624,7 @@ static void talk_control_clicked(lv_event_t *event)
     if (wake) {
         room_ui_show_face_hint(10000);
     } else if (talk_action_handler != NULL && requested != TALK_CONTROL_NONE) {
-        talk_action_handler(requested == TALK_CONTROL_START);
+        talk_action_handler(requested == TALK_CONTROL_START, recipient_revision);
     }
 }
 
@@ -996,7 +998,6 @@ static bool room_ui_render_locked(void)
     bool overlay = diagnostics_open;
     room_ui_facts_t facts = current_facts;
     room_ui_talk_target_t target = current_target;
-    unsigned recipient_revision = target_revision;
     room_conversation_context_t reader_context = current_reader_context;
     bool selecting = selection_pending, selection_error = selection_failed;
     room_watch_page_t page = watch_page;
@@ -1075,7 +1076,7 @@ static bool room_ui_render_locked(void)
             }
         }
         taskENTER_CRITICAL(&state_mux);
-        painted_target_revision = recipient_revision;
+        painted_target_revision = target.revision;
         taskEXIT_CRITICAL(&state_mux);
         lv_obj_set_state(talk_pill, LV_STATE_DISABLED, !start && !stop);
         lv_obj_set_flag(talk_pill, LV_OBJ_FLAG_HIDDEN, overlay);

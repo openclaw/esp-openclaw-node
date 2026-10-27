@@ -688,19 +688,19 @@ static void wake_admission_loss(void)
 
 static void local_talk_control(void)
 {
-    request_local_talk(true);
-    request_local_talk(true);
+    request_local_talk(true, talk_target_revision);
+    request_local_talk(true, talk_target_revision);
     CHECK(talk_call == NULL, "local input defers admission outside the display callback");
     drain();
     CHECK(talk_start_in_flight && talk_call != NULL, "local start admits one call");
-    request_local_talk(false);
+    request_local_talk(false, 0);
     drain();
     host_run_task("talk_start");
     drain();
     CHECK(talk_call == NULL && host.opens == 0, "local stop cancels before media acquisition");
     connect_call();
-    request_local_talk(false);
-    request_local_talk(false);
+    request_local_talk(false, 0);
+    request_local_talk(false, 0);
     drain();
     expect_closed();
     CHECK(host.closes == 1, "repeated local stops close once");
@@ -708,7 +708,7 @@ static void local_talk_control(void)
 
 static void local_talk_readiness_loss(void)
 {
-    request_local_talk(true);
+    request_local_talk(true, talk_target_revision);
     host_emit_node(operator_client, ESP_OPENCLAW_NODE_EVENT_DISCONNECTED);
     drain();
     CHECK(talk_call == NULL && host.opens == 0, "stale local start cannot use a lost operator");
@@ -1420,9 +1420,47 @@ static void target_selection(void)
         "owner acknowledges a current agent before Talk admission");
     CHECK(host.ui_target.selected && strcmp(host.ui_target.id, "builder") == 0 && host.ui_refreshes > refreshes,
         "selection is published and repainted in the same supervisor turn");
+    request_local_talk(true, talk_target_revision);
+    request_local_agent_selection("fixture", revision);
+    host_run_task("talk_teardown");
+    CHECK(talk_call == NULL && host.config_requests == 0 && host.create_requests == 0,
+        "a queued Start cannot move to a replacement recipient");
+    if (talk_call != NULL) return;
+    request_local_agent_selection("builder", revision);
+    host_run_task("talk_teardown");
+    CHECK(host.ui == ROOM_UI_ERROR, "changed recipient asks for a new Start");
+    char *select_fixture[] = {"agents", "select", "fixture"};
+    char *select_builder[] = {"agents", "select", "builder"};
+    char *use_default[] = {"agents", "default"};
+    for (unsigned change = 0; change < 3; ++change) {
+        request_local_talk(true, host.ui_target.revision);
+        if (change == 1) {
+            CHECK(agents_console_command(2, use_default) == 0, "console selects default");
+        } else {
+            CHECK(agents_console_command(3, select_fixture) == 0, "console replaces recipient");
+            if (change == 2)
+                CHECK(agents_console_command(3, select_builder) == 0, "console restores the same identity");
+        }
+        host_run_task("talk_teardown");
+        CHECK(talk_call == NULL && host.config_requests == 0 && host.create_requests == 0,
+            "console changes, defaults and A-to-B-to-A cannot redirect queued Start");
+        if (talk_call != NULL) return;
+        request_local_agent_selection("builder", revision);
+        host_run_task("talk_teardown");
+    }
+    uint64_t painted_recipient = host.ui_target.revision;
+    CHECK(agents_console_command(3, select_fixture) == 0, "recipient changes before the UI callback");
+    request_local_talk(true, painted_recipient);
+    host_run_task("talk_teardown");
+    CHECK(talk_call == NULL, "callback must carry the painted revision, not recapture the current one");
+    if (talk_call != NULL) return;
+    request_local_agent_selection("builder", revision);
+    host_run_task("talk_teardown");
     host_emit_node(node_client, ESP_OPENCLAW_NODE_EVENT_DISCONNECTED);
     CHECK(!talk_target.expired, "primary node loss does not replace operator authority");
-    admit();
+    request_local_talk(true, host.ui_target.revision);
+    host_run_task("talk_teardown");
+    CHECK(talk_call != NULL && talk_start_in_flight, "a fresh Start admits the repainted recipient");
     CHECK(select_talk_agent("fixture", revision) == ESP_OK, "choose next agent after admission");
     request_local_agents(false, 0);
     host_run_task("talk_teardown");
@@ -1476,7 +1514,7 @@ static void target_default(void)
         host.ui_refreshes > refreshes, "owner acknowledges, clears and publishes default routing");
     CHECK(talk_active && strcmp(host.create_key, "agent:builder:work") == 0,
         "default selection leaves the current call with its admitted agent");
-    host_command(node_client, "talk.stop");
+    request_local_talk(false, 0);
     host_run_task("talk_teardown");
     CHECK(strcmp(host.close_key, "agent:builder:work") == 0, "close preserves the original agent");
     admit();

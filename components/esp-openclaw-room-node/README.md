@@ -44,6 +44,9 @@ connection expires the choice and disables Start until an agent is chosen
 again, or **Use default** restores Gateway-default routing for the next call.
 The default action is available on the agent list and detail screens, including
 after a choice expires. USB `agents default` performs the same reset.
+Start carries the displayed recipient through queued admission. If selection
+changes before admission, the request asks you to start again; it never moves
+silently to the new recipient. Stop still applies to the active call.
 Returning Home keeps the screen awake for ten seconds before the configured
 idle display policy resumes. Loading, offline, empty, denied, oversized, and
 timed-out requests have visible outcomes. USB `menu agents` opens this screen

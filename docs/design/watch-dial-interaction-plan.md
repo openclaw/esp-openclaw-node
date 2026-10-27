@@ -1,11 +1,16 @@
 # Watch and Dial: interaction plan
 
-**Revision 04 · shared node experience · design proposal · no firmware changes**
+**Revision 05 · agents, input, setup and settings · design proposal · no firmware changes**
 
-Start with the [annotated design board](watch-dial-ux-plan.html). The
+Start with the [interactive flow explorer](watch-dial-ux-flows.html), then use
+the [annotated layout board](watch-dial-ux-plan.html) for the spatial overview. The
 [revision 02 explorer](watch-dial-ux.html) remains a reference, not the target
 design. The [research and source audit](watch-dial-ux.md) supplies the hardware,
 Gateway, pairing, and authorization constraints retained here.
+
+The flow explorer contains 110 simulated states for both devices, including
+50 settings and recovery states. Use All settings screens for the complete
+contact sheet, or click through the device controls for a specific journey.
 
 Build one complete OpenClaw node experience on both devices. Agents,
 conversations, device control, activity and settings belong on both. A watch
@@ -37,7 +42,7 @@ Measured at native size in the revision 02 browser:
 
 These are layout measurements, not usability-test results. The screenshots
 also show underused space around the Dial's center and too many outlined
-controls on the watch. The next revision should be judged by task clarity and
+controls on the watch. Each revision should be judged by task clarity and
 use of space, not by how many states fit in a screenshot gallery.
 
 ## Shared product, focused views
@@ -77,8 +82,9 @@ the watch presents the list. Both expose every destination.
 | Settings | Gear | Display, connection, capabilities, local audio where present, help and recovery |
 
 Home shows the current agent and conversation, one useful recent task, and
-Continue. Both devices can resume that context. The watch may additionally
-surface Talk as a shortcut when voice is available. The Dial's encoder is an
+a capability-aware primary action. On a voice-ready watch this is Hold to talk;
+on the current Dial it is Continue, opening reply options. Both resume the same
+context. Live conversation is a separate explicit mode. The Dial's encoder is an
 input method for the same navigation and actions, not a reason to remove agent
 selection or conversations. Help is within Settings on both devices.
 
@@ -155,7 +161,7 @@ lobster, a short availability label and one recent-task card with clear gaps.
 
 When there is no recent work, omit that card and center the simpler composition.
 Do not invent activity to fill space. Menu is a header action, separate from
-Continue or an optional Talk shortcut.
+the capability-aware Talk / Continue action.
 
 Five 64 px icon-and-label rows fit in the 342 px browse region. Comfortable
 spacing uses 68 px rows; larger text scrolls rather than hiding a destination.
@@ -313,14 +319,174 @@ Teaching should happen through the first successful task. Show a short
 contextual input cue the first time the Dial editor opens, not a setup
 slideshow. Do not block an experienced user with repeated instructions.
 
+## Agent identity and selection
+
+Agents are people-like identities, not identical generic person icons.
+Kitsune uses the configured fox; Builder can use its cube; another agent can
+use a picture, emoji or initials. Keep OpenClaw's lobster as the product
+mascot. An agent avatar appears in the roster, selected context, conversation,
+capture destination and reply attribution.
+
+The roster shows name, identity, current selection and a concise useful
+capability/availability summary. Open the profile to inspect an agent before
+choosing it. Prefer a familiar one-tap route back to the current conversation.
+The selected indicator and name must remain understandable without color.
+
+Resolve identity by stable agent ID. The proposed display fallback is:
+
+1. A bounded, supported avatar supplied through an authorized identity path.
+2. A supported configured identity emoji, rendered from a local known glyph.
+3. Initials from the display name, with a deterministic neutral background.
+
+Do not infer that an arbitrary URL, local path, data URL or unsupported SVG
+is safe for an ESP image decoder. Bound format, dimensions, byte size, decode
+memory and cache eviction before firmware support. Cache one small representation;
+roster rendering must not stall on network image fetches. A failed image never
+hides the agent's name.
+
+The inspected Gateway source at
+[5a447267](https://github.com/openclaw/openclaw/blob/5a4472678cfc08d5d286bcebec8889f8cb414fb7/src/gateway/session-utils-store.ts#L340)
+returns identity fields including name, emoji, avatar and avatarUrl.
+[agents.list](https://github.com/openclaw/openclaw/blob/5a4472678cfc08d5d286bcebec8889f8cb414fb7/src/gateway/server-methods/agents.ts#L849)
+only selects its Control UI HTTP avatar base for the Control UI client. Device
+firmware must not impersonate that client or assume its browser avatar URL
+contract is already a device image service. Use a reviewed device-appropriate
+identity adapter. An identity field is not evidence of online or voice readiness.
+
+The explorer uses authored vector examples, including a fox for Kitsune.
+It does not fetch the owner's private profile. Its empty, loading, unavailable,
+fallback-avatar and active-call switch states are distinct.
+
+## Voice first, deliberate send
+
+Recommend **hold → speak → release → review → Send** for short watch requests.
+The Home action and the current conversation both lead to this flow. Tap the
+reply-method control to use a quick reply, handwriting or a touch keyboard.
+Do not default to typing on a watch.
+
+Live conversation remains a separate **Start / End** mode. Do not silently
+turn a short PTT request into an open microphone session. Returning Home ends
+an unsubmitted PTT capture and keeps the unsent text only when policy permits;
+a live call follows its separate explicit End lifecycle.
+
+| State | Visible meaning | Exit / failure behavior |
+| --- | --- | --- |
+| Ready | Selected agent and conversation; Hold to talk | No microphone capture yet |
+| Listening | Clear mic/capture state; release to review | Slide away, Cancel, pointer loss, Home, background or timeout closes capture |
+| Transcribing | Recording closed; draft not sent | Cancel; empty/error offers record again or another input method |
+| Review | Actual recognized text and destination | Send, edit or record again; no automatic timeout-send |
+| Sending | Submit the reviewed text once | Preserve request identity; distinguish rejection from ambiguous acceptance |
+| Working | Agent accepted the turn | May leave; incoming result goes to its original context |
+| Reply | Readable result and optional watch speech | Reply, stop playback, or return; Dial reads the same content |
+
+Proposed recording cap: 30 seconds, then stop and review. Timer, pointer,
+capture and network work need one owner and cancellation generation. The
+browser prototype simulates these boundaries without recording audio.
+Production must not route an unreviewed recording straight to the agent while
+calling the UI a review-before-send flow.
+
+Current watch firmware provides
+[Start/Stop Talk](../../components/esp-openclaw-room-node/room_ui_controller.c)
+and [WebRTC media startup](../../components/esp-openclaw-room-node/esp_openclaw_room_node.c).
+It does **not** already provide this bounded PTT/transcription/review contract.
+A transcription operation and a conversational submission need distinct
+capability and permission checks.
+
+The [watch audio topology](../../examples/waveshare-esp32-s3-touch-amoled-1.8-room-node/README.md)
+suppresses capture during playback; no interruption or acoustic echo
+cancellation is promised. The
+[Dial hardware](../../examples/m5stack-dial-node/README.md) has no mic or speech
+speaker. Its input menu exposes working text alternatives and explains voice
+unavailability. It remains independent and does not require the watch.
+
+## Finger input and quick replies
+
+Follow the useful input hierarchy from
+[Apple's text-entry guidance](https://support.apple.com/en-ie/guide/watch/apdaf7837856/27/watchos/27):
+dictation, short prepared replies, handwriting and keyboard are alternative
+methods within the same compose flow. These ESP devices do not inherit Apple's
+recognizer or keyboard.
+
+- **Quick replies:** select a phrase, inspect the destination and text, then Send.
+  Do not encode privileged actions in a phrase or silently execute it.
+- **Write with finger:** a bounded stroke pad with Undo, Clear, recognition
+  candidates and an explicit accept step. Keep accepted words if the next word
+  fails. Do not claim recognition merely because the hardware reports touch.
+- **Touch keyboard:** a secondary large-target character picker for short input.
+  The prototype pages six characters at a time; Dial uses touch to choose and
+  the encoder to change pages. A production keyboard needs complete language,
+  punctuation, cursor/edit and Unicode coverage.
+- **Long text and secrets:** protected phone/laptop entry or USB. Do not make
+  a watch keyboard the default way to enter Wi-Fi passwords or setup codes.
+
+Both boards have touch input. Neither currently ships handwriting recognition.
+The explorer's pad records local demo strokes; its Sample result button
+explicitly demonstrates a proposed recognition response. It does not perform
+recognition or send the strokes. The Dial pad is particularly constrained:
+qualify it physically before enabling handwriting by default.
+
+## Pairing screens, end to end
+
+The explorer covers Welcome, method selection, protected setup-network entry,
+device confirmation, Wi-Fi selection, password handoff, joining, join failure,
+Gateway code entry handoff, destination confirmation, optional real approval,
+expired code, rejection, success and USB guidance.
+
+Codes are entered on the companion browser, not retyped on the device. Device
+screens show identity and progress. No fake scannable QR code or working secret
+appears in the design artifacts. A real QR or code must be generated by its
+authorized setup owner, expire and have a clear manual route.
+
+Wi-Fi joining is not OpenClaw pairing. A real pending authorization is not the
+normal state for every setup-code exchange. Do not fabricate it for visual
+completeness. Cancellation closes the temporary setup surface without erasing
+already valid configuration. Network replacement needs rollback behavior
+designed at the provisioning owner.
+
+Setup is independent on each device. Consumer browser provisioning remains
+new work; the existing USB console is a complete fallback. First-use practice
+has no remote effects, and optional audio failure does not erase successful
+pairing.
+
+## Complete settings inventory
+
+These are **proposed product options**, not new configuration shipped by this
+documentation. New persistence, capture, pairing and reset semantics require
+their owner design before implementation. The explorer makes every branch
+visible now so review can cover the whole product.
+
+| Group | Pages / options | Default or limitation |
+| --- | --- | --- |
+| Display | Compact / Comfortable, Standard / Larger / Largest text, brightness, Normal / Reduced motion, display sleep | Compact; readable proportional text; preview before saving; sleep must match actual wake hardware |
+| Talk & input | Hold-review-send / Live / Text only, microphone enabled/disabled, wake word, finger methods, input language | PTT proposed for watch; wake word off in PTT; Dial explains unavailable audio |
+| Sound | Speech volume, feedback on/off, deliberate audio check | Watch speech independent of mic state; Dial buzzer only, no invented volume control |
+| Privacy & alerts | Hide / show Home previews, quiet badge / sound / off, clear local previews | Hide sensitive previews; clearing local content never deletes server history |
+| Agent & context | Default agent, resume last valid thread, current conversation | Configured identity retained; no automatic agent fallback |
+| Connection | Wi-Fi status/details/change, OpenClaw status/reconnect/re-pair, granted permissions | Inspect separate layers; permissions are read-only facts |
+| Power | Battery and power-source status | Unknown today; no invented percentage or charging state |
+| About | Device identity, firmware, actual capabilities, USB update guidance | No OTA install button until an OTA owner exists |
+| Help & diagnostics | Control practice, speaker/mic or buzzer check, connection checks, setup guide | Tests start deliberately, stop on exit, and report observable results |
+| Recovery | Reconnect, restart, forget Wi-Fi, forget OpenClaw, factory reset | Each states consequences; final reset has a second confirmation |
+
+Settings that select a value show the current value and selection checkmark.
+A slider previews locally; Back cancels and Done commits through its real owner.
+Diagnostics use the same facts as the status bar. Local reset cannot claim to
+revoke remote access. No preference silently changes the agent owning pending
+work.
+
+The explorer is a fixture navigator with temporary browser state. It does not
+persist settings, play audio, connect, pair, grant permissions, reset a device
+or send messages. Contact sheets and interactive views are generated from the
+same screen definitions.
+
 ## Build sequence and review gates
 
-1. **Approve the interaction direction through the design board.** Compare
+1. **Review the full journeys in the flow explorer and the layout board.** Compare
    Home, menu, agent/conversation selection, devices, numeric editor, activity
    and settings at native size. This is the immediate deliverable, not another firmware patch.
-2. **Prototype these templates and the seven journeys.** Reuse state/ownership
+2. **Prototype these templates and journeys on the device renderers.** Reuse state/ownership
    contracts from revision 02; replace its layout and menu composition. The
-   old explorer stays labeled as a superseded study during this work.
+   revision 02 explorer stays labeled as a superseded study during this work.
 3. **Implement one shared vertical slice on both devices.** Agents →
    Conversations → Devices → outcome → Back/Home, including offline and pending
    states. Keep shared menu/capability/action contracts with board-specific
@@ -370,8 +536,8 @@ Unresolved before firmware: licensed font/raster memory cost; long-label and
 Unicode coverage; accepted persistent preference storage; the authorized
 control catalog/assignment entry point; actual voice capability/error facts;
 the first-use teaching flag; and battery/power providers for the shared status
-strip. Clock, sleep/wake policy, haptics and linked-device behaviors remain
-separate future scope. Product parity does not depend on linking the devices.
+strip. Clock, haptics and linked-device behaviors remain separate future scope.
+Display-sleep options are now shown for review but still need hardware policy. Product parity does not depend on linking the devices.
 
 The requested Claude design critique is pending authentication. No Claude
 critique or approval is claimed. The source and visual analysis above is

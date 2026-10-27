@@ -2,8 +2,9 @@
 
 **Research baseline · revision 02 · 27 October 2026 · no firmware changes.**
 
-**Current direction:** [revision 04 shared interaction plan](watch-dial-interaction-plan.md)
-and its [annotated layout board](watch-dial-ux-plan.html). The revision 02
+**Current direction:** [revision 05 shared interaction plan](watch-dial-interaction-plan.md)
+and its [interactive flow explorer](watch-dial-ux-flows.html) and
+[annotated layout board](watch-dial-ux-plan.html). The revision 02
 product split, visual rules and explorer below are retained as a superseded
 study; hardware, protocol and source evidence remain reference material.
 

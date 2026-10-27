@@ -19,13 +19,24 @@ typedef int esp_err_t;
 """,
     "esp_codec_dev.h": "typedef void *esp_codec_dev_handle_t;",
     "esp_openclaw_node.h": """
+#include <stddef.h>
+#include "esp_err.h"
 typedef struct esp_openclaw_node *esp_openclaw_node_handle_t;
-typedef struct esp_openclaw_node_error esp_openclaw_node_error_t;
+typedef struct { const char *code; const char *message; } esp_openclaw_node_error_t;
+typedef esp_err_t (*esp_openclaw_node_command_handler_t)(esp_openclaw_node_handle_t,
+    void *, const char *, size_t, char **, esp_openclaw_node_error_t *);
+typedef struct {
+    const char *name;
+    esp_openclaw_node_command_handler_t handler;
+    void *context;
+} esp_openclaw_node_command_t;
+esp_err_t esp_openclaw_node_register_command(esp_openclaw_node_handle_t,
+    const esp_openclaw_node_command_t *);
 """,
-    "cJSON.h": "typedef struct cJSON cJSON;",
     "esp_log.h": """
 #define ESP_LOGE(tag, ...) ((void)(tag))
 #define ESP_LOGW(tag, ...) ((void)(tag))
+#define ESP_LOGI(tag, ...) ((void)(tag))
 """,
     "esp_timer.h": """
 #include <stdint.h>
@@ -54,9 +65,14 @@ size_t strlcpy(char *, const char *, size_t);
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--lvgl-dir", type=Path, required=True, help="Read-only LVGL 9 source directory")
+    parser.add_argument("--cjson-dir", type=Path, help="Read-only cJSON source directory; defaults to the sibling managed component")
     parser.add_argument("--snapshot", type=Path, help="Optional synthetic Tab5 framebuffer in PPM format")
+    parser.add_argument("--watch-snapshot", type=Path, help="Optional synthetic watch framebuffer in PPM format")
     args = parser.parse_args()
     lvgl = args.lvgl_dir.resolve()
+    cjson = (args.cjson_dir or lvgl.parent / "espressif__cjson/cJSON").resolve()
+    if not (cjson / "cJSON.c").is_file():
+        parser.error("--cjson-dir must contain cJSON sources")
     if not (lvgl / "src/lvgl.h").exists() and not (lvgl / "lvgl.h").exists():
         parser.error("--lvgl-dir must contain LVGL sources")
     tests = Path(__file__).resolve().parent
@@ -95,7 +111,10 @@ def main():
             "-DLV_FONT_MONTSERRAT_20=1", "-DLV_FONT_MONTSERRAT_28=1",
             "-I", str(root), "-I", str(component), "-I", str(component / "include"),
             "-I", str(lvgl), str(tests / "test_room_ui_controller.c"),
+            "-I", str(cjson), str(cjson / "cJSON.c"),
             str(component / "room_ui_controller.c"), str(component / "room_board.c"),
+            str(component / "room_watch_home.c"),
+            str(component / "room_face.c"),
             str(pixels), str(watch_pixels), str(component / "room_lobster.c"),
             *map(str, sorted((lvgl / "src").rglob("*.c"))),
             "-lm", "-o", str(binary),
@@ -106,6 +125,8 @@ def main():
             arguments = [str(binary), scenario]
             if args.snapshot and scenario == "tab5":
                 arguments.append(str(args.snapshot.resolve()))
+            if args.watch_snapshot and scenario == "watch":
+                arguments.append(str(args.watch_snapshot.resolve()))
             subprocess.run(arguments, check=True)
 
 

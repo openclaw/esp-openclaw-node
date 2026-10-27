@@ -15,7 +15,8 @@
 static lv_display_t *display;
 static uint8_t *frame, *draw_buffer;
 static int width, height, brightness, display_depth, critical_depth;
-static bool deny_display, canvas_active, face_visible;
+static bool deny_display, canvas_active;
+static esp_openclaw_node_command_handler_t face_gesture;
 static unsigned toggles, holds;
 static unsigned talk_starts, talk_stops, display_flushes;
 static lv_indev_t *touchscreen;
@@ -63,14 +64,13 @@ static void fire_timer(const char *name)
     assert(!"expected active timer");
 }
 
-void room_face_set_controller(const room_face_controller_t *controller) { assert(controller); }
-esp_err_t room_face_create(lv_obj_t *parent) { assert(parent); return ESP_OK; }
-void room_face_show(room_face_state_t state) { (void)state; face_visible = true; }
-void room_face_show_hint(int64_t until)
-{ (void)until; face_visible = room_board_config()->display.animated_face; }
-void room_face_hide(void) { face_visible = false; }
-bool room_face_is_visible(void) { return face_visible; }
-void room_face_reset_mood(void) {}
+esp_err_t esp_openclaw_node_register_command(esp_openclaw_node_handle_t node,
+                                            const esp_openclaw_node_command_t *command)
+{
+    assert(node && command);
+    if (strcmp(command->name, "face.gesture") == 0) face_gesture = command->handler;
+    return ESP_OK;
+}
 void room_canvas_set_action_handler(room_canvas_action_handler_t handler) { canvas_action = handler; }
 bool room_canvas_is_active(void) { return canvas_active; }
 void room_canvas_view_toggle(void)
@@ -377,6 +377,86 @@ static void check_watch_repaint(void)
     lv_obj_delete(parent);
 }
 
+static void check_watch_home(const char *path)
+{
+    room_ui_facts_t facts = {.wifi = ROOM_UI_WIFI_CONNECTED,
+        .gateway = ROOM_UI_GATEWAY_CONNECTED, .talk = ROOM_UI_TALK_READY};
+    room_ui_store_facts(&facts);
+    room_ui_set(ROOM_UI_IDLE, NULL);
+    lv_obj_t *title = find_text(lv_layer_top(), "Ready when you are");
+    assert(title && lv_obj_is_visible(title));
+    assert(room_face_is_visible());
+    lv_obj_update_layout(lv_layer_top());
+    unsigned objects = check_home_tree(lv_obj_get_parent(title));
+    lv_area_t title_area, action_area;
+    lv_obj_get_coords(title, &title_area);
+    lv_obj_t *button = lv_obj_get_parent(find_text(lv_layer_top(), "Start Talk"));
+    lv_obj_get_coords(button, &action_area);
+    assert(title_area.y1 >= 312 && title_area.y2 < action_area.y1);
+    assert(action_area.x1 >= 24 && action_area.x2 < width - 24);
+    assert(action_area.y1 >= 376 && action_area.y2 < height - 16);
+    snapshot(path);
+
+    facts.talk = ROOM_UI_TALK_ACTIVE;
+    room_ui_store_facts(&facts);
+    room_ui_set(ROOM_UI_SPEAKING, NULL);
+    assert(find_text(lv_layer_top(), "Conversation live"));
+    assert(!find_text(lv_layer_top(), "Speaking"));
+    canvas_active = true;
+    room_ui_refresh();
+    assert(!lv_obj_is_visible(title));
+    lv_obj_update_layout(lv_layer_top());
+    lv_obj_get_coords(button, &action_area);
+    assert(action_area.y1 == 14 && lv_area_get_height(&action_area) == 44);
+    canvas_active = false;
+    room_ui_refresh();
+    assert(lv_obj_is_visible(title));
+    lv_obj_update_layout(lv_layer_top());
+    lv_obj_get_coords(button, &action_area);
+    assert(action_area.y1 == 376);
+    room_diagnostics_open();
+    assert(!lv_obj_is_visible(title));
+    room_diagnostics_close();
+    assert(lv_obj_is_visible(title));
+
+    facts.gateway = ROOM_UI_GATEWAY_NO_SESSION;
+    facts.talk = ROOM_UI_TALK_NO_SESSION;
+    room_ui_store_facts(&facts);
+    room_ui_set(ROOM_UI_SETUP, "USB console: gateway setup-code");
+    assert(find_text(lv_layer_top(), "Pairing needed"));
+    assert(room_face_is_visible());
+    room_ui_set(ROOM_UI_SETUP, "USB console:\nwifi set + setup-code");
+    lv_obj_t *setup = find_text(lv_layer_top(), "USB console: wifi set + setup-code");
+    assert(setup);
+    lv_obj_update_layout(lv_layer_top());
+    lv_area_t setup_area;
+    lv_obj_get_coords(setup, &setup_area);
+    assert(setup_area.y2 < action_area.y1);
+    char detail[] = "A long error that must fit within the watch";
+    room_ui_set(ROOM_UI_ERROR, detail);
+    assert(room_face_is_visible());
+    memset(detail, 'x', strlen(detail));
+    assert(find_text(lv_layer_top(), "A long error that must fit within the watch"));
+    for (int i = 0; i < 100; ++i) room_ui_refresh();
+    assert(check_home_tree(lv_obj_get_parent(title)) == objects);
+    room_ui_set(ROOM_UI_IDLE, NULL);
+}
+
+static void check_watch_home_gesture(void)
+{
+    esp_openclaw_node_handle_t node = (esp_openclaw_node_handle_t)(uintptr_t)1;
+    assert(room_face_register_node_commands(node) == ESP_OK);
+    assert(face_gesture && brightness == 0);
+    const char params[] = "{\"name\":\"nod\"}";
+    char *payload = NULL;
+    esp_openclaw_node_error_t error = {0};
+    assert(face_gesture(node, NULL, params, sizeof(params) - 1, &payload, &error) == ESP_OK);
+    assert(brightness == 40);
+    assert(payload && strstr(payload, "\"played\":true"));
+    free(payload);
+    room_ui_set(ROOM_UI_IDLE, NULL);
+}
+
 int main(int argc, char **argv)
 {
     assert(argc >= 2);
@@ -395,7 +475,7 @@ int main(int argc, char **argv)
     lv_display_set_flush_cb(display, flush);
     esp_openclaw_room_node_config_t board = {
         .display_name = "OpenClaw M5Stack Tab5 Room Node",
-        .model_identifier = "m5stack-tab5",
+        .model_identifier = watch ? "waveshare-esp32-s3-touch-amoled-1.8" : "m5stack-tab5",
         .display = {.start = start_display, .lock = lock_display, .unlock = unlock_display,
             .set_brightness = set_brightness, .native_width = width, .native_height = height,
             .safe_inset = 24, .animated_face = animated, .idle_brightness = 101},
@@ -412,7 +492,7 @@ int main(int argc, char **argv)
     if (animated) {
         assert(!find_text(lv_screen_active(), "OpenClaw Room Node"));
         room_ui_set(ROOM_UI_LISTENING, NULL);
-        assert(face_visible && brightness == 40);
+        assert(room_face_is_visible() && brightness == 40);
         room_ui_set(ROOM_UI_IDLE, NULL);
         assert(brightness == 0);
     } else {
@@ -515,7 +595,11 @@ int main(int argc, char **argv)
         fire_timer("text_hint");
         assert(brightness == idle);
     }
-    if (watch) check_watch_repaint();
+    if (watch) {
+        check_watch_home(argc == 3 ? argv[2] : NULL);
+        check_watch_home_gesture();
+        check_watch_repaint();
+    }
     assert(room_board_display_brightness_set(0) == ESP_OK && brightness == 0);
     assert(display_depth == 0 && critical_depth == 0);
     lv_deinit();

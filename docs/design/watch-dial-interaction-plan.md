@@ -593,9 +593,39 @@ same screen definitions.
 
 ## Build sequence and review gates
 
+The design review is complete in
+[PR #103](https://github.com/openclaw/esp-openclaw-node/pull/103). Implementation
+ships as independently usable slices, with both devices remaining independent.
+The table below is the implementation queue, not a claim of shipped features.
+Each row can split further when its UI and protocol owners need separate review.
+
+| Slice | Behavior to land | Required proof |
+| --- | --- | --- |
+| Watch Home layout | Bounded status, mascot and bottom Talk action; truthful live-call label | Native layout, wake/held-input tests, camera capture |
+| Dial Home layout | Same hierarchy, with a primary action the Dial can perform | Round clipping, rotary/press tests, camera capture |
+| Navigation | Five destinations, explicit Back/Home, preserved focus and ongoing work | Real LVGL touch/encoder transitions on both profiles |
+| Agent directory | Bounded, authorized roster with actual names and identity | Gateway role/scopes, stale replies and reconnect |
+| Agent picker | Shared selection model, avatars/fallbacks, denied and empty states | Long names, unavailable agents, no call/control retargeting |
+| Conversations | Resume a returned canonical session; bounded list and reader | Pagination, permission failure, preserved selection |
+| New conversation | One explicit creation intent with retry-safe identity | Gateway write authority, duplicate/retry behavior |
+| Voice routing | Selected conversation owns the entire watch call | Live audio and selection changes during a call |
+| Hold to talk | Bounded capture, release to review, cancellation | Real microphone, touch loss, wake-only press, memory |
+| Review and send | Edit/cancel/retry a transcript without silent submission | Offline recovery, one send per intent, agent ownership |
+| Dial input | Quick replies and device-appropriate text entry | Rotary/touch entry, Unicode, cancel and draft retention |
+| Devices and activity | Actual catalog, control binding and correlated outcomes | Delayed/rejected results without view or owner changes |
+| Display settings | Compact/comfortable, text size and reduced motion | Both native sizes, persistence, speech/render budget |
+| Mobile setup | QR discovery, protected BLE exchange and local confirmation | Real phone/device pairing, expiry, rejection and recovery |
+| Recovery and remaining settings | Network/session repair, privacy and device information | Saved-state reboot, denied permissions, explicit outcomes |
+
+Hardware captures validate what the camera can show. Automated LVGL input tests
+do not establish physical touch or encoder ergonomics; firmware builds do not
+establish audio quality. Record those gaps separately and do not label an
+unimplemented destination or simulated pairing flow as working.
+
 1. **Review the full journeys in the flow explorer and the layout board.** Compare
    Home, menu, agent/conversation selection, devices, numeric editor, activity
-   and settings at native size. This is the immediate deliverable, not another firmware patch.
+   and settings at native size. This design step is complete; retain the explorer
+   as the visual reference for the implementation queue.
 2. **Prototype these templates and journeys on the device renderers.** Reuse state/ownership
    contracts from revision 02; replace its layout and menu composition. The
    revision 02 explorer stays labeled as a superseded study during this work.

@@ -1,6 +1,6 @@
 # Standalone watch and Dial UX
 
-**Research and design proposal · 27 October 2026 · no firmware changes.**
+**Research and design proposal · revision 02 · 27 October 2026 · no firmware changes.**
 
 The watch and M5Dial are independent, Gateway-backed OpenClaw nodes. Each must
 complete setup, explain its capabilities, offer useful everyday interactions,
@@ -209,19 +209,19 @@ Home: lobster, actual readiness, Talk, Menu
     Activity: current task / recent session-only results
     Canvas: latest retained image or supported A2UI card
     Actions: only configured, authorized actions [later contract]
-    Conversations: current/default session [chooser later]
+    Assistants: Automatic or permitted agent → new/existing conversation
     Settings
       Connection: Wi-Fi, Gateway, pairing, Talk readiness
       Audio & privacy: output level, wake word / mic state [new controls]
-      Display: brightness, sleep preference, reduced motion [new preferences]
-      Help & device: identity, firmware, diagnostics, guided checks
+      Display & text: layout density, text size, typeface, brightness, motion
       Recovery: change network, reconnect, forget Gateway, reset
+    Help & device: identity, firmware, diagnostics, guided checks
 ```
 
 Use a vertical text list, not a honeycomb of tiny icons. Home has prominent
 **Talk** and clear **Menu** actions. A current task can replace the idle subtitle
 with **View activity**; it must not remove navigation or End. Inside Menu, show
-three large rows at once and scroll for more. Everyday tasks are one or two
+as many readable rows as the chosen density permits and scroll for more. Everyday tasks are one or two
 selections away; settings may need one further level.
 
 | Screen | Content and primary action | Failure / empty behavior |
@@ -231,7 +231,7 @@ selections away; settings may need one further level.
 | Activity | Current request and confirmed result; open related card | “No activity yet”; no fabricated conversation history |
 | Canvas | Latest supported content with reserved navigation | “No card yet”; unsupported content explains its limit |
 | Actions | Named, authorized actions with consequence preview | Hide until a real configured action source exists |
-| Conversations | Current session and destination | Current/default only until list/create/select APIs exist |
+| Assistants / conversations | Permitted agent and scoped conversation | Loading/offline/denied states; device integration remains new |
 | Connection | Wi-Fi, Gateway, pairing, Talk as separate rows | Each failed row opens its repair |
 | Audio & privacy | Actual output level and input/wake-word state | No mic-off claim until capture and wake admission are disabled |
 | Help & device | Identity, firmware version, diagnostics, speaker test | No fabricated temperature or battery measurements |
@@ -267,13 +267,15 @@ competing with audio.
 Home: assigned control summary OR “Choose a control”, Menu
   Menu (rotary list)
     Control: one current assignment first
+    Assignment: agent → authorized control → accepted configuration
     Messages: bounded readable message / result
     Activity: current request and latest outcome
     Settings
       Connection: Wi-Fi, Gateway, pairing
-      Display & sound: brightness, feedback preference
-      Help & device: identity, firmware, input test
+      Display & text: layout density, text size, typeface, brightness
+      Feedback sound: local preference
       Recovery: network / Gateway repairs and reset
+    Help & device: identity, firmware, local practice
   Future: multiple named controls after a real assignment/catalog contract
 ```
 
@@ -385,25 +387,146 @@ primary action. Red belongs to the lobster and deliberate warning accents,
 not every button. Give settings and tasks room to breathe. Avoid tiny status
 dashboards, decorative waveforms, dense icon grids and endless cheerful errors.
 
-On the watch, start with 24–32 px body/action text and roughly 76–88 px primary
-hit regions, then validate physically. These are hypotheses, not certification.
-A nominal 1.8-inch, 368×448 panel is approximately 12.7 pixels/mm: the old 52 px
-button was only about 4.1 mm high. Browser zoom hides that problem. Apple's
-[accessibility guidance](https://developer.apple.com/design/human-interface-guidelines/accessibility)
-uses points; it does not mean “44 raw pixels is enough.” Prefer full-width
-primary controls and at most two short parallel actions, following its
-[button guidance](https://developer.apple.com/design/human-interface-guidelines/buttons).
+Default to **Compact + Mono** in the revised concept. Density and text size are
+separate, per-device preferences. Comfortable adds spacing and a larger base
+font; Small/Default/Large adjusts reading size without changing navigation.
 
-On Dial, keep essential text in the circle's safe center; start near 20–24 px
-labels, a much larger value, and unmistakable row focus. The physical main path
-reduces dependence on touch precision; touch still needs testing. Long labels
-wrap or open details; do not truncate away target or unit. State uses text and
-shape as well as color/sound. Text-size and motion options must work across the
-whole screen set without clipping.
+| Role | Watch compact / comfortable | Dial compact / comfortable |
+| --- | --- | --- |
+| Default body | 18 / 20 px | 15 / 17 px |
+| Default title | 22 / 24 px | 17 / 19 px |
+| Text-size adjustment | Small −2 px; Large +3 px | Small −2 px; Large +3 px |
+| List interaction | 56 / 66 px minimum rows; vertical scroll | Up to three / two focused rows; fewer when needed |
+| Primary action | Full-width hit region independent of glyph size | Physical press with labeled touch equivalent |
+
+These are browser design values, not final raster metrics or physical
+accessibility claims. Qualify fonts and hit areas on hardware. The previous
+24–32 px body everywhere crowded the interface; its 76–88 px rows are no longer
+the default. Apple separates text-size adjustment from other display settings;
+borrow the control model, not point values as raw ESP pixels.
+[Apple Watch display controls](https://support.apple.com/en-gb/guide/watch/apd127ec93ac/26/watchos/26).
+
+Use mono for labels, status, values and short text, with a humanist option for
+readability. Restrained `>`, `[x]`, `[online]`, thin rules and aligned values
+provide structure without decorative terminal prompts. Keep the mobile lobster.
+Preserve Unicode in incoming text and agent names: an ASCII-style shell must
+not become an ASCII-only data contract. Long labels wrap or paginate instead
+of losing their target, unit or important status.
+
+The browser uses local system mono (Menlo/SF Mono where available); no Apple
+font is embedded or redistributed. Current firmware uses Montserrat 16/20/24/28
+on watch and 16/24 on Dial. LVGL supports generated bitmap fonts and ASCII-only
+UNSCII; UNSCII is a diagnostic-style candidate, not a general message font.
+Before firmware work, qualify a licensed mono family at bounded sizes with
+explicit fallback for missing glyphs. Do not scale one tiny raster or load
+arbitrary fonts during calls.
+[LVGL font support](https://lvgl.io/docs/open/9.3/details/main-modules/font).
 
 The explorer reviews hierarchy, wording and interaction. It is not a final
 visual system, hardware performance result, or proof that browser CSS fits
 firmware fonts. All example labels and values are synthetic.
+
+## Revision 02: user walkthrough and agent selection
+
+The review follows navigation, not just isolated screenshots. The explorer's
+on-device Display settings and outside review shortcuts change the same
+per-device preferences. Values last for this browser page session; this does
+not claim firmware persistence.
+
+| Pane family | Issue found | Revised behavior |
+| --- | --- | --- |
+| Home / Talk | Oversized text and hidden active-call context | Compact summary, named assistant, persistent Return/End strip |
+| Menu / Back | Fixed Back destinations lost entry context and could clear calls | History-aware Back restores parent scroll/focus; Home stays separate |
+| Assistant / conversation | Static default-session placeholder | Permitted assistant → new/existing conversation; explicit Automatic routing |
+| Display | One oversized layout | Independent density, text size and typeface, with visible selected values |
+| Audio / Help | Edits reset; audio checks opened volume | Retained simulation values; deliberate speaker/mic checks; explicit privacy state |
+| Setup / repair | Repair cleared unrelated state | Distinct initial setup and Wi-Fi change; preserve identity and Dial assignment |
+| Dial menu | No one-level Back; lost focus; hidden items | Numbered position, focus, Back and parent selection restoration |
+| Dial practice | Claimed remote sends/results; changed a real draft | Separate local draft; no remote request or overwritten Activity |
+| Dial assignment | No reachable agent/control flow | Agent → control → target/range → accepted configuration; reject/offline keeps current binding |
+| Dial requests | Pending state tied to screen; results stole focus | Request survives navigation; Activity marker and frozen submitted context |
+| Messages / large text | Fixed-height clipping | Pagination, page position and unchanged control value while reading |
+| Forget / reset | Simulator language and unclear scope | Read consequences, then Cancel-first choices; invalidate Gateway-owned routing and permissions |
+
+The service simulator stays outside the device. It supplies synthetic call,
+connection, result and permission events; device buttons never manufacture
+remote success. Walk through the device controls for ordinary use, then use
+the screen index for exceptional and empty states.
+
+### Prototype validation
+
+Reviewed all 40 watch and 37 Dial panes, including setup, empty/error states,
+preferences and destructive-action explanations. Browser geometry checks cover
+all 77 panes across both densities, all three text sizes and both typefaces
+(924 combinations), plus every Dial menu focus position. Long details paginate;
+watch lists scroll with a visible cue. Checked four browser widths and found
+no page overflow, JavaScript errors or external requests.
+
+Interaction checks cover parent navigation, retained preferences, active-call
+switch/cancel, pairing invalidation, denied creation, local practice isolation,
+late results without page changes, pending versus prior results, and rejected
+or offline assignments retaining the old control. These are prototype checks,
+not firmware, physical font, audio or hardware qualification.
+
+### Watch: assistant → conversation → call
+
+Use **assistant** for who handles the work and **conversation** for its context.
+Keep IDs/session keys out of ordinary labels. The current choice is visible on
+Home and reachable from Menu. Automatic means Gateway routing; never silently
+choose the first roster entry when explicit selection is required.
+
+1. Load the permitted roster. Distinguish loading, empty, offline/cache, request
+   failure and permission failure. Cached labels do not authorize a new choice.
+2. Select an assistant, then New conversation or one of its existing threads.
+   Do not mix other assistants' threads or infer capabilities from names.
+3. Resume with the returned canonical key. Creating a thread is a write action;
+   read/talk access alone does not grant it. Otherwise explain how to resume an
+   existing thread or create one in OpenClaw.
+4. Change the selected route only after success. Keep the prior choice on error.
+   Retry the same creation intent with the same idempotency key; use a new one
+   for a new creation intent.
+5. Copy the route into each call. Changing assistant or conversation during a
+   call stages the choice and offers Keep current call or End and switch.
+   Apply the next route only after the old call closes. Existing audio, results,
+   callbacks and Canvas actions retain their original owners.
+   Re-pairing explicitly ends the old call and clears Gateway-owned selection
+   and creation permissions before validating the new connection.
+6. Show that original assistant/conversation on results, even after the next
+   selected route changes. Do not imply provider readiness from roster presence.
+
+The core audit used locally cached main
+[`d777ae1`](https://github.com/openclaw/openclaw/tree/d777ae1239625a8cadb3da17e7a057d0c4de71fa),
+not a claim about the serving Gateway revision:
+
+| Operation | Existing seam | Missing device integration |
+| --- | --- | --- |
+| Roster | [`agents.list`](https://github.com/openclaw/openclaw/blob/d777ae1239625a8cadb3da17e7a057d0c4de71fa/src/gateway/server-methods/agents.ts#L118), filtered by current grants | Bounded picker, refresh and errors |
+| Resume | [`sessions.list` agent filter](https://github.com/openclaw/openclaw/blob/d777ae1239625a8cadb3da17e7a057d0c4de71fa/packages/gateway-protocol/src/schema/sessions-list.ts#L18) | Pagination, titles and canonical-key retention |
+| Create | [`sessions.create`](https://github.com/openclaw/openclaw/blob/d777ae1239625a8cadb3da17e7a057d0c4de71fa/src/gateway/session-create-service.ts#L343) | Write authority, idempotency and result handling |
+| Voice | [Explicit Talk session key](../../components/esp-openclaw-talk/include/esp_openclaw_talk.h) | Room app currently uses automatic routing; picker wiring is new |
+| Dial owner | [`dial.configure` invocation session](../../examples/m5stack-dial-node/main/app_main.c) | Authorized control catalog and assignment handshake |
+
+The prototype includes a denied New conversation path; its external service
+simulator can enable the hypothetical granted case. The device selector never
+grants itself access. Creation must produce a distinct thread, not reset an
+existing main conversation.
+
+### Dial: agent + control assignment
+
+The Dial selects an **agent for a control**, not a voice partner. Its assignment
+identifies owner, target, unit and range. The two example controls are synthetic;
+the catalog remains a new contract. Only accepted configuration replaces the
+old binding. A menu choice alone cannot retarget a control or grant permissions.
+
+During transport send, another press and reconfiguration are blocked. After
+acceptance, completion remains pending, but a new press can supersede it and
+reconfiguration can invalidate its old result token. Warn that previous work
+may still run. No step promises external cancellation or rollback.
+
+Hold Home, open Settings or change typography while waiting: the request keeps
+its submitted agent/target/value. A result marks Activity without changing the
+focused page or replacing a newer draft. Connection loss means Outcome unknown.
+Home values say agent reported because they are not physical telemetry.
 
 ## Implementation sequence and completion criteria
 

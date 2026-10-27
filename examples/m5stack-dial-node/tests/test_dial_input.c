@@ -573,19 +573,54 @@ int main(int argc, char **argv)
     assert(navigation.view == DIAL_NAV_DISPLAY);
     touch(68, 44, true); touch(68, 44, false);
     touch(120, 126, true); touch(120, 126, false);
+    assert(navigation.view == DIAL_NAV_CONNECTION);
+    dial_navigation_set_connection(&navigation, false, false);
+    assert(strcmp(lv_label_get_text(navigation.names[0]), "Wi-Fi offline") == 0);
+    assert(strcmp(lv_label_get_text(navigation.names[1]), "Gateway offline") == 0);
+    snapshot("connection-offline");
+    unsigned connection_requests = brightness_requests;
+    encoder_diff = 1;
+    lv_indev_read(encoder); advance(40);
+    touch(120, 98, true); touch(120, 98, false);
+    assert(navigation.view == DIAL_NAV_CONNECTION && brightness_requests == connection_requests);
+    assert(confirmations == before_settings);
+    dial_navigation_set_connection(&navigation, true, false);
+    assert(strcmp(lv_label_get_text(navigation.names[0]), "Wi-Fi online") == 0);
+    assert(strcmp(lv_label_get_text(navigation.names[1]), "Gateway offline") == 0);
+    snapshot("connection-wifi");
+    dial_navigation_set_connection(&navigation, true, true);
+    assert(strcmp(lv_label_get_text(navigation.names[1]), "Gateway online") == 0);
+    snapshot("connection-online");
+    lv_obj_update_layout(screen);
+    for (unsigned i = 0; i < lv_obj_get_child_count(navigation.root); ++i)
+        check_home_bounds(lv_obj_get_child(navigation.root, i));
+    ++roster.revision;
+    dial_navigation_update(&navigation, &roster);
+    assert(navigation.view == DIAL_NAV_CONNECTION);
+    // A status update does not change the meaning of an already-held Back.
+    touch(68, 44, true);
+    dial_navigation_set_connection(&navigation, false, false);
+    touch(68, 44, false);
+    assert(navigation.view == DIAL_NAV_SETTINGS && navigation.focus == 1);
+    touch(120, 82, true); touch(120, 82, false);
+    assert(navigation.view == DIAL_NAV_DISPLAY);
+    touch(68, 44, true); touch(68, 44, false);
+    touch(120, 170, true); touch(120, 170, false);
     assert(navigation.view == DIAL_NAV_MENU);
-    dial_navigation_open_settings(&navigation, true);
+    dial_navigation_open_settings(&navigation, DIAL_NAV_DISPLAY);
     encoder_state = LV_INDEV_STATE_PRESSED;
     lv_indev_read(encoder); advance(40);
     encoder_state = LV_INDEV_STATE_RELEASED;
     lv_indev_read(encoder); advance(40);
     assert(navigation.view == DIAL_NAV_SETTINGS);
+    touch(120, 126, true); touch(120, 126, false);
+    assert(navigation.view == DIAL_NAV_CONNECTION);
     encoder_state = LV_INDEV_STATE_PRESSED;
     lv_indev_read(encoder); advance(1000);
     encoder_state = LV_INDEV_STATE_RELEASED;
     lv_indev_read(encoder); advance(40);
     assert(!navigating && confirmations == before_settings);
-    puts("local display input, bounds, failures, offline focus and return: passed");
+    puts("local display and connection input, bounds, failures, offline focus and return: passed");
 
     lv_deinit();
 }

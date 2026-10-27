@@ -20,6 +20,7 @@ static bool disconnect_during_delay, in_callback;
 static esp_openclaw_node_handle_t fail_uri;
 static int64_t now;
 static int queries;
+static char last_method[32], last_params[1024];
 static esp_err_t query_result = ESP_OK;
 static esp_openclaw_node_gateway_request_cb_t response;
 static void *response_context;
@@ -28,7 +29,10 @@ esp_err_t esp_openclaw_node_gateway_request_on_connection(esp_openclaw_node_hand
     uint32_t connection, const char *method, const char *params,
     esp_openclaw_node_gateway_request_cb_t callback, void *context) {
     assert(!locked && !in_callback && handle == &client && connection == client.id);
-    assert(strcmp(method, "agents.list") == 0 && strcmp(params, "{}") == 0);
+    assert(strlen(method) < sizeof(last_method) && strlen(params) < sizeof(last_params));
+    strcpy(last_method, method);
+    strcpy(last_params, params);
+    assert(strcmp(method, "agents.list") != 0 || strcmp(params, "{}") == 0);
     ++queries;
     if (query_result == ESP_OK) { assert(response == NULL); response = callback; response_context = context; }
     return query_result;
@@ -214,6 +218,88 @@ int main(void) {
     before = queries; step(); assert(queries == before); // Explicit refresh after a timed-out request.
     assert(dial_reader_agents_refresh(0) == ESP_OK); step();
     respond("{\"agents\":[]}"); step(); agent_status(DIAL_AGENTS_EMPTY, 0);
+    /* Browse agent B without changing any node/control session state. */
+    assert(dial_reader_agents_refresh(0) == ESP_OK); step();
+    respond("{\"agents\":[{\"id\":\"alpha\"},{\"id\":\"beta\"}]}"); step();
+    dial_reader_agents_copy(&snapshot);
+    assert(dial_reader_conversations_open("beta", snapshot.revision - 1) == ESP_ERR_INVALID_STATE);
+    assert(dial_reader_conversations_open("missing", snapshot.revision) == ESP_ERR_INVALID_STATE);
+    assert(dial_reader_conversations_open("beta", snapshot.revision) == ESP_OK); step();
+    assert(strcmp(last_method, "sessions.list") == 0);
+    cJSON *params = cJSON_Parse(last_params);
+    assert(strcmp(cJSON_GetObjectItem(params, "agentId")->valuestring, "beta") == 0);
+    assert(cJSON_GetObjectItem(params, "limit")->valueint == 8);
+    assert(cJSON_IsFalse(cJSON_GetObjectItem(params, "includeGlobal")));
+    cJSON_Delete(params);
+    respond("{\"sessions\":[{\"key\":\"agent:beta:thread:one\",\"label\":\"One\"},{\"key\":\"agent:beta:thread:two\",\"label\":\"Two\"}],\"offset\":0,\"hasMore\":true,\"nextOffset\":2}"); step();
+    dial_conversations_snapshot_t *view = malloc(sizeof(*view));
+    assert(view != NULL);
+    dial_reader_conversations_copy(view);
+    assert(view->state == DIAL_AGENTS_READY && view->page.count == 2);
+    assert(strcmp(view->agent.id, "beta") == 0 && view->page.next_offset == 2);
+    unsigned revision = view->revision;
+    assert(dial_reader_preview_open(2, revision) == ESP_ERR_INVALID_STATE);
+    assert(dial_reader_preview_open(0, revision - 1) == ESP_ERR_INVALID_STATE);
+    assert(dial_reader_preview_open(0, revision) == ESP_OK); step();
+    assert(strcmp(last_method, "sessions.preview") == 0);
+    params = cJSON_Parse(last_params);
+    assert(strcmp(cJSON_GetArrayItem(cJSON_GetObjectItem(params, "keys"), 0)->valuestring, "agent:beta:thread:one") == 0);
+    assert(cJSON_GetObjectItem(params, "limit")->valueint == 4);
+    cJSON_Delete(params);
+    assert(dial_reader_preview_open(1, revision) == ESP_OK);
+    respond("{\"previews\":[{\"key\":\"agent:beta:thread:one\",\"status\":\"ok\",\"items\":[{\"role\":\"assistant\",\"text\":\"stale\"}]}]}"); step();
+    dial_reader_conversations_copy(view);
+    assert(view->selected == 1 && view->preview_state == DIAL_AGENTS_LOADING && view->preview.count == 0);
+    respond("{\"previews\":[{\"key\":\"agent:beta:thread:two\",\"status\":\"missing\",\"items\":[]}]}"); step();
+    dial_reader_conversations_copy(view);
+    assert(view->preview_state == DIAL_AGENTS_READY && view->preview.status == ESP_OPENCLAW_PREVIEW_MISSING && view->preview.count == 0);
+
+    assert(dial_reader_conversations_refresh(2) == ESP_OK); step();
+    params = cJSON_Parse(last_params);
+    assert(cJSON_GetObjectItem(params, "offset")->valueint == 2);
+    cJSON_Delete(params);
+    assert(dial_reader_conversations_open("alpha", snapshot.revision) == ESP_OK);
+    respond("{\"sessions\":[{\"key\":\"agent:beta:old\"}],\"offset\":2}"); step();
+    dial_reader_conversations_copy(view);
+    assert(strcmp(view->agent.id, "alpha") == 0 && view->state == DIAL_AGENTS_LOADING && view->page.count == 0);
+    respond("{\"sessions\":[{\"key\":\"agent:alpha:main\"}]}"); step();
+    dial_reader_conversations_copy(view);
+    assert(view->state == DIAL_AGENTS_READY && view->page.count == 1);
+    assert(dial_reader_preview_open(0, view->revision) == ESP_OK); step();
+    dial_reader_conversations_close();
+    respond("{\"previews\":[{\"key\":\"agent:alpha:main\",\"status\":\"empty\",\"items\":[]}]}"); step();
+    dial_reader_conversations_copy(view);
+    assert(view->state == DIAL_AGENTS_IDLE && view->preview.count == 0);
+    before = queries; step(); assert(queries == before);
+
+    assert(dial_reader_conversations_open("beta", snapshot.revision) == ESP_OK); step();
+    node.id = 0; dial_reader_node_event(ESP_OPENCLAW_NODE_EVENT_DISCONNECTED);
+    dial_reader_conversations_copy(view);
+    assert(view->state == DIAL_AGENTS_OFFLINE && view->page.count == 0);
+    respond("{\"sessions\":[{\"key\":\"agent:beta:stale\"}]}"); step();
+    disconnected(ESP_OPENCLAW_NODE_DISCONNECTED_REASON_REQUESTED); step();
+    node_connected(20); step(); connected(81); step();
+    /* Reconnect refreshes agents, but never silently reopens the old agent. */
+    respond("{\"agents\":[{\"id\":\"beta\"}]}"); step();
+    dial_reader_conversations_copy(view);
+    assert(view->state == DIAL_AGENTS_IDLE && view->page.count == 0);
+    dial_reader_agents_copy(&snapshot);
+    assert(dial_reader_conversations_open("beta", snapshot.revision) == ESP_OK); step();
+    respond(NULL); step();
+    dial_reader_conversations_copy(view);
+    assert(view->state == DIAL_AGENTS_ERROR && view->page.count == 0);
+    query_result = ESP_ERR_NO_MEM;
+    assert(dial_reader_conversations_refresh(0) == ESP_OK); step(); step();
+    dial_reader_conversations_copy(view);
+    assert(view->state == DIAL_AGENTS_ERROR && view->page.count == 0);
+    query_result = ESP_OK;
+    assert(dial_reader_conversations_refresh(0) == ESP_OK); step();
+    assert(dial_reader_agents_refresh(0) == ESP_OK);
+    respond("{\"sessions\":[{\"key\":\"agent:beta:stale\"}]}"); step();
+    dial_reader_conversations_copy(view);
+    assert(view->state == DIAL_AGENTS_IDLE && view->page.count == 0);
+    respond("{\"agents\":[{\"id\":\"beta\"}]}"); step();
+    free(view);
     puts("Dial reader: role, handoff, loss, auth, origin and stale-connection cases passed");
     return 0;
 }

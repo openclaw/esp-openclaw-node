@@ -716,6 +716,77 @@ static int agents_command(int argc, char **argv)
     return 0;
 }
 
+static int conversations_command(int argc, char **argv)
+{
+    dial_conversations_snapshot_t *snapshot = malloc(sizeof(*snapshot));
+    if (snapshot == NULL) return 1;
+    esp_err_t err = ESP_OK;
+    if (argc == 3 && strcmp(argv[1], "open") == 0) {
+        dial_agents_snapshot_t *agents = malloc(sizeof(*agents));
+        if (agents == NULL) { free(snapshot); return 1; }
+        dial_reader_agents_copy(agents);
+        err = dial_reader_conversations_open(argv[2], agents->revision);
+        free(agents);
+    } else if (argc == 3 && (strcmp(argv[1], "refresh") == 0 || strcmp(argv[1], "preview") == 0)) {
+        char *end;
+        errno = 0;
+        unsigned long index = strtoul(argv[2], &end, 10);
+        if (argv[2][0] < '0' || argv[2][0] > '9' || *end != '\0' || errno != 0 || index > 2147483647u)
+            err = ESP_ERR_INVALID_ARG;
+        else if (strcmp(argv[1], "refresh") == 0) err = dial_reader_conversations_refresh(index);
+        else {
+            dial_reader_conversations_copy(snapshot);
+            err = dial_reader_preview_open(index, snapshot->revision);
+        }
+    } else if (argc == 2 && strcmp(argv[1], "close") == 0) dial_reader_conversations_close();
+    else if (argc != 1) err = ESP_ERR_INVALID_ARG;
+    if (err != ESP_OK) {
+        free(snapshot);
+        printf("%s: conversations [open <agent> | refresh <offset> | preview <index> | close]\n", esp_err_to_name(err));
+        return 1;
+    }
+    dial_reader_conversations_copy(snapshot);
+    static const char *states[] = {"idle", "loading", "ready", "empty", "offline", "connecting", "access-needed", "error", "too-large"};
+    static const char *previews[] = {"ok", "empty", "missing", "error"};
+    static const char *roles[] = {"user", "assistant", "tool", "system", "other"};
+    cJSON *root = cJSON_CreateObject();
+    cJSON *sessions = root != NULL ? cJSON_AddArrayToObject(root, "sessions") : NULL;
+    cJSON *items = root != NULL ? cJSON_AddArrayToObject(root, "items") : NULL;
+    bool ok = sessions != NULL && items != NULL &&
+        cJSON_AddStringToObject(root, "state", states[snapshot->state]) != NULL &&
+        cJSON_AddStringToObject(root, "agentId", snapshot->agent.id) != NULL &&
+        cJSON_AddNumberToObject(root, "revision", snapshot->revision) != NULL &&
+        cJSON_AddNumberToObject(root, "offset", snapshot->page.offset) != NULL &&
+        cJSON_AddBoolToObject(root, "hasMore", snapshot->page.has_more) != NULL &&
+        cJSON_AddNumberToObject(root, "nextOffset", snapshot->page.next_offset) != NULL &&
+        cJSON_AddStringToObject(root, "previewState", states[snapshot->preview_state]) != NULL &&
+        cJSON_AddStringToObject(root, "previewStatus", snapshot->preview_state == DIAL_AGENTS_READY ? previews[snapshot->preview.status] : "unavailable") != NULL &&
+        cJSON_AddNumberToObject(root, "selected", snapshot->selected) != NULL;
+    for (size_t i = 0; ok && i < snapshot->page.count; ++i) {
+        const esp_openclaw_session_t *session = &snapshot->page.sessions[i];
+        cJSON *row = cJSON_CreateObject();
+        if (row == NULL) { ok = false; break; }
+        if (!cJSON_AddItemToArray(sessions, row)) { cJSON_Delete(row); ok = false; break; }
+        ok = cJSON_AddStringToObject(row, "key", session->key) != NULL &&
+            cJSON_AddStringToObject(row, "title", session->title) != NULL &&
+            cJSON_AddStringToObject(row, "lastMessage", session->last_message) != NULL;
+    }
+    for (size_t i = 0; ok && i < snapshot->preview.count; ++i) {
+        cJSON *item = cJSON_CreateObject();
+        if (item == NULL) { ok = false; break; }
+        if (!cJSON_AddItemToArray(items, item)) { cJSON_Delete(item); ok = false; break; }
+        ok = cJSON_AddStringToObject(item, "role", roles[snapshot->preview.items[i].role]) != NULL &&
+            cJSON_AddStringToObject(item, "text", snapshot->preview.items[i].text) != NULL;
+    }
+    free(snapshot);
+    char *json = ok ? cJSON_PrintUnformatted(root) : NULL;
+    cJSON_Delete(root);
+    if (json == NULL) return 1;
+    printf("%s\n", json);
+    free(json);
+    return 0;
+}
+
 void app_main(void)
 {
     /* GPIO46 holds battery power. Backlight owns LEDC timer/channel 1; reserve
@@ -770,5 +841,8 @@ void app_main(void)
     const esp_console_cmd_t agents = {.command = "agents", .help = "Read or refresh the permitted agent roster",
         .hint = "[refresh [offset]]", .func = agents_command};
     ESP_ERROR_CHECK(esp_console_cmd_register(&agents));
+    const esp_console_cmd_t conversations = {.command = "conversations", .help = "Browse permitted conversations and previews",
+        .hint = "[open <agent> | refresh <offset> | preview <index> | close]", .func = conversations_command};
+    ESP_ERROR_CHECK(esp_console_cmd_register(&conversations));
     ESP_LOGI(TAG, "ready: provision Wi-Fi and Gateway from the USB console");
 }

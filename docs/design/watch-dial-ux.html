@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>OpenClaw · Watch and Dial UX</title>
+<!--
+Mascot geometry derived from OpenClawMascotView.swift and ui/public/favicon.svg.
+Copyright (c) 2026 OpenClaw Foundation
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+-->
+<style>
+  :root { color-scheme:light; --page:#f4f2ef; --ink:#202421; --muted:#626963; --line:#d9dcd5; --accent:#bd3b36; --surface:#fff; --screen:#050706; --screen-ink:#f2f5f1; --screen-muted:#b5beb7; --red:#ff625e; --green:#87dbb5; font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--page); color:var(--ink); }
+  button,select,input { font:inherit; }
+  button,select,a { -webkit-tap-highlight-color:transparent; }
+  button { cursor:pointer; }
+  button:disabled { cursor:default; }
+  button:focus-visible,select:focus-visible,input:focus-visible,a:focus-visible { outline:3px solid #458fc1; outline-offset:4px; }
+  a { color:inherit; text-underline-offset:4px; }
+  .page { max-width:1160px; margin:auto; padding:32px 32px 48px; }
+  .mast { display:flex; gap:16px; align-items:center; justify-content:space-between; flex-wrap:wrap; padding-bottom:22px; border-bottom:1px solid var(--line); }
+  .wordmark { display:flex; align-items:center; gap:10px; font-weight:650; letter-spacing:-.5px; }
+  .mark { width:26px; height:26px; }
+  .badge { font-size:12px; color:var(--muted); letter-spacing:.03em; }
+  h1 { font-size:clamp(30px,4.5vw,52px); letter-spacing:-2px; line-height:1.08; margin:34px 0 14px; font-weight:600; }
+  .intro { max-width:640px; color:var(--muted); margin:0 0 25px; }
+  .controls { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .control { min-height:42px; padding:8px 14px; border:1px solid var(--line); border-radius:10px; color:var(--ink); background:transparent; }
+  .control:hover { background:var(--surface); }
+  .control.primary { background:var(--ink); border-color:var(--ink); color:var(--page); }
+  .select-label { display:flex; gap:8px; align-items:center; color:var(--muted); font-size:13px; }
+  select.control { max-width:100%; }
+  .stage { display:grid; grid-template-columns:minmax(310px,1.1fr) minmax(265px,.9fr); align-items:start; gap:72px; margin-top:38px; }
+  .watch-column { min-width:0; }
+  .device-meta { display:flex; justify-content:space-between; align-items:baseline; gap:16px; margin:0 auto 12px; max-width:396px; }
+  .device-meta h2 { font-size:14px; font-weight:600; margin:0; }
+  .device-meta span { font-size:12px; color:var(--muted); }
+  .watch { width:100%; max-width:396px; padding:14px; background:#1d211f; border-radius:55px; margin:auto; box-shadow:0 20px 34px #18241b1c,inset 0 0 0 1px #535b56; }
+  .watch-screen { position:relative; width:100%; aspect-ratio:368 / 448; background:var(--screen); color:var(--screen-ink); border-radius:41px; overflow:hidden; display:flex; flex-direction:column; padding:17px 20px 19px; }
+  .screen-header { display:flex; align-items:center; justify-content:space-between; min-height:26px; gap:8px; font-size:12px; color:var(--screen-muted); }
+  .connection { display:flex; align-items:center; gap:6px; }
+  .dot { width:6px; height:6px; border-radius:50%; background:var(--green); flex:none; }
+  .watch-screen[data-connected="false"] .dot { background:#edc379; }
+  .details-link { color:var(--screen-muted); border:0; background:none; padding:5px 0 5px 10px; min-height:28px; font-size:12px; }
+  .watch-content { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; min-height:0; padding-bottom:10px; }
+  .mascot { width:67%; max-width:226px; flex-shrink:1; min-height:0; overflow:visible; }
+  .state-title { font-size:24px; line-height:1.15; font-weight:550; letter-spacing:-.6px; margin:8px 0; }
+  .state-copy { margin:0; font-size:13px; line-height:1.4; color:var(--screen-muted); max-width:270px; min-height:36px; }
+  .watch-action { flex:none; width:100%; min-height:52px; border-radius:17px; border:0; background:#f1f5ef; color:#121714; font-weight:600; font-size:15px; padding:12px; }
+  .watch-action[aria-label="End conversation"] { background:#222925; color:#f0f3ef; }
+  .watch-action:disabled { color:#bec6bf; background:#222925; }
+  .caption { max-width:396px; margin:20px auto 0; font-size:13px; line-height:1.6; color:var(--muted); }
+  .caption strong { color:var(--ink); font-weight:550; }
+  .dial-column { padding-top:0; min-width:0; }
+  .dial-column .device-meta { max-width:284px; }
+  .dial { width:268px; height:268px; padding:14px; border-radius:50%; margin:25px auto 0; background:#242a26; box-shadow:0 16px 30px #18241b17,inset 0 0 0 1px #666e66; }
+  .dial-button { display:block; width:240px; height:240px; padding:0; border:0; border-radius:50%; background:var(--screen); color:var(--screen-ink); }
+  .dial-button svg { display:block; width:100%; height:100%; }
+  .dial-title { fill:var(--screen-muted); font-size:14px; }
+  .dial-value { fill:var(--screen-ink); font-size:62px; font-weight:500; letter-spacing:-3px; font-variant-numeric:tabular-nums; }
+  .dial-unit { fill:var(--screen-muted); font-size:13px; }
+  .dial-status { fill:var(--green); font-size:11px; }
+  .dial-hint { fill:var(--screen-muted); font-size:10px; }
+  .dial-adjust { display:flex; gap:10px; align-items:center; max-width:284px; margin:22px auto 0; }
+  .dial-adjust input { min-width:0; width:100%; accent-color:var(--accent); }
+  .dial-adjust button { width:42px; min-width:42px; padding:8px; }
+  .dial-note { text-align:center; max-width:290px; margin:10px auto 0; font-size:12px; color:var(--muted); }
+  .decision { border-top:1px solid var(--line); padding-top:22px; margin-top:32px; }
+  .decision h3 { font-size:15px; margin:0 0 8px; font-weight:600; }
+  .decision p { color:var(--muted); font-size:14px; margin:0 0 12px; }
+  .detail-panel { width:100%; text-align:left; }
+  .detail-panel h3 { font-size:23px; margin:0 0 24px; }
+  .detail-row { display:flex; justify-content:space-between; gap:15px; padding:12px 0; border-bottom:1px solid #242d27; font-size:13px; }
+  .detail-row span:first-child { color:var(--screen-muted); }
+  .detail-footnote { color:var(--screen-muted); font-size:12px; line-height:1.5; margin-top:18px; }
+  [hidden] { display:none !important; }
+  .idle-body { transform-origin:60px 65px; animation:breathe 4s ease-in-out infinite; }
+  .eyes { transform-box:fill-box; transform-origin:center; animation:blink 5.6s infinite; }
+  .mouth { display:none; fill:none; stroke:#050810; stroke-width:2.5; stroke-linecap:round; }
+  .watch-screen[data-state="ready"] .left-claw { transform-origin:26px 53px; animation:claw 5s ease-in-out infinite; }
+  .watch-screen:not([data-state="ready"]) .idle-body { animation:none; }
+  .watch-screen[data-state="working"] .eyes { transform:translate(2px,-2px); animation:none; }
+  .watch-screen[data-state="speaking"] .mouth { display:block; fill:#050810; stroke:none; transform-origin:60px 55px; animation:speak .42s ease-in-out infinite alternate; }
+  .watch-screen[data-state="result"] .mouth { display:block; }
+  .watch-screen[data-state="offline"] .mouth,.watch-screen[data-state="error"] .mouth { display:block; transform:translate(0,113px) scale(1,-1); }
+  .watch-screen[data-state="offline"] .eyes,.watch-screen[data-state="error"] .eyes { opacity:.7; }
+  .watch-screen[data-state="error"] .mascot,.watch-screen[data-state="offline"] .mascot { max-width:180px; }
+  @keyframes breathe { 0%,100% { transform:translateY(1px); } 50% { transform:translateY(-2px); } }
+  @keyframes blink { 0%,92%,96%,100% { transform:scaleY(1); } 94% { transform:scaleY(.15); } }
+  @keyframes claw { 0%,85%,100% { transform:rotate(0); } 91% { transform:rotate(-8deg); } }
+  @keyframes speak { from { transform:scaleY(.35); } to { transform:scaleY(1.4); } }
+  footer { border-top:1px solid var(--line); padding-top:20px; margin-top:40px; display:flex; justify-content:space-between; gap:16px; flex-wrap:wrap; font-size:12px; color:var(--muted); }
+  @media (prefers-reduced-motion:reduce) { *,*::before,*::after { animation:none !important; transition:none !important; } }
+  @media (prefers-color-scheme:dark) { :root { color-scheme:dark; --page:#181c19; --ink:#eef1eb; --muted:#b2bbb3; --line:#3b443d; --surface:#29302a; --accent:#ff7872; } }
+  @media (max-width:760px) { .page { padding:22px 20px 32px; } .stage { grid-template-columns:1fr; gap:40px; } .dial-column { max-width:396px; width:100%; margin:auto; } h1 { letter-spacing:-1px; } .decision { margin-top:26px; } }
+  @media (max-width:390px) { .watch { padding:10px; border-radius:44px; } .watch-screen { padding:13px 15px 15px; border-radius:34px; } .state-title { font-size:21px; } .state-copy { font-size:12px; min-height:32px; } .watch-action { min-height:46px; font-size:14px; } .screen-header { font-size:11px; } .details-link { font-size:11px; } }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="mast">
+    <div class="wordmark"><svg class="mark" viewBox="0 0 120 120" aria-hidden="true"><path fill="#e75049" d="M60 10C30 10 15 35 15 55c0 20 15 40 30 45v10h10v-10c0 0 5 2 10 0v10h10v-10c15-5 30-25 30-45 0-20-15-45-45-45Z"/><path fill="#e75049" d="M20 45C5 40 0 50 5 60c5 10 15 5 20-5 3-7 0-10-5-10Zm80 0c15-5 20 5 15 15s-15 5-20-5c-3-7 0-10 5-10Z"/><circle cx="45" cy="35" r="7" fill="#111"/><circle cx="75" cy="35" r="7" fill="#111"/></svg>OpenClaw</div>
+    <div class="badge">INTERACTION STUDY 01 · SIMULATED DATA</div>
+  </header>
+  <h1>One glance.<br>One next step.</h1>
+  <p class="intro">A lobster-led watch that tells you what’s happening. A Dial that stays focused on the thing you’re adjusting.</p>
+  <nav class="controls" aria-label="Prototype scenarios">
+    <button class="control primary" id="voice-demo" type="button">Voice → Dial</button>
+    <button class="control" id="dial-demo" type="button">Dial → voice</button>
+    <button class="control" id="offline-demo" type="button">Connection lost</button>
+    <button class="control" id="error-demo" type="button">Request failed</button>
+    <label class="select-label">View <select class="control" id="state-select"><option value="ready">Ready</option><option value="connecting">Connecting</option><option value="active">In conversation</option><option value="listening">Listening</option><option value="working">Working</option><option value="speaking">Speaking</option><option value="result">Result</option><option value="stopping">Ending conversation</option><option value="offline">Offline</option><option value="error">Request failed</option><option value="details">Device details</option></select></label>
+    <button class="control" id="reset" type="button">Reset</button>
+  </nav>
+  <main class="stage">
+    <section class="watch-column" aria-label="Watch concept">
+      <div class="device-meta"><h2>The watch</h2><span>368 × 448</span></div>
+      <div class="watch">
+        <div class="watch-screen" data-state="ready" id="watch-screen">
+          <div class="screen-header"><span class="connection"><span class="dot" aria-hidden="true"></span><span id="connection-label">Connected</span></span><button class="details-link" id="details-button" type="button">Details</button></div>
+          <div class="watch-content" id="watch-content">
+            <!-- Derived from the OpenClaw mobile mascot. MIT, OpenClaw Foundation.
+                 Source and license: components/esp-openclaw-room-node/assets/NOTICE.md. -->
+            <svg class="mascot" viewBox="0 0 120 120" aria-hidden="true">
+              <defs><linearGradient id="lobster-red" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#ff4d4d"/><stop offset="1" stop-color="#991b1b"/></linearGradient></defs>
+              <g class="idle-body">
+                <path fill="url(#lobster-red)" d="M60 10C30 10 15 35 15 55c0 20 15 40 30 45v10h10v-10c0 0 5 2 10 0v10h10v-10c15-5 30-25 30-45 0-20-15-45-45-45Z"/>
+                <path class="left-claw" fill="url(#lobster-red)" d="M20 45C5 40 0 50 5 60c5 10 15 5 20-5 3-7 0-10-5-10Z"/>
+                <path fill="url(#lobster-red)" d="M100 45c15-5 20 5 15 15s-15 5-20-5c-3-7 0-10 5-10Z"/>
+                <path d="M45 15Q35 5 30 8M75 15Q85 5 90 8" stroke="#ff4d4d" stroke-width="3" stroke-linecap="round" fill="none"/>
+                <g class="eyes"><circle cx="45" cy="35" r="6" fill="#050810"/><circle cx="75" cy="35" r="6" fill="#050810"/><circle cx="46" cy="34" r="2.5" fill="#00e5cc"/><circle cx="76" cy="34" r="2.5" fill="#00e5cc"/></g>
+                <path class="mouth" d="M53 53Q60 60 67 53Q60 64 53 53"/>
+              </g>
+            </svg>
+            <h2 class="state-title" id="state-title">Ready when you are</h2>
+            <p class="state-copy" id="state-copy">Tap below to start a conversation</p>
+          </div>
+          <div class="watch-content" id="detail-content" hidden><div class="detail-panel"><h3>Device details</h3><div class="detail-row"><span>Wi-Fi</span><span>Connected</span></div><div class="detail-row"><span>OpenClaw</span><span id="detail-connection">Connected</span></div><div class="detail-row"><span>Voice</span><span id="detail-voice">Ready</span></div><p class="detail-footnote">Prototype values. The shipped screen will use actual device state.</p></div></div>
+          <button class="watch-action" id="watch-action" type="button">Talk to OpenClaw</button>
+        </div>
+      </div>
+      <p class="caption" id="scenario-caption" aria-live="polite"><strong>Ready.</strong> One visible action; the lobster supplies the personality.</p>
+    </section>
+    <section class="dial-column" aria-label="Dial concept">
+      <div class="device-meta"><h2>The Dial</h2><span>240 × 240</span></div>
+      <div class="dial"><button class="dial-button" id="dial-confirm" type="button" aria-label="Confirm Volume 42"><svg viewBox="0 0 240 240" aria-hidden="true"><circle cx="120" cy="120" r="105" fill="none" stroke="#242d27" stroke-width="7"/><circle id="dial-progress" cx="120" cy="120" r="105" fill="none" stroke="#ff7068" stroke-width="7" stroke-linecap="round" stroke-dasharray="277 660" transform="rotate(-90 120 120)"/><text class="dial-title" x="120" y="66" text-anchor="middle">Volume</text><text class="dial-value" id="dial-value" x="118" y="132" text-anchor="middle">42</text><text class="dial-unit" x="120" y="153" text-anchor="middle">0–100</text><text class="dial-status" id="dial-status" x="120" y="179" text-anchor="middle">Ready to adjust</text><text class="dial-hint" x="120" y="197" text-anchor="middle">Press to confirm</text></svg></button></div>
+      <div class="dial-adjust"><button class="control" id="dial-less" type="button" aria-label="Decrease volume">−</button><input id="dial-range" aria-label="Dial volume" type="range" min="0" max="100" step="1" value="42"><button class="control" id="dial-more" type="button" aria-label="Increase volume">+</button></div>
+      <p class="dial-note" id="dial-note" aria-live="polite">Turn to adjust. Press the Dial to confirm.</p>
+      <div class="decision"><h3>Familiar shape. Clearer feedback.</h3><p>The watch gets the redesign. The Dial keeps its number, arc, and physical controls.</p><p>Try turning while a request is pending. The confirmed value stays separate from the value you’re editing.</p></div>
+      <div class="decision"><h3>What to judge</h3><p>Lobster size. Bottom button placement. How clearly listening, replying, and success differ.</p><p>Turn phases and result receipts are proposed. The first firmware slice will use “In conversation” until real events support finer labels.</p><a href="watch-dial-ux.md">Read the interaction plan ↗</a></div>
+    </section>
+  </main>
+  <footer><span>Interactive concept · no connection to real devices · no audio</span><span>Artwork: OpenClaw Foundation · MIT</span></footer>
+</div>
+<script>
+  const el = (id) => document.getElementById(id);
+  const screens = {
+    ready: ["Ready when you are", "Tap below to start a conversation", "Talk to OpenClaw", "Ready. One visible action; the lobster supplies the personality."],
+    connecting: ["Connecting…", "Opening your conversation", "End conversation", "Connecting. Ending here stops Talk; it does not undo an action already sent."],
+    active: ["In conversation", "Your conversation is connected", "End conversation", "In conversation. This label is supported by the current call lifecycle; finer turn phases require new UI facts."],
+    listening: ["I'm listening", "Ask your question", "End conversation", "Listening. The body stays still during the call to preserve the audio budget."],
+    working: ["Working on it", "Setting up the Dial’s volume control", "End conversation", "Working. This proposed state requires an explicit processing event, not a guess from silence."],
+    speaking: ["Replying", "Wait for the reply to finish", "End conversation", "Replying. Eyes and mouth animate. Voice interruption is unavailable on this watch."],
+    result: ["Dial is ready", "Volume · 42<br>Range 0–100 · Step 1", "Back to listening", "Result. The Dial accepted its configuration. This does not claim that an external volume changed."],
+    stopping: ["Ending conversation…", "Closing your voice connection", "Ending conversation…", "Ending. The control stays disabled until Talk releases the current call."],
+    offline: ["Connection lost", "Reconnecting to OpenClaw", "Waiting for connection", "Offline. This scenario disconnects only the watch. The Dial has its own connection."],
+    error: ["That didn't go through", "Couldn't reach the Dial", "Back to listening", "Request failed. Keep the reason visible; never disguise a rejected action as success."]
+  };
+  let state = "ready";
+  let detailReturn = "ready";
+  let timers = [];
+  let pending = null;
+  let completed = null;
+  let dialTimer = null;
+  let dialAckTimer = null;
+  let sending = false;
+  let generation = 0;
+  let replyText = null;
+  let speakDialResults = false;
+
+  function clearSequence() { timers.forEach(clearTimeout); timers = []; speakDialResults = false; }
+  function schedule(fn, delay) { timers.push(setTimeout(fn, delay)); }
+  function setState(next) {
+    state = next;
+    el("state-select").value = next;
+    el("watch-screen").dataset.state = next;
+    const details = next === "details";
+    el("watch-content").hidden = details;
+    el("detail-content").hidden = !details;
+    el("details-button").hidden = details;
+    const base = details ? detailReturn : next;
+    el("watch-screen").dataset.connected = String(base !== "offline");
+    el("connection-label").textContent = base === "offline" ? "Offline" : "Connected";
+    el("detail-connection").textContent = base === "offline" ? "Disconnected" : "Connected";
+    el("detail-voice").textContent = base === "offline" ? "Unavailable" : base === "ready" ? "Ready" : base === "speaking" ? "Replying" : "In conversation";
+    const screen = details ? ["", "", "Back", "Details. Status stays discoverable without adding a permanent dashboard."] : screens[next];
+    if (!details) { el("state-title").textContent = screen[0]; el("state-copy").innerHTML = next === "speaking" && replyText ? "“" + replyText + "”<br>Wait for the reply to finish" : screen[1]; }
+    el("watch-action").textContent = screen[2];
+    el("watch-action").setAttribute("aria-label", screen[2]);
+    el("watch-action").disabled = next === "offline" || next === "stopping";
+    el("scenario-caption").textContent = screen[3];
+  }
+
+  function showDetails() { clearSequence(); detailReturn = state; setState("details"); }
+  function editDial(value) {
+    const valueNumber = Math.max(0, Math.min(100, Number(value)));
+    el("dial-range").value = valueNumber;
+    el("dial-value").textContent = valueNumber;
+    el("dial-progress").setAttribute("stroke-dasharray", `${valueNumber * 6.6} 660`);
+    el("dial-confirm").setAttribute("aria-label", `Confirm Volume ${valueNumber}`);
+    el("dial-status").textContent = pending === null ? completed === null ? "Ready to adjust" : `${completed} confirmed` : `${pending} pending`;
+    el("dial-note").textContent = pending === null ? completed === null ? "Turn to adjust. Press the Dial to confirm." : `Demo result for ${completed}. Editing ${valueNumber}.` : `Editing ${valueNumber}. Waiting for the result for ${pending}.`;
+  }
+  function clearDialRequest() { generation++; clearTimeout(dialTimer); clearTimeout(dialAckTimer); pending = null; completed = null; sending = false; }
+  function confirmDial() {
+    if (sending) return;
+    clearTimeout(dialTimer); clearTimeout(dialAckTimer);
+    const request = ++generation;
+    const value = Number(el("dial-range").value);
+    pending = value;
+    sending = true;
+    completed = null;
+    editDial(value);
+    el("dial-status").textContent = "Sending…";
+    dialAckTimer = setTimeout(() => { if (request === generation) { sending = false; el("dial-status").textContent = `${value} request sent`; } }, 700);
+    dialTimer = setTimeout(() => {
+      if (request !== generation) return;
+      pending = null;
+      sending = false;
+      completed = value;
+      editDial(el("dial-range").value);
+      el("dial-status").textContent = `${value} confirmed`;
+      if (speakDialResults) {
+        replyText = `${value} confirmed.`;
+        setState("speaking");
+        schedule(() => { replyText = null; setState("listening"); }, 2500);
+      }
+    }, 2800);
+  }
+  function voiceDemo() {
+    reset(); setState("listening");
+    el("state-copy").textContent = "“Set up volume on the Dial at 42”";
+    schedule(() => setState("working"), 2100);
+    schedule(() => { editDial(42); replyText = "The Dial is ready at 42."; setState("speaking"); }, 4100);
+    schedule(() => { replyText = null; setState("result"); }, 6900);
+    schedule(() => setState("listening"), 9700);
+  }
+  function dialDemo() {
+    reset(); editDial(65); setState("listening"); speakDialResults = true; confirmDial();
+    el("state-copy").textContent = "You pressed the Dial at 65";
+    schedule(() => { setState("working"); el("state-copy").textContent = "Waiting for the Dial action result"; }, 700);
+  }
+  function reset() { clearSequence(); clearDialRequest(); replyText = null; editDial(42); setState("ready"); }
+  el("watch-action").addEventListener("click", () => {
+    clearSequence(); replyText = null;
+    if (state === "details") { setState(detailReturn); return; }
+    if (state === "ready") { setState("connecting"); schedule(() => setState("active"), 800); }
+    else if (state === "result" || state === "error") setState("listening");
+    else { setState("stopping"); schedule(() => setState("ready"), 650); }
+  });
+  el("details-button").addEventListener("click", showDetails);
+  el("state-select").addEventListener("change", (event) => { clearSequence(); replyText = null; if (event.target.value === "details") showDetails(); else setState(event.target.value); });
+  el("voice-demo").addEventListener("click", voiceDemo);
+  el("dial-demo").addEventListener("click", dialDemo);
+  el("offline-demo").addEventListener("click", () => { clearSequence(); replyText = null; setState("offline"); });
+  el("error-demo").addEventListener("click", () => { clearSequence(); replyText = null; setState("error"); });
+  el("reset").addEventListener("click", reset);
+  el("dial-range").addEventListener("input", (event) => editDial(event.target.value));
+  el("dial-less").addEventListener("click", () => editDial(Number(el("dial-range").value) - 1));
+  el("dial-more").addEventListener("click", () => editDial(Number(el("dial-range").value) + 1));
+  el("dial-confirm").addEventListener("click", confirmDial);
+</script>
+</body>
+</html>

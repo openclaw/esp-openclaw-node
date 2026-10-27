@@ -27,3 +27,5 @@ See the [Component README](./components/esp-openclaw-node/README.md) for more de
 1. Read [Getting Started](./docs/getting-started.md).
 2. Choose an example from [Examples](./examples/README.md).
 3. Use [Troubleshooting](./docs/troubleshooting.md) if the node pairs, connects, or advertises commands differently than expected.
+
+For interface design feedback, see the [watch and Dial UX proposal](./docs/design/watch-dial-ux.md) and its interactive concept.

@@ -54,6 +54,12 @@ static void back(dial_navigation_t *nav)
 {
     if (nav->view == DIAL_NAV_MENU) nav->handler(DIAL_NAV_HOME, 0, nav->context);
     else {
+        if (nav->view == DIAL_NAV_ACTIVITY) {
+            nav->view = DIAL_NAV_MENU;
+            nav->focus = 3;
+            changed(nav);
+            return;
+        }
         if (nav->view == DIAL_NAV_DISPLAY || nav->view == DIAL_NAV_CONNECTION) {
             nav->focus = nav->view == DIAL_NAV_CONNECTION ? 1 : 0;
             nav->view = DIAL_NAV_SETTINGS;
@@ -241,8 +247,8 @@ static void item(dial_navigation_t *nav, unsigned index, const char **name, cons
 {
     *icon = LV_SYMBOL_RIGHT;
     if (nav->view == DIAL_NAV_MENU) {
-        const char *names[] = {"Agents", "Conversations", "Controls", "Settings"};
-        const char *icons[] = {LV_SYMBOL_DIRECTORY, LV_SYMBOL_LIST, LV_SYMBOL_SETTINGS, LV_SYMBOL_SETTINGS};
+        const char *names[] = {"Agents", "Conversations", "Controls", "Activity", "Settings"};
+        const char *icons[] = {LV_SYMBOL_DIRECTORY, LV_SYMBOL_LIST, LV_SYMBOL_SETTINGS, LV_SYMBOL_LIST, LV_SYMBOL_SETTINGS};
         *name = names[index];
         *icon = icons[index];
         return;
@@ -318,6 +324,34 @@ static void render(dial_navigation_t *nav)
         render_display(nav);
         return;
     }
+    if (nav->view == DIAL_NAV_ACTIVITY) {
+        lv_label_set_text_static(nav->heading, "Activity");
+        lv_obj_set_hidden(nav->description, false);
+        lv_obj_set_y(nav->description, 64);
+        lv_obj_set_height(nav->description, 20);
+        lv_obj_set_style_text_font(nav->description, &lv_font_montserrat_14, 0);
+        lv_label_set_long_mode(nav->description, LV_LABEL_LONG_DOT);
+        lv_label_set_text_static(nav->description, dial_activity_title(nav->activity.stage));
+        lv_obj_set_hidden(nav->identity, true);
+        for (unsigned i = 0; i < 3; ++i) lv_obj_set_hidden(nav->rows[i], true);
+        lv_obj_set_hidden(nav->preview_body, false);
+        lv_obj_set_pos(nav->preview_body, 44, 90);
+        lv_obj_set_height(nav->preview_body, 96);
+        lv_obj_set_hidden(nav->hint, false);
+        lv_label_set_text_static(nav->hint, "Turn to read");
+        if (nav->activity.stage == DIAL_ACTIVITY_EMPTY)
+            lv_label_set_text_static(nav->preview_text, "Control requests appear here.\n\nOnly the latest request is kept until restart.");
+        else {
+            const char *message = nav->activity.message[0] != '\0' ? nav->activity.message :
+                nav->activity.stage == DIAL_ACTIVITY_SENDING ? "Sending to the configured control." :
+                nav->activity.stage == DIAL_ACTIVITY_COMPLETED ? "The agent reported success." :
+                nav->activity.stage == DIAL_ACTIVITY_FAILED ? "The agent reported failure." :
+                dial_activity_title(nav->activity.stage);
+            lv_label_set_text_fmt(nav->preview_text, "%s\n%d%s\n\n%s\n\nLatest request\nUntil restart",
+                nav->activity.label, nav->activity.value, nav->activity.unit, message);
+        }
+        return;
+    }
     if (nav->view == DIAL_NAV_CONNECTION) {
         lv_label_set_text_static(nav->heading, "Connection");
         lv_obj_set_hidden(nav->preview_body, true);
@@ -348,7 +382,7 @@ static void render(dial_navigation_t *nav)
     bool sessions = nav->view == DIAL_NAV_SESSIONS;
     bool preview = nav->view == DIAL_NAV_PREVIEW;
     bool message = (nav->view == DIAL_NAV_AGENTS || sessions) && agent_count(nav) == 0;
-    nav->count = detail || preview ? 1 : nav->view == DIAL_NAV_MENU ? 4 : nav->view == DIAL_NAV_SETTINGS ? 3 :
+    nav->count = detail || preview ? 1 : nav->view == DIAL_NAV_MENU ? 5 : nav->view == DIAL_NAV_SETTINGS ? 3 :
         agent_count(nav) + has_next(nav) + has_previous(nav) + 2;
     if (!detail && !preview && nav->focus >= nav->count) nav->focus = 0;
     unsigned visible = message ? 2 : 3;
@@ -361,6 +395,8 @@ static void render(dial_navigation_t *nav)
     else if (preview && nav->conversations != NULL && nav->conversations->selected < nav->conversations->page.count)
         lv_label_set_text(nav->heading, nav->conversations->page.sessions[nav->conversations->selected].title);
     lv_obj_set_hidden(nav->preview_body, !preview);
+    lv_obj_set_pos(nav->preview_body, 44, 70);
+    lv_obj_set_height(nav->preview_body, 112);
     lv_obj_set_hidden(nav->description, !detail && !message);
     lv_obj_set_hidden(nav->identity, !detail);
     lv_obj_set_hidden(nav->hint, message);
@@ -511,7 +547,7 @@ void dial_navigation_move(dial_navigation_t *nav, int direction)
             nav->handler(DIAL_NAV_BRIGHTNESS, (size_t)percent, nav->context);
         return;
     }
-    if (nav->view == DIAL_NAV_PREVIEW) {
+    if (nav->view == DIAL_NAV_PREVIEW || nav->view == DIAL_NAV_ACTIVITY) {
         lv_obj_scroll_by(nav->preview_body, 0, direction > 0 ? -24 : 24, LV_ANIM_OFF);
         return;
     }
@@ -529,7 +565,7 @@ void dial_navigation_activate(dial_navigation_t *nav)
         else back(nav);
         return;
     }
-    if (nav->view == DIAL_NAV_PREVIEW) { back(nav); return; }
+    if (nav->view == DIAL_NAV_PREVIEW || nav->view == DIAL_NAV_ACTIVITY) { back(nav); return; }
     if (nav->view == DIAL_NAV_DETAIL) {
         nav->agent_focus = nav->focus;
         nav->view = DIAL_NAV_SESSIONS;
@@ -541,7 +577,8 @@ void dial_navigation_activate(dial_navigation_t *nav)
     if (nav->view == DIAL_NAV_MENU) {
         if (nav->focus == 1) nav->handler(DIAL_NAV_RESUME, 0, nav->context);
         else if (nav->focus == 2) nav->handler(DIAL_NAV_CONTROL, 0, nav->context);
-        else if (nav->focus == 3) dial_navigation_open_settings(nav, DIAL_NAV_SETTINGS);
+        else if (nav->focus == 3) dial_navigation_open_activity(nav);
+        else if (nav->focus == 4) dial_navigation_open_settings(nav, DIAL_NAV_SETTINGS);
         else dial_navigation_open(nav, true);
         return;
     }
@@ -601,4 +638,19 @@ void dial_navigation_set_connection(dial_navigation_t *nav, bool wifi, bool gate
     nav->wifi_connected = wifi;
     nav->gateway_connected = gateway;
     if (nav->view == DIAL_NAV_CONNECTION) render(nav);
+}
+
+void dial_navigation_open_activity(dial_navigation_t *nav)
+{
+    nav->view = DIAL_NAV_ACTIVITY;
+    lv_obj_set_hidden(nav->root, false);
+    changed(nav);
+    lv_obj_scroll_to_y(nav->preview_body, 0, LV_ANIM_OFF);
+}
+
+void dial_navigation_activity_update(dial_navigation_t *nav, const dial_activity_t *activity)
+{
+    if (nav->activity.revision == activity->revision) return;
+    nav->activity = *activity;
+    if (nav->view == DIAL_NAV_ACTIVITY) changed(nav);
 }

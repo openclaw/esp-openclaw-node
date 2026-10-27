@@ -108,7 +108,7 @@ to its list. With no selection, **Choose agent** opens Agents. Offline,
 **Open menu** keeps local settings and controls reachable.
 
 Turning on Home always opens the menu, which contains Agents, Conversations,
-Controls, and Settings. Turn to move the highlight and press to open; touch
+Controls, Activity, and Settings. Turn to move the highlight and press to open; touch
 rows directly. Hold the encoder or a stationary touch to return Home. A reader
 refresh, replacement, or disconnect invalidates an in-progress Home press;
 continuing never submits a numeric control or changes its owning agent.
@@ -170,9 +170,21 @@ user presses; rotary ticks never create agent turns. The message reports
 it. Commands do not execute arbitrary local shell or GPIO operations.
 
 Only one confirmation can be pending. A replacement configuration is rejected
-until that result arrives. Offline presses show `Gateway offline` and are not
-replayed after reconnection. `Action sent` means the Gateway accepted the event,
-not that an external device completed an action.
+until the transport outcome arrives. Offline presses show `Gateway offline`
+and are not replayed after reconnection. **Waiting for result** means the Gateway
+accepted the event, not that an external device completed an action.
+
+Activity opens the latest submitted control request directly. It retains the
+submitted label, value, and unit even if the dial changes afterward. Turn or
+swipe to read the result; press Back to return to the Activity menu row, or hold
+to return Home. Reading Activity never submits or retries a control.
+
+The page distinguishes Sending, Waiting for result, Completed, Failed, Not sent,
+and Outcome unknown. An uncertain transport failure can still receive a matching
+completion while its connection and binding remain current. Disconnecting or
+replacing that binding makes an unfinished outcome unknown: check the target
+before retrying. Confirmed outcomes survive those changes. Only the latest
+request is retained in memory, until restart; this is not persistent history.
 
 After carrying out an action, the same agent session can invoke `dial.complete`
 with the event's `requestId`, a boolean `success`, and a short `text` message:
@@ -204,7 +216,7 @@ change the result of a newer one.
 | --- | --- | --- |
 | `device.info`, `device.status`, `wifi.status` | `{}` | Shared device/network status |
 | `display.show` | `{"heading":"Hello","text":"A message"}` | Display state including `heading` and `text`; limits: 64/512 UTF-8 bytes |
-| `display.menu` | `{}` or `{"page":"settings"}` | Open `menu`, `agents`, `conversations`, `preview`, `settings`, `display`, or `connection` |
+| `display.menu` | `{}` or `{"page":"settings"}` | Open `menu`, `agents`, `conversations`, `preview`, `activity`, `settings`, `display`, or `connection` |
 | `display.clear` | `{}` | Return to the face |
 | `display.status`, `dial.status`, `input.status` | `{}` | View, value/range, input counts, brightness, connection, action state |
 | `display.brightness` | `{"percent":65}` | Set backlight, integer 0–100 |
@@ -216,7 +228,7 @@ change the result of a newer one.
 Display-state responses include `heading` and `text` while `view` is `message`,
 so an agent can read back the displayed content. Menu responses include
 `view: "menu"` and `page: "menu"`, `"agents"`, `"agent"`, `"conversations"`,
-`"preview"`, `"settings"`, `"display"`, or `"connection"`. Other views omit those fields;
+`"preview"`, `"activity"`, `"settings"`, `"display"`, or `"connection"`. Other views omit those fields;
 `display.clear` returns to the face without reporting the hidden message.
 
 The buzzer stops asynchronously and rejects overlapping tones. It uses LEDC

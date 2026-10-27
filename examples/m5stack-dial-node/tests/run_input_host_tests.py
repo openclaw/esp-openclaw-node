@@ -39,6 +39,7 @@ def main():
             "-I", str(root / "components/esp-openclaw-directory/include"),
             str(tests / "test_dial_input.c"), str(tests.parent / "main/dial_input.c"),
             str(tests.parent / "main/dial_home.c"),
+            str(tests.parent / "main/dial_action.c"),
             str(tests.parent / "main/dial_navigation.c"),
             str(avatars / "esp_openclaw_avatar.c"), str(pixels),
             *map(str, sorted((lvgl / "src").rglob("*.c"))), "-lm", "-o", str(binary),

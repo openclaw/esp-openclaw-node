@@ -131,6 +131,8 @@ static void check_home_bounds(lv_obj_t *object)
     for (int i = 0; i < 2; ++i)
         for (int j = 0; j < 2; ++j)
             assert(x[i] * x[i] + y[j] * y[j] <= 112 * 112);
+    /* Scroll content is clipped by this bounded viewport, not by its label. */
+    if (object == navigation.preview_body) return;
     for (unsigned i = 0; i < lv_obj_get_child_count(object); ++i)
         check_home_bounds(lv_obj_get_child(object, i));
 }
@@ -648,13 +650,13 @@ int main(int argc, char **argv)
     dial_input_set_control(&input, false);
     dial_navigation_set_brightness(&navigation, brightness, false);
     dial_navigation_open(&navigation, false);
-    for (unsigned i = 0; i < 3; ++i) {
+    for (unsigned i = 0; i < 4; ++i) {
         encoder_diff = 1;
         lv_indev_read(encoder); advance(40);
     }
     snapshot("menu-settings");
-    assert(strcmp(lv_label_get_text(navigation.names[0]), "Conversations") == 0);
-    assert(strcmp(lv_label_get_text(navigation.names[1]), "Controls") == 0);
+    assert(strcmp(lv_label_get_text(navigation.names[0]), "Controls") == 0);
+    assert(strcmp(lv_label_get_text(navigation.names[1]), "Activity") == 0);
     assert(strcmp(lv_label_get_text(navigation.names[2]), "Settings") == 0);
     touch(120, 168, true); touch(120, 168, false);
     assert(navigation.view == DIAL_NAV_SETTINGS);
@@ -767,6 +769,100 @@ int main(int argc, char **argv)
     lv_indev_read(encoder); advance(40);
     assert(!navigating && confirmations == before_settings);
     puts("local display and connection input, bounds, failures, offline focus and return: passed");
+
+    /* Read the latest request through real menu/encoder/touch input. Browsing
+     * and result updates never confirm the numeric control. */
+    navigating = true;
+    lv_obj_set_hidden(home.root, true);
+    dial_navigation_open(&navigation, false);
+    for (unsigned i = 0; i < 3; ++i) dial_navigation_move(&navigation, 1);
+    assert(strcmp(lv_label_get_text(navigation.names[1]), "Activity") == 0);
+    touch(120, 126, true); touch(120, 126, false);
+    assert(navigation.view == DIAL_NAV_ACTIVITY);
+    assert(strcmp(lv_label_get_text(navigation.description), "No requests yet") == 0);
+    snapshot("activity-empty");
+    dial_action_state_t action_state = {0};
+    dial_action_token_t token;
+    assert(dial_action_connect(&action_state, 1, "ws://example.test"));
+    assert(dial_action_configure(&action_state, true));
+    assert(dial_action_begin(&action_state, &token));
+    dial_action_submitted(&action_state, token, "Desk light", 45, "%");
+    dial_navigation_activity_update(&navigation, &action_state.activity);
+    assert(strcmp(lv_label_get_text(navigation.description), "Sending") == 0);
+    assert(strstr(lv_label_get_text(navigation.preview_text), "Desk light\n45%") != NULL);
+    snapshot("activity-sending");
+    assert(dial_action_complete(&action_state, token, DIAL_ACTION_ACCEPTED));
+    dial_navigation_activity_update(&navigation, &action_state.activity);
+    assert(strcmp(lv_label_get_text(navigation.description), "Waiting for result") == 0);
+    snapshot("activity-waiting");
+    encoder_diff = 1;
+    lv_indev_read(encoder); advance(40);
+    lv_coord_t reading_at = lv_obj_get_scroll_y(navigation.preview_body);
+    assert(reading_at > 0);
+    dial_navigation_activity_update(&navigation, &action_state.activity);
+    advance(40);
+    assert(lv_obj_get_scroll_y(navigation.preview_body) == reading_at);
+    // A new result cancels a held Back and preserves the reading position.
+    touch(68, 44, true);
+    assert(dial_action_resolve(&action_state, token, true,
+        "The desk light is now at 45%. This long result remains readable by turning the dial or scrolling the detail."));
+    dial_navigation_activity_update(&navigation, &action_state.activity);
+    touch(68, 44, false);
+    assert(navigation.view == DIAL_NAV_ACTIVITY);
+    assert(lv_obj_get_scroll_y(navigation.preview_body) == reading_at);
+    assert(strcmp(lv_label_get_text(navigation.description), "Completed") == 0);
+    assert(strstr(lv_label_get_text(navigation.preview_text), "45%") != NULL);
+    snapshot("activity-completed");
+    dial_navigation_move(&navigation, -1);
+    snapshot("activity-top");
+    touch(120, 150, true); touch(120, 112, true); touch(120, 80, true); touch(120, 80, false);
+    assert(navigation.view == DIAL_NAV_ACTIVITY);
+    encoder_state = LV_INDEV_STATE_PRESSED;
+    lv_indev_read(encoder); advance(40);
+    encoder_state = LV_INDEV_STATE_RELEASED;
+    lv_indev_read(encoder); advance(40);
+    assert(navigation.view == DIAL_NAV_MENU && navigation.focus == 3);
+    assert(confirmations == before_settings);
+    // Completion off-screen is visible on re-entry, and disconnect retains it.
+    assert(dial_action_connect(&action_state, 0, NULL));
+    dial_navigation_activity_update(&navigation, &action_state.activity);
+    touch(120, 126, true); touch(120, 126, false);
+    assert(navigation.view == DIAL_NAV_ACTIVITY);
+    assert(strcmp(lv_label_get_text(navigation.description), "Completed") == 0);
+    assert(dial_action_connect(&action_state, 2, "ws://example.test"));
+    assert(dial_action_begin(&action_state, &token));
+    dial_action_submitted(&action_state, token, "Desk light", 60, "%");
+    assert(dial_action_complete(&action_state, token, DIAL_ACTION_UNCERTAIN));
+    dial_navigation_activity_update(&navigation, &action_state.activity);
+    assert(strcmp(lv_label_get_text(navigation.description), "Outcome unknown") == 0);
+    assert(strstr(lv_label_get_text(navigation.preview_text), "Check before retry") != NULL);
+    snapshot("activity-unknown");
+    assert(dial_action_resolve(&action_state, token, false, "The light is unavailable."));
+    dial_navigation_activity_update(&navigation, &action_state.activity);
+    assert(strcmp(lv_label_get_text(navigation.description), "Failed") == 0);
+    snapshot("activity-failed");
+    // Empty result text is valid, including when completion beats the ack.
+    for (unsigned success = 0; success < 2; ++success) {
+        assert(dial_action_begin(&action_state, &token));
+        dial_action_submitted(&action_state, token, "Desk light", 50, "%");
+        assert(dial_action_resolve(&action_state, token, success != 0, ""));
+        dial_navigation_activity_update(&navigation, &action_state.activity);
+        assert(strstr(lv_label_get_text(navigation.preview_text), success ? "reported success" : "reported failure") != NULL);
+        assert(strstr(lv_label_get_text(navigation.preview_text), "Sending") == NULL);
+        assert(!dial_action_complete(&action_state, token, DIAL_ACTION_ACCEPTED));
+        snapshot(success ? "activity-empty-success" : "activity-empty-failure");
+    }
+    lv_obj_update_layout(screen);
+    for (unsigned i = 0; i < lv_obj_get_child_count(navigation.root); ++i)
+        check_home_bounds(lv_obj_get_child(navigation.root, i));
+    encoder_state = LV_INDEV_STATE_PRESSED;
+    lv_indev_read(encoder); advance(1000);
+    encoder_state = LV_INDEV_STATE_RELEASED;
+    lv_indev_read(encoder); advance(40);
+    assert(!navigating && confirmations == before_settings);
+    assert(dial_action_connect(&action_state, 0, NULL));
+    assert(dial_action_configure(&action_state, false));
+    puts("Activity outcomes, scrolling, retained values, stale holds and safe return: passed");
 
     lv_deinit();
 }

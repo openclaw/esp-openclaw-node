@@ -1,4 +1,6 @@
+# LVGL calls the allocator from a later archive; retain its otherwise unreferenced object.
 idf_component_register(
+    WHOLE_ARCHIVE
     SRCS
         "main.c"
         "watch_lvgl_allocator.c"

@@ -48,6 +48,9 @@ the default firmware uses read-only voice access.
 
 Tap the screen or press BOOT to wake the display, then use **Start Talk** at the
 bottom of the screen. During connection and conversation it becomes **Stop Talk**.
+Start Talk names its next recipient below the action, independently of the
+conversation being browsed. The compact Canvas control omits this second line.
+A changed recipient must be repainted before a new Start press is accepted.
 It is disabled while Talk is unavailable or stopping. The control also appears
 over Canvas; the existing screen tap/hold gestures still toggle Canvas and open
 diagnostics. Diagnostics hides the Talk control until closed.

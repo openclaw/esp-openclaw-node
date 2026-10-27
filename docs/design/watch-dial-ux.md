@@ -1,6 +1,11 @@
 # Standalone watch and Dial UX
 
-**Research and design proposal · revision 02 · 27 October 2026 · no firmware changes.**
+**Research baseline · revision 02 · 27 October 2026 · no firmware changes.**
+
+**Current direction:** [revision 03 interaction plan](watch-dial-interaction-plan.md)
+and its [annotated layout board](watch-dial-ux-plan.html). The revision 02
+visual rules and explorer below are retained as a superseded study; hardware,
+protocol and source evidence remain reference material.
 
 The watch and M5Dial are independent, Gateway-backed OpenClaw nodes. Each must
 complete setup, explain its capabilities, offer useful everyday interactions,
@@ -380,7 +385,7 @@ widgets may be useful later, but require real local services first.
 Current startup enables microphone capture for wake-word processing; ending
 Talk or rebooting is not equivalent to disabling the microphone.
 
-## Visual and accessibility rules
+## Revision 02 visual rules (superseded)
 
 Use black backgrounds, high-contrast text, restrained color and one clear
 primary action. Red belongs to the lobster and deliberate warning accents,

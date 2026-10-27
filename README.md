@@ -28,4 +28,4 @@ See the [Component README](./components/esp-openclaw-node/README.md) for more de
 2. Choose an example from [Examples](./examples/README.md).
 3. Use [Troubleshooting](./docs/troubleshooting.md) if the node pairs, connects, or advertises commands differently than expected.
 
-For interface design feedback, see the [standalone watch and Dial UX research](./docs/design/watch-dial-ux.md) and its screen explorer covering setup, menus, daily use, settings, and recovery.
+For interface design feedback, start with the [watch and Dial interaction plan](./docs/design/watch-dial-interaction-plan.md) and [annotated layout board](./docs/design/watch-dial-ux-plan.html). The [source research and earlier explorer](./docs/design/watch-dial-ux.md) remain available as reference.

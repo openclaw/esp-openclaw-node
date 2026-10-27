@@ -746,6 +746,13 @@ static void check_watch_agents(const char *path)
     puts("watch agents: acknowledged selection, next-call identity, paging and fenced pointer input passed");
 }
 
+static bool visible_watch_text(const char *text)
+{
+    lv_obj_update_layout(lv_layer_top());
+    lv_obj_t *label = find_text(lv_layer_top(), text);
+    return label && lv_obj_is_visible(label);
+}
+
 static void check_watch_conversations(const char *path)
 {
     assert(room_ui_watch_menu("agents") == ESP_OK);
@@ -782,9 +789,9 @@ static void check_watch_conversations(const char *path)
     strcpy(view->page.sessions[1].title, "Project notes");
     unsigned generation = conversation_generation;
     room_ui_store_conversations(view, generation - 1);
-    assert(!visible_text("Planning a trip"));
+    assert(!visible_watch_text("Planning a trip"));
     room_ui_conversations_failed(generation - 1);
-    assert(!visible_text("Couldn't load conversations.\n\nGo back and refresh to try again."));
+    assert(!visible_watch_text("Couldn't load conversations.\n\nGo back and refresh to try again."));
     room_ui_store_conversations(view, generation);
     assert(lv_obj_is_visible(find_text(lv_layer_top(), "Planning a trip")));
     char output[1024];
@@ -798,8 +805,13 @@ static void check_watch_conversations(const char *path)
     deny_display = false;
     room_ui_refresh();
     assert(conversation_action == ROOM_CONVERSATIONS_OPEN);
-    click_talk(row);
-    assert(conversation_action == ROOM_CONVERSATIONS_READ && conversation_value == 0);
+    unsigned old_generation = conversation_generation;
+    click_talk(lv_obj_get_parent(find_text(lv_layer_top(), "Project notes")));
+    assert(conversation_action == ROOM_CONVERSATIONS_READ && conversation_value == 1);
+    assert(visible_watch_text("Project notes"));
+    room_ui_store_conversations(view, old_generation);
+    assert(visible_watch_text("Project notes"));
+    view->selected = 1;
     view->preview_revision = 1;
     view->preview_state = ROOM_AGENTS_READY;
     view->preview.status = ESP_OPENCLAW_PREVIEW_OK;

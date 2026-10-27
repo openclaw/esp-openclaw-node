@@ -107,7 +107,8 @@ void room_ui_store_conversations(const room_conversations_snapshot_t *snapshot, 
     room_conversations_snapshot_t *current = current_conversations;
     /* A new view must not consume a snapshot copied before its open intent. */
     bool changed = current != NULL && generation == conversation_generation && (current->revision != snapshot->revision ||
-        current->preview_revision != snapshot->preview_revision || current->state != snapshot->state ||
+        current->preview_revision != snapshot->preview_revision || current->selected != snapshot->selected ||
+        current->state != snapshot->state ||
         current->preview_state != snapshot->preview_state);
     if (changed) {
         *current = *snapshot;
@@ -410,6 +411,7 @@ static void watch_conversations_clicked(lv_event_t *event)
     if (current_conversations != NULL && painted_conversations != NULL) {
         current = current && current_conversations->revision == painted_conversations->revision &&
             current_conversations->preview_revision == painted_conversations->preview_revision &&
+            current_conversations->selected == painted_conversations->selected &&
             current_conversations->state == painted_conversations->state &&
             current_conversations->preview_state == painted_conversations->preview_state;
     }
@@ -426,8 +428,13 @@ static void watch_conversations_clicked(lv_event_t *event)
     else if (conversation_handler != NULL && (result == ROOM_CHAT_LOAD || result == ROOM_CHAT_READ)) {
         taskENTER_CRITICAL(&state_mux);
         if (current_conversations != NULL) {
+            /* Fence publication from before this pending request. */
+            ++conversation_generation;
             if (result == ROOM_CHAT_LOAD) current_conversations->state = ROOM_AGENTS_LOADING;
-            else current_conversations->preview_state = ROOM_AGENTS_LOADING;
+            else {
+                current_conversations->selected = value;
+                current_conversations->preview_state = ROOM_AGENTS_LOADING;
+            }
         }
         taskEXIT_CRITICAL(&state_mux);
         conversation_handler(result == ROOM_CHAT_LOAD ? ROOM_CONVERSATIONS_LOAD : ROOM_CONVERSATIONS_READ,
@@ -792,6 +799,7 @@ static bool room_ui_render_locked(void)
     bool chats_changed = current_conversations != NULL && painted_conversations != NULL &&
         (current_conversations->revision != painted_conversations->revision ||
          current_conversations->preview_revision != painted_conversations->preview_revision ||
+         current_conversations->selected != painted_conversations->selected ||
          current_conversations->state != painted_conversations->state ||
          current_conversations->preview_state != painted_conversations->preview_state);
     if (chats_changed) *painted_conversations = *current_conversations;

@@ -16,14 +16,18 @@ static unsigned confirmations, homes, changes;
 static dial_navigation_t navigation;
 static dial_agents_snapshot_t roster;
 static bool navigating;
-static unsigned refreshes, previous, next;
+static unsigned refreshes, previous, next, opens, reads;
+static dial_conversations_snapshot_t conversations;
+static const char *snapshot_prefix;
+static uint16_t frame[240 * 240];
 static size_t requested_offset;
-static uint16_t pixels[240 * 20];
+static uint16_t pixels[240 * 240];
 
 static void flush(lv_display_t *display, const lv_area_t *area, uint8_t *data)
 {
-    (void)area;
-    (void)data;
+    for (int y = area->y1; y <= area->y2; ++y)
+        for (int x = area->x1; x <= area->x2; ++x)
+            frame[y * 240 + x] = ((const uint16_t *)data)[(y - area->y1) * (lv_draw_buf_width_to_stride(area->x2 - area->x1 + 1, LV_COLOR_FORMAT_RGB565) / 2) + x - area->x1];
     lv_display_flush_ready(display);
 }
 
@@ -75,7 +79,9 @@ static void navigation_event(dial_navigation_event_t kind, size_t offset, void *
 {
     (void)context;
     dial_input_set_control(&input, false);
-    if (kind == DIAL_NAV_REFRESH) { ++refreshes; requested_offset = offset; }
+    if (kind == DIAL_NAV_CONVERSATIONS) { ++opens; requested_offset = offset; }
+    else if (kind == DIAL_NAV_READ) { ++reads; requested_offset = offset; }
+    else if (kind == DIAL_NAV_REFRESH || kind == DIAL_NAV_SESSIONS_REFRESH) { ++refreshes; requested_offset = offset; }
     else if (kind == DIAL_NAV_HOME || kind == DIAL_NAV_CONTROL) {
         navigating = false;
         lv_obj_set_hidden(navigation.root, true);
@@ -123,13 +129,36 @@ static void touch(int x, int y, bool pressed)
     advance(40);
 }
 
-int main(void)
+static void snapshot(const char *name)
 {
+    if (snapshot_prefix == NULL) return;
+    char path[1024];
+    assert(snprintf(path, sizeof(path), "%s-%s.ppm", snapshot_prefix, name) < (int)sizeof(path));
+    lv_obj_invalidate(lv_screen_active());
+    lv_refr_now(NULL);
+    FILE *file = fopen(path, "wb");
+    assert(file != NULL);
+    fprintf(file, "P6\n240 240\n255\n");
+    for (unsigned i = 0; i < 240 * 240; ++i) {
+        unsigned pixel = frame[i];
+        unsigned char rgb[] = {(pixel >> 11) * 255 / 31, ((pixel >> 5) & 63) * 255 / 63, (pixel & 31) * 255 / 31};
+        assert(fwrite(rgb, 1, 3, file) == 3);
+    }
+    assert(fclose(file) == 0);
+}
+
+int main(int argc, char **argv)
+{
+    snapshot_prefix = argc > 1 ? argv[1] : NULL;
     lv_init();
     lv_display_t *display = lv_display_create(240, 240);
+    lv_display_set_color_format(display, LV_COLOR_FORMAT_RGB565);
     lv_display_set_buffers(display, pixels, NULL, sizeof(pixels), LV_DISPLAY_RENDER_MODE_PARTIAL);
     lv_display_set_flush_cb(display, flush);
     lv_obj_t *screen = lv_screen_active();
+    lv_obj_set_style_bg_color(screen, lv_color_hex(0x15101b), 0);
+    lv_obj_set_style_bg_grad_color(screen, lv_color_hex(0x362031), 0);
+    lv_obj_set_style_bg_grad_dir(screen, LV_GRAD_DIR_VER, 0);
     lv_obj_set_scrollable(screen, false);
     lv_obj_set_clickable(screen, true);
     dial_home_create(&home, screen);
@@ -378,6 +407,91 @@ int main(void)
     dial_navigation_activate(&navigation);
     assert(navigation.view == DIAL_NAV_MENU);
     puts("empty-page navigation: passed");
+
+    roster.state = DIAL_AGENTS_READY;
+    roster.revision = 4;
+    roster.page.count = roster.page.total = 1;
+    roster.page.offset = 0;
+    strcpy(roster.page.agents[0].id, "beta");
+    strcpy(roster.page.agents[0].name, "Beta");
+    dial_navigation_update(&navigation, &roster);
+    dial_navigation_open(&navigation, true);
+    touch(120, 82, true); touch(120, 82, false);
+    assert(navigation.view == DIAL_NAV_DETAIL);
+    snapshot("agent");
+    touch(120, 172, true); touch(120, 172, false);
+    assert(navigation.view == DIAL_NAV_SESSIONS && opens == 1 && requested_offset == 0);
+    conversations = (dial_conversations_snapshot_t){.state = DIAL_AGENTS_LOADING, .revision = 1};
+    conversations.agent = roster.page.agents[0];
+    dial_navigation_conversations_update(&navigation, &conversations);
+    assert(strstr(lv_label_get_text(navigation.description), "Loading conversations") != NULL);
+    conversations.state = DIAL_AGENTS_READY;
+    conversations.page.count = 2;
+    conversations.page.has_more = true;
+    conversations.page.next_offset = 2;
+    strcpy(conversations.page.sessions[0].title, "Planning the next adventure");
+    strcpy(conversations.page.sessions[1].title, "A question for Beta");
+    dial_navigation_conversations_update(&navigation, &conversations);
+    snapshot("list");
+    assert(strncmp(lv_label_get_text(navigation.names[0]), "Planning", 8) == 0);
+    touch(120, 82, true);
+    ++conversations.revision;
+    dial_navigation_conversations_update(&navigation, &conversations);
+    touch(120, 82, false);
+    assert(navigation.view == DIAL_NAV_SESSIONS && reads == 0);
+    dial_navigation_move(&navigation, 1);
+    dial_navigation_activate(&navigation);
+    assert(navigation.view == DIAL_NAV_PREVIEW && reads == 1 && requested_offset == 1);
+    conversations.selected = 1;
+    conversations.preview_state = DIAL_AGENTS_LOADING;
+    ++conversations.preview_revision;
+    dial_navigation_conversations_update(&navigation, &conversations);
+    assert(strstr(lv_label_get_text(navigation.preview_text), "Loading") != NULL);
+    conversations.preview_state = DIAL_AGENTS_READY;
+    conversations.preview.status = ESP_OPENCLAW_PREVIEW_OK;
+    conversations.preview.count = 2;
+    conversations.preview.items[0].role = ESP_OPENCLAW_PREVIEW_USER;
+    strcpy(conversations.preview.items[0].text, "What should we work on next?");
+    conversations.preview.items[1].role = ESP_OPENCLAW_PREVIEW_ASSISTANT;
+    strcpy(conversations.preview.items[1].text, "Start with a small working journey. Pick an agent, read a conversation, and return without losing your place. Then check how the controls behave when the network drops and reconnects.");
+    dial_navigation_conversations_update(&navigation, &conversations);
+    snapshot("preview");
+    assert(strstr(lv_label_get_text(navigation.preview_text), "What should we work on next?") != NULL);
+    dial_navigation_move(&navigation, 1);
+    advance(40);
+    assert(lv_obj_get_scroll_y(navigation.preview_body) > 0);
+    snapshot("scrolled");
+    touch(68, 44, true); touch(68, 44, false);
+    assert(navigation.view == DIAL_NAV_SESSIONS && navigation.focus == 1);
+    dial_navigation_activate(&navigation);
+    conversations.preview.count = 0;
+    conversations.preview.status = ESP_OPENCLAW_PREVIEW_MISSING;
+    ++conversations.preview_revision;
+    dial_navigation_conversations_update(&navigation, &conversations);
+    assert(strcmp(lv_label_get_text(navigation.preview_text), "Conversation unavailable") == 0);
+    snapshot("missing");
+    conversations.preview_state = conversations.state = DIAL_AGENTS_OFFLINE;
+    dial_navigation_conversations_update(&navigation, &conversations);
+    assert(strstr(lv_label_get_text(navigation.preview_text), "Gateway offline") != NULL);
+    assert(strstr(lv_label_get_text(navigation.preview_text), "What should") == NULL);
+    touch(68, 44, true); touch(68, 44, false);
+    touch(68, 44, true); touch(68, 44, false);
+    assert(navigation.view == DIAL_NAV_DETAIL && navigation.focus == 0 && confirmations == 4);
+    puts("conversation list, scrolling, missing/offline preview and return focus: passed");
+
+    // A rejected reader command after Home must leave the active control usable.
+    navigation.view = DIAL_NAV_PREVIEW;
+    navigating = false;
+    lv_obj_set_hidden(navigation.root, true);
+    control();
+    unsigned before_rejection = changes;
+    conversations = (dial_conversations_snapshot_t){.revision = 99};
+    assert(!dial_navigation_show_reader(&navigation, &roster, &conversations, true));
+    encoder_diff = 1;
+    lv_indev_read(input.encoder);
+    advance(40);
+    assert(changes == before_rejection + 1);
+    puts("rejected reader page preserves active control input: passed");
 
     lv_deinit();
 }

@@ -75,6 +75,7 @@ static struct {
     dial_input_t input;
     dial_navigation_t navigation;
     dial_agents_snapshot_t *agents;
+    dial_conversations_snapshot_t *conversations;
 } ui;
 
 static esp_err_t invalid(esp_openclaw_node_error_t *error, const char *message)
@@ -121,6 +122,10 @@ static bool only_fields(cJSON *params, const char *const *names, size_t count)
 static void show_view(dial_view_t view)
 {
     if (view != VIEW_NAVIGATION) {
+        dial_reader_conversations_close();
+        free(ui.conversations);
+        ui.conversations = NULL;
+        ui.navigation.conversations = NULL;
         free(ui.agents);
         ui.agents = NULL;
         ui.navigation.snapshot = NULL;
@@ -149,6 +154,21 @@ static void navigation_event(dial_navigation_event_t event, size_t offset, void 
             dial_reader_agents_copy(ui.agents);
             dial_navigation_update(&ui.navigation, ui.agents);
         }
+    } else if (event == DIAL_NAV_CLOSE) dial_reader_conversations_close();
+    else if (event == DIAL_NAV_CONVERSATIONS || event == DIAL_NAV_SESSIONS_REFRESH || event == DIAL_NAV_READ) {
+        if (ui.conversations == NULL) ui.conversations = calloc(1, sizeof(*ui.conversations));
+        if (ui.conversations == NULL) {
+            strlcpy(ui.heading, "Reader unavailable", sizeof(ui.heading));
+            lv_label_set_text(ui.message, "Not enough memory.\nHold to return Home.");
+            show_view(VIEW_MESSAGE);
+            return;
+        }
+        if (event == DIAL_NAV_CONVERSATIONS && offset < ui.agents->page.count)
+            dial_reader_conversations_open(ui.agents->page.agents[offset].id, ui.agents->revision);
+        else if (event == DIAL_NAV_SESSIONS_REFRESH) dial_reader_conversations_refresh(offset);
+        else if (event == DIAL_NAV_READ) dial_reader_preview_open(offset, ui.conversations->revision);
+        dial_reader_conversations_copy(ui.conversations);
+        dial_navigation_conversations_update(&ui.navigation, ui.conversations);
     } else dial_input_set_control(&ui.input, false);
 }
 
@@ -319,6 +339,10 @@ static void refresh_ui(lv_timer_t *timer)
     if (ui.view == VIEW_NAVIGATION) {
         dial_reader_agents_copy(ui.agents);
         dial_navigation_update(&ui.navigation, ui.agents);
+        if (ui.conversations != NULL) {
+            dial_reader_conversations_copy(ui.conversations);
+            dial_navigation_conversations_update(&ui.navigation, ui.conversations);
+        }
         return;
     }
     if (ui.view != VIEW_FACE) return;
@@ -420,7 +444,8 @@ static cJSON *status_payload(void)
     cJSON_AddStringToObject(result, "view", ui.view == VIEW_FACE ? "face" : ui.view == VIEW_CONTROL ? "control" : ui.view == VIEW_NAVIGATION ? "menu" : "message");
     if (ui.view == VIEW_NAVIGATION) {
         cJSON_AddStringToObject(result, "page", ui.navigation.view == DIAL_NAV_MENU ? "menu" :
-            ui.navigation.view == DIAL_NAV_AGENTS ? "agents" : "agent");
+            ui.navigation.view == DIAL_NAV_AGENTS ? "agents" : ui.navigation.view == DIAL_NAV_SESSIONS ? "conversations" :
+            ui.navigation.view == DIAL_NAV_PREVIEW ? "preview" : "agent");
     }
     if (ui.view == VIEW_MESSAGE) {
         cJSON_AddStringToObject(result, "heading", ui.heading);
@@ -491,9 +516,21 @@ static esp_err_t handle_command(esp_openclaw_node_handle_t client, void *context
         const char *fields[] = {"page"};
         const char *page = "menu";
         if (!only_fields(params, fields, 1) ||
-            (cJSON_HasObjectItem(params, "page") && !text_field(params, "page", 6, &page)) ||
-            (strcmp(page, "menu") != 0 && strcmp(page, "agents") != 0)) {
-            err = invalid(error, "page must be menu or agents");
+            (cJSON_HasObjectItem(params, "page") && !text_field(params, "page", 13, &page)) ||
+            (strcmp(page, "menu") != 0 && strcmp(page, "agents") != 0 &&
+             strcmp(page, "conversations") != 0 && strcmp(page, "preview") != 0)) {
+            err = invalid(error, "page must be menu, agents, conversations or preview");
+        } else if (strcmp(page, "conversations") == 0 || strcmp(page, "preview") == 0) {
+            if (ui.conversations == NULL) ui.conversations = calloc(1, sizeof(*ui.conversations));
+            if (ui.agents == NULL) ui.agents = calloc(1, sizeof(*ui.agents));
+            if (ui.conversations == NULL || ui.agents == NULL) err = invalid(error, "Reader memory unavailable");
+            else {
+                dial_reader_agents_copy(ui.agents);
+                dial_reader_conversations_copy(ui.conversations);
+                if (!dial_navigation_show_reader(&ui.navigation, ui.agents, ui.conversations, strcmp(page, "preview") == 0))
+                    err = invalid(error, "Open a conversation before showing this page");
+                else show_view(VIEW_NAVIGATION);
+            }
         } else open_navigation(strcmp(page, "agents") == 0);
     } else if (strcmp(command, "display.show") == 0) {
         const char *heading, *text;

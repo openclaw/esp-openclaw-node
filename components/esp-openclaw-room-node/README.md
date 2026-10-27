@@ -28,6 +28,19 @@ display; tap the visible control again to start or stop Talk. If the
 button's action changes during a press, release and press again; a held Start
 press cannot become Stop when wake word or a remote command starts Talk.
 
+The local USB command `agents refresh [offset]` reads a page of up to eight
+agents through the existing operator connection. `agents` reports its state
+and copied identities; `agents close` releases the page. This is read-only:
+it does not select an agent or change an existing Talk session. The Gateway
+currently returns the entire roster, so responses larger than 32 KiB are
+rejected before parsing.
+
+Directory requests wait during Talk startup and teardown. A 15-second
+directory timeout does not disconnect the shared operator or interrupt Talk
+and Canvas. Only one request can remain outstanding; a new refresh waits for
+its predecessor to complete or be drained by disconnection. Reconnection or
+a Gateway change invalidates the old page and late responses.
+
 `talk.say {"text":"Set to 23 degrees."}` sends a short confirmation into the
 current connected voice call. Text is limited to 1024 UTF-8 bytes. The response
 `{"queued":true}` confirms local submission; a Gateway rejection appears on

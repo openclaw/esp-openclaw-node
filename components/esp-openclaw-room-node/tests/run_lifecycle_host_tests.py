@@ -35,6 +35,7 @@ def main():
         repo / "components/esp-openclaw-node/include",
         repo / "components/esp-openclaw-node-provisioning/include",
         repo / "components/esp-openclaw-talk/include",
+        repo / "components/esp-openclaw-directory/include",
         sdk / "esp_webrtc/include", sdk / "esp_peer/include", sdk / "av_render/include",
         managed / "espressif__esp_capture/include", managed / "espressif__esp_capture/interface",
         managed / "espressif__esp_codec_dev/include", managed / "espressif__esp_codec_dev/interface",
@@ -84,6 +85,8 @@ def main():
         command += [
             str(tests / "test_room_talk_lifecycle.c"), str(tests / "host/room_host_fakes.c"),
             str(repo / "components/esp-openclaw-talk/src/esp_openclaw_talk.c"),
+            str(tests.parent / "room_agent_directory.c"),
+            str(repo / "components/esp-openclaw-directory/esp_openclaw_directory.c"),
             *link, "-o", str(binary),
         ]
         failed = 0

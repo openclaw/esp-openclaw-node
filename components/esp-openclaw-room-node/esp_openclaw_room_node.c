@@ -41,6 +41,7 @@
 #include "room_runtime_diagnostics.h"
 #include "room_ui_controller.h"
 #include "room_board.h"
+#include "room_agent_directory.h"
 #include "esp_openclaw_room_node.h"
 
 static const char *TAG = "openclaw_room";
@@ -284,7 +285,10 @@ static esp_err_t create_connection_timers(void)
     ESP_RETURN_ON_ERROR(esp_timer_create(&args, &operator_start_timer), TAG, "operator retry timer");
     args.callback = node_reconnect_timer_fired;
     args.name = "node_reconnect";
-    return esp_timer_create(&args, &node_reconnect_timer);
+    ESP_RETURN_ON_ERROR(esp_timer_create(&args, &node_reconnect_timer), TAG, "node retry timer");
+    esp_err_t err = room_agent_directory_init(state_lock, wake_talk_teardown);
+    if (err != ESP_OK) ESP_LOGW(TAG, "agent directory unavailable: %s", esp_err_to_name(err));
+    return ESP_OK;
 }
 
 static bool schedule_operator_start(uint32_t delay_ms)
@@ -436,6 +440,10 @@ static void talk_teardown_task(void *arg)
         if (!close) {
             start_node_if_pending();
             start_operator_if_pending();
+            xSemaphoreTake(state_lock, portMAX_DELAY);
+            bool defer_directory = talk_start_in_flight || talk_dialing || talk_closing;
+            xSemaphoreGive(state_lock);
+            room_agent_directory_poll(defer_directory);
             continue;
         }
 
@@ -724,6 +732,8 @@ static void operator_event(
 {
     (void)data;
     (void)ctx;
+    uint32_t connection = event == ESP_OPENCLAW_NODE_EVENT_CONNECTED
+        ? esp_openclaw_node_get_connection_id(client) : 0;
     xSemaphoreTake(state_lock, portMAX_DELAY);
     bool current = client == operator_client;
     bool connected = event == ESP_OPENCLAW_NODE_EVENT_CONNECTED;
@@ -742,6 +752,7 @@ static void operator_event(
     }
     bool ready = current && operator_ready;
     if (current) {
+        room_agent_directory_set_owner_locked(client, operator_incarnation, connection, connected);
         operator_ui_pending = true;
         wake_talk_teardown();
     }
@@ -968,6 +979,7 @@ static void node_event(
                 ESP_LOGI(TAG, "Gateway changed; reconnecting the operator client");
                 xSemaphoreTake(state_lock, portMAX_DELAY);
                 operator_ready = false;
+                room_agent_directory_set_owner_locked(existing_operator, operator_incarnation, 0, false);
                 request_talk_stop_locked(talk_generation, NULL);
                 xSemaphoreGive(state_lock);
                 esp_err_t disconnect_err =
@@ -1487,6 +1499,54 @@ static int menu_console_command(int argc, char **argv)
     return err == ESP_OK ? 0 : 1;
 }
 
+static int agents_console_command(int argc, char **argv)
+{
+    if (argc >= 2 && strcmp(argv[1], "refresh") == 0 && argc <= 3) {
+        size_t offset = 0;
+        if (argc == 3) {
+            if (argv[2][0] == '\0') return 1;
+            for (const char *p = argv[2]; *p != '\0'; ++p) {
+                if (*p < '0' || *p > '9' || offset > (SIZE_MAX - (size_t)(*p - '0')) / 10) return 1;
+                offset = offset * 10 + (size_t)(*p - '0');
+            }
+        }
+        if (room_agent_directory_refresh(offset) != ESP_OK) return 1;
+    } else if (argc == 2 && strcmp(argv[1], "close") == 0) {
+        room_agent_directory_cancel();
+    } else if (argc != 1) {
+        printf("usage: agents [refresh [offset] | close]\n");
+        return 1;
+    }
+    room_agents_snapshot_t *snapshot = malloc(sizeof(*snapshot));
+    if (snapshot == NULL) return 1;
+    room_agent_directory_copy(snapshot);
+    const char *states[] = {"idle", "offline", "loading", "ready", "empty", "error", "too-large", "timeout"};
+    cJSON *root = cJSON_CreateObject();
+    if (root != NULL) {
+        cJSON_AddStringToObject(root, "state", states[snapshot->state]);
+        cJSON_AddNumberToObject(root, "revision", snapshot->revision);
+        cJSON_AddNumberToObject(root, "offset", snapshot->page.offset);
+        cJSON_AddNumberToObject(root, "total", snapshot->page.total);
+        cJSON *agents = cJSON_AddArrayToObject(root, "agents");
+        for (size_t i = 0; agents != NULL && i < snapshot->page.count; ++i) {
+            const esp_openclaw_agent_t *agent = &snapshot->page.agents[i];
+            cJSON *item = cJSON_CreateObject();
+            if (item == NULL) break;
+            cJSON_AddStringToObject(item, "id", agent->id);
+            cJSON_AddStringToObject(item, "name", agent->name);
+            cJSON_AddStringToObject(item, "emoji", agent->emoji);
+            cJSON_AddItemToArray(agents, item);
+        }
+    }
+    free(snapshot);
+    char *json = root != NULL ? cJSON_PrintUnformatted(root) : NULL;
+    cJSON_Delete(root);
+    if (json == NULL) return 1;
+    printf("agents=%s\n", json);
+    free(json);
+    return 0;
+}
+
 static esp_err_t register_room_console_commands(void)
 {
     static const esp_console_cmd_t COMMANDS[] = {
@@ -1495,6 +1555,12 @@ static esp_err_t register_room_console_commands(void)
             .help = "Open a local watch menu page without starting Talk",
             .hint = "[menu|connection|canvas|home]",
             .func = menu_console_command,
+        },
+        {
+            .command = "agents",
+            .help = "Inspect the read-only agent directory",
+            .hint = "refresh [offset] | close",
+            .func = agents_console_command,
         },
         {
             .command = "voice-actions",

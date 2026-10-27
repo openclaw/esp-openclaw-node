@@ -1203,7 +1203,12 @@ static void conversations_suspend(void)
         reader.page.count == 1 && strcmp(reader.agent.id, "fixture") == 0,
         "hidden completion retains the matching roster and conversation page");
     CHECK(room_conversations_resume_current(epoch), "coherent copy has live authority");
+    room_conversation_context_t context;
+    CHECK(room_conversations_copy_context(&context) == ESP_OK && context.epoch == epoch &&
+        strcmp(context.agent_name, reader.agent.name) == 0,
+        "Home context uses the same live reader and epoch without copying its messages");
     CHECK(room_conversations_preview(0, reader.revision) == ESP_OK, "retained page can open its exact row");
+    CHECK(!room_conversations_resume_current(context.epoch), "Home context expires with reader selection");
     CHECK(!room_conversations_resume_current(epoch), "a changed selection rejects an earlier copy");
     host_run_task("talk_teardown");
     CHECK(room_conversations_copy_resume(&agents, &reader, &epoch) == ESP_OK &&
@@ -1214,6 +1219,8 @@ static void conversations_suspend(void)
     CHECK(room_conversations_copy_resume(&agents, &reader, &epoch) == ESP_OK &&
         reader.preview_state == ROOM_AGENTS_READY && reader.preview.count == 1,
         "hidden preview completion is available on return");
+    CHECK(room_conversations_copy_context(&context) == ESP_OK && context.epoch == epoch,
+        "Home can republish the completed hidden preview");
     unsigned requests = host.conversation_requests;
     host_run_task("talk_teardown");
     CHECK(host.conversation_requests == requests && host.agent_requests == 1,
@@ -1225,6 +1232,8 @@ static void conversations_suspend(void)
     CHECK(!room_conversations_resume_current(epoch) &&
         room_conversations_copy_resume(&agents, &reader, &epoch) == ESP_ERR_INVALID_STATE &&
         reader.agent.id[0] == '\0', "explicit close revokes retained content and copied authority");
+    CHECK(room_conversations_copy_context(&context) == ESP_ERR_INVALID_STATE &&
+        context.epoch == 0 && context.agent_name[0] == '\0', "explicit close clears the Home projection");
 }
 
 static void conversations_resume_invalidation(void)
@@ -1264,6 +1273,9 @@ static void conversations_resume_invalidation(void)
         room_conversations_copy_resume(&agents, &reader, &epoch) == ESP_ERR_INVALID_STATE &&
         agents.page.count == 0 && reader.page.count == 0,
         "owner loss rejects a copy taken before the UI acquired its display lock");
+    room_conversation_context_t context = {.epoch = epoch, .agent_name = "stale"};
+    CHECK(room_conversations_copy_context(&context) == ESP_ERR_INVALID_STATE &&
+        context.epoch == 0 && context.agent_name[0] == '\0', "owner loss clears the Home projection");
 }
 
 static void directory_suspend_pending(void)

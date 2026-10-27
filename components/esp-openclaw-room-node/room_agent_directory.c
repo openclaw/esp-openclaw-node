@@ -242,6 +242,18 @@ void room_conversations_copy(room_conversations_snapshot_t *snapshot)
     xSemaphoreGive(directory.lock);
 }
 
+/* Caller holds the directory owner lock. */
+static bool reader_available(void)
+{
+    if (directory.ready && directory.state == ROOM_AGENTS_READY &&
+        directory.page != NULL && directory.conversations != NULL) {
+        for (size_t i = 0; i < directory.page->count; ++i)
+            if (strcmp(directory.page->agents[i].id, directory.conversations->agent.id) == 0)
+                return true;
+    }
+    return false;
+}
+
 esp_err_t room_conversations_copy_resume(room_agents_snapshot_t *agents,
     room_conversations_snapshot_t *reader, unsigned *epoch)
 {
@@ -251,13 +263,7 @@ esp_err_t room_conversations_copy_resume(room_agents_snapshot_t *agents,
     *epoch = 0;
     if (directory.lock == NULL) return ESP_ERR_INVALID_STATE;
     xSemaphoreTake(directory.lock, portMAX_DELAY);
-    bool member = false;
-    if (directory.ready && directory.state == ROOM_AGENTS_READY &&
-        directory.page != NULL && directory.conversations != NULL) {
-        for (size_t i = 0; i < directory.page->count; ++i)
-            if (strcmp(directory.page->agents[i].id, directory.conversations->agent.id) == 0)
-                member = true;
-    }
+    bool member = reader_available();
     if (member) {
         agents->state = directory.state;
         agents->revision = directory.revision;
@@ -269,6 +275,23 @@ esp_err_t room_conversations_copy_resume(room_agents_snapshot_t *agents,
     }
     xSemaphoreGive(directory.lock);
     return member ? ESP_OK : ESP_ERR_INVALID_STATE;
+}
+
+esp_err_t room_conversations_copy_context(room_conversation_context_t *context)
+{
+    if (context == NULL) return ESP_ERR_INVALID_ARG;
+    *context = (room_conversation_context_t){0};
+    if (directory.lock == NULL) return ESP_ERR_INVALID_STATE;
+    xSemaphoreTake(directory.lock, portMAX_DELAY);
+    bool available = reader_available();
+    if (available) {
+        const esp_openclaw_agent_t *agent = &directory.conversations->agent;
+        memcpy(context->agent_name, agent->name[0] != '\0' ? agent->name : agent->id,
+            sizeof(context->agent_name));
+        context->epoch = atomic_load(&reader_epoch);
+    }
+    xSemaphoreGive(directory.lock);
+    return available ? ESP_OK : ESP_ERR_INVALID_STATE;
 }
 
 bool room_conversations_resume_current(unsigned epoch)

@@ -44,6 +44,19 @@ int main(void)
 {
     cJSON_Hooks hooks = {.malloc_fn = limited_malloc, .free_fn = limited_free};
     cJSON_InitHooks(&hooks);
+    const char *lossy = "{\"agents\":[{\"id\":\"main\\u0000suffix\"}]}";
+    cJSON *normalized = cJSON_Parse(lossy);
+    assert(normalized != NULL);
+    assert(strcmp(text(cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(normalized, "agents"), 0), "id"), "main") == 0);
+    cJSON_Delete(normalized);
+    assert(!esp_openclaw_node_json_strings_valid(lossy, strlen(lossy)));
+    assert(parse(lossy) == NULL);
+    const char *valid_strings[] = {"{\"id\":\"main\"}", "{\"text\":\"🦊\\n\\t\\u00e9\"}", "{\"text\":\"\\\\u0000\"}"};
+    for (size_t i = 0; i < sizeof(valid_strings) / sizeof(valid_strings[0]); ++i)
+        assert(esp_openclaw_node_json_strings_valid(valid_strings[i], strlen(valid_strings[i])));
+    const char *bad_strings[] = {"{\"ma\\u0000in\":1}", "{\"text\":\"\\uZZZZ\"}", "{\"text\":\"\xc0\xaf\"}", "{\"text\":\"\\ud800\"}"};
+    for (size_t i = 0; i < sizeof(bad_strings) / sizeof(bad_strings[0]); ++i)
+        assert(!esp_openclaw_node_json_strings_valid(bad_strings[i], strlen(bad_strings[i])));
     const char prefix[] = "{\"payload\":{\"snapshot\":[null";
     const char row[] = ",{\"name\":\"ignored\",\"cap\":true,\"value\":123}";
     const char suffix[] = "] ,\"type\":\"hello-ok\",\"auth\":{\"deviceToken\":\"synthetic-node-token\","

@@ -52,6 +52,7 @@ static bool string(cursor_t *cursor)
             if (strchr("\"\\/bfnrt", escape) != NULL && escape != '\0') continue;
             unsigned codepoint;
             if (escape != 'u' || !hex_quad(cursor, &codepoint)) return false;
+            if (codepoint == 0) return false;
             if (codepoint >= 0xdc00 && codepoint <= 0xdfff) return false;
             if (codepoint >= 0xd800 && codepoint <= 0xdbff) {
                 unsigned low;
@@ -199,4 +200,18 @@ cJSON *esp_openclaw_node_parse_handshake(const char *json, size_t length)
     whitespace(&cursor);
     if (cursor.next != cursor.end) return NULL;
     return materialize(fields, sizeof(fields) / sizeof(fields[0]));
+}
+
+bool esp_openclaw_node_json_strings_valid(const char *json, size_t length)
+{
+    if (json == NULL) return false;
+    cursor_t cursor = {.next = json, .end = json + length};
+    while (cursor.next < cursor.end) {
+        if (*cursor.next == '"') {
+            if (!string(&cursor)) return false;
+        } else {
+            if (*cursor.next++ == '\0') return false;
+        }
+    }
+    return true;
 }

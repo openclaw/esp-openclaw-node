@@ -1081,7 +1081,9 @@ void esp_openclaw_node_process_gateway_message(
     esp_openclaw_node_lock_state(node);
     bool handshake = esp_openclaw_node_state_is_connecting(node->state);
     esp_openclaw_node_unlock_state(node);
-    cJSON *root = handshake ? esp_openclaw_node_parse_handshake(text, strlen(text)) : cJSON_Parse(text);
+    size_t length = strlen(text);
+    cJSON *root = handshake ? esp_openclaw_node_parse_handshake(text, length) :
+        esp_openclaw_node_json_strings_valid(text, length) ? cJSON_Parse(text) : NULL;
     if (root == NULL) {
         ESP_LOGW(ESP_OPENCLAW_NODE_TAG, "invalid gateway JSON frame");
         return;

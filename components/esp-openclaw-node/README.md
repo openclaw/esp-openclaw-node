@@ -28,6 +28,9 @@ role-token handoff and plugin surface URLs. Unused initial snapshots and feature
 catalogs do not consume a second allocation as a JSON tree. Handshake JSON is
 limited to 64 nested containers; the transport's frame-size limit still applies.
 Connected RPC and event payloads continue to use the ordinary JSON parser.
+All received JSON strings must contain valid UTF-8 and fit the SDK's C-string
+representation. Embedded NUL escapes are rejected before parsing and payload
+reserialization, so identifiers cannot silently lose their suffixes.
 
 ## Contents
 

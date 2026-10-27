@@ -781,6 +781,8 @@ void room_ui_set_agent_selection_handler(void (*handler)(const char *, unsigned)
 void room_ui_store_talk_target(const room_ui_talk_target_t *target) { host.ui_target = *target; }
 void room_ui_agent_selection_complete(esp_err_t result) { ++host.selection_completions; host.selection_result = result; }
 void room_ui_refresh(void) { ++host.ui_refreshes; }
+esp_err_t room_ui_apply_display_brightness(int percent) { return room_board_display_brightness_set(percent); }
+esp_err_t room_ui_watch_brightness(int percent) { (void)percent; return ESP_ERR_INVALID_STATE; }
 esp_err_t room_ui_watch_menu(const char *page) { (void)page; return ESP_ERR_INVALID_STATE; }
 const char *WIFI_EVENT = "wifi";
 const char *IP_EVENT = "ip";

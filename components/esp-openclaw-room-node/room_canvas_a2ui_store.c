@@ -12,6 +12,7 @@
 #include "esp_timer.h"
 #include "lvgl.h"
 #include "room_board.h"
+#include "room_ui_controller.h"
 #include "room_canvas_internal.h"
 #include "room_diagnostics.h"
 #include "freertos/FreeRTOS.h"
@@ -291,7 +292,7 @@ static esp_err_t show_present_image(
     record_retained_kind(ROOM_CANVAS_RETAINED_IMAGE);
     activate_canvas_locked();
     room_board_display_unlock();
-    room_board_display_brightness_set(ROOM_CANVAS_ACTIVE_BRIGHTNESS);
+    room_ui_apply_display_brightness(ROOM_CANVAS_ACTIVE_BRIGHTNESS);
     room_canvas_emit_action(ROOM_CANVAS_ACTION_RENDER_CHANGED, 0);
 
     if (asprintf(
@@ -1017,7 +1018,7 @@ void room_canvas_view_toggle(void)
         if (room_board_display_lock(ROOM_CANVAS_DISPLAY_LOCK_MS)) {
             activate_canvas_locked();
             room_board_display_unlock();
-            room_board_display_brightness_set(ROOM_CANVAS_ACTIVE_BRIGHTNESS);
+            room_ui_apply_display_brightness(ROOM_CANVAS_ACTIVE_BRIGHTNESS);
             room_canvas_emit_action(ROOM_CANVAS_ACTION_RENDER_CHANGED, 0);
         }
         return;
@@ -1231,7 +1232,7 @@ esp_err_t room_canvas_a2ui_reset(
     }
     room_board_display_unlock();
     if (canvas_active) {
-        room_board_display_brightness_set(ROOM_CANVAS_ACTIVE_BRIGHTNESS);
+        room_ui_apply_display_brightness(ROOM_CANVAS_ACTIVE_BRIGHTNESS);
     }
     *out_payload_json = payload;
     return ESP_OK;

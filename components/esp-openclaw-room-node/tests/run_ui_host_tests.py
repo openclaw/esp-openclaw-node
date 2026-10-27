@@ -116,7 +116,7 @@ def main():
             "-I", str(component.parent / "esp-openclaw-directory/include"),
             str(component / "room_ui_controller.c"), str(component / "room_board.c"),
             str(component / "room_watch_home.c"),
-            str(component / "room_watch_navigation.c"),
+            str(component / "room_watch_navigation.c"), str(component / "room_watch_settings.c"),
             str(component / "room_watch_agents.c"),
             str(component / "room_watch_conversations.c"),
             str(component / "room_face.c"),

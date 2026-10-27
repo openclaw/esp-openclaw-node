@@ -8,6 +8,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "room_board.h"
+#include "room_ui_controller.h"
 
 #define TAG "room_canvas_renderer"
 #define ROOM_CANVAS_MAX_DEPTH 8
@@ -509,7 +510,7 @@ static esp_err_t prefetch_a2ui_room_canvas_images(esp_openclaw_node_error_t *out
         room_canvas_record_no_retained_content();
         room_canvas_activate_locked();
         room_board_display_unlock();
-        room_board_display_brightness_set(ROOM_CANVAS_ACTIVE_BRIGHTNESS);
+        room_ui_apply_display_brightness(ROOM_CANVAS_ACTIVE_BRIGHTNESS);
         room_canvas_emit_action(ROOM_CANVAS_ACTION_RENDER_CHANGED, 0);
         return ESP_OK;
     }
@@ -646,7 +647,7 @@ static esp_err_t prefetch_a2ui_room_canvas_images(esp_openclaw_node_error_t *out
     room_canvas_record_a2ui_retained();
     room_canvas_activate_locked();
     room_board_display_unlock();
-    room_board_display_brightness_set(ROOM_CANVAS_ACTIVE_BRIGHTNESS);
+    room_ui_apply_display_brightness(ROOM_CANVAS_ACTIVE_BRIGHTNESS);
     room_canvas_emit_action(ROOM_CANVAS_ACTION_RENDER_CHANGED, 0);
     return ESP_OK;
 }

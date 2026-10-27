@@ -58,15 +58,24 @@ live**; it does not infer speech playback from the connection state. Missing
 clock and battery telemetry are omitted. The display still sleeps when idle;
 waking it does not start a conversation. Idle, setup and error views keep static
 mascot artwork without running the animation timer; wake-up hints still animate.
-The **Menu** button opens Canvas, Connection, and Device status. Connection
+The **Menu** button opens Agents, Canvas, Connection, and Settings. Connection
 shows live Wi-Fi, Gateway, and Talk states. Canvas shows the retained card or
 an empty-state explanation. Home returns to the latest conversation state;
 Start/Stop Talk remains available on menu pages. Device status opens the
-existing diagnostics overlay. The first touch on a dark screen only wakes it.
+existing diagnostics overlay from Settings. The first touch on a dark screen only wakes it.
+
+Settings → Display adjusts awake brightness in five-point steps from 10% to
+100%. The preference lasts until restart; an unsuccessful change keeps the
+last accepted value and shows a retry message. It applies to Home, Talk,
+Canvas and diagnostics, while idle sleep still turns the display off. Camera
+use keeps the screen at least 40% bright and labels that minimum when it
+exceeds the selected value. Brightness and navigation work offline and never
+change the selected agent or end a call.
 
 The USB console can open the same pages with `menu`, `menu connection`,
-`menu canvas`, and `menu home`, without starting or stopping a conversation.
-Agent selection, additional settings, and press-to-record messaging are tracked in the
+`menu settings`, `menu display`, `menu canvas`, and `menu home`, without starting or stopping a conversation.
+Use `brightness <10..100>` to set the same runtime preference over USB.
+Additional settings and press-to-record messaging are tracked in the
 [interaction plan](../../docs/design/watch-dial-interaction-plan.md).
 
 ## Board behavior

@@ -14,12 +14,14 @@
 #include "room_board.h"
 #include "room_watch_home.h"
 #include "room_watch_navigation.h"
+#include "room_watch_settings.h"
 #include "room_watch_agents.h"
 #include "room_watch_conversations.h"
 
 static bool watch_navigation_active(void);
 static void start_text_hint(uint32_t show_ms);
 static void room_ui_paint_and_unlock(void);
+static int room_ui_target_brightness(room_ui_state_t state, bool canvas_active);
 
 /* Tap toggles retained Canvas content; hold opens local diagnostics. */
 static void room_ui_status_clicked(lv_event_t *event)
@@ -50,6 +52,8 @@ static lv_obj_t *camera_indicator;
 static bool animated_face_enabled;
 static bool watch_home_enabled;
 static uint8_t idle_brightness;
+static int watch_brightness = -1;
+static bool watch_brightness_failed;
 /* Guarded by state_mux like the state/detail facts. */
 static char gateway_text[64];
 /* Last state/detail survive canvas mode so leaving it restores the live Talk
@@ -274,6 +278,8 @@ esp_err_t room_ui_watch_menu(const char *page)
     if (page == NULL) return ESP_ERR_INVALID_ARG;
     if (strcmp(page, "menu") == 0) requested = ROOM_WATCH_MENU;
     else if (strcmp(page, "agents") == 0) requested = ROOM_WATCH_AGENTS;
+    else if (strcmp(page, "settings") == 0) requested = ROOM_WATCH_SETTINGS;
+    else if (strcmp(page, "display") == 0) requested = ROOM_WATCH_DISPLAY;
     else if (strcmp(page, "connection") == 0) requested = ROOM_WATCH_CONNECTION;
     else if (strcmp(page, "canvas") == 0) requested = ROOM_WATCH_CANVAS;
     else if (strcmp(page, "home") == 0) requested = ROOM_WATCH_HOME;
@@ -327,6 +333,11 @@ static void watch_navigation_input(lv_event_t *event, room_watch_page_t page)
     bool wake = code == LV_EVENT_PRESSED && room_board_display_is_dark();
     bool activate = false;
     taskENTER_CRITICAL(&state_mux);
+    bool brightness_action = page == ROOM_WATCH_DIMMER || page == ROOM_WATCH_BRIGHTER;
+    if (brightness_action && watch_page != ROOM_WATCH_DISPLAY) {
+        taskEXIT_CRITICAL(&state_mux);
+        return;
+    }
     if (code == LV_EVENT_PRESSED) pressed_watch_page = wake || diagnostics_open ? -1 : (int)page;
     else {
         activate = code == LV_EVENT_SHORT_CLICKED && !diagnostics_open && pressed_watch_page == (int)page;
@@ -335,7 +346,15 @@ static void watch_navigation_input(lv_event_t *event, room_watch_page_t page)
     taskEXIT_CRITICAL(&state_mux);
     if (wake) { room_ui_show_face_hint(10000); return; }
     if (!activate) return;
-    (void)watch_navigation_show(page);
+    if (brightness_action) {
+        taskENTER_CRITICAL(&state_mux);
+        int percent = watch_brightness < 0 ? ROOM_CANVAS_ACTIVE_BRIGHTNESS : watch_brightness;
+        taskEXIT_CRITICAL(&state_mux);
+        percent += page == ROOM_WATCH_BRIGHTER ? 5 : -5;
+        if (percent < 10) percent = 10;
+        if (percent > 100) percent = 100;
+        (void)room_ui_watch_brightness(percent);
+    } else (void)watch_navigation_show(page);
 }
 
 static void watch_home_menu_clicked(lv_event_t *event)
@@ -710,6 +729,7 @@ void room_ui_init(void)
         lv_obj_set_style_bg_grad_dir(lv_screen_active(), LV_GRAD_DIR_VER, 0);
         room_watch_home_create(lv_layer_top(), watch_home_menu_clicked);
         room_watch_navigation_create(lv_layer_top(), watch_navigation_clicked);
+        room_watch_settings_create(lv_layer_top(), watch_navigation_clicked);
         room_watch_agents_create(lv_layer_top(), watch_agents_clicked);
         room_watch_conversations_create(lv_layer_top(), watch_conversations_clicked);
     }
@@ -776,6 +796,54 @@ static int room_ui_target_brightness(room_ui_state_t state, bool canvas_active)
         ? ROOM_UI_CAMERA_MIN_BRIGHTNESS : brightness;
 }
 
+static int watch_display_level(int requested, int preference, bool camera)
+{
+    int level = requested > 0 && preference >= 0 ? preference : requested;
+    return camera && level < ROOM_UI_CAMERA_MIN_BRIGHTNESS ? ROOM_UI_CAMERA_MIN_BRIGHTNESS : level;
+}
+
+esp_err_t room_ui_apply_display_brightness(int percent)
+{
+    if (!watch_home_enabled) return room_board_display_brightness_set(percent);
+    // Serialize the preference snapshot and hardware write with setting changes.
+    // The Watch port uses the recursive LVGL lock, including in Canvas callbacks.
+    if (!room_board_display_lock(100)) return ESP_ERR_TIMEOUT;
+    taskENTER_CRITICAL(&state_mux);
+    int preference = watch_brightness;
+    bool camera = camera_indicator_active;
+    taskEXIT_CRITICAL(&state_mux);
+    esp_err_t err = room_board_display_brightness_set(watch_display_level(percent, preference, camera));
+    room_board_display_unlock();
+    return err;
+}
+
+esp_err_t room_ui_watch_brightness(int percent)
+{
+    if (percent < 10 || percent > 100) return ESP_ERR_INVALID_ARG;
+    if (!watch_home_enabled || status_label == NULL) return ESP_ERR_INVALID_STATE;
+    if (!room_board_display_lock(100)) {
+        taskENTER_CRITICAL(&state_mux);
+        watch_brightness_failed = true;
+        pressed_watch_page = -1;
+        taskEXIT_CRITICAL(&state_mux);
+        arm_repaint_retry();
+        return ESP_ERR_TIMEOUT;
+    }
+    taskENTER_CRITICAL(&state_mux);
+    room_ui_state_t state = current_state;
+    bool camera = camera_indicator_active;
+    pressed_watch_page = -1;
+    taskEXIT_CRITICAL(&state_mux);
+    int requested = room_ui_target_brightness(state, room_canvas_is_active());
+    esp_err_t err = room_board_display_brightness_set(watch_display_level(requested, percent, camera));
+    taskENTER_CRITICAL(&state_mux);
+    if (err == ESP_OK) watch_brightness = percent;
+    watch_brightness_failed = err != ESP_OK;
+    taskEXIT_CRITICAL(&state_mux);
+    room_ui_paint_and_unlock();
+    return err;
+}
+
 /* Paints `current_state`/`current_detail` with the display lock held. Returns
  * true when the caller must apply the idle/active brightness after unlocking. */
 static bool room_ui_render_locked(void)
@@ -793,6 +861,9 @@ static bool room_ui_render_locked(void)
     room_ui_talk_target_t target = current_target;
     bool selecting = selection_pending, selection_error = selection_failed;
     room_watch_page_t page = watch_page;
+    int brightness = watch_brightness < 0 ? ROOM_CANVAS_ACTIVE_BRIGHTNESS : watch_brightness;
+    bool brightness_failed = watch_brightness_failed;
+    bool camera_minimum = camera_indicator_active && brightness < ROOM_UI_CAMERA_MIN_BRIGHTNESS;
     bool agents_changed = current_agents.revision != painted_agents.revision || current_agents.state != painted_agents.state;
     painted_agents = current_agents;
     bool chats = conversations_open;
@@ -817,7 +888,10 @@ static bool room_ui_render_locked(void)
     bool navigation = watch_home_enabled && page != ROOM_WATCH_HOME && !canvas_active;
     if (watch_home_enabled) {
         room_watch_home_render(&facts, &target, state, detail, canvas_active || overlay || navigation);
-        room_watch_navigation_render(page, &facts, !navigation || overlay || page == ROOM_WATCH_AGENTS);
+        bool settings = page == ROOM_WATCH_SETTINGS || page == ROOM_WATCH_DISPLAY;
+        room_watch_navigation_render(page, &facts, !navigation || overlay || page == ROOM_WATCH_AGENTS || settings);
+        room_watch_settings_render(page == ROOM_WATCH_DISPLAY, brightness, brightness_failed, camera_minimum,
+            !navigation || overlay || !settings);
         room_watch_agents_render(&painted_agents, !navigation || overlay || page != ROOM_WATCH_AGENTS || chats,
             target.selected ? target.id : "", target.expired, selecting, selection_error);
         room_watch_conversations_render(painted_conversations,
@@ -931,7 +1005,7 @@ static void room_ui_paint_and_unlock(void)
         int brightness = room_ui_target_brightness(
             painted_state,
             room_canvas_is_active());
-        room_board_display_brightness_set(brightness);
+        room_ui_apply_display_brightness(brightness);
     }
 }
 
@@ -1023,7 +1097,7 @@ void room_ui_show_face_hint(uint32_t show_ms)
     }
     room_board_display_unlock();
     if (shown) {
-        room_board_display_brightness_set(40);
+        room_ui_apply_display_brightness(40);
     }
     if (!shown) room_ui_refresh();
 }
@@ -1075,7 +1149,7 @@ esp_err_t room_ui_camera_indicator_begin(void)
     if (brightness < ROOM_UI_CAMERA_MIN_BRIGHTNESS) {
         brightness = ROOM_UI_CAMERA_MIN_BRIGHTNESS;
     }
-    esp_err_t err = room_board_display_brightness_set(brightness);
+    esp_err_t err = room_ui_apply_display_brightness(brightness);
     if (err != ESP_OK) {
         room_ui_camera_indicator_end();
     }
@@ -1129,11 +1203,14 @@ void room_ui_set_diagnostics_open(bool open)
     taskEXIT_CRITICAL(&state_mux);
     if (open) {
         if (watch_home_enabled) room_watch_home_render(NULL, NULL, ROOM_UI_IDLE, "", true);
-        if (watch_home_enabled) room_watch_navigation_render(ROOM_WATCH_HOME, NULL, true);
+        if (watch_home_enabled) {
+            room_watch_navigation_render(ROOM_WATCH_HOME, NULL, true);
+            room_watch_settings_render(false, 0, false, false, true);
+        }
         if (home != NULL) lv_obj_add_flag(home, LV_OBJ_FLAG_HIDDEN);
         if (talk_pill != NULL) lv_obj_add_flag(talk_pill, LV_OBJ_FLAG_HIDDEN);
         if (camera_indicator != NULL) lv_obj_move_foreground(camera_indicator);
-        room_board_display_brightness_set(ROOM_CANVAS_ACTIVE_BRIGHTNESS);
+        room_ui_apply_display_brightness(ROOM_CANVAS_ACTIVE_BRIGHTNESS);
     } else {
         room_ui_refresh();
     }

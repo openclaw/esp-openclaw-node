@@ -222,6 +222,9 @@ int main(void) {
     assert(dial_reader_agents_refresh(0) == ESP_OK); step();
     respond("{\"agents\":[{\"id\":\"alpha\"},{\"id\":\"beta\"}]}"); step();
     dial_reader_agents_copy(&snapshot);
+    dial_home_context_t home;
+    dial_reader_home_copy(&home);
+    assert(!home.available && home.agent_name[0] == '\0');
     assert(dial_reader_conversations_open("beta", snapshot.revision - 1) == ESP_ERR_INVALID_STATE);
     assert(dial_reader_conversations_open("missing", snapshot.revision) == ESP_ERR_INVALID_STATE);
     assert(dial_reader_conversations_open("beta", snapshot.revision) == ESP_OK); step();
@@ -237,6 +240,9 @@ int main(void) {
     dial_reader_conversations_copy(view);
     assert(view->state == DIAL_AGENTS_READY && view->page.count == 2);
     assert(strcmp(view->agent.id, "beta") == 0 && view->page.next_offset == 2);
+    dial_reader_home_copy(&home);
+    assert(home.available && !home.preview && strcmp(home.agent_name, "beta") == 0);
+    assert(home.directory_revision == snapshot.revision && home.conversation_revision == view->revision);
     unsigned revision = view->revision;
     assert(dial_reader_preview_open(2, revision) == ESP_ERR_INVALID_STATE);
     assert(dial_reader_preview_open(0, revision - 1) == ESP_ERR_INVALID_STATE);
@@ -250,11 +256,16 @@ int main(void) {
     respond("{\"previews\":[{\"key\":\"agent:beta:thread:one\",\"status\":\"ok\",\"items\":[{\"role\":\"assistant\",\"text\":\"stale\"}]}]}"); step();
     dial_reader_conversations_copy(view);
     assert(view->selected == 1 && view->preview_state == DIAL_AGENTS_LOADING && view->preview.count == 0);
+    dial_reader_home_copy(&home);
+    assert(home.available && home.preview && home.preview_revision == view->preview_revision);
+    unsigned home_revision = home.preview_revision;
     respond("{\"previews\":[{\"key\":\"agent:beta:thread:two\",\"status\":\"missing\",\"items\":[]}]}"); step();
     dial_reader_conversations_copy(view);
     assert(view->preview_state == DIAL_AGENTS_READY && view->preview.status == ESP_OPENCLAW_PREVIEW_MISSING && view->preview.count == 0);
 
     assert(dial_reader_conversations_refresh(2) == ESP_OK); step();
+    dial_reader_home_copy(&home);
+    assert(home.available && !home.preview && home.preview_revision != home_revision);
     params = cJSON_Parse(last_params);
     assert(cJSON_GetObjectItem(params, "offset")->valueint == 2);
     cJSON_Delete(params);
@@ -267,6 +278,8 @@ int main(void) {
     assert(view->state == DIAL_AGENTS_READY && view->page.count == 1);
     assert(dial_reader_preview_open(0, view->revision) == ESP_OK); step();
     dial_reader_conversations_close();
+    dial_reader_home_copy(&home);
+    assert(!home.available && home.agent_name[0] == '\0');
     respond("{\"previews\":[{\"key\":\"agent:alpha:main\",\"status\":\"empty\",\"items\":[]}]}"); step();
     dial_reader_conversations_copy(view);
     assert(view->state == DIAL_AGENTS_IDLE && view->preview.count == 0);
@@ -274,6 +287,8 @@ int main(void) {
 
     assert(dial_reader_conversations_open("beta", snapshot.revision) == ESP_OK); step();
     node.id = 0; dial_reader_node_event(ESP_OPENCLAW_NODE_EVENT_DISCONNECTED);
+    dial_reader_home_copy(&home);
+    assert(!home.available && home.agent_name[0] == '\0');
     dial_reader_conversations_copy(view);
     assert(view->state == DIAL_AGENTS_OFFLINE && view->page.count == 0);
     respond("{\"sessions\":[{\"key\":\"agent:beta:stale\"}]}"); step();

@@ -593,3 +593,26 @@ void dial_reader_conversations_copy(dial_conversations_snapshot_t *snapshot)
     }
     xSemaphoreGive(reader.lock);
 }
+
+void dial_reader_home_copy(dial_home_context_t *context)
+{
+    memset(context, 0, sizeof(*context));
+    if (reader.lock == NULL) return;
+    xSemaphoreTake(reader.lock, portMAX_DELAY);
+    const dial_conversations_snapshot_t *view = reader.conversations;
+    if (current_reader() && reader.directory_state == DIAL_AGENTS_READY &&
+        reader.directory_page != NULL && view != NULL) {
+        for (size_t i = 0; i < reader.directory_page->count; ++i) {
+            if (strcmp(reader.directory_page->agents[i].id, view->agent.id) != 0) continue;
+            context->available = true;
+            context->directory_revision = reader.directory_revision;
+            context->conversation_revision = view->revision;
+            context->preview_revision = view->preview_revision;
+            context->preview = view->state == DIAL_AGENTS_READY && view->selected < view->page.count &&
+                view->preview_state != DIAL_AGENTS_IDLE;
+            memcpy(context->agent_name, view->agent.name, sizeof(context->agent_name));
+            break;
+        }
+    }
+    xSemaphoreGive(reader.lock);
+}

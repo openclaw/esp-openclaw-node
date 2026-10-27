@@ -27,8 +27,8 @@ void dial_home_create(dial_home_t *home, lv_obj_t *parent)
     home->wifi = label(home->root, LV_SYMBOL_WIFI, 76, 20, 20);
     home->link = label(home->root, "Starting", 98, 20, 66);
     lv_obj_set_style_text_color(home->link, lv_color_hex(0xb8b0bd), 0);
-    lv_obj_t *title = label(home->root, "OpenClaw", 50, 44, 140);
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_16, 0);
+    home->title = label(home->root, "OpenClaw", 50, 44, 140);
+    lv_obj_set_style_text_font(home->title, &lv_font_montserrat_16, 0);
     lv_obj_t *frame = lv_obj_create(home->root);
     lv_obj_remove_style_all(frame);
     lv_obj_set_pos(frame, 78, 68);
@@ -57,12 +57,21 @@ void dial_home_create(dial_home_t *home, lv_obj_t *parent)
 }
 
 void dial_home_render(dial_home_t *home, bool wifi, bool connected, bool assigned,
-                      const char *activity)
+                      const char *activity, const dial_home_context_t *context)
 {
     lv_obj_set_style_text_color(home->wifi, lv_color_hex(wifi ? 0xbfe5d9 : 0x746e7c), 0);
     lv_label_set_text_static(home->link, connected ? "Online" : "Offline");
+    home->destination = !connected ? DIAL_HOME_MENU : !context->available ? DIAL_HOME_AGENTS
+        : context->preview ? DIAL_HOME_PREVIEW : DIAL_HOME_READER;
+    const char *action = home->destination == DIAL_HOME_MENU ? "Open menu"
+        : home->destination == DIAL_HOME_AGENTS ? "Choose agent"
+        : home->destination == DIAL_HOME_PREVIEW ? "Continue" : "Conversations";
+    lv_label_set_text_static(home->action, action);
+    const char *title = context->available ? context->agent_name : "OpenClaw";
+    if (strcmp(lv_label_get_text(home->title), title) != 0)
+        lv_label_set_text(home->title, title);
     const char *headline = activity != NULL ? activity : !connected ? "Gateway offline"
-        : assigned ? "Control ready" : "No action assigned";
+        : context->available ? "Ready to continue" : assigned ? "Control ready" : "Ready when you are";
     if (strcmp(lv_label_get_text(home->headline), headline) != 0)
         lv_label_set_text(home->headline, headline);
 }

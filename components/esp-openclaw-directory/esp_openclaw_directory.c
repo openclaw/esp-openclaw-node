@@ -83,19 +83,38 @@ static bool bounded_depth(const char *json, size_t length)
     return depth == 0 && !quoted;
 }
 
+static cJSON *parse_payload(const char *json, size_t length,
+                            esp_openclaw_directory_result_t *result)
+{
+    *result = ESP_OPENCLAW_DIRECTORY_INVALID;
+    if (length > ESP_OPENCLAW_DIRECTORY_MAX_JSON_BYTES) {
+        *result = ESP_OPENCLAW_DIRECTORY_TOO_LARGE;
+        return NULL;
+    }
+    if (json == NULL || length == 0 || !valid_utf8(json, length) ||
+        !bounded_depth(json, length)) return NULL;
+    const char *end = NULL;
+    cJSON *root = cJSON_ParseWithLengthOpts(json, length, &end, false);
+    while (end != NULL && end < json + length &&
+           (*end == ' ' || *end == '\n' || *end == '\r' || *end == '\t')) ++end;
+    if (!cJSON_IsObject(root) || end != json + length) {
+        cJSON_Delete(root);
+        return NULL;
+    }
+    *result = ESP_OPENCLAW_DIRECTORY_OK;
+    return root;
+}
+
 esp_openclaw_directory_result_t esp_openclaw_directory_parse(
     const char *json, size_t length, size_t offset, esp_openclaw_agent_page_t *page)
 {
     if (page == NULL) return ESP_OPENCLAW_DIRECTORY_INVALID;
     memset(page, 0, sizeof(*page));
-    if (length > ESP_OPENCLAW_DIRECTORY_MAX_JSON_BYTES) return ESP_OPENCLAW_DIRECTORY_TOO_LARGE;
-    if (json == NULL || length == 0) return ESP_OPENCLAW_DIRECTORY_INVALID;
-    if (!valid_utf8(json, length) || !bounded_depth(json, length)) return ESP_OPENCLAW_DIRECTORY_INVALID;
-    const char *end = NULL;
-    cJSON *root = cJSON_ParseWithLengthOpts(json, length, &end, false);
-    while (end != NULL && end < json + length && (*end == ' ' || *end == '\n' || *end == '\r' || *end == '\t')) ++end;
+    esp_openclaw_directory_result_t result;
+    cJSON *root = parse_payload(json, length, &result);
+    if (root == NULL) return result;
     const cJSON *agents = cJSON_GetObjectItemCaseSensitive(root, "agents");
-    bool valid = cJSON_IsObject(root) && cJSON_IsArray(agents) && end == json + length;
+    bool valid = cJSON_IsArray(agents);
     const char *main_key = string_field(root, "mainKey");
     if (main_key != NULL && strlen(main_key) < sizeof(page->main_key)) {
         memcpy(page->main_key, main_key, strlen(main_key) + 1);
@@ -130,6 +149,136 @@ esp_openclaw_directory_result_t esp_openclaw_directory_parse(
     if (!valid) {
         memset(page, 0, sizeof(*page));
         return ESP_OPENCLAW_DIRECTORY_INVALID;
+    }
+    return ESP_OPENCLAW_DIRECTORY_OK;
+}
+
+static bool page_number(const cJSON *value, size_t *number)
+{
+    /* Bound offsets independently of the target's size_t width. */
+    if (!cJSON_IsNumber(value) || !(value->valuedouble >= 0) ||
+        !(value->valuedouble <= 2147483647.0)) return false;
+    *number = (size_t)value->valuedouble;
+    return (double)*number == value->valuedouble;
+}
+
+static bool session_key(const char *key, const char *agent_id)
+{
+    if (key == NULL || strncmp(key, "agent:", 6) != 0) return false;
+    size_t length = strlen(agent_id);
+    return strncmp(key + 6, agent_id, length) == 0 &&
+        key[6 + length] == ':' && key[7 + length] != '\0';
+}
+
+esp_openclaw_directory_result_t esp_openclaw_sessions_parse(
+    const char *json, size_t length, const char *agent_id, size_t offset,
+    esp_openclaw_session_page_t *page)
+{
+    if (page == NULL) return ESP_OPENCLAW_DIRECTORY_INVALID;
+    memset(page, 0, sizeof(*page));
+    if (!valid_id(agent_id) || offset > 2147483647u) return ESP_OPENCLAW_DIRECTORY_INVALID;
+    esp_openclaw_directory_result_t result;
+    cJSON *root = parse_payload(json, length, &result);
+    if (root == NULL) return result;
+    const cJSON *rows = cJSON_GetObjectItemCaseSensitive(root, "sessions");
+    bool valid = cJSON_IsArray(rows);
+    size_t returned_offset = offset;
+    const cJSON *field = cJSON_GetObjectItemCaseSensitive(root, "offset");
+    if (field != NULL && (!page_number(field, &returned_offset) || returned_offset != offset)) valid = false;
+    const cJSON *row;
+    cJSON_ArrayForEach(row, rows) {
+        const char *key = string_field(row, "key");
+        const char *owner = string_field(row, "agentId");
+        if (!session_key(key, agent_id) || (owner != NULL && strcmp(owner, agent_id) != 0)) {
+            valid = false;
+            break;
+        }
+        if (strlen(key) >= ESP_OPENCLAW_SESSION_KEY_BYTES ||
+            page->count >= ESP_OPENCLAW_DIRECTORY_PAGE_SIZE) {
+            result = ESP_OPENCLAW_DIRECTORY_TOO_LARGE;
+            valid = false;
+            break;
+        }
+        for (size_t i = 0; i < page->count; ++i) {
+            if (strcmp(page->sessions[i].key, key) == 0) valid = false;
+        }
+        if (!valid) break;
+        esp_openclaw_session_t *session = &page->sessions[page->count++];
+        memcpy(session->key, key, strlen(key) + 1);
+        const char *title = string_field(row, "label");
+        if (title == NULL) title = string_field(row, "displayName");
+        if (title == NULL) title = string_field(row, "derivedTitle");
+        copy_label(session->title, sizeof(session->title), title != NULL ? title : key);
+        const char *message = string_field(row, "lastMessagePreview");
+        if (message != NULL) copy_label(session->last_message, sizeof(session->last_message), message);
+    }
+    const cJSON *more = cJSON_GetObjectItemCaseSensitive(root, "hasMore");
+    const cJSON *next = cJSON_GetObjectItemCaseSensitive(root, "nextOffset");
+    if (more != NULL && !cJSON_IsBool(more)) valid = false;
+    page->has_more = cJSON_IsTrue(more);
+    if (page->has_more) {
+        if (page->count == 0 || !page_number(next, &page->next_offset) ||
+            page->next_offset != offset + page->count) valid = false;
+    } else if (next != NULL && !cJSON_IsNull(next)) valid = false;
+    page->offset = offset;
+    cJSON_Delete(root);
+    if (!valid) {
+        memset(page, 0, sizeof(*page));
+        return result == ESP_OPENCLAW_DIRECTORY_TOO_LARGE ? result : ESP_OPENCLAW_DIRECTORY_INVALID;
+    }
+    return ESP_OPENCLAW_DIRECTORY_OK;
+}
+
+esp_openclaw_directory_result_t esp_openclaw_preview_parse(
+    const char *json, size_t length, const char *key,
+    esp_openclaw_session_preview_t *preview)
+{
+    if (preview == NULL) return ESP_OPENCLAW_DIRECTORY_INVALID;
+    memset(preview, 0, sizeof(*preview));
+    preview->status = ESP_OPENCLAW_PREVIEW_ERROR;
+    if (key == NULL || key[0] == '\0' || strlen(key) >= ESP_OPENCLAW_SESSION_KEY_BYTES)
+        return ESP_OPENCLAW_DIRECTORY_INVALID;
+    esp_openclaw_directory_result_t result;
+    cJSON *root = parse_payload(json, length, &result);
+    if (root == NULL) return result;
+    const cJSON *rows = cJSON_GetObjectItemCaseSensitive(root, "previews");
+    const cJSON *row = cJSON_GetArrayItem(rows, 0);
+    const char *returned_key = string_field(row, "key");
+    const char *status = string_field(row, "status");
+    const cJSON *items = cJSON_GetObjectItemCaseSensitive(row, "items");
+    bool valid = cJSON_IsArray(rows) && cJSON_GetArraySize(rows) == 1 &&
+        returned_key != NULL && strcmp(returned_key, key) == 0 && status != NULL && cJSON_IsArray(items);
+    if (valid) {
+        if (strcmp(status, "ok") == 0) preview->status = ESP_OPENCLAW_PREVIEW_OK;
+        else if (strcmp(status, "empty") == 0) preview->status = ESP_OPENCLAW_PREVIEW_EMPTY;
+        else if (strcmp(status, "missing") == 0) preview->status = ESP_OPENCLAW_PREVIEW_MISSING;
+        else if (strcmp(status, "error") != 0) valid = false;
+    }
+    const char *roles[] = {"user", "assistant", "tool", "system", "other"};
+    const cJSON *item;
+    cJSON_ArrayForEach(item, items) {
+        if (!valid) break;
+        if (preview->count >= ESP_OPENCLAW_PREVIEW_ITEMS) {
+            result = ESP_OPENCLAW_DIRECTORY_TOO_LARGE;
+            valid = false;
+            break;
+        }
+        const char *role = string_field(item, "role");
+        const cJSON *text = cJSON_GetObjectItemCaseSensitive(item, "text");
+        if (role == NULL || !cJSON_IsString(text)) { valid = false; break; }
+        size_t index = 0;
+        while (index < 5 && strcmp(role, roles[index]) != 0) ++index;
+        if (index == 5) { valid = false; break; }
+        esp_openclaw_preview_item_t *entry = &preview->items[preview->count++];
+        entry->role = (esp_openclaw_preview_role_t)index;
+        copy_label(entry->text, sizeof(entry->text), text->valuestring);
+    }
+    if ((preview->status == ESP_OPENCLAW_PREVIEW_OK) != (preview->count > 0)) valid = false;
+    cJSON_Delete(root);
+    if (!valid) {
+        memset(preview, 0, sizeof(*preview));
+        preview->status = ESP_OPENCLAW_PREVIEW_ERROR;
+        return result == ESP_OPENCLAW_DIRECTORY_TOO_LARGE ? result : ESP_OPENCLAW_DIRECTORY_INVALID;
     }
     return ESP_OPENCLAW_DIRECTORY_OK;
 }

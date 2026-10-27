@@ -1,6 +1,7 @@
 idf_component_register(
     SRCS
         "main.c"
+        "watch_lvgl_allocator.c"
     INCLUDE_DIRS "."
     REQUIRES
         av_render

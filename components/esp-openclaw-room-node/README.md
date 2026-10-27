@@ -19,6 +19,10 @@ keeps the backlight dimly lit and consumes more idle power. The home is a
 status surface, not evidence that touch, camera, networking or Talk has been
 qualified on a particular board.
 
+The 1.8-inch Watch allocates LVGL objects, styles, and render data in PSRAM.
+This preserves internal RAM for the radio and task stacks as menus grow; other
+boards retain their configured LVGL allocator.
+
 The local **Start Talk / Stop Talk** control uses the same admission and cleanup
 as wake-word and remote Talk commands. It stays visible over the home, face,
 and Canvas, and is hidden by diagnostics. Readiness comes from the operator and

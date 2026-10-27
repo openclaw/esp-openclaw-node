@@ -2,10 +2,10 @@
 
 **Research baseline · revision 02 · 27 October 2026 · no firmware changes.**
 
-**Current direction:** [revision 03 interaction plan](watch-dial-interaction-plan.md)
+**Current direction:** [revision 04 shared interaction plan](watch-dial-interaction-plan.md)
 and its [annotated layout board](watch-dial-ux-plan.html). The revision 02
-visual rules and explorer below are retained as a superseded study; hardware,
-protocol and source evidence remain reference material.
+product split, visual rules and explorer below are retained as a superseded
+study; hardware, protocol and source evidence remain reference material.
 
 The watch and M5Dial are independent, Gateway-backed OpenClaw nodes. Each must
 complete setup, explain its capabilities, offer useful everyday interactions,
@@ -17,7 +17,7 @@ journeys. Every screen is a proposed, simulated UI, including screens requiring
 new services. The earlier voice-to-Dial concept is superseded as the product
 direction. Working firmware at `7c9384358172ecf3011c3b6db6a614c8c71a557e` is unchanged.
 
-## Product decision
+## Revision 02 product decision (superseded)
 
 Build **a watch companion and a physical control console**, not two versions
 of a connected face. Keep the mobile app's red lobster and turquoise eyes on

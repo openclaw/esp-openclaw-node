@@ -15,6 +15,7 @@
 static lv_display_t *display;
 static uint8_t *frame, *draw_buffer;
 static int width, height, brightness, display_depth, critical_depth;
+static int64_t now_us = 1000000;
 static bool deny_display, canvas_active;
 static room_canvas_retained_kind_t retained_kind;
 static esp_openclaw_node_command_handler_t face_gesture;
@@ -64,7 +65,7 @@ esp_err_t esp_timer_create(const esp_timer_create_args_t *args, esp_timer_handle
 esp_err_t esp_timer_stop(esp_timer_handle_t timer) { timer->active = false; return ESP_OK; }
 esp_err_t esp_timer_start_once(esp_timer_handle_t timer, uint64_t us)
 { assert(us > 0); timer->active = true; return ESP_OK; }
-int64_t esp_timer_get_time(void) { return 1000000; }
+int64_t esp_timer_get_time(void) { return now_us; }
 
 static void fire_timer(const char *name)
 {
@@ -482,6 +483,16 @@ static void check_watch_home(const char *path)
     room_ui_set(ROOM_UI_IDLE, NULL);
 }
 
+static void expire_watch_hint(void)
+{
+    now_us += 11000000;
+    lv_tick_inc(11000);
+    lv_timer_handler();
+    lv_timer_handler();
+    fire_timer("text_hint");
+    assert(brightness == 0);
+}
+
 static void check_watch_navigation(void)
 {
     room_ui_facts_t facts = {.wifi = ROOM_UI_WIFI_CONNECTED,
@@ -514,6 +525,9 @@ static void check_watch_navigation(void)
     click_talk(home_button);
     assert(lv_obj_is_visible(find_text(lv_layer_top(), "Conversation live")));
     assert(room_face_is_visible());
+    room_ui_set(ROOM_UI_IDLE, NULL);
+    assert(brightness == 40); // A call ending must not cancel the Home wake period.
+    room_ui_set(ROOM_UI_SPEAKING, NULL);
     click_talk(watch_menu_button);
     click_talk(lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_SETTINGS "  Device status")));
     assert(room_diagnostics_is_open());
@@ -530,6 +544,18 @@ static void check_watch_navigation(void)
     assert(room_ui_watch_menu("connection") == ESP_OK);
     assert(lv_obj_is_visible(find_text(lv_layer_top(), "Wi-Fi: Connected")));
     assert(room_ui_watch_menu("home") == ESP_OK);
+    assert(brightness > 0); // Returning Home is a user action, not an idle timeout.
+    room_ui_refresh(); // A directory/owner update can repaint immediately afterward.
+    assert(brightness > 0);
+    expire_watch_hint(); // The existing idle sleep policy still resumes.
+    deny_display = true;
+    room_ui_show_face_hint(10000);
+    deny_display = false;
+    fire_timer("ui_repaint");
+    assert(brightness == 40); // Display contention must defer, not discard, a wake.
+    room_ui_refresh();
+    assert(brightness == 40);
+    expire_watch_hint();
     canvas_active = true;
     room_ui_refresh();
     assert(room_ui_watch_menu("menu") == ESP_OK);
@@ -540,7 +566,7 @@ static void check_watch_navigation(void)
     unsigned turns = toggles;
     assert(room_ui_watch_menu("canvas") == ESP_OK && canvas_active && toggles == turns);
     assert(room_ui_watch_menu("home") == ESP_OK);
-    brightness = 0;
+    expire_watch_hint();
     click_talk(watch_menu_button);
     assert(!canvas_active && brightness > 0);
     assert(lv_obj_is_visible(find_text(lv_layer_top(), "Ready when you are")));
@@ -692,6 +718,7 @@ static void check_watch_home_gesture(void)
 {
     esp_openclaw_node_handle_t node = (esp_openclaw_node_handle_t)(uintptr_t)1;
     assert(room_face_register_node_commands(node) == ESP_OK);
+    expire_watch_hint();
     assert(face_gesture && brightness == 0);
     const char params[] = "{\"name\":\"nod\"}";
     char *payload = NULL;

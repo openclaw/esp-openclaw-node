@@ -35,6 +35,19 @@ python3 examples/m5stack-dial-node/tests/run_reader_host_tests.py \
   --cjson-dir examples/m5stack-dial-node/managed_components/espressif__cjson/cJSON
 ```
 
+## Local agent avatars
+
+`esp_openclaw_agent_avatar` maps configured 🦊 and 🦞 identity emoji (with an
+optional variation selector) to bundled 64 x 64 artwork. It never infers an
+animal from a name or ID. A single printable ASCII identity stays text; other
+identities use up to two ASCII word initials, then the first alphanumeric ID
+character, then `?`. Watch and Dial use the same mapping for list and detail
+views. Remote URLs are not fetched.
+
+`esp_openclaw_avatar_pixels` returns immutable BGRA pixels for supported images
+and `NULL` for text. The component has no LVGL dependency. Artwork provenance
+and regeneration instructions are in [assets/NOTICE.md](assets/NOTICE.md).
+
 ## Conversation pages and previews
 
 `esp_openclaw_sessions_parse` consumes a server page from `sessions.list`,

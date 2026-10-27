@@ -1,6 +1,7 @@
 #include "dial_input.h"
 #include "dial_home.h"
 #include "dial_navigation.h"
+#include "esp_openclaw_avatar.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -160,8 +161,44 @@ static void snapshot(const char *name)
     assert(fclose(file) == 0);
 }
 
+static uint32_t avatar_hash(int x, int y, int size)
+{
+    lv_refr_now(NULL);
+    uint32_t hash = 2166136261u;
+    for (int row = y; row < y + size; ++row)
+        for (int col = x; col < x + size; ++col)
+            hash = (hash ^ frame[row * 240 + col]) * 16777619u;
+    return hash;
+}
+
+static void check_avatar_identity(void)
+{
+    const struct { const char *emoji, *name, *id; esp_openclaw_avatar_kind_t kind; const char *text; } cases[] = {
+        {"🦊", "Assistant", "a", ESP_OPENCLAW_AVATAR_FOX, ""},
+        {"🦊️", "Assistant", "a", ESP_OPENCLAW_AVATAR_FOX, ""},
+        {"🦞", "Kitsune", "a", ESP_OPENCLAW_AVATAR_LOBSTER, ""},
+        {"🦞️", "Assistant", "a", ESP_OPENCLAW_AVATAR_LOBSTER, ""},
+        {"🦊x", "two words", "a", ESP_OPENCLAW_AVATAR_TEXT, "TW"},
+        {"🔮", "two-words", "a", ESP_OPENCLAW_AVATAR_TEXT, "TW"},
+        {"", "Kitsune", "a", ESP_OPENCLAW_AVATAR_TEXT, "K"},
+        {"!", "Assistant", "a", ESP_OPENCLAW_AVATAR_TEXT, "!"},
+        {" ", "two_words", "a", ESP_OPENCLAW_AVATAR_TEXT, "TW"},
+        {"", "狐", "fox", ESP_OPENCLAW_AVATAR_TEXT, "F"},
+        {"", "", "", ESP_OPENCLAW_AVATAR_TEXT, "?"},
+    };
+    for (unsigned i = 0; i < sizeof(cases) / sizeof(*cases); ++i) {
+        esp_openclaw_agent_t agent = {0};
+        strcpy(agent.emoji, cases[i].emoji);
+        strcpy(agent.name, cases[i].name);
+        strcpy(agent.id, cases[i].id);
+        esp_openclaw_avatar_t avatar = esp_openclaw_agent_avatar(&agent);
+        assert(avatar.kind == cases[i].kind && strcmp(avatar.text, cases[i].text) == 0);
+    }
+}
+
 int main(int argc, char **argv)
 {
+    check_avatar_identity();
     snapshot_prefix = argc > 1 ? argv[1] : NULL;
     lv_init();
     lv_display_t *display = lv_display_create(240, 240);
@@ -346,9 +383,42 @@ int main(int argc, char **argv)
     advance(40);
     for (unsigned i = 0; i < lv_obj_get_child_count(navigation.root); ++i)
         check_home_bounds(lv_obj_get_child(navigation.root, i));
-    touch(120, 82, true);
-    touch(120, 82, false);
+    uint32_t fox = avatar_hash(46, 70, 24);
+    snapshot("agents-fox");
+    strcpy(roster.page.agents[0].emoji, "🦞");
+    ++roster.revision;
+    dial_navigation_update(&navigation, &roster);
+    assert(avatar_hash(46, 70, 24) != fox);
+    snapshot("agents-lobster");
+    // The image must pass pointer input to its owning row.
+    touch(58, 82, true);
+    touch(58, 82, false);
     assert(navigation.view == DIAL_NAV_DETAIL);
+    uint32_t lobster = avatar_hash(100, 64, 40);
+    snapshot("agent-lobster");
+    strcpy(roster.page.agents[0].emoji, "🦊");
+    ++roster.revision;
+    dial_navigation_update(&navigation, &roster);
+    assert(navigation.view == DIAL_NAV_AGENTS);
+    touch(58, 82, true);
+    touch(58, 82, false);
+    assert(avatar_hash(100, 64, 40) != lobster);
+    snapshot("agent-fox");
+    strcpy(roster.page.agents[0].emoji, "🔮");
+    ++roster.revision;
+    dial_navigation_update(&navigation, &roster);
+    assert(navigation.view == DIAL_NAV_AGENTS);
+    touch(58, 82, true);
+    touch(58, 82, false);
+    assert(lv_obj_is_visible(navigation.detail_initials));
+    assert(!lv_obj_is_visible(navigation.detail_avatar));
+    assert(strcmp(lv_label_get_text(navigation.detail_initials), "AV") == 0);
+    snapshot("agent-initials");
+    strcpy(roster.page.agents[0].emoji, "🦊");
+    ++roster.revision;
+    dial_navigation_update(&navigation, &roster);
+    touch(58, 82, true);
+    touch(58, 82, false);
     assert(strcmp(lv_label_get_text(navigation.identity), "agent-0") == 0);
     touch(68, 44, true);
     touch(68, 44, false);

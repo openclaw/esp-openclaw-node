@@ -593,6 +593,17 @@ static void check_watch_navigation(void)
     puts("watch menu, live connection, Talk and empty Canvas: passed");
 }
 
+static uint32_t avatar_hash(int x, int y, int size)
+{
+    lv_refr_now(display);
+    uint32_t hash = 2166136261u;
+    for (int row = y; row < y + size; ++row)
+        for (int col = x; col < x + size; ++col)
+            for (int channel = 0; channel < 3; ++channel)
+                hash = (hash ^ frame[(row * width + col) * 4 + channel]) * 16777619u;
+    return hash;
+}
+
 static void check_watch_agents(const char *path)
 {
     room_ui_facts_t facts = {.wifi = ROOM_UI_WIFI_CONNECTED,
@@ -622,8 +633,34 @@ static void check_watch_agents(const char *path)
     assert(bounds.x1 >= 0 && bounds.x2 < width && bounds.y1 >= 100 && bounds.y2 < 326);
     char output[1024];
     if (path) { snprintf(output, sizeof(output), "%s-agents.ppm", path); write_frame(output); }
-    click_talk(first);
+    uint32_t fox = avatar_hash(38, 128, 36);
+    strcpy(roster.page.agents[0].emoji, "🦞");
+    ++roster.revision;
+    room_ui_store_agents(&roster);
+    assert(avatar_hash(38, 128, 36) != fox);
+    if (path) { snprintf(output, sizeof(output), "%s-agents-lobster.ppm", path); write_frame(output); }
+    // Tap the image itself: it must not swallow its owning row's gesture.
+    lv_obj_t *image = NULL;
+    for (unsigned i = 0; i < lv_obj_get_child_count(first); ++i) {
+        lv_obj_t *child = lv_obj_get_child(first, i);
+        if (lv_obj_check_type(child, &lv_image_class)) image = child;
+    }
+    assert(image && lv_obj_is_visible(image));
+    click_talk(image);
     assert(lv_obj_is_visible(find_text(lv_layer_top(), "Agent ID\nagent-0")));
+    uint32_t lobster = avatar_hash(32, 112, 64);
+    strcpy(roster.page.agents[0].emoji, "🦊");
+    ++roster.revision;
+    room_ui_store_agents(&roster);
+    assert(avatar_hash(32, 112, 64) != lobster);
+    strcpy(roster.page.agents[0].emoji, "🔮");
+    ++roster.revision;
+    room_ui_store_agents(&roster);
+    assert(lv_obj_is_visible(find_text(lv_layer_top(), "K")));
+    if (path) { snprintf(output, sizeof(output), "%s-agent-initials.ppm", path); write_frame(output); }
+    strcpy(roster.page.agents[0].emoji, "🦊");
+    ++roster.revision;
+    room_ui_store_agents(&roster);
     lv_obj_t *choose = lv_obj_get_parent(find_text(lv_layer_top(), "Use for next Talk"));
     unsigned selections = agent_selections, starts = talk_starts;
     click_talk(choose);

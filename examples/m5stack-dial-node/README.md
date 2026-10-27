@@ -128,7 +128,8 @@ Next agents, Previous agents, Refresh, and Back appear after the names.
 Long names and IDs scroll in the detail view.
 Loading, offline, missing read access, empty pages, and errors have distinct
 screens. A refresh or disconnect cancels any held selection before replacing
-the rows. Initial letters represent identities whose avatars are not rendered.
+the rows. Configured 🦊 and 🦞 identities use local artwork in the list and detail view.
+Other identities use an ASCII symbol or name initials.
 This is read-only browsing: opening an agent does not select a conversation or
 change which agent owns a configured numeric control.
 

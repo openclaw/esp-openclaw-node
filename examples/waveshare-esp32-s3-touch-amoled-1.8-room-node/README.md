@@ -58,6 +58,10 @@ live**; it does not infer speech playback from the connection state. Missing
 clock and battery telemetry are omitted. The display still sleeps when idle;
 waking it does not start a conversation. Idle, setup and error views keep static
 mascot artwork without running the animation timer; wake-up hints still animate.
+Agents shows local fox and lobster artwork for configured 🦊 and 🦞 identities,
+with an ASCII symbol or name initials for other identities. The same avatar
+appears in the list and detail view; it does not change agent routing.
+
 The **Menu** button opens Agents, Canvas, Connection, and Settings. Connection
 shows live Wi-Fi, Gateway, and Talk states. Canvas shows the retained card or
 an empty-state explanation. Home returns to the latest conversation state;

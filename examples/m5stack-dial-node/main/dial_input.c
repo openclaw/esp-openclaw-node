@@ -31,7 +31,8 @@ static void object_event(lv_event_t *event)
         input->pointer_moved = true;
     } else if (code == LV_EVENT_KEY && !input->control) {
         uint32_t key = lv_event_get_key(event);
-        if (key == LV_KEY_LEFT || key == LV_KEY_RIGHT) emit(input, DIAL_INPUT_OPEN, false);
+        if (key == LV_KEY_LEFT) emit(input, DIAL_INPUT_PREVIOUS, false);
+        else if (key == LV_KEY_RIGHT) emit(input, DIAL_INPUT_NEXT, false);
     } else if (code == LV_EVENT_VALUE_CHANGED) {
         // Changing the arc is adjustment, even if the finger barely moves.
         if (pointer) input->pointer_moved = true;

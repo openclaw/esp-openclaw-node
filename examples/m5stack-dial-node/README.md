@@ -40,8 +40,8 @@ when Wi-Fi or the Gateway changes.
 The Dial also starts a separate operator connection after the node connects.
 It requests only `operator.read` and reuses the operator session handed off
 during pairing. It does not grant itself access or change the node connection's
-permissions. This is the connection foundation for agent and conversation
-browsing; those pickers are not yet part of the firmware UI.
+permissions. The on-device agent browser uses this connection. Conversation selection
+is a separate feature.
 
 Run `reader` in the USB console to inspect it:
 
@@ -102,12 +102,23 @@ The screen is upright with the USB connector on the right. The home screen
 shows a compact connection strip, a blinking face, and one action. Wi-Fi and
 Gateway status are separate; no battery level is invented. Home shows whether
 an agent action is assigned and retains the current action's feedback in its
-headline. Open dial works locally; Open control returns to an assigned control.
-Turn the encoder
-or tap to open the numeric control. Turn or drag its arc to change the value;
-press the encoder or tap the center to confirm. Hold the encoder or the center
-of the screen to return to the face. Dragging the arc never confirms an action
-or triggers the home gesture. Turning continues to adjust after confirmation.
+headline. **Open menu** leads to Agents, Controls, and Home. Turn to move the
+highlight and press to open; touch rows directly. Hold the encoder or a
+stationary touch to return Home. The menu stays available offline.
+
+Agents shows a bounded page of the Gateway roster. Turn to browse names, then
+open an identity to see its canonical ID. The back arrow returns to the list;
+Next agents, Previous agents, Refresh, and Back appear after the names.
+Long names and IDs scroll in the detail view.
+Loading, offline, missing read access, empty pages, and errors have distinct
+screens. A refresh or disconnect cancels any held selection before replacing
+the rows. Initial letters represent identities whose avatars are not rendered.
+This is read-only browsing: opening an agent does not select a conversation or
+change which agent owns a configured numeric control.
+
+Controls opens the existing numeric dial. Turn or drag its arc to change the
+value; press the encoder or tap the center to confirm. Dragging never confirms
+an action or triggers Home. Turning continues to adjust after confirmation.
 If a command changes the view or reconfigures the control during a held press,
 release and press again to interact with the new view or confirm the new value.
 
@@ -162,6 +173,7 @@ change the result of a newer one.
 | --- | --- | --- |
 | `device.info`, `device.status`, `wifi.status` | `{}` | Shared device/network status |
 | `display.show` | `{"heading":"Hello","text":"A message"}` | Display state including `heading` and `text`; limits: 64/512 UTF-8 bytes |
+| `display.menu` | `{}` or `{"page":"agents"}` | Open the menu or read-only agent browser; `page` is `menu` or `agents` |
 | `display.clear` | `{}` | Return to the face |
 | `display.status`, `dial.status`, `input.status` | `{}` | View, value/range, input counts, brightness, connection, action state |
 | `display.brightness` | `{"percent":65}` | Set backlight, integer 0–100 |
@@ -171,7 +183,8 @@ change the result of a newer one.
 | `buzzer.play` | `{"frequencyHz":1000,"durationMs":200}` | Start a tone; 100–4000 Hz, 20–2000 ms |
 
 Display-state responses include `heading` and `text` while `view` is `message`,
-so an agent can read back the displayed content. Other views omit those fields;
+so an agent can read back the displayed content. Menu responses include
+`view: "menu"` and `page: "menu"`, `"agents"`, or `"agent"`. Other views omit those fields;
 `display.clear` returns to the face without reporting the hidden message.
 
 The buzzer stops asynchronously and rejects overlapping tones. It uses LEDC

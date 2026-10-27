@@ -7,6 +7,8 @@ typedef enum {
     DIAL_INPUT_HOME,
     DIAL_INPUT_CHANGE,
     DIAL_INPUT_CONFIRM,
+    DIAL_INPUT_PREVIOUS,
+    DIAL_INPUT_NEXT,
 } dial_input_event_t;
 
 typedef void (*dial_input_handler_t)(dial_input_event_t event, int value, bool pointer, void *context);

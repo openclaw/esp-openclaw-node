@@ -1,5 +1,6 @@
 #include "dial_input.h"
 #include "dial_home.h"
+#include "dial_navigation.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -12,6 +13,11 @@ static int encoder_diff;
 static lv_point_t pointer_point;
 static lv_indev_t *pointer;
 static unsigned confirmations, homes, changes;
+static dial_navigation_t navigation;
+static dial_agents_snapshot_t roster;
+static bool navigating;
+static unsigned refreshes, previous, next;
+static size_t requested_offset;
 static uint16_t pixels[240 * 20];
 
 static void flush(lv_display_t *display, const lv_area_t *area, uint8_t *data)
@@ -42,14 +48,40 @@ static void event(dial_input_event_t kind, int value, bool pointer, void *contex
     (void)value;
     (void)pointer;
     (void)context;
+    if (kind == DIAL_INPUT_PREVIOUS) ++previous;
+    if (kind == DIAL_INPUT_NEXT) ++next;
+    if (navigating && kind != DIAL_INPUT_HOME) {
+        if (kind == DIAL_INPUT_PREVIOUS) dial_navigation_move(&navigation, -1);
+        else if (kind == DIAL_INPUT_NEXT) dial_navigation_move(&navigation, 1);
+        else if (kind == DIAL_INPUT_OPEN) dial_navigation_activate(&navigation);
+        return;
+    }
     if (kind == DIAL_INPUT_CONFIRM) ++confirmations;
     else if (kind == DIAL_INPUT_CHANGE) ++changes;
     else {
-        if (kind == DIAL_INPUT_HOME) ++homes;
-        bool control = kind == DIAL_INPUT_OPEN;
+        if (kind == DIAL_INPUT_HOME) {
+            ++homes;
+            navigating = false;
+            if (navigation.root != NULL) lv_obj_set_hidden(navigation.root, true);
+        }
+        bool control = kind == DIAL_INPUT_OPEN || kind == DIAL_INPUT_PREVIOUS || kind == DIAL_INPUT_NEXT;
         lv_obj_set_flag(input.arc, LV_OBJ_FLAG_HIDDEN, !control);
         lv_obj_set_hidden(home.root, control);
         dial_input_set_control(&input, control);
+    }
+}
+
+static void navigation_event(dial_navigation_event_t kind, size_t offset, void *context)
+{
+    (void)context;
+    dial_input_set_control(&input, false);
+    if (kind == DIAL_NAV_REFRESH) { ++refreshes; requested_offset = offset; }
+    else if (kind == DIAL_NAV_HOME || kind == DIAL_NAV_CONTROL) {
+        navigating = false;
+        lv_obj_set_hidden(navigation.root, true);
+        lv_obj_set_hidden(home.root, kind != DIAL_NAV_HOME);
+        lv_obj_set_hidden(input.arc, kind != DIAL_NAV_CONTROL);
+        dial_input_set_control(&input, kind == DIAL_NAV_CONTROL);
     }
 }
 
@@ -105,13 +137,13 @@ int main(void)
     lv_obj_update_layout(screen);
     for (unsigned i = 0; i < lv_obj_get_child_count(home.root); ++i)
         check_home_bounds(lv_obj_get_child(home.root, i));
-    assert(strcmp(lv_label_get_text(home.action), "Open control") == 0);
+    assert(strcmp(lv_label_get_text(home.action), "Open menu") == 0);
     dial_home_render(&home, true, false, false, NULL);
     assert(strcmp(lv_label_get_text(home.link), "Offline") == 0);
     assert(strcmp(lv_label_get_text(home.headline), "Gateway offline") == 0);
     dial_home_render(&home, true, true, false, NULL);
     assert(strcmp(lv_label_get_text(home.headline), "No action assigned") == 0);
-    assert(strcmp(lv_label_get_text(home.action), "Open dial") == 0);
+    assert(strcmp(lv_label_get_text(home.action), "Open menu") == 0);
     char activity[] = "Action failed; press to retry";
     dial_home_render(&home, true, true, true, activity);
     memset(activity, 'x', strlen(activity));
@@ -236,6 +268,116 @@ int main(void)
     touch(120, 120, false);
     assert(confirmations == 4);
     puts("view changes cancel held touches: passed");
+
+    // The same real encoder now moves focus in both directions, and a press
+    // opens the focused row without sending a numeric action.
+    dial_navigation_create(&navigation, screen, navigation_event, NULL);
+    navigating = true;
+    lv_obj_set_hidden(arc, true);
+    lv_obj_set_hidden(home.root, true);
+    dial_navigation_open(&navigation, false);
+    advance(40);
+    encoder_diff = 1;
+    lv_indev_read(encoder);
+    advance(40);
+    assert(next > 0 && navigation.focus == 1);
+    encoder_diff = -1;
+    lv_indev_read(encoder);
+    advance(40);
+    assert(previous > 0 && navigation.focus == 0);
+    touch(120, 82, true);
+    touch(150, 95, true);
+    touch(150, 95, false);
+    assert(navigation.view == DIAL_NAV_MENU && refreshes == 0);
+    touch(120, 82, true);
+    touch(120, 82, false);
+    assert(navigation.view == DIAL_NAV_AGENTS && refreshes == 1);
+    roster = (dial_agents_snapshot_t){.state = DIAL_AGENTS_READY, .revision = 1,
+        .page = {.count = 8, .total = 10}};
+    for (unsigned i = 0; i < 8; ++i) {
+        snprintf(roster.page.agents[i].id, 65, "agent-%u", i);
+        snprintf(roster.page.agents[i].name, 65, "Assistant %u", i);
+    }
+    strcpy(roster.page.agents[0].name, "A very long assistant name that needs truncation");
+    strcpy(roster.page.agents[0].emoji, "🦊");
+    dial_navigation_update(&navigation, &roster);
+    advance(40);
+    for (unsigned i = 0; i < lv_obj_get_child_count(navigation.root); ++i)
+        check_home_bounds(lv_obj_get_child(navigation.root, i));
+    touch(120, 82, true);
+    touch(120, 82, false);
+    assert(navigation.view == DIAL_NAV_DETAIL);
+    assert(strcmp(lv_label_get_text(navigation.identity), "agent-0") == 0);
+    touch(68, 44, true);
+    touch(68, 44, false);
+    assert(navigation.view == DIAL_NAV_AGENTS && navigation.focus == 0);
+
+    // Both row and Back presses belong to the rendered revision. The shared
+    // input cancellation must consume their release after the roster changes.
+    touch(120, 82, true);
+    ++roster.revision;
+    strcpy(roster.page.agents[0].id, "replacement");
+    dial_navigation_update(&navigation, &roster);
+    touch(120, 82, false);
+    assert(navigation.view == DIAL_NAV_AGENTS);
+    touch(68, 44, true);
+    ++roster.revision;
+    dial_navigation_update(&navigation, &roster);
+    touch(68, 44, false);
+    assert(navigation.view == DIAL_NAV_AGENTS);
+
+    encoder_diff = 8;
+    lv_indev_read(encoder);
+    advance(40);
+    assert(navigation.focus == 8);
+    encoder_state = LV_INDEV_STATE_PRESSED;
+    lv_indev_read(encoder);
+    advance(40);
+    encoder_state = LV_INDEV_STATE_RELEASED;
+    lv_indev_read(encoder);
+    advance(40);
+    assert(refreshes == 2 && requested_offset == 8);
+
+    // A replacement/offline roster invalidates an in-progress press. Releasing
+    // it cannot open the new first row or send a stale control action.
+    encoder_state = LV_INDEV_STATE_PRESSED;
+    lv_indev_read(encoder);
+    advance(40);
+    roster.state = DIAL_AGENTS_OFFLINE;
+    ++roster.revision;
+    dial_navigation_update(&navigation, &roster);
+    encoder_state = LV_INDEV_STATE_RELEASED;
+    lv_indev_read(encoder);
+    advance(40);
+    assert(refreshes == 2 && navigation.view == DIAL_NAV_AGENTS);
+    assert(strstr(lv_label_get_text(navigation.description), "Gateway offline") != NULL);
+    for (unsigned i = 0; i < lv_obj_get_child_count(navigation.root); ++i)
+        check_home_bounds(lv_obj_get_child(navigation.root, i));
+    encoder_state = LV_INDEV_STATE_PRESSED;
+    lv_indev_read(encoder);
+    advance(1000);
+    assert(!navigating && !input.control);
+    encoder_state = LV_INDEV_STATE_RELEASED;
+    lv_indev_read(encoder);
+    advance(40);
+    assert(confirmations == 4);
+    puts("agent navigation, paging, bounds and stale presses: passed");
+
+    // An empty end page still exposes Previous, Refresh and Back on the two
+    // available rows; it must not strand the encoder on a hidden third row.
+    navigating = true;
+    lv_obj_set_hidden(home.root, true);
+    dial_navigation_open(&navigation, true);
+    roster = (dial_agents_snapshot_t){.state = DIAL_AGENTS_EMPTY, .revision = 3,
+        .page = {.offset = 8, .total = 8}};
+    dial_navigation_update(&navigation, &roster);
+    dial_navigation_move(&navigation, 1);
+    dial_navigation_move(&navigation, 1);
+    assert(strcmp(lv_label_get_text(navigation.names[0]), "Back") == 0);
+    assert(!lv_obj_has_flag(navigation.rows[0], LV_OBJ_FLAG_HIDDEN));
+    dial_navigation_activate(&navigation);
+    assert(navigation.view == DIAL_NAV_MENU);
+    puts("empty-page navigation: passed");
 
     lv_deinit();
 }

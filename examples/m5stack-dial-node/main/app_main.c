@@ -14,6 +14,7 @@
 #include "dial_control.h"
 #include "dial_home.h"
 #include "dial_input.h"
+#include "dial_navigation.h"
 #include "dial_reader.h"
 #include "driver/gpio.h"
 #include "driver/ledc.h"
@@ -40,10 +41,10 @@ static esp_openclaw_node_example_saved_session_reconnect_t reconnect;
 static atomic_bool connected;
 static atomic_bool tone_active;
 static esp_timer_handle_t tone_timer;
-static const char *commands[] = {"display.show", "display.clear", "display.status", "display.brightness",
+static const char *commands[] = {"display.show", "display.clear", "display.status", "display.brightness", "display.menu",
     "dial.configure", "dial.complete", "dial.status", "input.status", "face.set", "buzzer.play"};
 
-typedef enum { VIEW_FACE, VIEW_CONTROL, VIEW_MESSAGE } dial_view_t;
+typedef enum { VIEW_FACE, VIEW_CONTROL, VIEW_MESSAGE, VIEW_NAVIGATION } dial_view_t;
 typedef struct {
     dial_action_token_t token;
     int value;
@@ -72,6 +73,8 @@ static struct {
     lv_obj_t *arc, *title, *value, *message, *footer, *eyes[2], *mouth;
     dial_home_t home;
     dial_input_t input;
+    dial_navigation_t navigation;
+    dial_agents_snapshot_t *agents;
 } ui;
 
 static esp_err_t invalid(esp_openclaw_node_error_t *error, const char *message)
@@ -117,10 +120,16 @@ static bool only_fields(cJSON *params, const char *const *names, size_t count)
 
 static void show_view(dial_view_t view)
 {
+    if (view != VIEW_NAVIGATION) {
+        free(ui.agents);
+        ui.agents = NULL;
+        ui.navigation.snapshot = NULL;
+    }
     ui.view = view;
     lv_obj_set_hidden(ui.home.root, view != VIEW_FACE);
-    lv_obj_set_hidden(ui.title, view == VIEW_FACE);
-    lv_obj_set_hidden(ui.footer, view == VIEW_FACE);
+    lv_obj_set_hidden(ui.navigation.root, view != VIEW_NAVIGATION);
+    lv_obj_set_hidden(ui.title, view == VIEW_FACE || view == VIEW_NAVIGATION);
+    lv_obj_set_hidden(ui.footer, view == VIEW_FACE || view == VIEW_NAVIGATION);
     lv_obj_set_flag(ui.arc, LV_OBJ_FLAG_HIDDEN, view != VIEW_CONTROL);
     lv_obj_set_flag(ui.value, LV_OBJ_FLAG_HIDDEN, view != VIEW_CONTROL);
     lv_obj_set_flag(ui.message, LV_OBJ_FLAG_HIDDEN, view != VIEW_MESSAGE);
@@ -128,6 +137,34 @@ static void show_view(dial_view_t view)
     lv_obj_set_flag(ui.mouth, LV_OBJ_FLAG_HIDDEN, view != VIEW_FACE);
     lv_label_set_text(ui.title, view == VIEW_MESSAGE ? ui.heading : view == VIEW_CONTROL ? ui.label : "OpenClaw");
     dial_input_set_control(&ui.input, view == VIEW_CONTROL);
+}
+
+static void navigation_event(dial_navigation_event_t event, size_t offset, void *context)
+{
+    (void)context;
+    if (event == DIAL_NAV_HOME) show_view(VIEW_FACE);
+    else if (event == DIAL_NAV_CONTROL) show_view(VIEW_CONTROL);
+    else if (event == DIAL_NAV_REFRESH) {
+        if (dial_reader_agents_refresh(offset) == ESP_OK) {
+            dial_reader_agents_copy(ui.agents);
+            dial_navigation_update(&ui.navigation, ui.agents);
+        }
+    } else dial_input_set_control(&ui.input, false);
+}
+
+static void open_navigation(bool agents)
+{
+    if (ui.agents == NULL) ui.agents = calloc(1, sizeof(*ui.agents));
+    if (ui.agents == NULL) {
+        strlcpy(ui.heading, "Menu unavailable", sizeof(ui.heading));
+        lv_label_set_text(ui.message, "Not enough memory.\nHold to return Home.");
+        show_view(VIEW_MESSAGE);
+        return;
+    }
+    dial_reader_agents_copy(ui.agents);
+    dial_navigation_update(&ui.navigation, ui.agents);
+    show_view(VIEW_NAVIGATION);
+    dial_navigation_open(&ui.navigation, agents);
 }
 
 static void update_value(void)
@@ -246,10 +283,14 @@ static void input_event(dial_input_event_t event, int value, bool pointer, void 
         }
     } else if (event == DIAL_INPUT_HOME) {
         show_view(VIEW_FACE);
+    } else if (ui.view == VIEW_NAVIGATION) {
+        if (event == DIAL_INPUT_PREVIOUS) dial_navigation_move(&ui.navigation, -1);
+        else if (event == DIAL_INPUT_NEXT) dial_navigation_move(&ui.navigation, 1);
+        else if (event == DIAL_INPUT_OPEN) dial_navigation_activate(&ui.navigation);
     } else {
         if (pointer) ++ui.touches;
         if (event == DIAL_INPUT_CONFIRM) commit_action();
-        else show_view(VIEW_CONTROL);
+        else open_navigation(false);
     }
 }
 
@@ -275,6 +316,11 @@ static void refresh_ui(lv_timer_t *timer)
         ui.last_action.connection_id == action_state.connection_id
         ? lv_label_get_text(ui.footer) : NULL;
     xSemaphoreGive(action_lock);
+    if (ui.view == VIEW_NAVIGATION) {
+        dial_reader_agents_copy(ui.agents);
+        dial_navigation_update(&ui.navigation, ui.agents);
+        return;
+    }
     if (ui.view != VIEW_FACE) return;
     static uint32_t status_at;
     static bool status_sampled;
@@ -349,6 +395,7 @@ static esp_err_t start_display(void)
     ui.footer = label(screen, 158, 70, &lv_font_montserrat_16);
     lv_label_set_text(ui.footer, "USB setup");
     dial_home_create(&ui.home, screen);
+    dial_navigation_create(&ui.navigation, screen, navigation_event, NULL);
     for (int i = 0; i < 2; ++i) {
         ui.eyes[i] = lv_obj_create(screen);
         lv_obj_set_style_bg_color(ui.eyes[i], lv_color_hex(0x58d5c4), 0);
@@ -370,7 +417,11 @@ static cJSON *status_payload(void)
     cJSON *result = cJSON_CreateObject();
     if (result == NULL) return NULL;
     cJSON_AddBoolToObject(result, "connected", atomic_load(&connected));
-    cJSON_AddStringToObject(result, "view", ui.view == VIEW_FACE ? "face" : ui.view == VIEW_CONTROL ? "control" : "message");
+    cJSON_AddStringToObject(result, "view", ui.view == VIEW_FACE ? "face" : ui.view == VIEW_CONTROL ? "control" : ui.view == VIEW_NAVIGATION ? "menu" : "message");
+    if (ui.view == VIEW_NAVIGATION) {
+        cJSON_AddStringToObject(result, "page", ui.navigation.view == DIAL_NAV_MENU ? "menu" :
+            ui.navigation.view == DIAL_NAV_AGENTS ? "agents" : "agent");
+    }
     if (ui.view == VIEW_MESSAGE) {
         cJSON_AddStringToObject(result, "heading", ui.heading);
         cJSON_AddStringToObject(result, "text", ui.text);
@@ -436,7 +487,15 @@ static esp_err_t handle_command(esp_openclaw_node_handle_t client, void *context
         return ESP_ERR_TIMEOUT;
     }
     esp_err_t err = ESP_OK;
-    if (strcmp(command, "display.show") == 0) {
+    if (strcmp(command, "display.menu") == 0) {
+        const char *fields[] = {"page"};
+        const char *page = "menu";
+        if (!only_fields(params, fields, 1) ||
+            (cJSON_HasObjectItem(params, "page") && !text_field(params, "page", 6, &page)) ||
+            (strcmp(page, "menu") != 0 && strcmp(page, "agents") != 0)) {
+            err = invalid(error, "page must be menu or agents");
+        } else open_navigation(strcmp(page, "agents") == 0);
+    } else if (strcmp(command, "display.show") == 0) {
         const char *heading, *text;
         const char *fields[] = {"heading", "text"};
         if (!only_fields(params, fields, 2) || !text_field(params, "heading", 64, &heading) ||

@@ -1,7 +1,24 @@
 #include "dial_action.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+static void set_activity(dial_action_state_t *state, dial_activity_stage_t stage, const char *message)
+{
+    dial_activity_t *activity = &state->activity;
+    if (activity->stage == stage && strcmp(activity->message, message) == 0) return;
+    activity->stage = stage;
+    snprintf(activity->message, sizeof(activity->message), "%s", message);
+    ++activity->revision;
+}
+
+static void invalidate_activity(dial_action_state_t *state)
+{
+    if (state->activity.stage == DIAL_ACTIVITY_SENDING || state->activity.stage == DIAL_ACTIVITY_WAITING ||
+        state->activity.stage == DIAL_ACTIVITY_UNKNOWN)
+        set_activity(state, DIAL_ACTIVITY_UNKNOWN, "Result unavailable. Check before retry.");
+}
 
 static char *copy_uri(const char *uri)
 {
@@ -13,6 +30,7 @@ static char *copy_uri(const char *uri)
 bool dial_action_connect(dial_action_state_t *state, uint32_t id, const char *uri)
 {
     char *copy = id != 0 && uri != NULL ? copy_uri(uri) : NULL;
+    invalidate_activity(state);
     free(state->gateway_uri);
     state->gateway_uri = copy;
     state->connection_id = copy != NULL ? id : 0;
@@ -32,6 +50,7 @@ bool dial_action_configure(dial_action_state_t *state, bool enabled)
     if (enabled && state->gateway_uri == NULL) return false;
     char *copy = enabled ? copy_uri(state->gateway_uri) : NULL;
     if (enabled && copy == NULL) return false;
+    invalidate_activity(state);
     free(state->configured_uri);
     state->configured_uri = copy;
     state->result_attempt = 0;
@@ -42,6 +61,7 @@ bool dial_action_begin(dial_action_state_t *state, dial_action_token_t *token)
 {
     if (state->connection_id == 0 || state->configured_uri == NULL ||
         state->pending_attempt != 0) return false;
+    invalidate_activity(state);
     if (++state->next_attempt == 0) ++state->next_attempt;
     state->pending_attempt = state->next_attempt;
     state->result_attempt = state->next_attempt;
@@ -55,18 +75,53 @@ bool dial_action_matches(const dial_action_state_t *state, dial_action_token_t t
         token.attempt != 0 && token.attempt == state->pending_attempt;
 }
 
-bool dial_action_complete(dial_action_state_t *state, dial_action_token_t token)
+void dial_action_submitted(dial_action_state_t *state, dial_action_token_t token,
+                           const char *label, int value, const char *unit)
+{
+    if (!dial_action_matches(state, token)) return;
+    unsigned revision = state->activity.revision + 1;
+    state->activity = (dial_activity_t){.revision = revision, .token = token,
+        .stage = DIAL_ACTIVITY_SENDING, .value = value};
+    snprintf(state->activity.label, sizeof(state->activity.label), "%s", label);
+    snprintf(state->activity.unit, sizeof(state->activity.unit), "%s", unit);
+}
+
+bool dial_action_complete(dial_action_state_t *state, dial_action_token_t token,
+                          dial_action_delivery_t delivery)
 {
     if (!dial_action_matches(state, token)) return false;
     state->pending_attempt = 0;
+    if (delivery == DIAL_ACTION_NOT_SENT) state->result_attempt = 0;
+    if (state->activity.token.connection_id == token.connection_id && state->activity.token.attempt == token.attempt) {
+        set_activity(state, delivery == DIAL_ACTION_ACCEPTED ? DIAL_ACTIVITY_WAITING :
+            delivery == DIAL_ACTION_NOT_SENT ? DIAL_ACTIVITY_NOT_SENT : DIAL_ACTIVITY_UNKNOWN,
+            delivery == DIAL_ACTION_ACCEPTED ? "Waiting for the agent's result." :
+            delivery == DIAL_ACTION_NOT_SENT ? "Request was not sent." : "Delivery unconfirmed. Check before retry.");
+    }
     return true;
 }
 
-bool dial_action_resolve(dial_action_state_t *state, dial_action_token_t token)
+bool dial_action_resolve(dial_action_state_t *state, dial_action_token_t token,
+                         bool success, const char *message)
 {
     if (token.connection_id == 0 || token.connection_id != state->connection_id ||
         token.attempt == 0 || token.attempt != state->result_attempt) return false;
     state->result_attempt = 0;
     if (state->pending_attempt == token.attempt) state->pending_attempt = 0;
+    if (state->activity.token.connection_id == token.connection_id && state->activity.token.attempt == token.attempt)
+        set_activity(state, success ? DIAL_ACTIVITY_COMPLETED : DIAL_ACTIVITY_FAILED, message);
     return true;
+}
+
+const char *dial_activity_title(dial_activity_stage_t stage)
+{
+    switch (stage) {
+    case DIAL_ACTIVITY_SENDING: return "Sending";
+    case DIAL_ACTIVITY_WAITING: return "Waiting for result";
+    case DIAL_ACTIVITY_COMPLETED: return "Completed";
+    case DIAL_ACTIVITY_FAILED: return "Failed";
+    case DIAL_ACTIVITY_NOT_SENT: return "Not sent";
+    case DIAL_ACTIVITY_UNKNOWN: return "Outcome unknown";
+    default: return "No requests yet";
+    }
 }

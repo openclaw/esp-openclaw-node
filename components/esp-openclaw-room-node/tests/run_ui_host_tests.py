@@ -71,6 +71,7 @@ def main():
     parser.add_argument("--cjson-dir", type=Path, help="Read-only cJSON source directory; defaults to the sibling managed component")
     parser.add_argument("--snapshot", type=Path, help="Optional synthetic Tab5 framebuffer in PPM format")
     parser.add_argument("--watch-snapshot", type=Path, help="Optional synthetic watch framebuffer in PPM format")
+    parser.add_argument("--without-heading-font", action="store_true", help="Exercise the supported 14px heading fallback")
     args = parser.parse_args()
     lvgl = args.lvgl_dir.resolve()
     cjson = (args.cjson_dir or lvgl.parent / "espressif__cjson/cJSON").resolve()
@@ -122,7 +123,7 @@ def main():
             "-fno-sanitize-recover=all", "-fno-omit-frame-pointer",
             "-DLV_CONF_SKIP", "-DLV_USE_OS=LV_OS_NONE",
             "-DLV_USE_STDLIB_MALLOC=LV_STDLIB_CLIB", "-DLV_USE_LOG=0",
-            "-DLV_FONT_MONTSERRAT_20=1", "-DLV_FONT_MONTSERRAT_28=1",
+            "-DLV_FONT_MONTSERRAT_20=1", f"-DLV_FONT_MONTSERRAT_28={0 if args.without_heading_font else 1}",
             "-I", str(root), "-I", str(component), "-I", str(component / "include"),
             "-I", str(lvgl), str(tests / "test_room_ui_controller.c"),
             "-I", str(cjson), str(cjson / "cJSON.c"),
@@ -135,6 +136,7 @@ def main():
             str(component / "room_watch_home.c"),
             str(component.parent / "esp-openclaw-ui/openclaw_status_bar.c"),
             str(component.parent / "esp-openclaw-ui/openclaw_connection_details.c"),
+            str(component.parent / "esp-openclaw-ui/openclaw_reading.c"),
             str(component / "room_watch_navigation.c"), str(component / "room_watch_settings.c"),
             str(component / "room_watch_agents.c"),
             str(component / "room_watch_devices.c"),

@@ -115,13 +115,19 @@ rows directly. Hold the encoder or a stationary touch to return Home. A reader
 refresh, replacement, or disconnect invalidates an in-progress Home press;
 continuing never submits a numeric control or changes its owning agent.
 
-Settings → Display adjusts this Dial's screen brightness. Turn the encoder or
-tap − / + for five-point steps between 10% and 100%; press to return to Settings.
+Settings → Display → Brightness adjusts this Dial's screen brightness. Turn the
+encoder or tap − / + for five-point steps between 10% and 100%; press to return
+to Display.
 The page shows the last successfully applied value and an error if a change
 fails. It works offline, never submits the configured numeric control, and
 keeps focus during Gateway reconnects. Brightness lasts until restart; the
 existing `display.brightness` command updates the same value and retains its
 0–100% range. Hold still to return Home from any settings page.
+
+Settings → Display → Reading text offers Standard and Larger text. It reflows
+conversation previews, quick-reply reviews, and other scrollable reading views.
+The choice is local to this Dial and lasts until restart. Menus and status icons
+keep their existing size; this does not change the assigned control.
 
 Settings → Connection is a read-only, scrollable network summary. Turn the
 encoder or swipe to read the saved network, signal and channel (when available),

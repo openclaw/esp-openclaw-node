@@ -2,9 +2,10 @@
 
 #include <stdint.h>
 #include "room_watch_navigation.h"
+#include "openclaw_reading.h"
 
 static lv_obj_t *root, *heading, *back;
-static lv_obj_t *rows[4], *level, *detail, *adjust[2];
+static lv_obj_t *rows[4], *level, *detail, *adjust[2], *display_rows[2], *reading_rows[2];
 static lv_obj_t *messaging_status, *messaging_detail, *messaging_action;
 
 static lv_obj_t *label(lv_obj_t *parent, const char *value, int y, int width)
@@ -76,6 +77,10 @@ void room_watch_settings_create(lv_obj_t *parent, lv_event_cb_t handler, lv_even
     lv_obj_set_style_text_color(detail, lv_color_hex(0xb8b0bd), 0);
     adjust[0] = button(LV_SYMBOL_MINUS "  5%", 26, 264, 152, ROOM_WATCH_DIMMER, handler);
     adjust[1] = button(LV_SYMBOL_PLUS "  5%", 190, 264, 152, ROOM_WATCH_BRIGHTER, handler);
+    display_rows[0] = button(LV_SYMBOL_IMAGE "  Brightness", 26, 120, 316, ROOM_WATCH_BRIGHTNESS, handler);
+    display_rows[1] = button(LV_SYMBOL_LIST "  Reading text", 26, 184, 316, ROOM_WATCH_READING, handler);
+    reading_rows[0] = button("Standard", 26, 184, 316, ROOM_WATCH_TEXT_STANDARD, handler);
+    reading_rows[1] = button("Larger", 26, 248, 316, ROOM_WATCH_TEXT_LARGE, handler);
     lv_obj_set_hidden(root, true);
 }
 
@@ -85,12 +90,15 @@ void room_watch_settings_render(room_watch_page_t page, room_watch_page_t parent
     lv_obj_set_hidden(root, hidden);
     if (hidden) return;
     bool display = page == ROOM_WATCH_DISPLAY;
+    bool brightness_page = page == ROOM_WATCH_BRIGHTNESS;
+    bool reading = page == ROOM_WATCH_READING;
     bool permissions = page == ROOM_WATCH_MESSAGING;
-    lv_label_set_text_static(heading, display ? "Display" : permissions ? "Messaging" : page == ROOM_WATCH_LOCAL_DEVICE ? "This Watch" : "Settings");
+    lv_label_set_text_static(heading, display ? "Display" : brightness_page ? "Brightness" : reading ? "Reading text" : permissions ? "Messaging" : page == ROOM_WATCH_LOCAL_DEVICE ? "This Watch" : "Settings");
     lv_label_set_text_static(lv_obj_get_child(back, 0), parent == ROOM_WATCH_LOCAL_DEVICE ? LV_SYMBOL_LEFT " This Watch" :
         parent == ROOM_WATCH_SETTINGS ? LV_SYMBOL_LEFT " Settings" :
+        parent == ROOM_WATCH_DISPLAY ? LV_SYMBOL_LEFT " Display" :
         parent == ROOM_WATCH_DEVICES ? LV_SYMBOL_LEFT " Devices" : LV_SYMBOL_LEFT " Menu");
-    for (unsigned i = 0; i < 4; ++i) lv_obj_set_hidden(rows[i], display || permissions);
+    for (unsigned i = 0; i < 4; ++i) lv_obj_set_hidden(rows[i], display || brightness_page || reading || permissions);
     lv_obj_set_hidden(messaging_status, !permissions);
     lv_obj_set_hidden(messaging_detail, !permissions);
     lv_obj_set_hidden(messaging_action, !permissions);
@@ -127,10 +135,28 @@ void room_watch_settings_render(room_watch_page_t page, room_watch_page_t parent
         else lv_obj_add_state(messaging_action, LV_STATE_DISABLED);
         lv_obj_set_style_bg_color(messaging_action, lv_color_hex(messaging->can_request ? 0xa83648 : 0x302535), 0);
     }
-    lv_obj_set_hidden(level, !display);
-    lv_obj_set_hidden(detail, !display);
-    for (unsigned i = 0; i < 2; ++i) lv_obj_set_hidden(adjust[i], !display);
-    if (display) {
+    lv_obj_set_hidden(level, !brightness_page && !reading);
+    lv_obj_set_hidden(detail, !brightness_page && !reading);
+    for (unsigned i = 0; i < 2; ++i) {
+        lv_obj_set_hidden(adjust[i], !brightness_page);
+        lv_obj_set_hidden(display_rows[i], !display);
+        lv_obj_set_hidden(reading_rows[i], !reading);
+    }
+    lv_obj_set_y(detail, reading ? 320 : 206);
+    if (reading) {
+        lv_obj_set_style_text_font(level, openclaw_reading_font(), 0);
+        lv_label_set_text_static(level, "Hello from your assistant.");
+        lv_label_set_text_static(detail, "Reading views / until restart");
+        bool large = openclaw_reading_size() == OPENCLAW_READING_LARGE;
+        lv_label_set_text_static(lv_obj_get_child(reading_rows[0], 0), large ? "Standard" : LV_SYMBOL_OK "  Standard");
+        lv_label_set_text_static(lv_obj_get_child(reading_rows[1], 0), large ? LV_SYMBOL_OK "  Larger" : "Larger");
+    }
+    if (brightness_page) {
+#if LV_FONT_MONTSERRAT_28
+        lv_obj_set_style_text_font(level, &lv_font_montserrat_28, 0);
+#else
+        lv_obj_set_style_text_font(level, &lv_font_montserrat_14, 0);
+#endif
         lv_label_set_text_fmt(level, "%d%%", brightness);
         lv_label_set_text_static(detail, failed ? "Couldn't change. Try again." :
             camera_minimum ? "Camera needs at least 40%" : "Awake brightness / until restart");

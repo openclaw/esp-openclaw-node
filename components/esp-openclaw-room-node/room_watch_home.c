@@ -1,4 +1,5 @@
 #include "room_watch_home.h"
+#include "openclaw_reading.h"
 #include "esp_openclaw_node_wifi.h"
 #include "openclaw_status_bar.h"
 
@@ -238,6 +239,7 @@ bool room_watch_home_render(const room_ui_facts_t *facts, const room_ui_talk_tar
     lv_obj_set_hidden(title_label, reading);
     lv_obj_set_hidden(detail_label, reading);
     if (review) {
+        lv_obj_set_style_text_font(review_text, openclaw_reading_font(), 0);
         lv_obj_set_hidden(title_label, true);
         lv_obj_set_hidden(detail_label, true);
         lv_label_set_text_static(review_heading, sending ? "Sending" : submitted ?

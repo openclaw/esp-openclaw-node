@@ -1,5 +1,6 @@
 /* Deterministic boundary implementations. No room/Talk decision logic here. */
 #include "room_host_fakes.h"
+#include "esp_random.h"
 #include <setjmp.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -64,7 +65,7 @@ typedef struct {
     void *ctx;
     esp_openclaw_node_handle_t node;
 } pending_rpc_t;
-static pending_rpc_t config_rpc, create_rpc, scope_rpc, speech_rpc, agents_rpc, devices_rpc, transcription_rpc;
+static pending_rpc_t config_rpc, create_rpc, scope_rpc, speech_rpc, agents_rpc, devices_rpc, transcription_rpc, chat_rpc;
 
 typedef struct {
     esp_webrtc_cfg_t config;
@@ -538,9 +539,18 @@ esp_err_t esp_openclaw_node_gateway_request(esp_openclaw_node_handle_t node,
     const char *method, const char *params, esp_openclaw_node_gateway_request_cb_t callback, void *ctx)
 {
     bool transcription = strncmp(method, "talk.session.", 13) == 0;
-    host_require(host.critical_depth == 0 && (transcription || mutex_depth == 0), "non-transcription RPC outside locks");
+    bool chat = strcmp(method, "chat.history") == 0 || strcmp(method, "chat.send") == 0;
+    host_require(host.critical_depth == 0 && (transcription || chat || mutex_depth == 0), "non-transcription RPC outside locks");
     pending_rpc_t request = {.callback = callback, .ctx = ctx, .node = node};
-    if (transcription) {
+    if (chat) {
+        if (strcmp(method, "chat.send") == 0 && host.fail_chat_send) return ESP_FAIL;
+        host_require(chat_rpc.callback == NULL, "one chat request outstanding");
+        host_require(strlen(params) < sizeof(host.chat_params), "bounded chat observation");
+        strcpy(host.chat_params, params);
+        if (strcmp(method, "chat.history") == 0) ++host.chat_prepares;
+        else ++host.chat_sends;
+        chat_rpc = request;
+    } else if (transcription) {
         host_require(transcription_rpc.callback == NULL, "one transcription request outstanding");
         cJSON *json = cJSON_Parse(params);
         host_require(json != NULL, "transcription JSON parses");
@@ -657,6 +667,15 @@ static void reply(pending_rpc_t *slot, bool ok, const char *payload)
     request.callback(request.node, &result, request.ctx);
     --host.callback_depth;
     free(borrowed);
+}
+void esp_fill_random(void *buffer, size_t len)
+{
+    static unsigned char seed;
+    memset(buffer, ++seed, len);
+}
+void host_reply_chat(bool ok, const char *payload)
+{
+    reply(&chat_rpc, ok, payload);
 }
 void host_reply_transcription(bool ok, const char *payload)
 {
@@ -1015,7 +1034,7 @@ esp_err_t esp_http_client_cleanup(esp_http_client_handle_t client)
 void host_release_resources(void)
 {
     host_require(config_rpc.callback == NULL && create_rpc.callback == NULL && scope_rpc.callback == NULL &&
-        agents_rpc.callback == NULL && transcription_rpc.callback == NULL,
+        agents_rpc.callback == NULL && transcription_rpc.callback == NULL && chat_rpc.callback == NULL,
         "all real RPC references drained");
     host_require(!host.media_owned && mutex_depth == 0 && host.critical_depth == 0, "fixture leaves no ownership");
     for (size_t i = 0; i < node_count; ++i) free(nodes[i]);

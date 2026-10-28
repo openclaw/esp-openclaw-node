@@ -172,8 +172,24 @@ Gateway session receives bounded audio chunks on the original operator connectio
 it never starts an agent turn. The review screen shows final text only after the
 provider finishes, with scrolling for long drafts. **Discard**, leaving Home,
 changing the recipient, or losing the connection clears the draft. Empty speech,
-provider failures, and timeouts offer re-recording. Sending text to an agent is
-not available in this slice.
+provider failures, and timeouts offer re-recording.
+
+With [voice actions](#voice-agent-actions) enabled and approved, select an agent
+before recording. **Send** submits the reviewed text to that agent's existing
+main conversation, using the session and branch captured when recording began.
+A changed or missing conversation must be opened and recorded again. Default
+firmware still permits local recording and transcription, with Send disabled;
+it retains the read-only Live Talk permissions.
+
+Send is explicit and single-use: **Sending** waits for Gateway acceptance,
+**Accepted** means the turn is running, and **Sent** means this turn finished
+(or handed work off). **Check delivery** means the connection or acknowledgement
+was lost; inspect **Conversations** before trying again. No message is replayed
+automatically. Leaving Home preserves submitted status; **Done** releases the
+local view without aborting an accepted turn. **Conversations** refreshes the
+agent directory and opens that agent's conversation list when present on the
+first page, otherwise it leaves the directory available for navigation. Replies
+are read through the existing conversation reader, not spoken by this flow.
 
 Room endpoints request 400 ms of provider server-VAD post-speech silence for
 each Talk session. The player uses the pinned 4 KiB raw and 6 KiB render queue

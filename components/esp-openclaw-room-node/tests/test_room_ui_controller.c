@@ -77,7 +77,7 @@ static lv_indev_t *touchscreen;
 static lv_indev_state_t touch_state;
 static lv_point_t touch_point;
 static lv_obj_t *modal;
-static lv_obj_t *watch_menu_button, *watch_continue_button, *watch_voice_button, *watch_discard_button, *watch_review_body;
+static lv_obj_t *watch_menu_button, *watch_continue_button, *watch_voice_button, *watch_discard_button, *watch_send_button, *watch_review_body;
 static room_canvas_action_handler_t canvas_action;
 struct ui_timer { esp_timer_create_args_t args; bool active; };
 static struct ui_timer timers[4];
@@ -423,7 +423,7 @@ static unsigned check_home_tree(lv_obj_t *parent)
     unsigned count = 1;
     assert(lv_obj_has_flag(parent, LV_OBJ_FLAG_SCROLLABLE) == (parent == watch_review_body));
     if (parent == watch_review_body || parent == watch_menu_button || parent == watch_continue_button ||
-        parent == watch_voice_button || parent == watch_discard_button)
+        parent == watch_voice_button || parent == watch_discard_button || parent == watch_send_button)
         assert(lv_obj_has_flag(parent, LV_OBJ_FLAG_CLICKABLE));
     else assert(!lv_obj_has_flag(parent, LV_OBJ_FLAG_CLICKABLE));
     lv_area_t area;
@@ -502,6 +502,7 @@ static void check_watch_home(const char *path)
     watch_continue_button = lv_obj_get_parent(find_text(lv_layer_top(), "Continue conversations"));
     watch_voice_button = lv_obj_get_parent(find_text(lv_layer_top(), "Hold to record"));
     watch_discard_button = lv_obj_get_parent(find_text(lv_layer_top(), "Discard"));
+    watch_send_button = lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_UP "  Send"));
     lv_obj_t *review = lv_obj_get_parent(find_text(lv_layer_top(), "Text draft"));
     for (unsigned i = 0; i < lv_obj_get_child_count(review); ++i) {
         lv_obj_t *child = lv_obj_get_child(review, i);
@@ -1616,7 +1617,7 @@ static void check_watch_display_settings(const char *path)
     puts("watch display: accepted writes, failures, camera floor, sleep, stale presses and offline navigation passed");
 }
 
-static unsigned voice_begins, voice_finishes, voice_cancels;
+static unsigned voice_begins, voice_finishes, voice_cancels, voice_sends;
 static uint32_t voice_request_generation;
 static void voice_action(room_voice_action_t action, uint32_t generation, uint64_t revision, uint64_t owner)
 {
@@ -1625,13 +1626,16 @@ static void voice_action(room_voice_action_t action, uint32_t generation, uint64
     if (action == ROOM_VOICE_BEGIN) {
         assert(revision == 42 && owner == 7);
         ++voice_begins;
+    } else if (action == ROOM_VOICE_SEND) {
+        assert(revision == 42 && owner == 7);
+        ++voice_sends;
     } else if (action == ROOM_VOICE_FINISH) ++voice_finishes;
     else ++voice_cancels;
 }
 
 static room_voice_snapshot_t test_voice = {
     .state = ROOM_VOICE_READY, .recipient_revision = 42, .owner_incarnation = 7,
-    .recipient = "Kitsune", .text = "Turn on the reading light.",
+    .recipient = "Kitsune", .agent_id = "agent-0", .can_send = true, .text = "Turn on the reading light.",
 };
 static void show_voice(room_voice_state_t state)
 {
@@ -1653,7 +1657,8 @@ static void voice_snapshot(const char *base, const char *state)
     char path[1024];
     assert(snprintf(path, sizeof(path), "%s.voice-%s.ppm", base, state) < (int)sizeof(path));
     bool review = test_voice.state == ROOM_VOICE_TRANSCRIBING || test_voice.state == ROOM_VOICE_CANCELING ||
-        test_voice.state == ROOM_VOICE_DRAFT || test_voice.state == ROOM_VOICE_TRANSCRIPTION_ERROR;
+        test_voice.state == ROOM_VOICE_DRAFT || test_voice.state == ROOM_VOICE_TRANSCRIPTION_ERROR ||
+        test_voice.state >= ROOM_VOICE_SENDING;
     if (review) {
         assert(!room_face_is_visible());
         room_ui_show_face_hint(10000);
@@ -1706,7 +1711,8 @@ static void check_watch_voice(const char *path)
     touch_talk(button, false);
     assert(voice_finishes == 1 && voice_cancels == 1 && visible_watch_text("Discard"));
     uint32_t draft_generation = test_voice.generation;
-    click_talk(button); // A short re-record tap must leave the draft cancellable.
+    // The capped recording release never reaches the new Send target.
+    assert(voice_sends == 0);
     assert(room_ui_watch_menu("menu") == ESP_OK);
     assert(voice_request_generation == draft_generation);
     assert(voice_cancels == 2); // Leaving discards the capped draft.
@@ -1796,7 +1802,86 @@ static void check_watch_voice(const char *path)
     show_voice(ROOM_VOICE_CANCELING);
     assert(lv_obj_has_state(lv_obj_get_parent(find_visible_text(lv_layer_top(), "Canceling...")), LV_STATE_DISABLED));
     voice_snapshot(path, "canceling");
-    puts("watch voice: wake, tap, hold, release, cap, discard, cover and stale-owner gestures passed");
+    show_voice(ROOM_VOICE_READY);
+    hold_voice(button);
+    touch_talk(button, false);
+    strcpy(test_voice.text, "Turn on the reading light.");
+    test_voice.detail[0] = '\0';
+    test_voice.can_send = false;
+    strcpy(test_voice.detail, "Preparing conversation...");
+    show_voice(ROOM_VOICE_DRAFT);
+    lv_obj_t *send_button = lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_UP "  Send"));
+    assert(lv_obj_has_state(send_button, LV_STATE_DISABLED));
+    click_talk(send_button);
+    assert(voice_sends == 0 && visible_watch_text("Preparing conversation..."));
+    voice_snapshot(path, "preparing");
+    test_voice.can_send = true;
+    strcpy(test_voice.detail, "Could not queue the message. Try Send again.");
+    show_voice(ROOM_VOICE_DRAFT);
+    assert(visible_watch_text(test_voice.detail) && visible_watch_text("Kitsune / Not sent"));
+    voice_snapshot(path, "send-retry");
+    test_voice.detail[0] = '\0';
+    show_voice(ROOM_VOICE_DRAFT);
+    // Stored context invalidates a painted Send before another frame arrives.
+    ++test_voice.owner_incarnation;
+    room_ui_store_voice(&test_voice);
+    click_talk(send_button);
+    assert(voice_sends == 0);
+    --test_voice.owner_incarnation;
+    show_voice(ROOM_VOICE_DRAFT);
+    touch_talk(send_button, true);
+    ++test_voice.recipient_revision;
+    room_ui_store_voice(&test_voice);
+    touch_talk(send_button, false);
+    assert(voice_sends == 0);
+    --test_voice.recipient_revision;
+    show_voice(ROOM_VOICE_DRAFT);
+    assert(room_board_display_brightness_set(0) == ESP_OK);
+    click_talk(send_button);
+    assert(voice_sends == 0 && brightness > 0);
+    click_talk(send_button);
+    assert(voice_sends == 1);
+    // A new press that starts on Send must not become navigation mid-gesture.
+    touch_talk(send_button, true);
+    strcpy(test_voice.detail, "Message accepted. Open Conversations for the reply.");
+    show_voice(ROOM_VOICE_ACCEPTED);
+    unsigned requests = conversation_requests;
+    touch_talk(send_button, false);
+    assert(conversation_requests == requests && voice_sends == 1);
+    unsigned submitted_cancels = voice_cancels;
+    assert(room_ui_watch_menu("menu") == ESP_OK);
+    assert(voice_cancels == submitted_cancels);
+    assert(room_ui_watch_menu("home") == ESP_OK);
+    assert(visible_watch_text("Accepted"));
+    voice_snapshot(path, "accepted");
+    strcpy(test_voice.detail, "Waiting for the Gateway to accept this message.");
+    show_voice(ROOM_VOICE_SENDING);
+    assert(lv_obj_has_state(send_button, LV_STATE_DISABLED) && visible_watch_text("Sending..."));
+    voice_snapshot(path, "sending");
+    strcpy(test_voice.detail, "Check the conversation before sending again.");
+    show_voice(ROOM_VOICE_SEND_UNKNOWN);
+    assert(visible_watch_text("Check delivery") && visible_watch_text("Conversations"));
+    voice_snapshot(path, "send-unknown");
+    strcpy(test_voice.detail, "The turn stopped. Check the conversation for details.");
+    show_voice(ROOM_VOICE_SEND_FAILED);
+    voice_snapshot(path, "send-failed");
+    strcpy(test_voice.detail, "This turn finished. Open Conversations to read it.");
+    show_voice(ROOM_VOICE_SENT);
+    voice_snapshot(path, "sent");
+    click_talk(send_button);
+    assert(agent_open && agent_offset == 0);
+    room_agents_snapshot_t sent_roster = {.state = ROOM_AGENTS_READY, .revision = 110};
+    sent_roster.page.count = 1;
+    strcpy(sent_roster.page.agents[0].id, "agent-0");
+    strcpy(sent_roster.page.agents[0].name, "Kitsune");
+    room_ui_store_agents(&sent_roster);
+    assert(conversation_action == ROOM_CONVERSATIONS_OPEN && conversation_revision == 110 &&
+        strcmp(conversation_agent, "agent-0") == 0);
+    assert(voice_cancels == submitted_cancels);
+    assert(room_ui_watch_menu("home") == ESP_OK);
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), "Done")));
+    assert(voice_cancels == submitted_cancels + 1);
+    puts("watch voice: wake, recording, review, guarded Send, delivery states and conversation routing passed");
 }
 
 int main(int argc, char **argv)

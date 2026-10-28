@@ -1,7 +1,7 @@
 idf_component_register(
-    SRCS "esp_openclaw_directory.c" "esp_openclaw_avatar.c"
+    SRCS "esp_openclaw_directory.c" "esp_openclaw_avatar.c" "esp_openclaw_devices.c"
     INCLUDE_DIRS "include"
-    REQUIRES espressif__cjson
+    REQUIRES espressif__cjson esp-openclaw-node esp_timer freertos
 )
 
 if(NOT CMAKE_BUILD_EARLY_EXPANSION)

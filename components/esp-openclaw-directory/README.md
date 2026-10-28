@@ -1,4 +1,4 @@
-# Agent and conversation directory model
+# Agent, conversation, and device directories
 
 A bounded model for device pickers over the Gateway's `agents.list` response.
 It retains eight rows at a time: canonical ID, display name and identity emoji.
@@ -26,7 +26,7 @@ parses the whole response, subject to the device's transport and memory limits.
 Listing an agent does not establish its availability for a later operation;
 the Gateway must authorize that operation separately.
 
-This component owns no network client, selection, credentials or persistence.
+The agent and conversation parsers own no network client, selection, credentials or persistence.
 The caller must reject responses from replaced connections before exposing a
 page. The Dial's host runner exercises the parser and that lifecycle together:
 
@@ -78,3 +78,24 @@ Both parsers share the existing 32 KiB JSON, UTF-8, embedded-NUL, and depth
 bounds. They clear output on failure and own no request lifecycle or UI state.
 The caller must fence responses against the current connection and selection.
 This model adds no conversation mutation or device-control assignment.
+
+## Device inventory
+
+`esp_openclaw_devices` owns a bounded, read-only `node.list` request lifecycle
+for a caller-supplied operator client. The caller supplies its owner mutex and
+wake callback, publishes client incarnation and connection changes while holding
+that mutex, and calls `esp_openclaw_devices_poll` from one worker. Defer new
+requests while higher-priority work is pending. This module creates no client,
+requests no scopes, and performs no device commands.
+
+Refresh expresses interest; cancel clears it and releases the retained page.
+Responses are fenced by client, incarnation, connection, and view revision.
+Only one transport request can remain outstanding; each interested view has a
+15-second deadline even after a close/reopen invalidates an older request.
+Snapshots distinguish idle, offline, loading, ready, empty, error, oversized,
+and timed-out states. Copy them outside the caller's owner lock.
+
+The inventory retains at most 16 devices from a 32 KiB response. Each device
+keeps its canonical ID, display name, model, and separate known flags for
+connection and pairing. Missing optional facts remain unknown. Discovery
+confers no control authority and changes no agent selection.

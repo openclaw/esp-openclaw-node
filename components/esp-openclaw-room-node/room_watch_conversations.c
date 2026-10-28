@@ -168,6 +168,18 @@ static const char *failure_text(room_agents_state_t value)
     }
 }
 
+static void style_heading(bool reader)
+{
+    const lv_font_t *font = &lv_font_montserrat_14;
+#if LV_FONT_MONTSERRAT_20
+    font = &lv_font_montserrat_20;
+#endif
+    if (reader) font = openclaw_reading_font();
+    lv_obj_set_style_text_font(heading, font, 0);
+    lv_obj_set_height(heading, font->line_height);
+    lv_label_set_long_mode(heading, reader ? LV_LABEL_LONG_SCROLL_CIRCULAR : LV_LABEL_LONG_DOT);
+}
+
 void room_watch_conversations_render(const room_conversations_snapshot_t *snapshot, bool hidden, int content_bottom)
 {
     if (root == NULL) return;
@@ -194,6 +206,7 @@ void room_watch_conversations_render(const room_conversations_snapshot_t *snapsh
     }
     lv_obj_set_style_text_font(body_text, openclaw_reading_font(), 0);
     if (snapshot == NULL) {
+        style_heading(false);
         painted_preview = preview;
         painted_creation = creation;
         lv_label_set_text_static(back_text, LV_SYMBOL_LEFT " Agent");
@@ -228,6 +241,7 @@ void room_watch_conversations_render(const room_conversations_snapshot_t *snapsh
     state = snapshot->state;
     preview_revision = snapshot->preview_revision;
     preview_state = snapshot->preview_state;
+    style_heading(preview && !creation);
     lv_label_set_text_static(back_text, preview || creation ? LV_SYMBOL_LEFT " Chats" : LV_SYMBOL_LEFT " Agent");
     lv_label_set_text(heading, creation ? snapshot->creation.state == ROOM_CREATION_CREATING ? "Creating chat"
         : snapshot->creation.state == ROOM_CREATION_CREATED ? "Chat created"

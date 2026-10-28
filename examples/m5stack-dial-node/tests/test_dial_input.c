@@ -381,7 +381,9 @@ static void check_conversation_titles(void)
     strcpy(second, conversations.page.sessions[1].title);
     strcpy(conversations.page.sessions[0].title, "Planning the next adventure - Japan");
     strcpy(conversations.page.sessions[1].title, "Planning the next adventure - Norway");
-    for (int reading = OPENCLAW_READING_STANDARD; reading <= OPENCLAW_READING_LARGE; ++reading) {
+    const int reading_sizes[] = {OPENCLAW_READING_STANDARD, OPENCLAW_READING_LARGE, OPENCLAW_READING_STANDARD};
+    for (unsigned pass = 0; pass < sizeof(reading_sizes) / sizeof(reading_sizes[0]); ++pass) {
+        int reading = reading_sizes[pass];
         openclaw_reading_set_size(reading);
         for (int density = OPENCLAW_DENSITY_COMPACT; density <= OPENCLAW_DENSITY_COMFORTABLE; ++density) {
             openclaw_density_set(density);
@@ -422,11 +424,18 @@ static void check_conversation_titles(void)
             snapshot(capture);
             assert(moved && reads == requested + 1);
             check_home_bounds(navigation.heading);
+            assert(lv_obj_get_style_text_font(navigation.heading, 0) == openclaw_reading_font());
+            assert(lv_obj_get_height(navigation.heading) == openclaw_reading_font()->line_height);
+            lv_area_t heading_area, body_area;
+            lv_obj_get_coords(navigation.heading, &heading_area);
+            lv_obj_get_coords(navigation.preview_body, &body_area);
+            assert(heading_area.y2 < body_area.y1);
             touch(68, 44, true); touch(68, 44, false);
             assert(navigation.view == DIAL_NAV_SESSIONS && navigation.focus == 1);
+            assert(lv_obj_get_style_text_font(navigation.heading, 0) == &lv_font_montserrat_16);
         }
     }
-    assert(reads == before_reads + 4 && reply_sends == before_sends);
+    assert(reads == before_reads + 6 && reply_sends == before_sends);
     strcpy(conversations.page.sessions[0].title, first);
     strcpy(conversations.page.sessions[1].title, second);
     openclaw_reading_set_size(OPENCLAW_READING_STANDARD);

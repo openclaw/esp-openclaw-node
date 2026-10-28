@@ -777,6 +777,10 @@ static void render(dial_navigation_t *nav)
 {
     lv_label_set_long_mode(nav->heading, nav->view == DIAL_NAV_PREVIEW
         ? LV_LABEL_LONG_SCROLL_CIRCULAR : LV_LABEL_LONG_DOT);
+    const lv_font_t *heading_font = nav->view == DIAL_NAV_PREVIEW
+        ? openclaw_reading_font() : &lv_font_montserrat_16;
+    lv_obj_set_style_text_font(nav->heading, heading_font, 0);
+    lv_obj_set_height(nav->heading, heading_font->line_height);
     lv_obj_set_y(nav->description, 80);
     lv_obj_set_style_text_font(nav->preview_text, openclaw_reading_font(), 0);
     for (unsigned i = 0; i < 3; ++i) {

@@ -103,20 +103,22 @@ Proposed operations for the encrypted custom endpoint:
 | `wifi.scan` | Confirmed setup owner only; uses the existing scan limit of 16 and returns truncation explicitly |
 | `wifi.apply` | Confirmed owner, explicit phone submission, validated original SSID/password; starts one connection attempt |
 | `gateway.apply` | Confirmed owner with Wi-Fi ready; validates the setup code and displayed destination, then starts one node connect request |
-| `cancel` | Cancels pending setup work owned by this peer, starts teardown, and reports the effect of any already-applied change |
+| `cancel` | Closes this peer's setup session and drains pending work; disconnect is possible without a reply and does not prove rollback |
 
 Version the application envelope separately from the Gateway protocol. The
 first implementation must specify and test exact wire fields and error codes
 before the transport PR. Initial resource limits: one active operation, at most
-16 scan results, an 8 KiB request frame, and a 4 KiB decoded setup-code field.
+16 scan results, an 8 KiB logical request, and a 4 KiB original setup-code field
+(before the native parser decodes Base64URL).
 Reject oversize, malformed, unknown-operation, and unsupported-version input
 before allocation or mutation. Confirm these proposed bounds against real
 setup-code fixtures; do not silently truncate valid credentials or identities.
 
 The shared [frame codec](mobile-setup-frames.md) defines the binary fragment
-envelope within the pinned BLE attribute limits. Transfer reassembly and the
-application-operation schema remain separate work; an 8 KiB logical request
-must never be sent as one characteristic value.
+envelope within the pinned BLE attribute limits and implements transfer reassembly.
+The [application request codec](mobile-setup-requests.md) defines exact command
+fields and bounds. Response/error messages and application dispatch remain separate
+work; an 8 KiB logical request must never be sent as one characteristic value.
 
 Every mutating request has an operation ID and expected setup generation. Once
 accepted, a repeated ID returns that operation's status; it cannot run again or

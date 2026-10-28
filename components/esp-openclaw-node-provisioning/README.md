@@ -48,8 +48,14 @@ Decode and authorize application operations separately; an ACK is not operation
 success. `complete` accepts only the current pending generation/peer/transfer
 token. Empty or oversized responses become stable transport errors, not partial
 responses. Before local confirmation, peer authorization permits comparison
-messages only; it does not enable mutations or saved-state reads. BLE endpoint
-and application-message integration remain separate work.
+messages only; it does not enable mutations or saved-state reads.
+
+`esp_openclaw_setup_request.h` decodes the shared
+[application request format](../../docs/design/mobile-setup-requests.md) without
+allocation. It preserves full-width generation/operation IDs and returns bounded,
+borrowed SSID/password/setup-code spans. The caller still owns live authorization,
+confirmation, C-string adaptation, and dispatch through the existing bindings.
+Response messages, application dispatch and the BLE endpoint remain separate work.
 
 `esp_openclaw_setup_session.h` provides transport-independent setup admission
 for Watch and Dial. It is a library foundation; no example exposes BLE setup

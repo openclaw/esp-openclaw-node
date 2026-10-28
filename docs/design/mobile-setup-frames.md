@@ -2,7 +2,9 @@
 
 The Watch and Dial share this version 1 byte format for the encrypted custom
 setup endpoint. The structural codec and transfer owner are implemented; BLE
-transport, application messages, and mobile integration are not connected yet.
+transport, application dispatch, and mobile integration are not connected yet.
+The [application request codec](mobile-setup-requests.md) decodes completed requests;
+response messages remain separate work.
 See the [setup contract](mobile-provisioning-contract.md) for local confirmation
 and operation ownership. A valid frame does not authorize a setup operation.
 

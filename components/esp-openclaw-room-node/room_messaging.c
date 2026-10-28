@@ -108,6 +108,7 @@ void room_messaging_copy_locked(room_messaging_snapshot_t *snapshot, bool idle)
 {
     *snapshot = messaging.view;
     snapshot->connected = messaging.connected;
+    snapshot->busy = room_messaging_busy_locked();
     snapshot->can_request = idle && !messaging.inflight &&
         ((!room_messaging_busy_locked() && messaging.connected && !messaging.write_approved) ||
          (messaging.token != NULL && messaging.view.state == ROOM_MESSAGING_ERROR));

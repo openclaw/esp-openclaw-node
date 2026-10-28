@@ -247,8 +247,12 @@ hardware behavior.
 
 Default Watch and room-node firmware can request messaging access without a
 rebuild. Finish Live Talk, discard any unsent voice draft, and wait for pending
-chats to finish. Run `messaging request` in the USB console, then approve the
-exact device request on the Gateway. Run `messaging` to inspect its status.
+chats to finish. On Watch, open **Settings → Messaging → Request access**, then
+approve the exact device request on the Gateway. The screen distinguishes
+waiting for approval, reconnecting, enabled, declined, and expired requests.
+You can go Back while approval continues; **Try again** is available when the
+supervisor permits it. **This Watch → Messaging** opens the same screen.
+The USB equivalents are `messaging request` and `messaging` for status.
 This requests `operator.read`, `operator.talk`, and `operator.write`; it does
 not request `operator.admin` or enable owner-level voice tools.
 

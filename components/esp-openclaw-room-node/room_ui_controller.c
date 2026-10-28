@@ -80,11 +80,16 @@ static talk_control_action_t pressed_talk_action;
 static room_watch_page_t watch_page = ROOM_WATCH_HOME;
 static room_watch_page_t watch_display_parent = ROOM_WATCH_SETTINGS;
 static room_watch_page_t watch_connection_parent = ROOM_WATCH_MENU;
+static room_watch_page_t watch_messaging_parent = ROOM_WATCH_SETTINGS;
+static room_messaging_snapshot_t current_messaging, painted_messaging;
+static void (*messaging_handler)(unsigned revision);
+static bool messaging_held, messaging_pending;
 
 /* Called with state_mux held; subpages return to their actual entry point. */
 static room_watch_page_t watch_parent(room_watch_page_t page)
 {
     if (page == ROOM_WATCH_DISPLAY) return watch_display_parent;
+    if (page == ROOM_WATCH_MESSAGING) return watch_messaging_parent;
     if (page == ROOM_WATCH_CONNECTION) return watch_connection_parent;
     if (page == ROOM_WATCH_LOCAL_DEVICE) return ROOM_WATCH_DEVICES;
     if (page == ROOM_WATCH_DEVICES || page == ROOM_WATCH_SETTINGS) return ROOM_WATCH_MENU;
@@ -118,6 +123,24 @@ static unsigned device_generation;
 static int pressed_device_action = -100;
 static unsigned pressed_device_revision;
 static esp_openclaw_devices_state_t pressed_device_state;
+
+void room_ui_set_messaging_handler(void (*handler)(unsigned revision))
+{
+    messaging_handler = handler;
+}
+
+void room_ui_store_messaging(const room_messaging_snapshot_t *snapshot)
+{
+    taskENTER_CRITICAL(&state_mux);
+    bool changed = messaging_pending || current_messaging.revision != snapshot->revision ||
+        current_messaging.state != snapshot->state || current_messaging.connected != snapshot->connected ||
+        current_messaging.can_request != snapshot->can_request || current_messaging.busy != snapshot->busy;
+    current_messaging = *snapshot;
+    if (changed) messaging_held = false;
+    messaging_pending = false;
+    taskEXIT_CRITICAL(&state_mux);
+    if (changed) room_ui_refresh();
+}
 
 void room_ui_set_devices_action_handler(void (*handler)(bool open, unsigned generation))
 {
@@ -380,6 +403,9 @@ static esp_err_t watch_navigation_show_context(room_watch_page_t page, unsigned 
     taskENTER_CRITICAL(&state_mux);
     if (page == ROOM_WATCH_DISPLAY && watch_page != ROOM_WATCH_DISPLAY)
         watch_display_parent = watch_page == ROOM_WATCH_LOCAL_DEVICE ? ROOM_WATCH_LOCAL_DEVICE : ROOM_WATCH_SETTINGS;
+    if (page == ROOM_WATCH_MESSAGING && watch_page != ROOM_WATCH_MESSAGING)
+        watch_messaging_parent = watch_page == ROOM_WATCH_LOCAL_DEVICE ? ROOM_WATCH_LOCAL_DEVICE : ROOM_WATCH_SETTINGS;
+    messaging_held = false;
     if (page == ROOM_WATCH_CONNECTION && watch_page != ROOM_WATCH_CONNECTION)
         watch_connection_parent = watch_page == ROOM_WATCH_LOCAL_DEVICE ? ROOM_WATCH_LOCAL_DEVICE :
             watch_page == ROOM_WATCH_SETTINGS ? ROOM_WATCH_SETTINGS : ROOM_WATCH_MENU;
@@ -431,6 +457,7 @@ esp_err_t room_ui_watch_menu(const char *page)
     else if (strcmp(page, "device") == 0) requested = ROOM_WATCH_LOCAL_DEVICE;
     else if (strcmp(page, "settings") == 0) requested = ROOM_WATCH_SETTINGS;
     else if (strcmp(page, "display") == 0) requested = ROOM_WATCH_DISPLAY;
+    else if (strcmp(page, "messaging") == 0) requested = ROOM_WATCH_MESSAGING;
     else if (strcmp(page, "connection") == 0) requested = ROOM_WATCH_CONNECTION;
     else if (strcmp(page, "canvas") == 0) requested = ROOM_WATCH_CANVAS;
     else if (strcmp(page, "home") == 0) requested = ROOM_WATCH_HOME;
@@ -570,6 +597,33 @@ static void watch_navigation_input(lv_event_t *event, room_watch_page_t page)
         if (percent > 100) percent = 100;
         (void)room_ui_watch_brightness(percent);
     } else (void)watch_navigation_show(page);
+}
+
+static void watch_messaging_clicked(lv_event_t *event)
+{
+    lv_event_code_t code = lv_event_get_code(event);
+    if (code != LV_EVENT_PRESSED && code != LV_EVENT_PRESS_LOST && code != LV_EVENT_SHORT_CLICKED) return;
+    bool wake = code == LV_EVENT_PRESSED && room_board_display_is_dark();
+    bool activate = false;
+    unsigned revision;
+    taskENTER_CRITICAL(&state_mux);
+    bool current = watch_page == ROOM_WATCH_MESSAGING && !diagnostics_open && !messaging_pending &&
+        messaging_handler != NULL && painted_messaging.can_request && current_messaging.can_request &&
+        painted_messaging.connected == current_messaging.connected &&
+        painted_messaging.state == current_messaging.state && painted_messaging.revision == current_messaging.revision;
+    revision = painted_messaging.revision;
+    if (code == LV_EVENT_PRESSED) messaging_held = !wake && current;
+    else {
+        activate = code == LV_EVENT_SHORT_CLICKED && messaging_held && current;
+        messaging_held = false;
+        if (activate) messaging_pending = true;
+    }
+    taskEXIT_CRITICAL(&state_mux);
+    if (wake) { room_ui_show_face_hint(10000); return; }
+    if (activate) {
+        messaging_handler(revision);
+        room_ui_refresh();
+    }
 }
 
 static void watch_home_menu_clicked(lv_event_t *event)
@@ -1177,7 +1231,7 @@ void room_ui_init(void)
         room_watch_home_create(lv_layer_top(), watch_home_menu_clicked, watch_home_continue_clicked,
             watch_voice_clicked, watch_voice_discard, watch_voice_send);
         room_watch_navigation_create(lv_layer_top(), watch_navigation_clicked);
-        room_watch_settings_create(lv_layer_top(), watch_navigation_clicked);
+        room_watch_settings_create(lv_layer_top(), watch_navigation_clicked, watch_messaging_clicked);
         room_watch_agents_create(lv_layer_top(), watch_agents_clicked);
         room_watch_devices_create(lv_layer_top(), watch_devices_clicked);
         room_watch_conversations_create(lv_layer_top(), watch_conversations_clicked);
@@ -1335,6 +1389,11 @@ static bool room_ui_render_locked(void)
     voice = current_voice;
     room_conversation_context_t reader_context = current_reader_context;
     bool selecting = selection_pending, selection_error = selection_failed;
+    room_messaging_snapshot_t messaging = current_messaging;
+    if (messaging_pending || messaging_handler == NULL) messaging.can_request = false;
+    painted_messaging = messaging;
+    bool permission_busy = messaging_pending || messaging.busy;
+    if (permission_busy && facts.talk == ROOM_UI_TALK_READY) facts.talk = ROOM_UI_TALK_WAITING;
     room_watch_page_t page = watch_page;
     room_watch_page_t parent = watch_parent(page);
     int brightness = watch_brightness < 0 ? ROOM_CANVAS_ACTIVE_BRIGHTNESS : watch_brightness;
@@ -1402,11 +1461,11 @@ static bool room_ui_render_locked(void)
         painted_reader_epoch = continue_visible ? reader_context.epoch : 0;
         if (pressed_reader_epoch != painted_reader_epoch) pressed_reader_epoch = 0;
         taskEXIT_CRITICAL(&state_mux);
-        bool settings = page == ROOM_WATCH_SETTINGS || page == ROOM_WATCH_LOCAL_DEVICE || page == ROOM_WATCH_DISPLAY;
+        bool settings = page == ROOM_WATCH_SETTINGS || page == ROOM_WATCH_LOCAL_DEVICE || page == ROOM_WATCH_DISPLAY || page == ROOM_WATCH_MESSAGING;
         room_watch_navigation_render(page, &facts, !navigation || overlay || page == ROOM_WATCH_AGENTS ||
             page == ROOM_WATCH_DEVICES || settings, resume_failed, parent);
         room_watch_devices_render(painted_devices, !navigation || overlay || page != ROOM_WATCH_DEVICES);
-        room_watch_settings_render(page, parent, brightness, brightness_failed, camera_minimum,
+        room_watch_settings_render(page, parent, brightness, brightness_failed, camera_minimum, &messaging,
             !navigation || overlay || !settings);
         room_watch_agents_render(&painted_agents, !navigation || overlay || page != ROOM_WATCH_AGENTS || chats,
             target.selected ? target.id : "", target.expired, selecting, selection_error);
@@ -1735,6 +1794,7 @@ void room_ui_set_diagnostics_open(bool open)
     if (open) {
         pressed_talk_action = TALK_CONTROL_NONE;
         pressed_device_action = -100;
+        messaging_held = false;
         pressed_watch_page = -1;
         pressed_reader_epoch = 0;
         painted_reader_epoch = 0;
@@ -1751,7 +1811,7 @@ void room_ui_set_diagnostics_open(bool open)
         }
         if (watch_home_enabled) {
             room_watch_navigation_render(ROOM_WATCH_HOME, NULL, true, false, ROOM_WATCH_HOME);
-            room_watch_settings_render(ROOM_WATCH_HOME, ROOM_WATCH_HOME, 0, false, false, true);
+            room_watch_settings_render(ROOM_WATCH_HOME, ROOM_WATCH_HOME, 0, false, false, NULL, true);
         }
         if (home != NULL) lv_obj_add_flag(home, LV_OBJ_FLAG_HIDDEN);
         if (talk_pill != NULL) lv_obj_add_flag(talk_pill, LV_OBJ_FLAG_HIDDEN);

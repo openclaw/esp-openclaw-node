@@ -890,6 +890,8 @@ void room_ui_store_facts(const room_ui_facts_t *facts) { host.home = *facts; }
 void room_ui_set_voice_action_handler(void (*handler)(room_voice_action_t, uint32_t, uint64_t, uint64_t))
 { (void)handler; }
 void room_ui_store_voice(const room_voice_snapshot_t *snapshot) { host.voice = *snapshot; }
+void room_ui_set_messaging_handler(void (*handler)(unsigned)) { (void)handler; }
+void room_ui_store_messaging(const room_messaging_snapshot_t *snapshot) { host.messaging = *snapshot; }
 
 esp_err_t room_media_request_recording(room_media_talk_busy_cb_t busy, void *ctx)
 {

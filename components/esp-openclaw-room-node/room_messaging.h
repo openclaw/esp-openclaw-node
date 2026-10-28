@@ -15,7 +15,7 @@ typedef enum {
 typedef struct {
     room_messaging_state_t state;
     unsigned revision;
-    bool connected, can_request;
+    bool connected, can_request, busy;
     char request_id[129];
 } room_messaging_snapshot_t;
 

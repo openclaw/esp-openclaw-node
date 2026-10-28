@@ -1793,6 +1793,127 @@ static void check_watch_display_settings(const char *path)
     puts("watch display: accepted writes, failures, camera floor, sleep, stale presses and offline navigation passed");
 }
 
+static unsigned messaging_requests, messaging_revision;
+static void request_messaging(unsigned revision)
+{
+    assert(critical_depth == 0);
+    ++messaging_requests;
+    messaging_revision = revision;
+}
+
+static void messaging_snapshot(const char *path, const char *state)
+{
+    if (path == NULL) return;
+    char output[1024];
+    snprintf(output, sizeof(output), "%s-messaging-%s.ppm", path, state);
+    write_frame(output);
+}
+
+static void check_watch_messaging(const char *path)
+{
+    unsigned starts = talk_starts, stops = talk_stops, selections = agent_selections;
+    room_ui_set_messaging_handler(request_messaging);
+    room_ui_facts_t facts = {.wifi = ROOM_UI_WIFI_CONNECTED,
+        .gateway = ROOM_UI_GATEWAY_CONNECTED, .talk = ROOM_UI_TALK_READY};
+    room_ui_store_facts(&facts);
+    room_messaging_snapshot_t access = {.state = ROOM_MESSAGING_REQUIRED,
+        .revision = 42, .connected = true, .can_request = true};
+    room_ui_store_messaging(&access);
+    assert(room_ui_watch_menu("settings") == ESP_OK);
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_ENVELOPE "  Messaging")));
+    assert(visible_watch_text("Messaging off"));
+    lv_obj_t *request = lv_obj_get_parent(find_visible_text(lv_layer_top(), "Request access"));
+    lv_area_t area;
+    lv_obj_get_coords(request, &area);
+    assert(area.x1 >= 26 && area.x2 < 342 && area.y2 < 376 && lv_obj_get_height(request) >= 44);
+    messaging_snapshot(path, "required");
+    assert(room_ui_apply_display_brightness(0) == ESP_OK);
+    click_talk(request);
+    assert(messaging_requests == 0 && brightness > 0);
+    click_talk(request);
+    assert(messaging_requests == 1 && messaging_revision == 42);
+    click_talk(request);
+    assert(messaging_requests == 1);
+    access.state = ROOM_MESSAGING_WAITING; access.revision = 43; access.can_request = false; access.busy = true;
+    room_ui_store_messaging(&access);
+    assert(visible_watch_text("Awaiting approval") && visible_watch_text("Talk unavailable"));
+    assert(!visible_watch_text("Start Talk"));
+    messaging_snapshot(path, "waiting");
+    // A timed-out RPC retains connection ownership until its callback is drained.
+    access.state = ROOM_MESSAGING_EXPIRED; ++access.revision;
+    room_ui_store_messaging(&access);
+    assert(visible_watch_text("Request expired") && visible_watch_text("Talk unavailable"));
+    assert(!visible_watch_text("Start Talk"));
+    access.state = ROOM_MESSAGING_ERROR; ++access.revision;
+    room_ui_store_messaging(&access);
+    assert(visible_watch_text("Talk unavailable") && !visible_watch_text("Start Talk"));
+    access.busy = false; access.can_request = true;
+    room_ui_store_messaging(&access);
+    assert(visible_watch_text("Start Talk"));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " Settings")));
+    assert(visible_watch_text("Settings"));
+    access.state = ROOM_MESSAGING_READY; access.revision = 44; access.busy = false;
+    room_ui_store_messaging(&access);
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_ENVELOPE "  Messaging")));
+    assert(visible_watch_text("Messaging enabled") && !visible_watch_text("Request access"));
+    messaging_snapshot(path, "enabled");
+    access.state = ROOM_MESSAGING_REQUIRED; access.revision = 45; access.can_request = true;
+    room_ui_store_messaging(&access);
+    touch_talk(request, true);
+    ++access.revision;
+    room_ui_store_messaging(&access);
+    touch_talk(request, false);
+    assert(messaging_requests == 1);
+    // Admission can change without an approval revision (for example, Talk starts).
+    touch_talk(request, true);
+    access.can_request = false;
+    room_ui_store_messaging(&access);
+    access.can_request = true;
+    room_ui_store_messaging(&access);
+    touch_talk(request, false);
+    assert(messaging_requests == 1);
+    touch_talk(request, true);
+    assert(room_diagnostics_open() == ESP_OK);
+    room_diagnostics_close();
+    touch_talk(request, false);
+    assert(messaging_requests == 1);
+    touch_talk(request, true);
+    assert(room_ui_watch_menu("home") == ESP_OK);
+    touch_talk(request, false);
+    assert(messaging_requests == 1);
+    assert(room_ui_watch_menu("devices") == ESP_OK);
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_HOME "  This Watch")));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_ENVELOPE "  Messaging")));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " This Watch")));
+    assert(visible_watch_text("This Watch"));
+    assert(room_ui_watch_menu("messaging") == ESP_OK);
+    access.can_request = false; access.connected = false;
+    room_ui_store_messaging(&access);
+    assert(visible_watch_text("Connect to your Gateway before requesting access."));
+    click_talk(request);
+    assert(messaging_requests == 1);
+    messaging_snapshot(path, "offline");
+    access.state = ROOM_MESSAGING_CONNECTING; ++access.revision;
+    room_ui_store_messaging(&access);
+    assert(visible_watch_text("Connecting") && visible_watch_text("Connecting..."));
+    messaging_snapshot(path, "connecting");
+    access.state = ROOM_MESSAGING_ERROR; ++access.revision; access.can_request = true;
+    room_ui_store_messaging(&access);
+    assert(visible_watch_text("Couldn't enable messaging"));
+    messaging_snapshot(path, "error");
+    click_talk(request);
+    assert(messaging_requests == 2 && messaging_revision == access.revision);
+    access.state = ROOM_MESSAGING_REJECTED; ++access.revision; access.connected = true;
+    room_ui_store_messaging(&access);
+    assert(visible_watch_text("Request declined") && visible_watch_text("Try again"));
+    access.state = ROOM_MESSAGING_EXPIRED; ++access.revision;
+    room_ui_store_messaging(&access);
+    assert(visible_watch_text("Request expired"));
+    assert(talk_starts == starts && talk_stops == stops && agent_selections == selections);
+    assert(room_ui_watch_menu("home") == ESP_OK);
+    puts("watch messaging: approval states, wake, duplicate and stale presses, retry, and parent navigation passed");
+}
+
 static unsigned voice_begins, voice_finishes, voice_cancels, voice_sends;
 static uint32_t voice_request_generation;
 static void voice_action(room_voice_action_t action, uint32_t generation, uint64_t revision, uint64_t owner)
@@ -2214,6 +2335,7 @@ int main(int argc, char **argv)
         check_watch_home_gesture();
         check_watch_devices(argc == 3 ? argv[2] : NULL);
         check_watch_display_settings(argc == 3 ? argv[2] : NULL);
+        check_watch_messaging(argc == 3 ? argv[2] : NULL);
         check_watch_voice(argc == 3 ? argv[2] : NULL);
         // This isolated fixture replaces and destroys the mascot singleton.
         check_watch_repaint();

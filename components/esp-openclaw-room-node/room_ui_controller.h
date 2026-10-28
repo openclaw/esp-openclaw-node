@@ -6,6 +6,7 @@
 #include "room_agent_directory.h"
 #include "esp_openclaw_devices.h"
 #include "room_voice_draft.h"
+#include "room_messaging.h"
 
 typedef enum {
     ROOM_UI_IDLE = 0,
@@ -69,6 +70,9 @@ void room_ui_set_talk_action_handler(void (*handler)(bool start, uint64_t recipi
 void room_ui_set_voice_action_handler(void (*handler)(room_voice_action_t action, uint32_t generation,
                                                      uint64_t recipient_revision, uint64_t owner_incarnation));
 void room_ui_store_voice(const room_voice_snapshot_t *snapshot);
+/** Queue the displayed permission revision; the supervisor owns the request. */
+void room_ui_set_messaging_handler(void (*handler)(unsigned revision));
+void room_ui_store_messaging(const room_messaging_snapshot_t *snapshot);
 /** Records directory intent without waiting for the Gateway or room owner lock. */
 void room_ui_set_agents_action_handler(void (*handler)(bool open, size_t offset));
 /** Copy a directory result outside the room owner lock; repaint retries on contention. */
@@ -106,7 +110,7 @@ void room_ui_set(room_ui_state_t state, const char *detail);
 void room_ui_store_facts(const room_ui_facts_t *facts);
 /** Repaint the most recently set state, e.g. after leaving canvas mode. */
 void room_ui_refresh(void);
-/** Open a local watch page (menu, agents, conversations, settings, display, connection, canvas, home) without changing Talk. */
+/** Open a local watch page (menu, agents, conversations, settings, display, messaging, connection, canvas, home) without changing Talk. */
 esp_err_t room_ui_watch_menu(const char *page);
 /** Runtime Watch preference; sleep and camera visibility remain controller-owned. */
 esp_err_t room_ui_watch_brightness(int percent);

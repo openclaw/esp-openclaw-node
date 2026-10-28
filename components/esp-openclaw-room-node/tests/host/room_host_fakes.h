@@ -54,6 +54,7 @@ typedef struct {
     bool finish_after_recording_snapshot;
     room_recording_snapshot_t recording;
     room_voice_snapshot_t voice;
+    room_messaging_snapshot_t messaging;
     bool reject_task_creation;
     unsigned operator_connect_requests, node_connect_requests;
     room_ui_state_t ui;

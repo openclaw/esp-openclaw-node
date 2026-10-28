@@ -1,5 +1,47 @@
 # esp-openclaw-talk
 
+## Transcription drafts
+
+`esp_openclaw_transcription.h` provides a separate transcription-only client
+for recorded input. It uses `talk.session.create` with `mode: transcription`,
+`transport: gateway-relay`, and `brain: none`. The existing operator connection
+needs `operator.talk` and a configured Gateway transcription provider. It does
+not select an agent, open Live Talk, request new scopes, or submit chat messages.
+This is the transport prerequisite for the Watch's planned record/review/Send
+flow; microphone capture and that UI are not connected to this API yet.
+
+Begin once and publish the handle under the owner lock used by event forwarding,
+so an early ready event cannot be lost. Forward `talk.event` from that node and wait for `READY` before
+appending raw **8 kHz mono G.711 mu-law** audio. Each append copies at most 3,200
+bytes; wait for its acknowledgement (`READY` again) before the next chunk. The
+whole session accepts at most 240,000 bytes (30 seconds). PCM and WAV must be
+converted by the capture owner before submission. No audio buffer is retained
+by this client after queue submission.
+
+After the last acknowledged chunk, call `finish`. Continue forwarding events
+until `COMPLETE`: the close acknowledgement only begins the provider's final
+drain. Final transcript segments accumulate with spaces; partials and synthetic
+commit/turn-ended events cannot finish a draft. `COMPLETE` with empty text means
+no speech. A failed/canceled session exposes no text. Drafts exceeding 2,047
+bytes fail instead of silently truncating. Only a later explicit user Send
+action should submit a complete draft through a separately authorized chat API.
+
+Call `poll` periodically to enforce the 15-second request/readiness/inactivity
+deadline and 10-second final-drain deadline. A replaced connection fails the
+session; neither audio nor cleanup is replayed on another connection. Cancel
+discards text and closes only the original session, including a late create
+response. Stop event forwarding before destroying the handle. If `destroy`
+returns `ESP_ERR_INVALID_STATE`, keep polling and retry: cleanup still needs a
+pending response or queue space. `ESP_OK` releases ownership. The node must
+outlive outstanding RPC callbacks; those callbacks retain the handle internally.
+
+The wire contract follows the audited [Gateway relay implementation](https://github.com/openclaw/openclaw/blob/5a4472678cfc08d5d286bcebec8889f8cb414fb7/src/gateway/talk-transcription-relay.ts)
+and [session handlers](https://github.com/openclaw/openclaw/blob/5a4472678cfc08d5d286bcebec8889f8cb414fb7/src/gateway/server-methods/talk-session.ts).
+Run its host lifecycle tests with `tests/run_host_tests.py --transcription --sanitize`
+and the normal ESP-IDF/cJSON/SDK path arguments described below.
+
+## Live Talk
+
 Talk posts SDP and its single-use broker credential directly to the Gateway's
 `offerUrl`. HTTP redirects (including same-origin redirects) fail the exchange;
 configure the final offer URL in the Gateway or reverse proxy. Request-header

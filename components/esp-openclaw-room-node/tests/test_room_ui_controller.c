@@ -226,6 +226,7 @@ static void read_touch(lv_indev_t *indev, lv_indev_data_t *data)
 
 static void touch_talk(lv_obj_t *button, bool pressed)
 {
+    assert(button != NULL);
     if (touchscreen == NULL) {
         touchscreen = lv_indev_create();
         lv_indev_set_type(touchscreen, LV_INDEV_TYPE_POINTER);
@@ -552,7 +553,8 @@ static void check_watch_navigation(void)
     room_ui_show_face_hint(1000);
     assert(!room_face_is_visible() && brightness == ROOM_CANVAS_ACTIVE_BRIGHTNESS);
     assert(!canvas_active);
-    lv_obj_t *connection = lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_WIFI "  Connection"));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_SETTINGS "  Settings")));
+    lv_obj_t *connection = lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_WIFI "  Connection"));
     click_talk(connection);
     assert(lv_obj_is_visible(find_text(lv_layer_top(), "Wi-Fi: Connected")));
     facts.talk = ROOM_UI_TALK_ACTIVE;
@@ -564,7 +566,10 @@ static void check_watch_navigation(void)
     unsigned stopped = talk_stops;
     click_talk(stop);
     assert(talk_stops == stopped + 1);
-    lv_obj_t *home_button = lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_LEFT " Home"));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " Settings")));
+    assert(visible_watch_text("Settings"));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " Menu")));
+    lv_obj_t *home_button = lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " Home"));
     click_talk(home_button);
     assert(lv_obj_is_visible(find_text(lv_layer_top(), "Conversation live")));
     assert(room_face_is_visible());
@@ -1159,24 +1164,61 @@ static void check_watch_display_settings(const char *path)
     room_ui_store_facts(&facts);
     room_ui_set(ROOM_UI_IDLE, NULL);
     assert(room_ui_watch_menu("menu") == ESP_OK);
-    click_talk(lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_SETTINGS "  Settings")));
-    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Settings")));
-    click_talk(lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_IMAGE "  Display")));
-    assert(lv_obj_is_visible(find_text(lv_layer_top(), "80%")) && brightness == 80);
-    lv_obj_t *minus = lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_MINUS "  5%"));
-    lv_obj_t *plus = lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_PLUS "  5%"));
+    if (path) {
+        char output[1024];
+        snprintf(output, sizeof(output), "%s-local-menu.ppm", path);
+        write_frame(output);
+    }
+    lv_obj_t *devices = find_visible_text(lv_layer_top(), LV_SYMBOL_CHARGE "  Devices");
+    assert(devices != NULL && lv_obj_is_visible(devices));
+    click_talk(lv_obj_get_parent(devices));
+    assert(visible_watch_text("Devices"));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_HOME "  This Watch")));
+    assert(visible_watch_text("This Watch"));
+    const char *controls[] = {LV_SYMBOL_IMAGE "  Display", LV_SYMBOL_WIFI "  Connection", LV_SYMBOL_SETTINGS "  Device status"};
+    for (unsigned i = 0; i < 3; ++i) {
+        lv_obj_t *control = lv_obj_get_parent(find_visible_text(lv_layer_top(), controls[i]));
+        lv_area_t area;
+        lv_obj_get_coords(control, &area);
+        assert(lv_obj_get_height(control) >= 44 && area.x1 >= 26 && area.x2 < 342 && area.y2 < 376);
+    }
+    if (path) {
+        char output[1024];
+        snprintf(output, sizeof(output), "%s-local-device.ppm", path);
+        write_frame(output);
+    }
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_WIFI "  Connection")));
+    assert(visible_watch_text("Wi-Fi: Connected"));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " This Watch")));
+    assert(visible_watch_text("This Watch"));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_SETTINGS "  Device status")));
+    assert(room_diagnostics_is_open());
+    room_diagnostics_close();
+    assert(visible_watch_text("This Watch"));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_IMAGE "  Display")));
+    assert(lv_obj_is_visible(find_visible_text(lv_layer_top(), "80%")) && brightness == 80);
+    lv_obj_t *minus = lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_MINUS "  5%"));
+    lv_obj_t *plus = lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_PLUS "  5%"));
     click_talk(minus);
-    assert(brightness == 75 && lv_obj_is_visible(find_text(lv_layer_top(), "75%")));
+    assert(brightness == 75 && lv_obj_is_visible(find_visible_text(lv_layer_top(), "75%")));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " This Watch")));
+    assert(visible_watch_text("This Watch"));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " Devices")));
+    assert(visible_watch_text("Devices"));
+    assert(room_ui_watch_menu("home") == ESP_OK);
+    assert(room_ui_watch_menu("settings") == ESP_OK);
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_IMAGE "  Display")));
+    assert(visible_watch_text("75%") && brightness == 75);
     fail_brightness = true;
     assert(room_ui_watch_brightness(50) == ESP_ERR_TIMEOUT && brightness == 75);
-    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Couldn't change. Try again.")));
+    assert(lv_obj_is_visible(find_visible_text(lv_layer_top(), "Couldn't change. Try again.")));
     fail_brightness = false;
     assert(room_ui_watch_brightness(50) == ESP_OK && brightness == 50);
-    assert(!lv_obj_is_visible(find_text(lv_layer_top(), "Couldn't change. Try again.")));
+    assert(!visible_watch_text("Couldn't change. Try again."));
     assert(room_ui_camera_indicator_begin() == ESP_OK);
     assert(room_ui_watch_brightness(10) == ESP_OK && brightness == 40);
-    assert(lv_obj_is_visible(find_text(lv_layer_top(), "10%")));
-    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Camera needs at least 40%")));
+    assert(lv_obj_is_visible(find_visible_text(lv_layer_top(), "10%")));
+    assert(lv_obj_is_visible(find_visible_text(lv_layer_top(), "Camera needs at least 40%")));
     assert(room_ui_apply_display_brightness(0) == ESP_OK && brightness == 40);
     room_ui_camera_indicator_end();
     assert(brightness == 10);
@@ -1215,30 +1257,45 @@ static void check_watch_display_settings(const char *path)
     deny_display = false;
     fire_timer("ui_repaint");
     assert(brightness == 55);
-    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Couldn't change. Try again.")));
+    assert(lv_obj_is_visible(find_visible_text(lv_layer_top(), "Couldn't change. Try again.")));
     deny_display = true;
     room_ui_refresh();
     deny_display = false;
     assert(room_ui_watch_brightness(65) == ESP_OK);
     fire_timer("ui_repaint");
     assert(brightness == 65);
-    assert(!lv_obj_is_visible(find_text(lv_layer_top(), "Couldn't change. Try again.")));
+    assert(!visible_watch_text("Couldn't change. Try again."));
     assert(room_ui_watch_brightness(0) == ESP_ERR_INVALID_ARG && brightness == 65);
     facts.wifi = ROOM_UI_WIFI_OFFLINE;
     facts.gateway = ROOM_UI_GATEWAY_OFFLINE;
     room_ui_store_facts(&facts);
     room_ui_refresh();
-    assert(lv_obj_is_visible(find_text(lv_layer_top(), "65%")));
+    assert(lv_obj_is_visible(find_visible_text(lv_layer_top(), "65%")));
+    assert(room_ui_watch_menu("devices") == ESP_OK);
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_HOME "  This Watch")));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_IMAGE "  Display")));
+    assert(visible_watch_text("65%"));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " This Watch")));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_WIFI "  Connection")));
+    assert(visible_watch_text("Wi-Fi: Offline"));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " This Watch")));
+    lv_obj_t *display_button = lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_IMAGE "  Display"));
+    touch_talk(display_button, true);
+    assert(room_ui_watch_menu("home") == ESP_OK);
+    touch_talk(display_button, false);
+    assert(lv_obj_is_visible(watch_menu_button));
+    assert(room_ui_watch_menu("settings") == ESP_OK);
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_IMAGE "  Display")));
     assert(talk_starts == starts && talk_stops == stops && agent_selections == selections);
     if (path) {
         char output[1024];
         snprintf(output, sizeof(output), "%s-display.ppm", path);
         write_frame(output);
     }
-    click_talk(lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_LEFT " Settings")));
-    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Settings")));
-    click_talk(lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_LEFT " Menu")));
-    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Menu")));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " Settings")));
+    assert(lv_obj_is_visible(find_visible_text(lv_layer_top(), "Settings")));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " Menu")));
+    assert(lv_obj_is_visible(find_visible_text(lv_layer_top(), "Menu")));
     assert(room_ui_watch_menu("home") == ESP_OK);
     expire_watch_hint();
     puts("watch display: accepted writes, failures, camera floor, sleep, stale presses and offline navigation passed");

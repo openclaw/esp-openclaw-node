@@ -5,6 +5,8 @@
 #include <string.h>
 
 #include "esp_timer.h"
+#include "esp_random.h"
+#include "esp_openclaw_chat.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -71,6 +73,12 @@ static struct {
     int64_t approval_started;
     char *approved_token;
     bool write_registered, reset_client;
+    esp_openclaw_chat_handle_t chat;
+    dial_reply_snapshot_t reply;
+    char reply_key[ESP_OPENCLAW_SESSION_KEY_BYTES];
+    unsigned reply_generation;
+    uint32_t reply_connection;
+    bool reply_prepare, reply_send, reply_submitted;
 } reader;
 
 static void messaging_state(dial_messaging_state_t state)
@@ -121,6 +129,125 @@ static bool current_reader(void)
         atomic_load(&pending_event) == NONE &&
         reader.status == READY && reader.attempt == reader.generation &&
         reader.reader_id != 0 && reader.reader_id == esp_openclaw_node_get_connection_id(reader.client);
+}
+
+static bool reply_active(void)
+{
+    return reader.reply.state == DIAL_REPLY_SENDING || reader.reply.state == DIAL_REPLY_ACCEPTED;
+}
+
+static bool reply_owner(void)
+{
+    return current_reader() && reader.reply_generation == reader.generation &&
+        reader.reply_connection == reader.reader_id;
+}
+
+static bool reply_target(void)
+{
+    const dial_conversations_snapshot_t *view = reader.conversations;
+    return reply_owner() && view != NULL && view->state == DIAL_AGENTS_READY &&
+        view->selected < view->page.count &&
+        strcmp(view->agent.id, reader.reply.agent.id) == 0 &&
+        strcmp(view->page.sessions[view->selected].key, reader.reply_key) == 0;
+}
+
+static bool reply_sendable(void)
+{
+    return reply_target() && reader.messaging.state == DIAL_MESSAGING_READY &&
+        reader.reply.preview_revision == reader.preview_revision;
+}
+
+static void reply_state(dial_reply_state_t state, const char *detail)
+{
+    if (reader.reply.state != state || strcmp(reader.reply.detail, detail) != 0) {
+        reader.reply.state = state;
+        strcpy(reader.reply.detail, detail);
+        ++reader.reply.revision;
+    }
+}
+
+static void release_chat(void)
+{
+    if (reader.chat != NULL) esp_openclaw_chat_destroy(reader.chat);
+    reader.chat = NULL;
+    reader.reply_prepare = reader.reply_send = false;
+}
+
+/* The SDK releases its state lock before forwarding events. Serialize this
+ * handle with UI actions and worker destruction; RPC callbacks own their refs. */
+static void reply_event(esp_openclaw_node_handle_t client, const char *event,
+                        const char *payload, void *context)
+{
+    (void)context;
+    xSemaphoreTake(reader.lock, portMAX_DELAY);
+    if (client == reader.client && reader.chat != NULL)
+        esp_openclaw_chat_event(reader.chat, client, event, payload);
+    xSemaphoreGive(reader.lock);
+    wake_reader();
+}
+
+static void poll_reply(void)
+{
+    xSemaphoreTake(reader.lock, portMAX_DELAY);
+    if (reader.reply_prepare && reply_sendable()) {
+        reader.reply_prepare = false;
+        if (esp_openclaw_chat_prepare(reader.client, reader.reply_key, reader.reply.agent.id,
+                                      &reader.chat) != ESP_OK)
+            reply_state(DIAL_REPLY_FAILED, "Could not prepare. Choose a reply again.");
+    }
+    if (reader.chat != NULL) {
+        esp_openclaw_chat_snapshot_t chat;
+        esp_openclaw_chat_poll(reader.chat);
+        esp_openclaw_chat_copy(reader.chat, &chat);
+        switch (chat.state) {
+        case ESP_OPENCLAW_CHAT_PREPARING: break;
+        case ESP_OPENCLAW_CHAT_READY:
+            if (!reader.reply_send && reader.reply.state != DIAL_REPLY_REVIEW)
+                reply_state(DIAL_REPLY_REVIEW, "Review before sending.");
+            break;
+        case ESP_OPENCLAW_CHAT_SENDING:
+            reply_state(DIAL_REPLY_SENDING, "Waiting for the Gateway."); break;
+        case ESP_OPENCLAW_CHAT_RUNNING:
+            reply_state(DIAL_REPLY_ACCEPTED, "Accepted. Waiting for the agent."); break;
+        case ESP_OPENCLAW_CHAT_COMPLETE:
+            reply_state(DIAL_REPLY_SENT, "Sent. Check the conversation; agent work may continue."); break;
+        case ESP_OPENCLAW_CHAT_HANDED_OFF:
+            reply_state(DIAL_REPLY_SENT, "Handed off. Work may continue; check the conversation."); break;
+        case ESP_OPENCLAW_CHAT_ABORTED:
+            reply_state(DIAL_REPLY_FAILED, "Agent stopped. Check the conversation before retrying."); break;
+        case ESP_OPENCLAW_CHAT_FAILED:
+            reply_state(DIAL_REPLY_FAILED, reader.reply_submitted ?
+                "Agent reported a failure. Check the conversation before retrying." :
+                "Could not prepare. Choose a reply again."); break;
+        case ESP_OPENCLAW_CHAT_OUTCOME_UNKNOWN:
+            reply_state(DIAL_REPLY_UNKNOWN, "Outcome unknown. Check the conversation before retrying."); break;
+        }
+    }
+    /* Selection changes revoke unsent drafts, but cannot retarget or abort an
+     * submitted turn. A completed result survives a later transport loss. */
+    bool lost = !reply_owner() || reader.messaging.state != DIAL_MESSAGING_READY;
+    if ((!reader.reply_submitted && !reply_sendable()) || lost) {
+        if (reader.reply.state == DIAL_REPLY_PREPARING || reader.reply.state == DIAL_REPLY_REVIEW ||
+            reply_active())
+            reply_state(reader.reply_submitted ? DIAL_REPLY_UNKNOWN : DIAL_REPLY_FAILED,
+                reader.reply_submitted ? "Outcome unknown. Check the conversation before retrying." :
+                "Selection or connection changed. Choose a reply again.");
+        release_chat();
+    } else if (reader.reply_send) {
+        reader.reply_send = false;
+        unsigned char random[16];
+        char id[33];
+        static const char hex[] = "0123456789abcdef";
+        esp_fill_random(random, sizeof(random));
+        for (size_t i = 0; i < sizeof(random); ++i) {
+            id[i * 2] = hex[random[i] >> 4]; id[i * 2 + 1] = hex[random[i] & 15];
+        }
+        id[32] = '\0';
+        if (esp_openclaw_chat_send(reader.chat, reader.reply.text, id) == ESP_OK)
+            reader.reply_submitted = true;
+        else reply_state(DIAL_REPLY_REVIEW, "Could not queue. Try Send again.");
+    }
+    xSemaphoreGive(reader.lock);
 }
 
 static void clear_conversations(void)
@@ -404,6 +531,7 @@ static esp_err_t create_client(void)
     config.model_identifier = "m5stack-dial";
     config.role = "operator";
     config.event_cb = reader_event;
+    config.gateway_event_cb = reply_event;
     esp_err_t err = esp_openclaw_node_create(&config, &reader.client);
     if (err == ESP_OK) {
         err = esp_openclaw_node_register_scope(reader.client, "operator.read");
@@ -642,6 +770,7 @@ static void reader_task(void *context)
         consume_approval();
         consume_event();
         consume_response();
+        poll_reply();
         reset_idle_client();
         xSemaphoreTake(reader.lock, portMAX_DELAY);
         if ((reader.messaging.state == DIAL_MESSAGING_REQUESTING ||
@@ -663,9 +792,9 @@ static void reader_task(void *context)
         }
         if (reader.inflight != NULL && reader.inflight->timed_out &&
             reader.messaging.state != DIAL_MESSAGING_REQUESTING &&
-            reader.messaging.state != DIAL_MESSAGING_WAITING) {
+            reader.messaging.state != DIAL_MESSAGING_WAITING && !reply_active()) {
             /* Report the read deadline immediately, but keep an outstanding
-             * approval wait alive until its own bounded deadline. Closing the
+             * approval wait or submitted chat alive until its own deadline. Closing the
              * socket earlier can orphan a newly rotated operator token. */
             reader.force_disconnect = reader.retry = true;
         }
@@ -818,6 +947,93 @@ esp_err_t dial_reader_messaging_cancel(unsigned revision)
      * cannot revoke a grant the administrator may already have approved. */
     reader.force_disconnect = reader.phase != IDLE;
     reader.retry = true;
+    xSemaphoreGive(reader.lock);
+    wake_reader();
+    return ESP_OK;
+}
+
+esp_err_t dial_reader_reply_begin(dial_reply_preset_t preset, unsigned preview_revision)
+{
+    static const char *texts[] = {"Please continue.", "Please summarize the conversation so far.",
+                                  "Please explain the last response in more detail."};
+    if (reader.lock == NULL || (unsigned)preset >= DIAL_REPLY_PRESET_COUNT) return ESP_ERR_INVALID_ARG;
+    xSemaphoreTake(reader.lock, portMAX_DELAY);
+    const dial_conversations_snapshot_t *view = reader.conversations;
+    if (!current_reader() || reader.messaging.state != DIAL_MESSAGING_READY || reply_active() ||
+        view == NULL || view->state != DIAL_AGENTS_READY || view->selected >= view->page.count ||
+        preview_revision != reader.preview_revision || view->preview_state != DIAL_AGENTS_READY ||
+        (view->preview.status != ESP_OPENCLAW_PREVIEW_OK && view->preview.status != ESP_OPENCLAW_PREVIEW_EMPTY)) {
+        xSemaphoreGive(reader.lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    release_chat();
+    unsigned revision = reader.reply.revision + 1;
+    reader.reply = (dial_reply_snapshot_t){.state = DIAL_REPLY_PREPARING, .revision = revision,
+        .preview_revision = preview_revision, .agent = view->agent};
+    strcpy(reader.reply.title, view->page.sessions[view->selected].title);
+    strcpy(reader.reply.text, texts[preset]);
+    strcpy(reader.reply.detail, "Checking this conversation.");
+    strcpy(reader.reply_key, view->page.sessions[view->selected].key);
+    reader.reply_generation = reader.generation;
+    reader.reply_connection = reader.reader_id;
+    reader.reply_submitted = false;
+    reader.reply_prepare = true;
+    xSemaphoreGive(reader.lock);
+    wake_reader();
+    return ESP_OK;
+}
+
+esp_err_t dial_reader_reply_send(unsigned revision)
+{
+    if (reader.lock == NULL) return ESP_ERR_INVALID_STATE;
+    xSemaphoreTake(reader.lock, portMAX_DELAY);
+    if (revision != reader.reply.revision || reader.reply.state != DIAL_REPLY_REVIEW ||
+        reader.chat == NULL || !reply_sendable()) {
+        xSemaphoreGive(reader.lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    reader.reply_send = true;
+    reply_state(DIAL_REPLY_SENDING, "Waiting for the Gateway.");
+    xSemaphoreGive(reader.lock);
+    wake_reader();
+    return ESP_OK;
+}
+
+void dial_reader_reply_close(unsigned revision)
+{
+    if (reader.lock == NULL) return;
+    xSemaphoreTake(reader.lock, portMAX_DELAY);
+    if (revision == reader.reply.revision && !reader.reply_submitted && !reader.reply_send) {
+        release_chat();
+        reader.reply = (dial_reply_snapshot_t){.revision = revision + 1};
+    }
+    xSemaphoreGive(reader.lock);
+}
+
+void dial_reader_reply_copy(dial_reply_snapshot_t *snapshot)
+{
+    memset(snapshot, 0, sizeof(*snapshot));
+    if (reader.lock == NULL) return;
+    xSemaphoreTake(reader.lock, portMAX_DELAY);
+    *snapshot = reader.reply;
+    snapshot->can_send = snapshot->state == DIAL_REPLY_REVIEW && reply_sendable();
+    snapshot->can_read = snapshot->state != DIAL_REPLY_IDLE && reply_target();
+    xSemaphoreGive(reader.lock);
+}
+
+esp_err_t dial_reader_reply_read(unsigned revision)
+{
+    if (reader.lock == NULL) return ESP_ERR_INVALID_STATE;
+    xSemaphoreTake(reader.lock, portMAX_DELAY);
+    if (revision != reader.reply.revision || reader.reply.state == DIAL_REPLY_IDLE || !reply_target()) {
+        xSemaphoreGive(reader.lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    dial_conversations_snapshot_t *view = reader.conversations;
+    memset(&view->preview, 0, sizeof(view->preview));
+    view->preview_revision = ++reader.preview_revision;
+    view->preview_state = DIAL_AGENTS_LOADING;
+    reader.preview_pending = true;
     xSemaphoreGive(reader.lock);
     wake_reader();
     return ESP_OK;

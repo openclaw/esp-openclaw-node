@@ -24,6 +24,7 @@ typedef int esp_err_t;
 #define ESP_ERR_INVALID_ARG 0x102
 #define ESP_ERR_INVALID_STATE 0x103
 #define ESP_ERR_NOT_FOUND 0x105
+#define ESP_ERR_TIMEOUT 0x107
 """)
         (work / "freertos/FreeRTOS.h").write_text("""#pragma once
 #include <stdint.h>
@@ -58,7 +59,9 @@ esp_err_t esp_timer_create(const esp_timer_create_args_t *, esp_timer_handle_t *
 esp_err_t esp_timer_start_once(esp_timer_handle_t, uint64_t);
 esp_err_t esp_timer_stop(esp_timer_handle_t);
 """)
+        (work / "esp_random.h").write_text("#pragma once\n#include <stddef.h>\nvoid esp_fill_random(void *, size_t);\n")
         directory = root / "components/esp-openclaw-directory"
+        chat = root / "components/esp-openclaw-chat"
         binary = work / "reader-test"
         cjson_object = work / "cjson.o"
         subprocess.run(["cc", "-std=gnu11", "-g", "-fsanitize=address,undefined",
@@ -69,10 +72,10 @@ esp_err_t esp_timer_stop(esp_timer_handle_t);
             "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
             "-I", str(work), "-I", str(tests.parent / "main"),
             "-I", str(root / "components/esp-openclaw-node/include"),
-            "-I", str(directory / "include"),
+            "-I", str(directory / "include"), "-I", str(chat / "include"),
             "-I", str(args.cjson_dir), str(tests / "test_dial_reader.c"),
             str(tests.parent / "main/dial_reader.c"), str(directory / "esp_openclaw_directory.c"),
-            str(directory / "esp_openclaw_devices.c"),
+            str(directory / "esp_openclaw_devices.c"), str(chat / "src/esp_openclaw_chat.c"),
             str(cjson_object), "-lm", "-o", str(binary),
         ], check=True)
         subprocess.run([str(binary)], check=True)

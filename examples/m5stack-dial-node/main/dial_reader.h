@@ -5,6 +5,7 @@
 #include "esp_openclaw_devices.h"
 #include "dial_directory.h"
 #include "dial_messaging.h"
+#include "dial_reply.h"
 
 /* The node remains usable when optional operator access is unavailable. */
 esp_err_t dial_reader_start(esp_openclaw_node_handle_t node);
@@ -32,3 +33,10 @@ void dial_reader_conversations_copy(dial_conversations_snapshot_t *snapshot);
 /* Never allocates or copies transcript pages. An unavailable connection clears
  * the Home context immediately, before the reader worker repaints its state. */
 void dial_reader_home_copy(dial_home_context_t *context);
+
+/* A draft is bound to the visible preview; Send is an explicit revision-fenced intent. */
+esp_err_t dial_reader_reply_begin(dial_reply_preset_t preset, unsigned preview_revision);
+esp_err_t dial_reader_reply_send(unsigned revision);
+void dial_reader_reply_close(unsigned revision);
+void dial_reader_reply_copy(dial_reply_snapshot_t *snapshot);
+esp_err_t dial_reader_reply_read(unsigned revision);

@@ -9,6 +9,24 @@
 static void render(dial_navigation_t *nav);
 static lv_image_dsc_t avatar_sources[3];
 
+static bool reply_page(dial_navigation_view_t view)
+{
+    return view == DIAL_NAV_REPLY_PICKER || view == DIAL_NAV_REPLY_REVIEW || view == DIAL_NAV_REPLY_ACTIONS;
+}
+
+static bool reply_busy(const dial_navigation_t *nav)
+{
+    return nav->reply.state == DIAL_REPLY_SENDING || nav->reply.state == DIAL_REPLY_ACCEPTED;
+}
+
+static bool reply_available(const dial_navigation_t *nav)
+{
+    return nav->conversations != NULL && nav->conversation_state == DIAL_AGENTS_READY &&
+        nav->preview_state == DIAL_AGENTS_READY && nav->conversations->selected < nav->conversations->page.count &&
+        (nav->conversations->preview.status == ESP_OPENCLAW_PREVIEW_OK ||
+         nav->conversations->preview.status == ESP_OPENCLAW_PREVIEW_EMPTY);
+}
+
 static lv_obj_t *avatar_image(lv_obj_t *parent, int x, int y, int size)
 {
     lv_obj_t *image = lv_image_create(parent);
@@ -55,9 +73,28 @@ static void back(dial_navigation_t *nav)
 {
     if (nav->view == DIAL_NAV_MENU) nav->handler(DIAL_NAV_HOME, 0, nav->context);
     else {
+        if (nav->view == DIAL_NAV_REPLY_ACTIONS) {
+            nav->view = DIAL_NAV_REPLY_REVIEW;
+            changed(nav);
+            return;
+        }
+        if (nav->view == DIAL_NAV_REPLY_REVIEW) {
+            bool draft = nav->reply.state == DIAL_REPLY_PREPARING || nav->reply.state == DIAL_REPLY_REVIEW;
+            nav->handler(DIAL_NAV_REPLY_CLOSE, nav->reply.revision, nav->context);
+            nav->view = draft ? DIAL_NAV_REPLY_PICKER : DIAL_NAV_PREVIEW;
+            nav->focus = 0;
+            changed(nav);
+            return;
+        }
+        if (nav->view == DIAL_NAV_REPLY_PICKER) {
+            nav->view = DIAL_NAV_PREVIEW;
+            changed(nav);
+            return;
+        }
         if (nav->view == DIAL_NAV_MESSAGING) {
-            nav->view = DIAL_NAV_SETTINGS;
-            nav->focus = 2;
+            bool reply = reply_page(nav->settings_parent);
+            nav->view = reply ? nav->settings_parent : DIAL_NAV_SETTINGS;
+            nav->focus = reply ? 0 : 2;
             changed(nav);
             return;
         }
@@ -398,6 +435,95 @@ static void render_messaging(dial_navigation_t *nav)
     }
 }
 
+typedef enum { REPLY_SEND, REPLY_PRESETS, REPLY_READ, REPLY_ACCESS, REPLY_REVIEW } reply_action_t;
+
+static unsigned reply_actions(const dial_navigation_t *nav, reply_action_t actions[3])
+{
+    unsigned count = 0;
+    if (nav->reply.state == DIAL_REPLY_REVIEW) {
+        if (nav->messaging.state != DIAL_MESSAGING_READY) actions[count++] = REPLY_ACCESS;
+        else if (nav->reply.can_send) actions[count++] = REPLY_SEND;
+    } else if (nav->reply.can_read) actions[count++] = REPLY_READ;
+    if (!reply_busy(nav)) actions[count++] = REPLY_PRESETS;
+    actions[count++] = REPLY_REVIEW;
+    return count;
+}
+
+static void reply_button(dial_navigation_t *nav, unsigned row, const char *name, const char *icon, bool bottom)
+{
+    lv_obj_set_hidden(nav->rows[row], false);
+    lv_obj_set_pos(nav->rows[row], bottom ? 52 : 38, bottom ? 176 : 64 + (int)row * 44);
+    lv_obj_set_size(nav->rows[row], bottom ? 136 : 164, bottom ? 28 : 36);
+    lv_obj_set_pos(nav->icons[row], 12, bottom ? 5 : 9);
+    lv_obj_set_pos(nav->names[row], 40, bottom ? 5 : 9);
+    lv_obj_set_width(nav->names[row], bottom ? 88 : 112);
+    lv_label_set_text_static(nav->names[row], name);
+    lv_label_set_text_static(nav->icons[row], icon);
+    bool focus = bottom || nav->focus == row;
+    lv_obj_set_style_bg_color(nav->rows[row], lv_color_hex(focus ? 0xf4efee : 0x302535), 0);
+    lv_color_t color = lv_color_hex(focus ? 0x302131 : 0xf4efee);
+    lv_obj_set_style_text_color(nav->names[row], color, 0);
+    lv_obj_set_style_text_color(nav->icons[row], color, 0);
+}
+
+static void render_reply(dial_navigation_t *nav)
+{
+    lv_obj_set_hidden(nav->description, true);
+    lv_obj_set_hidden(nav->identity, true);
+    lv_obj_set_hidden(nav->preview_body, true);
+    for (unsigned i = 0; i < 3; ++i) lv_obj_set_hidden(nav->rows[i], true);
+    lv_obj_set_hidden(nav->hint, false);
+    nav->first = 0;
+    if (nav->view == DIAL_NAV_REPLY_REVIEW) {
+        const char *titles[] = {"Reply", "Preparing", "Review", "Sending", "Accepted", "Sent", "Check reply", "Reply failed"};
+        lv_label_set_text_static(nav->heading, titles[nav->reply.state]);
+        lv_obj_set_hidden(nav->preview_body, false);
+        lv_obj_set_pos(nav->preview_body, 44, 70);
+        lv_obj_set_height(nav->preview_body, 100);
+        char body[768];
+        const char *detail = nav->reply_action_failed ? "Action unavailable. Go back to the conversation and try again." :
+            nav->reply.state == DIAL_REPLY_UNKNOWN ? "Check this conversation before trying again." : nav->reply.detail;
+        snprintf(body, sizeof(body), "%s\n%s\n\n%s\n\n%s\n\nAgent: %s", nav->reply.agent.name,
+            nav->reply.title, nav->reply.text, detail, nav->reply.agent.id);
+        if (strcmp(lv_label_get_text(nav->preview_text), body) != 0) {
+            lv_label_set_text(nav->preview_text, body);
+            lv_obj_scroll_to_y(nav->preview_body, 0, LV_ANIM_OFF);
+        }
+        nav->count = 1;
+        nav->focus = 0;
+        reply_button(nav, 0, "Actions", LV_SYMBOL_LIST, true);
+        lv_obj_set_hidden(nav->hint, true);
+        return;
+    }
+    lv_label_set_text_static(nav->heading, nav->view == DIAL_NAV_REPLY_PICKER ? "Quick reply" : "Actions");
+    lv_label_set_text_static(nav->hint, nav->reply_action_failed ? "Back to retry" : "Turn + press");
+    if (nav->view == DIAL_NAV_REPLY_PICKER && nav->messaging.state != DIAL_MESSAGING_READY) {
+        nav->count = 1;
+        nav->focus = 0;
+        lv_obj_set_hidden(nav->description, false);
+        lv_obj_set_pos(nav->description, 44, 76);
+        lv_obj_set_size(nav->description, 152, 80);
+        lv_obj_set_style_text_font(nav->description, &lv_font_montserrat_14, 0);
+        lv_label_set_long_mode(nav->description, LV_LABEL_LONG_WRAP);
+        lv_label_set_text_static(nav->description, "Messaging access needed.\n\nRequest approval in Settings.");
+        reply_button(nav, 0, "Messaging", LV_SYMBOL_SETTINGS, true);
+        lv_obj_set_hidden(nav->hint, true);
+        return;
+    }
+    const char *presets[] = {"Continue", "Summarize", "Explain more"};
+    const char *names[] = {"Send", "Presets", "Read reply", "Messaging", "Review"};
+    const char *icons[] = {LV_SYMBOL_UP, LV_SYMBOL_LIST, LV_SYMBOL_LIST, LV_SYMBOL_SETTINGS, LV_SYMBOL_LEFT};
+    reply_action_t actions[3];
+    nav->count = nav->view == DIAL_NAV_REPLY_PICKER ? DIAL_REPLY_PRESET_COUNT : reply_actions(nav, actions);
+    if (nav->focus >= nav->count) nav->focus = 0;
+    for (unsigned i = 0; i < nav->count; ++i) {
+        const char *name = nav->view == DIAL_NAV_REPLY_PICKER ? presets[i] : names[actions[i]];
+        if (nav->view == DIAL_NAV_REPLY_ACTIONS && actions[i] == REPLY_PRESETS && nav->reply.state >= DIAL_REPLY_SENT)
+            name = "New reply";
+        reply_button(nav, i, name, nav->view == DIAL_NAV_REPLY_PICKER ? LV_SYMBOL_RIGHT : icons[actions[i]], false);
+    }
+}
+
 bool dial_navigation_has_devices(const dial_navigation_t *nav)
 {
     return nav->view == DIAL_NAV_DEVICES || nav->view == DIAL_NAV_DEVICE_DETAIL;
@@ -503,6 +629,10 @@ static void render(dial_navigation_t *nav)
         render_messaging(nav);
         return;
     }
+    if (reply_page(nav->view)) {
+        render_reply(nav);
+        return;
+    }
     if (nav->view == DIAL_NAV_ACTIVITY) {
         lv_label_set_text_static(nav->heading, "Activity");
         lv_obj_set_hidden(nav->description, false);
@@ -571,10 +701,10 @@ static void render(dial_navigation_t *nav)
         lv_label_set_text(nav->heading, nav->conversations->page.sessions[nav->conversations->selected].title);
     lv_obj_set_hidden(nav->preview_body, !preview);
     lv_obj_set_pos(nav->preview_body, 44, 70);
-    lv_obj_set_height(nav->preview_body, 112);
+    lv_obj_set_height(nav->preview_body, preview && reply_available(nav) ? 100 : 112);
     lv_obj_set_hidden(nav->description, !detail && !message);
     lv_obj_set_hidden(nav->identity, !detail);
-    lv_obj_set_hidden(nav->hint, message);
+    lv_obj_set_hidden(nav->hint, message || (preview && reply_available(nav)));
     bool readable = preview && nav->conversations != NULL && nav->preview_state == DIAL_AGENTS_READY &&
         nav->conversations->preview.status == ESP_OPENCLAW_PREVIEW_OK && nav->conversations->preview.count != 0;
     lv_label_set_text_static(nav->hint, preview ? readable ? "Turn to read" : "Press: back" : detail ? "Press: open" : sessions ? "Chats / turn" : "Turn + press");
@@ -647,6 +777,7 @@ static void render(dial_navigation_t *nav)
         lv_obj_set_style_text_color(nav->names[i], color, 0);
         lv_obj_set_style_text_color(nav->icons[i], color, 0);
     }
+    if (preview && reply_available(nav)) reply_button(nav, 0, "Reply", LV_SYMBOL_UP, true);
 }
 
 void dial_navigation_open(dial_navigation_t *nav, bool agents)
@@ -671,7 +802,7 @@ void dial_navigation_update(dial_navigation_t *nav, const dial_agents_snapshot_t
         nav->view = DIAL_NAV_AGENTS;
         nav->focus = 0;
         changed(nav);
-    }
+    } else if (reply_page(nav->view)) changed(nav);
 }
 
 void dial_navigation_conversations_update(dial_navigation_t *nav, const dial_conversations_snapshot_t *snapshot)
@@ -687,7 +818,7 @@ void dial_navigation_conversations_update(dial_navigation_t *nav, const dial_con
     if (nav->view == DIAL_NAV_SESSIONS || nav->view == DIAL_NAV_PREVIEW) {
         if (replaced) { nav->view = DIAL_NAV_SESSIONS; nav->focus = 0; }
         changed(nav);
-    }
+    } else if (reply_page(nav->view)) changed(nav);
 }
 
 void dial_navigation_devices_update(dial_navigation_t *nav, const esp_openclaw_devices_snapshot_t *snapshot)
@@ -754,7 +885,7 @@ void dial_navigation_move(dial_navigation_t *nav, int direction)
             nav->handler(DIAL_NAV_BRIGHTNESS, (size_t)percent, nav->context);
         return;
     }
-    if (nav->view == DIAL_NAV_PREVIEW || nav->view == DIAL_NAV_ACTIVITY ||
+    if (nav->view == DIAL_NAV_PREVIEW || nav->view == DIAL_NAV_ACTIVITY || nav->view == DIAL_NAV_REPLY_REVIEW ||
         nav->view == DIAL_NAV_DEVICE_DETAIL || nav->view == DIAL_NAV_CONNECTION) {
         lv_obj_scroll_by_bounded(nav->preview_body, 0, direction > 0 ? -24 : 24, LV_ANIM_OFF);
         return;
@@ -767,6 +898,57 @@ void dial_navigation_move(dial_navigation_t *nav, int direction)
 
 void dial_navigation_activate(dial_navigation_t *nav)
 {
+    if (nav->view == DIAL_NAV_REPLY_REVIEW) {
+        nav->view = DIAL_NAV_REPLY_ACTIONS;
+        nav->focus = 0;
+        changed(nav);
+        return;
+    }
+    if (nav->view == DIAL_NAV_REPLY_PICKER) {
+        if (nav->messaging.state != DIAL_MESSAGING_READY) {
+            dial_navigation_open_settings(nav, DIAL_NAV_MESSAGING);
+        } else {
+            nav->handler(DIAL_NAV_REPLY_BEGIN, nav->focus, nav->context);
+            if (reply_busy(nav) || (nav->reply.state != DIAL_REPLY_IDLE &&
+                nav->reply.preview_revision == nav->reply_preview_revision))
+                nav->view = DIAL_NAV_REPLY_REVIEW;
+            nav->focus = 0;
+            changed(nav);
+        }
+        return;
+    }
+    if (nav->view == DIAL_NAV_REPLY_ACTIONS) {
+        reply_action_t actions[3];
+        unsigned count = reply_actions(nav, actions);
+        if (nav->focus >= count) return;
+        switch (actions[nav->focus]) {
+        case REPLY_SEND:
+            nav->handler(DIAL_NAV_REPLY_SEND, nav->reply.revision, nav->context);
+            nav->view = DIAL_NAV_REPLY_REVIEW;
+            break;
+        case REPLY_PRESETS:
+            nav->handler(DIAL_NAV_REPLY_CLOSE, nav->reply.revision, nav->context);
+            nav->view = DIAL_NAV_REPLY_PICKER;
+            break;
+        case REPLY_READ:
+            nav->handler(DIAL_NAV_REPLY_READ, nav->reply.revision, nav->context);
+            return;
+        case REPLY_ACCESS: dial_navigation_open_settings(nav, DIAL_NAV_MESSAGING); return;
+        case REPLY_REVIEW: nav->view = DIAL_NAV_REPLY_REVIEW; break;
+        }
+        nav->focus = 0;
+        changed(nav);
+        return;
+    }
+    if (nav->view == DIAL_NAV_PREVIEW && reply_available(nav)) {
+        nav->reply_preview_revision = nav->preview_revision;
+        nav->reply_action_failed = false;
+        nav->view = reply_busy(nav) || (nav->reply.state != DIAL_REPLY_IDLE &&
+            nav->reply.preview_revision == nav->preview_revision) ? DIAL_NAV_REPLY_REVIEW : DIAL_NAV_REPLY_PICKER;
+        nav->focus = 0;
+        changed(nav);
+        return;
+    }
     if (nav->view == DIAL_NAV_MESSAGING) {
         nav->handler((nav->messaging.state == DIAL_MESSAGING_READY || messaging_pending(nav->messaging.state))
             ? DIAL_NAV_MESSAGING_CANCEL : DIAL_NAV_MESSAGING_REQUEST, nav->messaging.revision, nav->context);
@@ -848,7 +1030,8 @@ void dial_navigation_activate(dial_navigation_t *nav)
 void dial_navigation_open_settings(dial_navigation_t *nav, dial_navigation_view_t page)
 {
     if (page != DIAL_NAV_SETTINGS && page != DIAL_NAV_DISPLAY && page != DIAL_NAV_CONNECTION && page != DIAL_NAV_MESSAGING) return;
-    nav->settings_parent = nav->view == DIAL_NAV_LOCAL_DEVICE ? DIAL_NAV_LOCAL_DEVICE : DIAL_NAV_SETTINGS;
+    nav->settings_parent = reply_page(nav->view) ? nav->view :
+        nav->view == DIAL_NAV_LOCAL_DEVICE ? DIAL_NAV_LOCAL_DEVICE : DIAL_NAV_SETTINGS;
     nav->view = page;
     nav->focus = 0;
     lv_obj_set_hidden(nav->root, false);
@@ -879,13 +1062,27 @@ void dial_navigation_messaging_update(dial_navigation_t *nav, const dial_messagi
     nav->messaging = *snapshot;
     nav->messaging_action_failed = false;
     /* A held Request or Cancel belongs to the exact permission observation. */
-    if (nav->view == DIAL_NAV_MESSAGING) changed(nav);
+    if (nav->view == DIAL_NAV_MESSAGING || reply_page(nav->view)) changed(nav);
 }
 
 void dial_navigation_messaging_result(dial_navigation_t *nav, bool accepted)
 {
     nav->messaging_action_failed = !accepted;
     if (nav->view == DIAL_NAV_MESSAGING) render(nav);
+}
+
+void dial_navigation_reply_update(dial_navigation_t *nav, const dial_reply_snapshot_t *snapshot)
+{
+    if (memcmp(&nav->reply, snapshot, sizeof(*snapshot)) == 0) return;
+    nav->reply = *snapshot;
+    nav->reply_action_failed = false;
+    if (reply_page(nav->view)) changed(nav);
+}
+
+void dial_navigation_reply_result(dial_navigation_t *nav, bool accepted)
+{
+    nav->reply_action_failed = !accepted;
+    if (reply_page(nav->view)) render(nav);
 }
 
 void dial_navigation_open_activity(dial_navigation_t *nav)

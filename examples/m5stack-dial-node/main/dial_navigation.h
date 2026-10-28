@@ -3,12 +3,13 @@
 #include "dial_action.h"
 #include "dial_directory.h"
 #include "dial_messaging.h"
+#include "dial_reply.h"
 #include "esp_openclaw_device_types.h"
 #include "lvgl.h"
 #include "esp_openclaw_node_wifi.h"
 
-typedef enum { DIAL_NAV_MENU, DIAL_NAV_AGENTS, DIAL_NAV_DETAIL, DIAL_NAV_SESSIONS, DIAL_NAV_PREVIEW, DIAL_NAV_SETTINGS, DIAL_NAV_DISPLAY, DIAL_NAV_CONNECTION, DIAL_NAV_ACTIVITY, DIAL_NAV_DEVICES, DIAL_NAV_DEVICE_DETAIL, DIAL_NAV_LOCAL_DEVICE, DIAL_NAV_MESSAGING } dial_navigation_view_t;
-typedef enum { DIAL_NAV_HOME, DIAL_NAV_CONTROL, DIAL_NAV_REFRESH, DIAL_NAV_CHANGED, DIAL_NAV_CONVERSATIONS, DIAL_NAV_SESSIONS_REFRESH, DIAL_NAV_READ, DIAL_NAV_RESUME, DIAL_NAV_BRIGHTNESS, DIAL_NAV_DEVICES_REFRESH, DIAL_NAV_MESSAGING_REQUEST, DIAL_NAV_MESSAGING_CANCEL } dial_navigation_event_t;
+typedef enum { DIAL_NAV_MENU, DIAL_NAV_AGENTS, DIAL_NAV_DETAIL, DIAL_NAV_SESSIONS, DIAL_NAV_PREVIEW, DIAL_NAV_SETTINGS, DIAL_NAV_DISPLAY, DIAL_NAV_CONNECTION, DIAL_NAV_ACTIVITY, DIAL_NAV_DEVICES, DIAL_NAV_DEVICE_DETAIL, DIAL_NAV_LOCAL_DEVICE, DIAL_NAV_MESSAGING, DIAL_NAV_REPLY_PICKER, DIAL_NAV_REPLY_REVIEW, DIAL_NAV_REPLY_ACTIONS } dial_navigation_view_t;
+typedef enum { DIAL_NAV_HOME, DIAL_NAV_CONTROL, DIAL_NAV_REFRESH, DIAL_NAV_CHANGED, DIAL_NAV_CONVERSATIONS, DIAL_NAV_SESSIONS_REFRESH, DIAL_NAV_READ, DIAL_NAV_RESUME, DIAL_NAV_BRIGHTNESS, DIAL_NAV_DEVICES_REFRESH, DIAL_NAV_MESSAGING_REQUEST, DIAL_NAV_MESSAGING_CANCEL, DIAL_NAV_REPLY_BEGIN, DIAL_NAV_REPLY_SEND, DIAL_NAV_REPLY_CLOSE, DIAL_NAV_REPLY_READ } dial_navigation_event_t;
 /* CHANGED asks the input owner to cancel active gestures before replacing rows. */
 typedef void (*dial_navigation_handler_t)(dial_navigation_event_t event, size_t offset, void *context);
 
@@ -35,6 +36,9 @@ typedef struct {
     dial_activity_t activity;
     dial_messaging_snapshot_t messaging;
     bool messaging_action_failed;
+    dial_reply_snapshot_t reply;
+    unsigned reply_preview_revision;
+    bool reply_action_failed;
     /* Owned by the application and refreshed only on the LVGL task. */
     const dial_agents_snapshot_t *snapshot;
     const dial_conversations_snapshot_t *conversations;
@@ -63,5 +67,7 @@ void dial_navigation_set_brightness(dial_navigation_t *nav, int percent, bool fa
 void dial_navigation_set_connection(dial_navigation_t *nav, const esp_openclaw_node_wifi_status_t *wifi, bool gateway);
 void dial_navigation_messaging_update(dial_navigation_t *nav, const dial_messaging_snapshot_t *snapshot);
 void dial_navigation_messaging_result(dial_navigation_t *nav, bool accepted);
+void dial_navigation_reply_update(dial_navigation_t *nav, const dial_reply_snapshot_t *snapshot);
+void dial_navigation_reply_result(dial_navigation_t *nav, bool accepted);
 void dial_navigation_open_activity(dial_navigation_t *nav);
 void dial_navigation_activity_update(dial_navigation_t *nav, const dial_activity_t *activity);

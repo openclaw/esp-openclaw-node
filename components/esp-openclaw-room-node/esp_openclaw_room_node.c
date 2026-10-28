@@ -848,7 +848,12 @@ static void start_talk_once(void)
     talk_stage(generation, "startup", "begin", 0);
     if (cancelled) goto done;
     talk_stage(generation, "media_acquire", "begin", 0);
-    room_media_begin_talk();
+    esp_err_t media_result = room_media_begin_talk();
+    if (media_result != ESP_OK) {
+        talk_stage(generation, "media_acquire", "error", media_result);
+        request_talk_teardown(generation, "Audio is busy. Finish recording or the speaker test, then try again.");
+        goto done;
+    }
     talk_stage(generation, "media_acquire", "end", 0);
     talk_audio_snapshot(generation, "acquired");
     xSemaphoreTake(state_lock, portMAX_DELAY);

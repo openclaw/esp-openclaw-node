@@ -159,6 +159,15 @@ It updates on the existing 75 ms diagnostics refresh, reacts only while the
 tone is running or during its eight-tick success bounce, and does not enable
 the full-screen procedural face on boards that disable it.
 
+The local recording backend copies mono PCM from the existing ambient drain;
+it leaves that sink running and suppresses wake-triggered calls until recording
+cleanup finishes. A worker converts 16 kHz PCM to 8 kHz G.711 mu-law, retaining
+at most 30 seconds (240,000 encoded bytes) in PSRAM. Stop preserves the draft;
+cancel, queue overflow, malformed input, codec failure, or a stalled source
+discards it. Recording, the speaker test, and Live Talk share one media owner;
+busy Talk startup fails visibly without opening a peer or contacting the Gateway.
+The backend does not yet expose a recording gesture, transcribe, or send a message.
+
 Room endpoints request 400 ms of provider server-VAD post-speech silence for
 each Talk session. The player uses the pinned 4 KiB raw and 6 KiB render queue
 capacities: they start playback immediately and bound stale audio backlog under

@@ -232,6 +232,7 @@ static const char *capture_owner_name(room_diagnostics_capture_owner_t owner)
 {
     return owner == ROOM_DIAGNOSTICS_CAPTURE_AMBIENT ? "ambient"
         : owner == ROOM_DIAGNOSTICS_CAPTURE_TALK ? "talk"
+        : owner == ROOM_DIAGNOSTICS_CAPTURE_RECORDING ? "recording"
         : "transition";
 }
 

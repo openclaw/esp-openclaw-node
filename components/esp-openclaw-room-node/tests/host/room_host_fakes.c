@@ -761,12 +761,14 @@ int esp_webrtc_close(esp_webrtc_handle_t session)
     return 0;
 }
 
-void room_media_begin_talk(void)
+esp_err_t room_media_begin_talk(void)
 {
+    if (host.media_busy) return ESP_ERR_INVALID_STATE;
     host_require(!host.media_owned && host.ambient, "exclusive ambient-to-Talk media admission");
     host.media_owned = true;
     ++host.media_begins;
     if (host.at_media_begin != NULL) host.at_media_begin();
+    return ESP_OK;
 }
 void room_media_end_talk(bool capture_remained_ambient)
 {

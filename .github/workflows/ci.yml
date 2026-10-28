@@ -166,6 +166,7 @@ jobs:
               python3 tests/run_reader_host_tests.py --cjson-dir managed_components/espressif__cjson/cJSON
             fi &&
             if [ "${{ matrix.name }}" = "waveshare-amoled-room-node" ]; then
+              python3 ../../components/esp-openclaw-room-node/tests/run_recording_host_tests.py --managed-components managed_components &&
               python3 ../../components/esp-openclaw-room-node/tests/run_lifecycle_host_tests.py --managed-components managed_components &&
               python3 ../../components/esp-openclaw-room-node/tests/run_lifecycle_host_tests.py --managed-components managed_components --voice-actions --log-mode tagged --case operator-scopes &&
               python3 ../../components/esp-openclaw-room-node/tests/run_ui_host_tests.py --lvgl-dir managed_components/lvgl__lvgl

@@ -12,6 +12,7 @@
 #include "room_lobster.h"
 #include "room_ui_controller.h"
 #include "openclaw_reading.h"
+#include "openclaw_density.h"
 #include "esp_openclaw_node_wifi.h"
 
 static lv_display_t *display;
@@ -2240,6 +2241,65 @@ static void check_watch_reading_size(const char *path)
     puts("watch reading size: native preview, draft reflow and no send/capture side effects passed");
 }
 
+static void check_watch_density(const char *path)
+{
+    unsigned starts = talk_starts, sends = voice_sends;
+    assert(room_ui_watch_menu("display") == ESP_OK);
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LIST "  List spacing")));
+    assert(visible_watch_text(LV_SYMBOL_OK "  Compact"));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), "Comfortable")));
+    assert(visible_watch_text(LV_SYMBOL_OK "  Comfortable"));
+    assert(room_ui_watch_menu("menu") == ESP_OK);
+    lv_obj_t *agents = lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LIST "  Agents"));
+    lv_obj_t *menu = lv_obj_get_parent(agents);
+    lv_obj_t *settings = lv_obj_get_parent(find_text(menu, LV_SYMBOL_SETTINGS "  Settings"));
+    lv_obj_update_layout(menu);
+    assert(lv_obj_get_height(agents) == 60);
+    assert(lv_obj_get_style_text_font(lv_obj_get_child(agents, 0), 0) == &lv_font_montserrat_14);
+    lv_obj_scroll_to_y(menu, 0, LV_ANIM_OFF);
+    if (path) { char output[1024]; snprintf(output, sizeof(output), "%s-density-comfortable.ppm", path); write_frame(output); }
+    lv_obj_scroll_to_view(settings, LV_ANIM_OFF);
+    lv_obj_update_layout(menu);
+    assert(lv_obj_get_scroll_y(menu) > 0);
+    click_talk(settings);
+    assert(visible_watch_text("Settings"));
+    lv_obj_t *messaging = lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_ENVELOPE "  Messaging"));
+    lv_obj_scroll_to_view(messaging, LV_ANIM_OFF);
+    lv_obj_update_layout(messaging);
+    click_talk(messaging);
+    assert(visible_watch_text("Messaging"));
+    room_agents_snapshot_t roster = {.state = ROOM_AGENTS_READY, .revision = 901,
+        .page = {.count = 3, .total = 3}};
+    for (unsigned i = 0; i < 3; ++i) {
+        snprintf(roster.page.agents[i].id, sizeof(roster.page.agents[i].id), "density-%u", i);
+        snprintf(roster.page.agents[i].name, sizeof(roster.page.agents[i].name), "Assistant %u", i + 1);
+    }
+    unsigned selections = agent_selections;
+    assert(room_ui_watch_menu("agents") == ESP_OK);
+    room_ui_store_agents(&roster); room_ui_refresh();
+    lv_obj_t *first_agent = lv_obj_get_parent(find_visible_text(lv_layer_top(), "Assistant 1"));
+    lv_obj_t *last_agent = lv_obj_get_parent(find_text(lv_obj_get_parent(first_agent), "Assistant 3"));
+    lv_obj_update_layout(first_agent);
+    assert(lv_obj_get_height(first_agent) == 76);
+    if (path) { char output[1024]; snprintf(output, sizeof(output), "%s-density-agents.ppm", path); write_frame(output); }
+    lv_obj_scroll_to_view(last_agent, LV_ANIM_OFF);
+    lv_obj_update_layout(last_agent);
+    click_talk(last_agent);
+    assert(visible_watch_text("Use for next Talk") && agent_selections == selections);
+    assert(room_ui_watch_menu("density") == ESP_OK);
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), "Compact")));
+    assert(openclaw_density() == OPENCLAW_DENSITY_COMPACT);
+    assert(room_ui_watch_menu("menu") == ESP_OK);
+    lv_obj_update_layout(menu);
+    assert(lv_obj_get_scroll_y(menu) == 0);
+    if (path) { char output[1024]; snprintf(output, sizeof(output), "%s-density-menu-return.ppm", path); write_frame(output); }
+    agents = lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LIST "  Agents"));
+    lv_obj_update_layout(agents);
+    assert(lv_obj_get_height(agents) == 44);
+    assert(talk_starts == starts && voice_sends == sends);
+    puts("watch list spacing: touch choices, scroll reachability, fixed typography and no Talk/send passed");
+}
+
 int main(int argc, char **argv)
 {
     assert(argc >= 2);
@@ -2397,6 +2457,7 @@ int main(int argc, char **argv)
         check_watch_messaging(argc == 3 ? argv[2] : NULL);
         check_watch_voice(argc == 3 ? argv[2] : NULL);
         check_watch_reading_size(argc == 3 ? argv[2] : NULL);
+        check_watch_density(argc == 3 ? argv[2] : NULL);
         // This isolated fixture replaces and destroys the mascot singleton.
         check_watch_repaint();
     }

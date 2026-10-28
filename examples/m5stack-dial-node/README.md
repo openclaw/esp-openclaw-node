@@ -129,6 +129,13 @@ conversation previews, quick-reply reviews, and other scrollable reading views.
 The choice is local to this Dial and lasts until restart. Menus and status icons
 keep their existing size; this does not change the assigned control.
 
+**Display → List spacing** switches between Compact (three rows) and Comfortable
+(two taller rows) in menus, agent and conversation pickers, device lists, and
+quick-reply choices. Turn to reveal the remaining rows and press to choose; Back
+returns to the same selected item. Both layouts retain at least 44-pixel row
+height within the circular display. Compact is the default and the selection
+lasts until restart. It does not change text size or the assigned control.
+
 Settings → Connection is a read-only, scrollable network summary. Turn the
 encoder or swipe to read the saved network, signal and channel (when available),
 current IP address, and independent Gateway state. Offline details include the

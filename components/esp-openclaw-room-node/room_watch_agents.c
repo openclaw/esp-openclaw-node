@@ -1,3 +1,4 @@
+#include "openclaw_density.h"
 #include "room_watch_agents.h"
 #include "esp_openclaw_avatar.h"
 
@@ -170,6 +171,15 @@ void room_watch_agents_render(const room_agents_snapshot_t *snapshot, bool hidde
     if (root == NULL) return;
     lv_obj_set_hidden(root, hidden);
     if (hidden) return;
+    int row_height = openclaw_density_row_height(true);
+    for (unsigned i = 0; i < ESP_OPENCLAW_DIRECTORY_PAGE_SIZE; ++i) {
+        lv_obj_set_y(rows[i], (int)i * (row_height + 8));
+        lv_obj_set_height(rows[i], row_height);
+        lv_obj_set_y(avatars[i], (row_height - 36) / 2);
+        lv_obj_set_y(avatar_images[i], (row_height - 36) / 2);
+        lv_obj_set_y(names[i], (row_height - 38) / 2);
+        lv_obj_set_y(ids[i], (row_height - 38) / 2 + 23);
+    }
     can_reset = target_id[0] != '\0' && !pending;
     lv_obj_set_state(use_default, LV_STATE_DISABLED, !can_reset);
     lv_label_set_text_static(default_text, pending ? "Choosing..." : can_reset ? "Use default" : "Default");
@@ -240,6 +250,10 @@ void room_watch_agents_render(const room_agents_snapshot_t *snapshot, bool hidde
         lv_label_set_text(message, text);
     }
     reset_scroll = false;
+    if (!lv_obj_is_hidden(list)) {
+        lv_obj_update_layout(list);
+        lv_obj_readjust_scroll(list, LV_ANIM_OFF);
+    }
 }
 
 room_agent_action_t room_watch_agents_activate(int action, size_t *offset)

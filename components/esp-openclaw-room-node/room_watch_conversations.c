@@ -1,3 +1,4 @@
+#include "openclaw_density.h"
 #include "room_watch_conversations.h"
 #include "openclaw_reading.h"
 
@@ -172,6 +173,13 @@ void room_watch_conversations_render(const room_conversations_snapshot_t *snapsh
     if (root == NULL) return;
     lv_obj_set_hidden(root, hidden);
     if (hidden) { current = NULL; return; }
+    int row_height = openclaw_density_row_height(true);
+    for (unsigned i = 0; i < ESP_OPENCLAW_DIRECTORY_PAGE_SIZE; ++i) {
+        lv_obj_set_y(rows[i], (int)i * (row_height + 8));
+        lv_obj_set_height(rows[i], row_height);
+        lv_obj_set_y(titles[i], (row_height - 40) / 2);
+        lv_obj_set_y(summaries[i], (row_height - 40) / 2 + 24);
+    }
     lv_obj_set_style_text_font(body_text, openclaw_reading_font(), 0);
     if (snapshot == NULL) {
         painted_preview = preview;
@@ -290,6 +298,10 @@ void room_watch_conversations_render(const room_conversations_snapshot_t *snapsh
         lv_obj_scroll_to_y(list, suspended.list_y, LV_ANIM_OFF);
         lv_obj_scroll_to_y(body, suspended.body_y, LV_ANIM_OFF);
         suspended.restore_scroll = false;
+    }
+    if (!lv_obj_is_hidden(list)) {
+        lv_obj_update_layout(list);
+        lv_obj_readjust_scroll(list, LV_ANIM_OFF);
     }
 }
 

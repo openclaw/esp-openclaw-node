@@ -110,7 +110,7 @@ void room_ui_set(room_ui_state_t state, const char *detail);
 void room_ui_store_facts(const room_ui_facts_t *facts);
 /** Repaint the most recently set state, e.g. after leaving canvas mode. */
 void room_ui_refresh(void);
-/** Open a local watch page (menu, agents, conversations, settings, display, brightness, reading, messaging, connection, canvas, home) without changing Talk. */
+/** Open a local watch page (menu, agents, conversations, settings, display, brightness, reading, density, messaging, connection, canvas, home) without changing Talk. */
 esp_err_t room_ui_watch_menu(const char *page);
 /** Runtime Watch preference; sleep and camera visibility remain controller-owned. */
 esp_err_t room_ui_watch_brightness(int percent);

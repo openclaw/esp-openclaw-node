@@ -2,6 +2,7 @@
 #include "dial_home.h"
 #include "dial_navigation.h"
 #include "openclaw_reading.h"
+#include "openclaw_density.h"
 #include "esp_openclaw_avatar.h"
 
 #include <assert.h>
@@ -1459,6 +1460,7 @@ int main(int argc, char **argv)
     dial_navigation_open_settings(&navigation, DIAL_NAV_DISPLAY);
     dial_navigation_move(&navigation, 1);
     dial_navigation_move(&navigation, 1);
+    dial_navigation_move(&navigation, 1);
     encoder_state = LV_INDEV_STATE_PRESSED;
     lv_indev_read(encoder); advance(40);
     encoder_state = LV_INDEV_STATE_RELEASED;
@@ -1706,6 +1708,41 @@ int main(int argc, char **argv)
     touch(120, 82, true); touch(120, 82, false);
     assert(openclaw_reading_size() == OPENCLAW_READING_STANDARD && confirmations == reading_confirmations);
     puts("Dial reading size: input, reflow, scrolling and no control submission passed");
+    unsigned density_confirmations = confirmations;
+    dial_navigation_open_settings(&navigation, DIAL_NAV_DISPLAY);
+    dial_navigation_move(&navigation, 1);
+    dial_navigation_move(&navigation, 1);
+    dial_navigation_activate(&navigation);
+    assert(navigation.view == DIAL_NAV_DENSITY);
+    touch(120, 126, true); touch(120, 126, false);
+    assert(openclaw_density() == OPENCLAW_DENSITY_COMFORTABLE && navigation.view == DIAL_NAV_DENSITY);
+    lv_obj_update_layout(screen);
+    assert(lv_obj_is_hidden(navigation.rows[2]));
+    for (unsigned i = 0; i < 2; ++i) {
+        assert(lv_obj_get_height(navigation.rows[i]) == 60);
+        check_home_bounds(navigation.rows[i]);
+        assert(lv_obj_get_style_text_font(navigation.names[i], 0) == &lv_font_montserrat_14);
+    }
+    snapshot("density-comfortable");
+    dial_navigation_move(&navigation, 1);
+    assert(navigation.first == 2 && strcmp(lv_label_get_text(navigation.names[0]), "Back") == 0);
+    dial_navigation_activate(&navigation);
+    assert(navigation.view == DIAL_NAV_DISPLAY && navigation.focus == 2);
+    dial_navigation_open(&navigation, false);
+    dial_navigation_move(&navigation, 1);
+    dial_navigation_move(&navigation, 1);
+    dial_navigation_move(&navigation, 1);
+    assert(navigation.focus == 3 && navigation.first == 2);
+    assert(strcmp(lv_label_get_text(navigation.names[1]), "Activity") == 0);
+    snapshot("density-menu");
+    dial_navigation_open_settings(&navigation, DIAL_NAV_DISPLAY);
+    dial_navigation_move(&navigation, 1); dial_navigation_move(&navigation, 1);
+    dial_navigation_activate(&navigation);
+    dial_navigation_move(&navigation, -1);
+    dial_navigation_activate(&navigation);
+    assert(openclaw_density() == OPENCLAW_DENSITY_COMPACT);
+    assert(confirmations == density_confirmations && openclaw_reading_size() == OPENCLAW_READING_STANDARD);
+    puts("Dial list spacing: two-row paging, Back focus, circular bounds and no control submission passed");
     assert(reader_boundary_failures == 0);
     lv_deinit();
 }

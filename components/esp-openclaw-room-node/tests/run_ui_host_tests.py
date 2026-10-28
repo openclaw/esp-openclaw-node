@@ -137,6 +137,7 @@ def main():
             str(component.parent / "esp-openclaw-ui/openclaw_status_bar.c"),
             str(component.parent / "esp-openclaw-ui/openclaw_connection_details.c"),
             str(component.parent / "esp-openclaw-ui/openclaw_reading.c"),
+            str(component.parent / "esp-openclaw-ui/openclaw_density.c"),
             str(component / "room_watch_navigation.c"), str(component / "room_watch_settings.c"),
             str(component / "room_watch_agents.c"),
             str(component / "room_watch_devices.c"),

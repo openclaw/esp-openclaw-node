@@ -50,6 +50,7 @@ def main():
             str(root / "components/esp-openclaw-ui/openclaw_status_bar.c"),
             str(root / "components/esp-openclaw-ui/openclaw_connection_details.c"),
             str(root / "components/esp-openclaw-ui/openclaw_reading.c"),
+            str(root / "components/esp-openclaw-ui/openclaw_density.c"),
             str(tests.parent / "main/dial_action.c"),
             str(tests.parent / "main/dial_navigation.c"),
             str(avatars / "esp_openclaw_avatar.c"), str(pixels),

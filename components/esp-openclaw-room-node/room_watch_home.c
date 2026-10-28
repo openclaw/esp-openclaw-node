@@ -1,7 +1,5 @@
 #include "room_watch_home.h"
 #include "openclaw_reading.h"
-#include "esp_openclaw_node_wifi.h"
-#include "openclaw_status_bar.h"
 
 #include <string.h>
 #include <stdio.h>
@@ -14,39 +12,6 @@ static lv_obj_t *voice_button, *voice_label, *discard_button, *send_button, *sen
 static lv_obj_t *review_panel, *review_heading, *review_recipient, *review_notice, *review_body, *review_text;
 static uint32_t review_generation;
 static room_voice_state_t review_state;
-static openclaw_status_bar_t status_bar;
-static bool wifi_connected, gateway_connected;
-static bool display_awake;
-static lv_timer_t *status_timer;
-
-static void refresh_status(lv_timer_t *timer)
-{
-    (void)timer;
-    if (!display_awake || !lv_obj_is_visible(root)) return;
-    esp_openclaw_node_wifi_status_t wifi = {0};
-    esp_openclaw_node_wifi_get_status(&wifi);
-    const openclaw_status_facts_t status = {
-        .wifi_connected = wifi_connected && wifi.connected,
-        .signal_known = wifi.ap_info_valid,
-        .rssi = wifi.rssi,
-        .gateway_connected = gateway_connected,
-    };
-    openclaw_status_bar_set(&status_bar, &status);
-}
-
-void room_watch_home_set_awake(bool awake)
-{
-    if (display_awake == awake) return;
-    display_awake = awake;
-    if (status_timer == NULL) return;
-    if (awake) {
-        lv_timer_resume(status_timer);
-        lv_timer_reset(status_timer);
-        refresh_status(NULL);
-    } else {
-        lv_timer_pause(status_timer);
-    }
-}
 
 static lv_obj_t *label(lv_obj_t *parent, const char *text, int x, int y, int width, uint32_t color)
 {
@@ -138,10 +103,6 @@ void room_watch_home_create(lv_obj_t *parent, lv_event_cb_t menu_handler, lv_eve
             .data = esp_openclaw_avatar_pixels(kind),
         };
     }
-    openclaw_status_bar_create(&status_bar, root);
-    lv_obj_set_pos(status_bar.root, 248, 10);
-    status_timer = lv_timer_create(refresh_status, 1000, NULL);
-    if (!display_awake) lv_timer_pause(status_timer);
     title_label = label(root, "Your OpenClaw", 26, 312, 316, 0xf4efee);
     lv_obj_set_height(title_label, 34);
 #if LV_FONT_MONTSERRAT_20
@@ -216,15 +177,10 @@ void room_watch_home_render(const room_ui_facts_t *facts, const room_ui_talk_tar
                            bool voice_enabled, bool holding, room_home_action_t primary, bool hidden)
 {
     if (root == NULL) return;
-    bool was_hidden = !lv_obj_is_visible(root);
     lv_obj_set_flag(root, LV_OBJ_FLAG_HIDDEN, hidden);
     if (hidden) return;
     bool wifi = facts->wifi == ROOM_UI_WIFI_CONNECTED;
     bool connected = facts->gateway == ROOM_UI_GATEWAY_CONNECTED;
-    bool connection_changed = wifi_connected != wifi || gateway_connected != connected;
-    wifi_connected = wifi;
-    gateway_connected = connected;
-    if (was_hidden || connection_changed) refresh_status(NULL);
 
     bool voice_busy = voice != NULL && voice->state >= ROOM_VOICE_STARTING;
     bool draft = voice != NULL && voice->state == ROOM_VOICE_DRAFT;

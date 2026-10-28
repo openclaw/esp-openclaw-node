@@ -1,10 +1,45 @@
 #include "room_watch_home.h"
+#include "esp_openclaw_node_wifi.h"
+#include "openclaw_status_bar.h"
 
 #include <string.h>
 #include <stdio.h>
 
-static lv_obj_t *root, *wifi_label, *gateway_label, *title_label, *detail_label;
+static lv_obj_t *root, *title_label, *detail_label;
 static lv_obj_t *continue_card, *reader_label;
+static openclaw_status_bar_t status_bar;
+static bool wifi_connected, gateway_connected;
+static bool display_awake;
+static lv_timer_t *status_timer;
+
+static void refresh_status(lv_timer_t *timer)
+{
+    (void)timer;
+    if (!display_awake || !lv_obj_is_visible(root)) return;
+    esp_openclaw_node_wifi_status_t wifi = {0};
+    esp_openclaw_node_wifi_get_status(&wifi);
+    const openclaw_status_facts_t status = {
+        .wifi_connected = wifi_connected && wifi.connected,
+        .signal_known = wifi.ap_info_valid,
+        .rssi = wifi.rssi,
+        .gateway_connected = gateway_connected,
+    };
+    openclaw_status_bar_set(&status_bar, &status);
+}
+
+void room_watch_home_set_awake(bool awake)
+{
+    if (display_awake == awake) return;
+    display_awake = awake;
+    if (status_timer == NULL) return;
+    if (awake) {
+        lv_timer_resume(status_timer);
+        lv_timer_reset(status_timer);
+        refresh_status(NULL);
+    } else {
+        lv_timer_pause(status_timer);
+    }
+}
 
 static lv_obj_t *label(lv_obj_t *parent, const char *text, int x, int y, int width, uint32_t color)
 {
@@ -38,9 +73,10 @@ void room_watch_home_create(lv_obj_t *parent, lv_event_cb_t menu_handler, lv_eve
     lv_obj_set_style_text_font(menu_label, &lv_font_montserrat_14, 0);
     lv_obj_remove_flag(menu_label, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_align(menu_label, LV_ALIGN_LEFT_MID, 0, 0);
-    wifi_label = label(root, LV_SYMBOL_WIFI, 196, 22, 30, 0xa6a1ac);
-    gateway_label = label(root, "Starting", 230, 22, 112, 0xa6a1ac);
-    lv_obj_set_style_text_align(gateway_label, LV_TEXT_ALIGN_RIGHT, 0);
+    openclaw_status_bar_create(&status_bar, root);
+    lv_obj_set_pos(status_bar.root, 248, 22);
+    status_timer = lv_timer_create(refresh_status, 1000, NULL);
+    if (!display_awake) lv_timer_pause(status_timer);
     title_label = label(root, "Your OpenClaw", 26, 312, 316, 0xf4efee);
     lv_obj_set_height(title_label, 28);
 #if LV_FONT_MONTSERRAT_20
@@ -79,16 +115,15 @@ bool room_watch_home_render(const room_ui_facts_t *facts, const room_ui_talk_tar
                            const char *detail, const char *reader_agent, bool hidden)
 {
     if (root == NULL) return false;
+    bool was_hidden = !lv_obj_is_visible(root);
     lv_obj_set_flag(root, LV_OBJ_FLAG_HIDDEN, hidden);
     if (hidden) return false;
     bool wifi = facts->wifi == ROOM_UI_WIFI_CONNECTED;
     bool connected = facts->gateway == ROOM_UI_GATEWAY_CONNECTED;
-    lv_obj_set_style_text_color(wifi_label, lv_color_hex(wifi ? 0xbfe5d9 : 0x746e7c), 0);
-    const char *gateway = connected ? "Connected"
-        : facts->gateway == ROOM_UI_GATEWAY_NO_SESSION ? "Pairing needed"
-        : facts->gateway == ROOM_UI_GATEWAY_CONNECTING ? "Connecting"
-        : facts->gateway == ROOM_UI_GATEWAY_STARTING ? "Starting" : "Offline";
-    lv_label_set_text_static(gateway_label, gateway);
+    bool connection_changed = wifi_connected != wifi || gateway_connected != connected;
+    wifi_connected = wifi;
+    gateway_connected = connected;
+    if (was_hidden || connection_changed) refresh_status(NULL);
 
     bool reading = reader_agent != NULL && reader_agent[0] != '\0' && wifi && connected &&
         state != ROOM_UI_ERROR && state != ROOM_UI_SETUP &&

@@ -55,10 +55,13 @@ It is disabled while Talk is unavailable or stopping. The control also appears
 over Canvas; the existing screen tap/hold gestures still toggle Canvas and open
 diagnostics. Diagnostics hides the Talk control until closed.
 
-The watch Home keeps Wi-Fi and Gateway status above the lobster, with a bounded
-headline and a separate bottom action. A live connection says **Conversation
-live**; it does not infer speech playback from the connection state. Missing
-clock and battery telemetry are omitted. The display still sleeps when idle;
+The watch Home shares the Dial's compact Wi-Fi, OpenClaw link, and battery
+strip above the lobster, with a bounded headline and a separate bottom action.
+Signal is sampled once per second while Home is visible and the display is
+awake. Missing signal stays neutral; the battery outline with a dash means
+unknown. The Connection page keeps the text descriptions. A live connection
+says **Conversation live**; it does not infer speech playback from the
+connection state. Missing clock telemetry is omitted. The display still sleeps when idle;
 waking it does not start a conversation. Idle, setup and error views keep static
 mascot artwork without running the animation timer; wake-up hints still animate.
 When a retained reader is available, Home shows its agent and **Continue

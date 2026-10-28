@@ -2,6 +2,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include "esp_openclaw_transcription.h"
 
 typedef enum {
     ROOM_VOICE_UNAVAILABLE = 0,
@@ -9,8 +10,11 @@ typedef enum {
     ROOM_VOICE_STARTING,
     ROOM_VOICE_RECORDING,
     ROOM_VOICE_FINISHING,
+    ROOM_VOICE_TRANSCRIBING,
+    ROOM_VOICE_CANCELING,
     ROOM_VOICE_DRAFT,
     ROOM_VOICE_ERROR,
+    ROOM_VOICE_TRANSCRIPTION_ERROR,
 } room_voice_state_t;
 
 typedef enum { ROOM_VOICE_BEGIN, ROOM_VOICE_FINISH, ROOM_VOICE_CANCEL } room_voice_action_t;
@@ -23,11 +27,13 @@ typedef struct {
     uint64_t owner_incarnation;
     char recipient[65];
     char detail[96];
+    char text[ESP_OPENCLAW_TRANSCRIPTION_TEXT_BYTES];
 } room_voice_snapshot_t;
 
 typedef struct {
     bool valid;
     bool available;
+    esp_openclaw_node_handle_t operator_node;
     uint64_t recipient_revision;
     uint64_t owner_incarnation;
     char recipient[65];
@@ -38,6 +44,11 @@ typedef struct {
 void room_voice_draft_request(room_voice_action_t action, uint32_t generation,
                              uint64_t recipient_revision, uint64_t owner_incarnation);
 bool room_voice_draft_needs_poll(void);
-/* The room supervisor is the sole caller and owns the unsent audio allocation.
- * Returns true when the copied UI snapshot changed. No network submission. */
+/* Poll and event forwarding share the room state lock. The operator node is
+ * process-lived, including while accepted cleanup callbacks drain. */
+void room_voice_draft_event(esp_openclaw_node_handle_t source, const char *event,
+                           const char *payload, uint64_t revision, uint64_t owner);
+bool room_voice_draft_busy(void);
+/* The supervisor owns capture, transcription and cleanup. Transcription never
+ * submits chat; only COMPLETE text becomes a reviewable draft. */
 bool room_voice_draft_poll(const room_voice_context_t *context, room_voice_snapshot_t *result);

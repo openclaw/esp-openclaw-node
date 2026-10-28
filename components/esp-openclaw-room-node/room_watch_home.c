@@ -8,6 +8,9 @@
 static lv_obj_t *root, *title_label, *detail_label;
 static lv_obj_t *continue_card, *reader_label;
 static lv_obj_t *voice_button, *voice_label, *discard_button;
+static lv_obj_t *review_panel, *review_heading, *review_recipient, *review_body, *review_text;
+static uint32_t review_generation;
+static room_voice_state_t review_state;
 static openclaw_status_bar_t status_bar;
 static bool wifi_connected, gateway_connected;
 static bool display_awake;
@@ -132,6 +135,31 @@ void room_watch_home_create(lv_obj_t *parent, lv_event_cb_t menu_handler, lv_eve
     label(continue_card, "Continue conversations", 50, 35, 228, 0xb8b0bd);
     label(continue_card, LV_SYMBOL_RIGHT, 288, 23, 14, 0xc9b9db);
     lv_obj_set_hidden(continue_card, true);
+    review_panel = lv_obj_create(root);
+    lv_obj_remove_style_all(review_panel);
+    lv_obj_set_pos(review_panel, 18, 68);
+    lv_obj_set_size(review_panel, 332, 298);
+    lv_obj_remove_flag(review_panel, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_style_bg_color(review_panel, lv_color_hex(0x15101b), 0);
+    lv_obj_set_style_bg_opa(review_panel, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(review_panel, 20, 0);
+    review_heading = label(review_panel, "Text draft", 8, 8, 316, 0xf4efee);
+#if LV_FONT_MONTSERRAT_20
+    lv_obj_set_style_text_font(review_heading, &lv_font_montserrat_20, 0);
+#endif
+    review_recipient = label(review_panel, "", 8, 40, 316, 0xb8b0bd);
+    review_body = lv_obj_create(review_panel);
+    lv_obj_remove_style_all(review_body);
+    lv_obj_set_pos(review_body, 8, 72);
+    lv_obj_set_size(review_body, 316, 216);
+    lv_obj_set_scroll_dir(review_body, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(review_body, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_set_style_width(review_body, 3, LV_PART_SCROLLBAR);
+    lv_obj_set_style_bg_color(review_body, lv_color_hex(0xb8b0bd), LV_PART_SCROLLBAR);
+    lv_obj_set_style_bg_opa(review_body, LV_OPA_60, LV_PART_SCROLLBAR);
+    review_text = label(review_body, "", 0, 0, 306, 0xf4efee);
+    lv_label_set_long_mode(review_text, LV_LABEL_LONG_WRAP);
+    lv_obj_set_hidden(review_panel, true);
     voice_button = action(root, "Hold to record", voice_handler, &voice_label);
     discard_button = action(root, "Discard", discard_handler, NULL);
     lv_obj_set_size(discard_button, 104, 52);
@@ -141,6 +169,11 @@ void room_watch_home_create(lv_obj_t *parent, lv_event_cb_t menu_handler, lv_eve
     lv_obj_center(lv_obj_get_child(discard_button, 0));
     lv_obj_set_hidden(voice_button, true);
     lv_obj_set_hidden(discard_button, true);
+}
+
+bool room_watch_home_review_visible(void)
+{
+    return review_panel != NULL && lv_obj_is_visible(review_panel);
 }
 
 bool room_watch_home_render(const room_ui_facts_t *facts, const room_ui_talk_target_t *target, room_ui_state_t state,
@@ -160,16 +193,25 @@ bool room_watch_home_render(const room_ui_facts_t *facts, const room_ui_talk_tar
 
     bool voice_busy = voice != NULL && voice->state >= ROOM_VOICE_STARTING;
     bool draft = voice != NULL && voice->state == ROOM_VOICE_DRAFT;
-    bool retry = voice != NULL && voice->state == ROOM_VOICE_ERROR;
-    bool split = draft && !holding;
-    lv_obj_set_hidden(voice_button, voice == NULL);
-    lv_obj_set_hidden(discard_button, !split);
+    bool canceling = voice != NULL && voice->state == ROOM_VOICE_CANCELING;
+    bool transcribing = voice != NULL && (voice->state == ROOM_VOICE_TRANSCRIBING || canceling);
+    bool transcription_failed = voice != NULL && voice->state == ROOM_VOICE_TRANSCRIPTION_ERROR;
+    bool review = (draft || transcribing || transcription_failed) && !holding;
+    bool retry = voice != NULL && (voice->state == ROOM_VOICE_ERROR || transcription_failed);
+    bool split = (draft || transcription_failed) && !holding;
+    lv_obj_set_hidden(review_panel, !review);
+    lv_obj_set_hidden(voice_button, voice == NULL || (transcribing && !holding));
+    lv_obj_set_hidden(discard_button, !review);
+    lv_obj_set_size(discard_button, transcribing ? 316 : 104, 52);
+    lv_label_set_text_static(lv_obj_get_child(discard_button, 0), canceling ? "Canceling..." : transcribing ? "Cancel" : "Discard");
+    lv_obj_center(lv_obj_get_child(discard_button, 0));
+    lv_obj_set_state(discard_button, LV_STATE_DISABLED, canceling);
     lv_obj_set_pos(voice_button, split ? 138 : 26, 376);
     lv_obj_set_width(voice_button, split ? 204 : 316);
     lv_obj_center(voice_label);
     lv_label_set_text_static(voice_label, split || retry ? "Hold to record again" :
         voice != NULL && voice->state == ROOM_VOICE_FINISHING ? "Finishing..." :
-        voice_busy ? "Release to keep" : "Hold to record");
+        voice_busy && !retry ? "Release to keep" : "Hold to record");
     /* Keep a pressed recording target enabled through the duration cap so its
      * release cannot activate the replacement draft controls. */
     lv_obj_set_state(voice_button, LV_STATE_DISABLED, !voice_enabled);
@@ -180,6 +222,25 @@ bool room_watch_home_render(const room_ui_facts_t *facts, const room_ui_talk_tar
     lv_obj_set_hidden(continue_card, !reading);
     lv_obj_set_hidden(title_label, reading);
     lv_obj_set_hidden(detail_label, reading);
+    if (review) {
+        lv_obj_set_hidden(title_label, true);
+        lv_obj_set_hidden(detail_label, true);
+        lv_label_set_text_static(review_heading, canceling ? "Canceling" : transcribing ? "Transcribing" : transcription_failed ? "Couldn't transcribe" : "Text draft");
+        char recipient[96];
+        snprintf(recipient, sizeof(recipient), "%s / Not sent", voice->recipient);
+        lv_label_set_text(review_recipient, recipient);
+        const char *text = draft ? voice->text : transcription_failed ? voice->detail : canceling ? "Discarding this recording." :
+            "Turning your recording into text.\n\nNothing is sent to your agent. Review the text when it is ready.";
+        bool changed = review_generation != voice->generation || review_state != voice->state ||
+            strcmp(lv_label_get_text(review_text), text) != 0;
+        if (changed) {
+            lv_label_set_text(review_text, text);
+            lv_obj_scroll_to_y(review_body, 0, LV_ANIM_OFF);
+        }
+        review_generation = voice->generation;
+        review_state = voice->state;
+        return false;
+    }
     if (reading) {
         if (strcmp(lv_label_get_text(reader_label), reader_agent) != 0)
             lv_label_set_text(reader_label, reader_agent);

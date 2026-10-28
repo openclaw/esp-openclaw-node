@@ -45,6 +45,7 @@ typedef struct {
     unsigned critical_depth, callback_depth;
     bool media_owned, ambient, inside_start, media_busy;
     unsigned recording_starts, recording_stops, recording_cancels;
+    unsigned transcription_creates, transcription_appends, transcription_closes, transcription_bytes;
     bool recording_active;
     bool finish_after_recording_snapshot;
     room_recording_snapshot_t recording;
@@ -91,6 +92,7 @@ void host_reply_config(void);
 void host_reply_create(bool ok);
 void host_reply_speech(bool ok);
 void host_reply_scope(bool ok, const char *payload);
+void host_reply_transcription(bool ok, const char *payload);
 void host_reply_agents(bool ok, const char *payload);
 void host_reply_devices(bool ok, const char *payload);
 void host_fire_timeout(TimerHandle_t timer);

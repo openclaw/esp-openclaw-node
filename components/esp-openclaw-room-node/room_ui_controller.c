@@ -755,7 +755,8 @@ void room_ui_set_voice_action_handler(void (*handler)(room_voice_action_t, uint3
 void room_ui_store_voice(const room_voice_snapshot_t *snapshot)
 {
     taskENTER_CRITICAL(&state_mux);
-    bool failed = snapshot->state == ROOM_VOICE_ERROR && current_voice.state != ROOM_VOICE_ERROR;
+    bool failed = (snapshot->state == ROOM_VOICE_ERROR || snapshot->state == ROOM_VOICE_TRANSCRIPTION_ERROR) &&
+        snapshot->state != current_voice.state;
     current_voice = *snapshot;
     taskEXIT_CRITICAL(&state_mux);
     if (watch_home_enabled && failed) start_text_hint(10000);
@@ -793,7 +794,7 @@ static void watch_voice_clicked(lv_event_t *event)
         if (wake) { room_ui_show_face_hint(10000); return; }
         if (!current || voice_held || voice_generation == UINT32_MAX ||
             (painted_voice.state != ROOM_VOICE_READY && painted_voice.state != ROOM_VOICE_DRAFT &&
-             painted_voice.state != ROOM_VOICE_ERROR)) return;
+             painted_voice.state != ROOM_VOICE_ERROR && painted_voice.state != ROOM_VOICE_TRANSCRIPTION_ERROR)) return;
         lv_indev_t *input = lv_indev_active();
         if (input == NULL) return;
         lv_point_t point;
@@ -833,7 +834,8 @@ static void watch_voice_discard(lv_event_t *event)
 {
     lv_event_code_t code = lv_event_get_code(event);
     if (code == LV_EVENT_PRESSED) {
-        discard_pressed_generation = !voice_held && painted_voice.state == ROOM_VOICE_DRAFT
+        discard_pressed_generation = !voice_held && (painted_voice.state == ROOM_VOICE_DRAFT ||
+            painted_voice.state == ROOM_VOICE_TRANSCRIBING || painted_voice.state == ROOM_VOICE_TRANSCRIPTION_ERROR)
             ? painted_voice.generation : 0;
         if (discard_pressed_generation != 0) room_ui_show_face_hint(10000);
     } else if (code == LV_EVENT_SHORT_CLICKED) {
@@ -1255,7 +1257,8 @@ static bool room_ui_render_locked(void)
     bool overlay = diagnostics_open;
     room_ui_facts_t facts = current_facts;
     room_ui_talk_target_t target = current_target;
-    room_voice_snapshot_t voice = current_voice;
+    static room_voice_snapshot_t voice;
+    voice = current_voice;
     room_conversation_context_t reader_context = current_reader_context;
     bool selecting = selection_pending, selection_error = selection_failed;
     room_watch_page_t page = watch_page;
@@ -1375,7 +1378,7 @@ static bool room_ui_render_locked(void)
         }
         if (camera_indicator != NULL) lv_obj_move_foreground(camera_indicator);
     }
-    if (canvas_active || navigation) {
+    if (canvas_active || navigation || (watch_home_enabled && room_watch_home_review_visible())) {
         room_face_hide();
         lv_obj_set_hidden(status_label, true);
         if (state == ROOM_UI_IDLE) {
@@ -1505,7 +1508,7 @@ void room_ui_show_face_hint(uint32_t show_ms)
         if (watch_hint) arm_repaint_retry();
         return;
     }
-    if (watch_navigation_active()) {
+    if (watch_navigation_active() || (watch_home_enabled && room_watch_home_review_visible())) {
         room_ui_paint_and_unlock();
         return;
     }

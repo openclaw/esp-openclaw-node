@@ -117,13 +117,15 @@ void room_watch_navigation_create(lv_obj_t *parent, lv_event_cb_t handler)
 }
 
 void room_watch_navigation_render(room_watch_page_t page, const room_ui_facts_t *facts,
-                                  bool hidden, bool resume_failed, room_watch_page_t parent)
+                                  bool hidden, bool resume_failed, room_watch_page_t parent, int content_bottom)
 {
     if (root == NULL) return;
     bool entering_connection = !connection_active && !hidden && page == ROOM_WATCH_CONNECTION;
     connection_active = !hidden && page == ROOM_WATCH_CONNECTION;
     lv_obj_set_hidden(root, hidden);
     if (hidden) return;
+    lv_obj_set_height(menu_list, content_bottom - 116);
+    lv_obj_set_height(connection_body, content_bottom - 164);
     lv_obj_set_style_text_font(connection_text, openclaw_reading_font(), 0);
     lv_obj_set_hidden(connection_body, !connection_active);
     if (entering_connection) {

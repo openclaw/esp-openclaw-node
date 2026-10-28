@@ -13,7 +13,7 @@ void room_watch_agents_create(lv_obj_t *parent, lv_event_cb_t handler);
 void room_watch_agents_reset(void);
 /* The snapshot is owned by the display controller and lives until the next render. */
 void room_watch_agents_render(const room_agents_snapshot_t *snapshot, bool hidden,
-    const char *target_id, bool expired, bool pending, bool failed);
+    const char *target_id, bool expired, bool pending, bool failed, int content_bottom);
 room_agent_action_t room_watch_agents_activate(int action, size_t *offset);
 
 bool room_watch_agents_target(char id[65], unsigned *revision);

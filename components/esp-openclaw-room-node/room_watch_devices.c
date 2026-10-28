@@ -100,7 +100,7 @@ void room_watch_devices_reset(void)
     devices = NULL;
 }
 
-void room_watch_devices_render(const esp_openclaw_devices_snapshot_t *snapshot, bool hidden)
+void room_watch_devices_render(const esp_openclaw_devices_snapshot_t *snapshot, bool hidden, int content_bottom)
 {
     if (root == NULL) return;
     devices = hidden ? NULL : snapshot;
@@ -116,7 +116,10 @@ void room_watch_devices_render(const esp_openclaw_devices_snapshot_t *snapshot, 
     lv_obj_set_y(lv_obj_get_child(local, 0), (row_height - 16) / 2);
     lv_obj_set_hidden(list, detail || !ready);
     lv_obj_set_y(list, 116 + row_height + 8);
-    lv_obj_set_height(list, 316 - (116 + row_height + 8));
+    lv_obj_set_height(list, content_bottom - 56 - (116 + row_height + 8));
+    lv_obj_set_y(previous, content_bottom - 44);
+    lv_obj_set_y(counter, content_bottom - 29);
+    lv_obj_set_y(next, content_bottom - 44);
     for (unsigned i = 0; i < PAGE_SIZE; ++i) {
         lv_obj_set_pos(rows[i], 0, (int)i * (row_height + openclaw_density_row_gap()));
         lv_obj_set_height(rows[i], row_height);

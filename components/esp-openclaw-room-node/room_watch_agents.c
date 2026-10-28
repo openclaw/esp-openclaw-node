@@ -166,11 +166,15 @@ static void render_avatar(lv_obj_t *text, lv_obj_t *image, const esp_openclaw_ag
 }
 
 void room_watch_agents_render(const room_agents_snapshot_t *snapshot, bool hidden,
-    const char *target_id, bool expired, bool pending, bool failed)
+    const char *target_id, bool expired, bool pending, bool failed, int content_bottom)
 {
     if (root == NULL) return;
     lv_obj_set_hidden(root, hidden);
     if (hidden) return;
+    lv_obj_set_height(list, content_bottom - 172);
+    lv_obj_set_y(previous, content_bottom - 44);
+    lv_obj_set_y(refresh, content_bottom - 44);
+    lv_obj_set_y(next, content_bottom - 44);
     int row_height = openclaw_density_row_height(true);
     for (unsigned i = 0; i < ESP_OPENCLAW_DIRECTORY_PAGE_SIZE; ++i) {
         lv_obj_set_y(rows[i], (int)i * (row_height + 8));

@@ -25,7 +25,7 @@ typedef struct {
     unsigned speech_requests;
     char speech_params[1536];
     unsigned scope_requests, token_connects;
-    unsigned agent_requests, conversation_requests, device_requests;
+    unsigned agent_requests, conversation_requests, session_creations, device_requests;
     bool devices_wanted;
     unsigned devices_generation;
     esp_openclaw_devices_state_t devices_state;
@@ -98,6 +98,7 @@ void host_reply_scope(bool ok, const char *payload);
 void host_reply_transcription(bool ok, const char *payload);
 void host_reply_chat(bool ok, const char *payload);
 void host_reply_agents(bool ok, const char *payload);
+void host_reply_creation(bool ok, const char *payload, const char *error_code);
 void host_reply_devices(bool ok, const char *payload);
 void host_fire_timeout(TimerHandle_t timer);
 void host_fire_timeout_generation(TimerHandle_t timer, uint32_t generation);

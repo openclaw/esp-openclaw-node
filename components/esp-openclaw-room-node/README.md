@@ -353,3 +353,24 @@ Phone pairing is explicitly marked unavailable. These are read-only details.
 The network sample refreshes once per second while this page is visible and the
 display is awake. Refreshing preserves the reading position; reopening starts
 at the top. Hidden pages and accepted display sleep stop network polling.
+
+### New conversations on the Watch
+
+In an agent's **Conversations** list, **New chat** opens a review of the selected
+agent. **Create empty conversation** creates a fresh, empty Gateway conversation;
+it sends no initial message, resets no existing conversation, and leaves the
+current and next Talk target unchanged. **Open conversation** reads the exact key
+returned by the Gateway. Sending a message remains a separate action.
+
+Creation uses the existing `CONFIG_OPENCLAW_ROOM_VOICE_ACTIONS` opt-in and its
+USB approval procedure above. The default read/talk build explains that setup
+requirement and cannot submit a creation request. No additional access is
+requested by opening the review.
+
+Back dismisses an unsubmitted review. After submission it only hides the status:
+a created empty conversation remains on the Gateway. A timeout, disconnect, or
+unrecognized result displays **Outcome unknown** and is never retried
+automatically. Check Chats before creating another conversation. A late valid
+receipt can resolve that status, but a replaced connection must reload Chats
+before opening it. Pending creation never disconnects the shared Talk/Canvas
+connection to recover from a timeout.

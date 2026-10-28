@@ -1348,6 +1348,182 @@ static void check_watch_conversations(const char *path)
     puts("watch conversations: read, resume, retained scroll, cancellation, stale owner, paging and Back passed");
 }
 
+static void creation_snapshot(const char *base, const char *state)
+{
+    if (base == NULL) return;
+    char path[1024];
+    assert(snprintf(path, sizeof(path), "%s.creation-%s.ppm", base, state) < (int)sizeof(path));
+    snapshot_content(path, false);
+}
+
+static void check_watch_creation(const char *path)
+{
+    assert(room_ui_watch_menu("agents") == ESP_OK);
+    room_agents_snapshot_t roster = {.state = ROOM_AGENTS_READY, .revision = 80,
+        .page = {.count = 1, .total = 1}};
+    strcpy(roster.page.agents[0].id, "fox");
+    strcpy(roster.page.agents[0].name, "Kitsune");
+    room_ui_store_agents(&roster);
+    room_conversations_snapshot_t *view = calloc(1, sizeof(*view));
+    assert(view != NULL);
+    view->agent = roster.page.agents[0];
+    view->state = ROOM_AGENTS_EMPTY;
+    view->revision = 1;
+    unsigned generation = conversation_generation + 1;
+    assert(room_ui_watch_reader(view, false, generation) == ESP_OK);
+    unsigned selections = agent_selections, starts = talk_starts, requests = conversation_requests;
+    assert(visible_watch_text("No conversations yet."));
+    creation_snapshot(path, "empty");
+    lv_obj_t *new_chat = lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_PLUS "  New chat"));
+    assert(room_board_display_brightness_set(0) == ESP_OK);
+    click_talk(new_chat);
+    assert(brightness > 0 && conversation_requests == requests);
+    click_talk(new_chat);
+    assert(conversation_action == ROOM_CONVERSATIONS_NEW && conversation_revision == 1);
+    assert(conversation_requests == requests + 1 && conversation_generation == generation);
+
+    view->creation = (room_creation_snapshot_t){.state = ROOM_CREATION_REVIEW, .revision = 1,
+        .conversation_revision = view->revision, .agent = view->agent};
+    strcpy(view->creation.detail, "Enable voice actions using USB setup to create chats. No message is sent.");
+    room_ui_store_conversations(view, generation);
+    lv_obj_t *create = lv_obj_get_parent(find_visible_text(lv_layer_top(), "Create empty conversation"));
+    assert(lv_obj_has_state(create, LV_STATE_DISABLED));
+    creation_snapshot(path, "access-needed");
+    requests = conversation_requests;
+    click_talk(create);
+    assert(conversation_requests == requests);
+    view->creation.can_create = true;
+    strcpy(view->creation.detail, "Creates an empty chat. No message is sent.");
+    room_ui_store_conversations(view, generation);
+    assert(!lv_obj_has_state(create, LV_STATE_DISABLED));
+    creation_snapshot(path, "review");
+
+    // A capability change fences the held Create even without a new revision or a repaint.
+    touch_talk(create, true);
+    view->creation.can_create = false;
+    deny_display = true;
+    room_ui_store_conversations(view, generation);
+    touch_talk(create, false);
+    assert(conversation_requests == requests);
+    deny_display = false;
+    view->creation.can_create = true;
+    room_ui_store_conversations(view, generation);
+    room_ui_refresh();
+
+    lv_obj_t *review_text = find_visible_text(lv_layer_top(),
+        "Kitsune\n\nCreates an empty chat. No message is sent.\n\nAgent ID\nfox");
+    assert(review_text != NULL);
+    lv_obj_t *scroll = lv_obj_get_parent(review_text);
+    memset(view->creation.agent.name, 'W', sizeof(view->creation.agent.name) - 1);
+    view->creation.agent.name[sizeof(view->creation.agent.name) - 1] = '\0';
+    memset(view->creation.agent.id, 'W', sizeof(view->creation.agent.id) - 1);
+    view->creation.agent.id[sizeof(view->creation.agent.id) - 1] = '\0';
+    memset(view->creation.detail, 'W', sizeof(view->creation.detail) - 1);
+    view->creation.detail[sizeof(view->creation.detail) - 1] = '\0';
+    room_ui_store_conversations(view, generation);
+    lv_obj_update_layout(lv_layer_top());
+    assert(lv_obj_get_scroll_bottom(scroll) > 0);
+    creation_snapshot(path, "review-wide");
+    touch_point = (lv_point_t){180, 265}; touch_state = LV_INDEV_STATE_PRESSED;
+    lv_indev_read(touchscreen); lv_tick_inc(40);
+    touch_point.y = 145; lv_indev_read(touchscreen); lv_tick_inc(40);
+    touch_state = LV_INDEV_STATE_RELEASED; lv_indev_read(touchscreen); lv_tick_inc(40);
+    assert(lv_obj_get_scroll_y(scroll) > 0 && conversation_requests == requests);
+    creation_snapshot(path, "review-scrolled");
+    view->creation.agent = view->agent;
+    strcpy(view->creation.detail, "Creates an empty chat. No message is sent.");
+    room_ui_store_conversations(view, generation);
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " Chats")));
+    assert(conversation_action == ROOM_CONVERSATIONS_DISMISS_CREATION && conversation_revision == 1);
+    assert(visible_watch_text("No conversations yet."));
+    view->creation = (room_creation_snapshot_t){0};
+    room_ui_store_conversations(view, generation);
+    click_talk(new_chat);
+    assert(conversation_action == ROOM_CONVERSATIONS_NEW);
+    view->creation = (room_creation_snapshot_t){.state = ROOM_CREATION_REVIEW, .revision = 2,
+        .conversation_revision = view->revision, .agent = view->agent, .can_create = true};
+    strcpy(view->creation.detail, "Creates an empty chat. No message is sent.");
+    room_ui_store_conversations(view, generation);
+    click_talk(create);
+    assert(conversation_action == ROOM_CONVERSATIONS_CREATE && conversation_revision == 2);
+    view->creation.state = ROOM_CREATION_CREATING;
+    ++view->creation.revision;
+    view->creation.can_create = false;
+    strcpy(view->creation.detail, "Creating an empty conversation.");
+    room_ui_store_conversations(view, generation);
+    assert(visible_watch_text("Creating chat"));
+    creation_snapshot(path, "creating");
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " Chats")));
+    assert(conversation_action == ROOM_CONVERSATIONS_DISMISS_CREATION && conversation_revision == 3);
+    requests = conversation_requests;
+    click_talk(new_chat);
+    assert(conversation_requests == requests && visible_watch_text("Creating chat"));
+
+    view->creation.state = ROOM_CREATION_UNKNOWN;
+    ++view->creation.revision;
+    strcpy(view->creation.detail, "Outcome unknown. Check Chats before creating another.");
+    room_ui_store_conversations(view, generation);
+    assert(visible_watch_text("Unknown") && !visible_watch_text("Review again"));
+    creation_snapshot(path, "unknown");
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), "Chats")));
+    assert(conversation_action == ROOM_CONVERSATIONS_DISMISS_CREATION);
+    click_talk(new_chat);
+    assert(conversation_action == ROOM_CONVERSATIONS_NEW);
+    view->creation.state = ROOM_CREATION_FAILED;
+    ++view->creation.revision;
+    strcpy(view->creation.detail, "Could not queue. Review and try again.");
+    room_ui_store_conversations(view, generation);
+    creation_snapshot(path, "failed");
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), "Review again")));
+    assert(conversation_action == ROOM_CONVERSATIONS_NEW && conversation_revision == view->revision);
+
+    view->creation.state = ROOM_CREATION_CREATED;
+    ++view->creation.revision;
+    view->creation.can_open = true;
+    strcpy(view->creation.detail, "Created. Open it to read the conversation.");
+    room_ui_store_conversations(view, generation);
+    lv_obj_t *open = lv_obj_get_parent(find_visible_text(lv_layer_top(), "Open conversation"));
+    creation_snapshot(path, "created");
+    requests = conversation_requests;
+    touch_talk(open, true);
+    view->creation.can_open = false;
+    strcpy(view->creation.detail, "Created. Reconnect and refresh Chats to find the conversation.");
+    deny_display = true;
+    room_ui_store_conversations(view, generation);
+    touch_talk(open, false);
+    deny_display = false;
+    room_ui_refresh();
+    assert(conversation_requests == requests && lv_obj_has_state(open, LV_STATE_DISABLED));
+    creation_snapshot(path, "created-unavailable");
+    view->creation.can_open = true;
+    strcpy(view->creation.detail, "Created. Open it to read the conversation.");
+    room_ui_store_conversations(view, generation);
+    click_talk(open);
+    assert(conversation_action == ROOM_CONVERSATIONS_OPEN_CREATED && conversation_revision == view->creation.revision);
+    assert(visible_watch_text("Chat created"));
+    ++view->revision;
+    ++view->preview_revision;
+    view->state = ROOM_AGENTS_READY;
+    view->page.count = 1;
+    strcpy(view->page.sessions[0].title, "New conversation");
+    view->preview_state = ROOM_AGENTS_LOADING;
+    room_ui_store_conversations(view, generation);
+    assert(visible_watch_text("New conversation") && visible_watch_text("Loading..."));
+    view->preview_state = ROOM_AGENTS_READY;
+    view->preview.status = ESP_OPENCLAW_PREVIEW_EMPTY;
+    room_ui_store_conversations(view, generation);
+    assert(visible_watch_text("No messages yet."));
+    creation_snapshot(path, "opened");
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " Chats")));
+    assert(visible_watch_text(LV_SYMBOL_PLUS "  New chat"));
+    click_talk(new_chat);
+    assert(conversation_action == ROOM_CONVERSATIONS_NEW && conversation_revision == view->revision);
+    assert(agent_selections == selections && talk_starts == starts);
+    assert(room_ui_watch_menu("home") == ESP_OK);
+    free(view);
+    puts("watch creation: explicit create, permission and revision fencing, scroll, retained outcomes and confirmed Open passed");
+}
+
 static void check_watch_home_gesture(void)
 {
     esp_openclaw_node_handle_t node = (esp_openclaw_node_handle_t)(uintptr_t)1;
@@ -2034,6 +2210,7 @@ int main(int argc, char **argv)
         check_watch_connection(argc == 3 ? argv[2] : NULL);
         check_watch_agents(argc == 3 ? argv[2] : NULL);
         check_watch_conversations(argc == 3 ? argv[2] : NULL);
+        check_watch_creation(argc == 3 ? argv[2] : NULL);
         check_watch_home_gesture();
         check_watch_devices(argc == 3 ? argv[2] : NULL);
         check_watch_display_settings(argc == 3 ? argv[2] : NULL);

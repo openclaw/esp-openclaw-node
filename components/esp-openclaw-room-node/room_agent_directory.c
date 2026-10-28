@@ -3,16 +3,19 @@
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
+#include "sdkconfig.h"
+#include "esp_random.h"
 #include "esp_timer.h"
 #include "cJSON.h"
 
 #define DIRECTORY_TIMEOUT_US (15 * 1000 * 1000)
 
-typedef enum { AGENTS, SESSIONS, PREVIEW } request_kind_t;
+typedef enum { AGENTS, SESSIONS, PREVIEW, CREATE } request_kind_t;
 typedef union {
     esp_openclaw_agent_page_t agents;
     esp_openclaw_session_page_t sessions;
     esp_openclaw_session_preview_t preview;
+    esp_openclaw_session_created_t created;
 } directory_page_t;
 
 typedef struct {
@@ -26,6 +29,9 @@ typedef struct {
     int64_t deadline;
     room_agents_state_t state;
     char *json;
+    unsigned creation_intent;
+    bool submitted, rejected;
+    char idempotency_key[33];
 } directory_request_t;
 
 static struct {
@@ -44,9 +50,24 @@ static struct {
     room_conversations_snapshot_t *conversations;
     unsigned conversations_revision, preview_revision;
     bool sessions_pending, preview_pending;
+    room_creation_snapshot_t creation;
+    esp_openclaw_session_created_t created;
+    esp_openclaw_node_handle_t creation_client;
+    uint64_t creation_incarnation;
+    uint32_t creation_connection;
+    unsigned creation_intent;
+    bool creation_pending, creation_submitted;
 } directory;
 static _Atomic(directory_request_t *) completed;
 static atomic_uint reader_epoch;
+static void copy_creation(room_creation_snapshot_t *snapshot);
+
+static void creation_state(room_creation_state_t state, const char *detail)
+{
+    directory.creation.state = state;
+    strcpy(directory.creation.detail, detail);
+    ++directory.creation.revision;
+}
 
 static void deadline_fired(void *arg)
 {
@@ -64,6 +85,11 @@ esp_err_t room_agent_directory_init(SemaphoreHandle_t owner_lock, void (*wake)(v
 
 static void clear_conversations(void)
 {
+    if (directory.creation.state == ROOM_CREATION_CREATING && !directory.creation_submitted) {
+        directory.creation_pending = false;
+        creation_state(ROOM_CREATION_FAILED, "Selection changed. Nothing was queued.");
+    }
+    ++directory.creation.revision;
     atomic_fetch_add(&reader_epoch, 1);
     ++directory.conversations_revision;
     ++directory.preview_revision;
@@ -93,6 +119,12 @@ void room_agent_directory_set_owner_locked(esp_openclaw_node_handle_t client,
     directory.incarnation = incarnation;
     directory.connection = connection;
     directory.ready = ready;
+    if (directory.creation.state == ROOM_CREATION_CREATING) {
+        directory.creation_pending = false;
+        creation_state(directory.creation_submitted ? ROOM_CREATION_UNKNOWN : ROOM_CREATION_FAILED,
+            directory.creation_submitted ? "Outcome unknown. Check Chats before creating another." :
+                "Connection changed. Nothing was queued.");
+    }
     invalidate();
 }
 
@@ -146,6 +178,8 @@ static bool current(const directory_request_t *request)
         request->incarnation != directory.incarnation || request->connection != directory.connection) return false;
     if (request->kind == AGENTS)
         return directory.interested && request->revision == directory.revision;
+    if (request->kind == CREATE)
+        return request->creation_intent == directory.creation_intent;
     return directory.conversations != NULL && request->revision == (request->kind == SESSIONS
         ? directory.conversations_revision : directory.preview_revision);
 }
@@ -239,6 +273,7 @@ void room_conversations_copy(room_conversations_snapshot_t *snapshot)
     else if (!directory.ready) snapshot->state = snapshot->preview_state = ROOM_AGENTS_OFFLINE;
     snapshot->revision = directory.conversations_revision;
     snapshot->preview_revision = directory.preview_revision;
+    copy_creation(&snapshot->creation);
     xSemaphoreGive(directory.lock);
 }
 
@@ -252,6 +287,133 @@ static bool reader_available(void)
                 return true;
     }
     return false;
+}
+
+static bool creation_owner(void)
+{
+    if (!directory.ready || directory.client != directory.creation_client ||
+        directory.incarnation != directory.creation_incarnation ||
+        directory.connection != directory.creation_connection || directory.page == NULL) return false;
+    for (size_t i = 0; i < directory.page->count; ++i)
+        if (strcmp(directory.page->agents[i].id, directory.creation.agent.id) == 0) return true;
+    return false;
+}
+
+static bool creation_target(void)
+{
+    return creation_owner() && directory.conversations != NULL &&
+        directory.conversations_revision == directory.creation.conversation_revision &&
+        strcmp(directory.conversations->agent.id, directory.creation.agent.id) == 0;
+}
+
+static bool creation_enabled(void)
+{
+#if CONFIG_OPENCLAW_ROOM_VOICE_ACTIONS
+    return true;
+#else
+    return false;
+#endif
+}
+
+static void copy_creation(room_creation_snapshot_t *snapshot)
+{
+    *snapshot = directory.creation;
+    snapshot->can_create = snapshot->state == ROOM_CREATION_REVIEW &&
+        creation_target() && creation_enabled();
+    snapshot->can_open = snapshot->state == ROOM_CREATION_CREATED && creation_owner();
+    if (snapshot->state == ROOM_CREATION_REVIEW && !creation_target())
+        strcpy(snapshot->detail, "Refresh Chats and choose New chat again.");
+    else if (snapshot->state == ROOM_CREATION_REVIEW && !creation_enabled())
+        strcpy(snapshot->detail, "Enable voice actions using USB setup to create chats. No message is sent.");
+    else if (snapshot->state == ROOM_CREATION_CREATED && !snapshot->can_open)
+        strcpy(snapshot->detail, "Created. Reconnect and refresh Chats to find the conversation.");
+}
+
+esp_err_t room_conversations_creation_begin(unsigned conversation_revision)
+{
+    if (directory.lock == NULL) return ESP_ERR_INVALID_STATE;
+    xSemaphoreTake(directory.lock, portMAX_DELAY);
+    room_conversations_snapshot_t *view = directory.conversations;
+    esp_err_t err = ESP_ERR_INVALID_STATE;
+    if (reader_available() && conversation_revision == directory.conversations_revision &&
+        (view->state == ROOM_AGENTS_READY || view->state == ROOM_AGENTS_EMPTY) &&
+        directory.creation.state != ROOM_CREATION_CREATING &&
+        (directory.inflight == NULL || directory.inflight->kind != CREATE)) {
+        directory.creation = (room_creation_snapshot_t){.state = ROOM_CREATION_REVIEW,
+            .revision = directory.creation.revision + 1, .conversation_revision = conversation_revision,
+            .agent = view->agent};
+        strcpy(directory.creation.detail, "Creates an empty chat. No message is sent.");
+        directory.creation_client = directory.client;
+        directory.creation_incarnation = directory.incarnation;
+        directory.creation_connection = directory.connection;
+        ++directory.creation_intent;
+        directory.creation_pending = directory.creation_submitted = false;
+        directory.created = (esp_openclaw_session_created_t){0};
+        err = ESP_OK;
+    } else if (directory.creation.state != ROOM_CREATION_CREATING &&
+        (directory.inflight == NULL || directory.inflight->kind != CREATE)) {
+        if (view != NULL) directory.creation.agent = view->agent;
+        creation_state(ROOM_CREATION_FAILED, "Selection changed. Refresh Chats and try again.");
+    }
+    xSemaphoreGive(directory.lock);
+    return err;
+}
+
+esp_err_t room_conversations_creation_submit(unsigned revision)
+{
+    if (directory.lock == NULL) return ESP_ERR_INVALID_STATE;
+    xSemaphoreTake(directory.lock, portMAX_DELAY);
+    esp_err_t err = ESP_ERR_INVALID_STATE;
+    if (revision == directory.creation.revision && directory.creation.state == ROOM_CREATION_REVIEW &&
+        creation_target() && creation_enabled()) {
+        creation_state(ROOM_CREATION_CREATING, "Creating an empty conversation.");
+        directory.creation_pending = true;
+        err = ESP_OK;
+    }
+    xSemaphoreGive(directory.lock);
+    if (err == ESP_OK) directory.wake();
+    return err;
+}
+
+void room_conversations_creation_dismiss(unsigned revision)
+{
+    if (directory.lock == NULL) return;
+    xSemaphoreTake(directory.lock, portMAX_DELAY);
+    if (revision == directory.creation.revision &&
+        (directory.creation.state == ROOM_CREATION_REVIEW || directory.creation.state == ROOM_CREATION_FAILED))
+        directory.creation = (room_creation_snapshot_t){.revision = revision + 1};
+    xSemaphoreGive(directory.lock);
+}
+
+esp_err_t room_conversations_creation_open(unsigned revision)
+{
+    if (directory.lock == NULL) return ESP_ERR_INVALID_STATE;
+    xSemaphoreTake(directory.lock, portMAX_DELAY);
+    if (revision != directory.creation.revision || directory.creation.state != ROOM_CREATION_CREATED ||
+        !creation_owner()) {
+        xSemaphoreGive(directory.lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (directory.conversations == NULL) directory.conversations = calloc(1, sizeof(*directory.conversations));
+    room_conversations_snapshot_t *view = directory.conversations;
+    if (view == NULL) {
+        creation_state(ROOM_CREATION_CREATED, "Could not open the reader. Try Open again.");
+        xSemaphoreGive(directory.lock);
+        return ESP_ERR_NO_MEM;
+    }
+    atomic_fetch_add(&reader_epoch, 1);
+    ++directory.conversations_revision;
+    ++directory.preview_revision;
+    *view = (room_conversations_snapshot_t){.state = ROOM_AGENTS_READY,
+        .preview_state = ROOM_AGENTS_LOADING, .agent = directory.creation.agent};
+    view->page.count = 1;
+    strcpy(view->page.sessions[0].key, directory.created.key);
+    strcpy(view->page.sessions[0].title, "New conversation");
+    directory.sessions_pending = false;
+    directory.preview_pending = true;
+    xSemaphoreGive(directory.lock);
+    directory.wake();
+    return ESP_OK;
 }
 
 esp_err_t room_conversations_copy_resume(room_agents_snapshot_t *agents,
@@ -271,6 +433,7 @@ esp_err_t room_conversations_copy_resume(room_agents_snapshot_t *agents,
         *reader = *directory.conversations;
         reader->revision = directory.conversations_revision;
         reader->preview_revision = directory.preview_revision;
+        copy_creation(&reader->creation);
         *epoch = atomic_load(&reader_epoch);
     }
     xSemaphoreGive(directory.lock);
@@ -322,6 +485,10 @@ static void response(esp_openclaw_node_handle_t client,
     (void)client;
     directory_request_t *request = context;
     request->state = ROOM_AGENTS_ERROR;
+    request->rejected = !result->ok && result->error_code != NULL &&
+        (strcmp(result->error_code, "INVALID_REQUEST") == 0 ||
+         strcmp(result->error_code, "FORBIDDEN") == 0 ||
+         strcmp(result->error_code, "STALE_CONNECTION") == 0);
     if (result->ok && result->payload_json != NULL) {
         size_t length = strnlen(result->payload_json, ESP_OPENCLAW_DIRECTORY_MAX_JSON_BYTES + 1);
         if (length > ESP_OPENCLAW_DIRECTORY_MAX_JSON_BYTES) request->state = ROOM_AGENTS_TOO_LARGE;
@@ -340,7 +507,10 @@ static char *request_params(const directory_request_t *request)
     cJSON *root = cJSON_CreateObject();
     if (root == NULL) return NULL;
     bool ok = true;
-    if (request->kind == SESSIONS) {
+    if (request->kind == CREATE) {
+        ok = cJSON_AddStringToObject(root, "agentId", request->agent_id) != NULL &&
+            cJSON_AddStringToObject(root, "idempotencyKey", request->idempotency_key) != NULL;
+    } else if (request->kind == SESSIONS) {
         ok = cJSON_AddStringToObject(root, "agentId", request->agent_id) != NULL &&
             cJSON_AddNumberToObject(root, "limit", ESP_OPENCLAW_DIRECTORY_PAGE_SIZE) != NULL &&
             cJSON_AddNumberToObject(root, "offset", request->offset) != NULL &&
@@ -399,8 +569,11 @@ void room_agent_directory_poll(bool defer_request)
                 result = esp_openclaw_sessions_parse(done->json, length, done->agent_id, done->offset, &page->sessions);
                 if (result == ESP_OPENCLAW_DIRECTORY_OK)
                     done->state = page->sessions.count == 0 ? ROOM_AGENTS_EMPTY : ROOM_AGENTS_READY;
-            } else {
+            } else if (done->kind == PREVIEW) {
                 result = esp_openclaw_preview_parse(done->json, length, done->key, &page->preview);
+                if (result == ESP_OPENCLAW_DIRECTORY_OK) done->state = ROOM_AGENTS_READY;
+            } else {
+                result = esp_openclaw_session_created_parse(done->json, length, done->agent_id, &page->created);
                 if (result == ESP_OPENCLAW_DIRECTORY_OK) done->state = ROOM_AGENTS_READY;
             }
             if (result == ESP_OPENCLAW_DIRECTORY_TOO_LARGE) done->state = ROOM_AGENTS_TOO_LARGE;
@@ -408,7 +581,21 @@ void room_agent_directory_poll(bool defer_request)
         esp_timer_stop(directory.timer);
         xSemaphoreTake(directory.lock, portMAX_DELAY);
         directory.inflight = NULL;
-        if (current(done)) {
+        if (done->kind == CREATE && done->creation_intent == directory.creation_intent &&
+            (directory.creation.state == ROOM_CREATION_CREATING || directory.creation.state == ROOM_CREATION_UNKNOWN)) {
+            /* A late, valid receipt resolves uncertainty even after owner loss.
+             * It grants no routing authority; Open revalidates the live owner. */
+            if (done->submitted && page != NULL && done->state == ROOM_AGENTS_READY) {
+                directory.created = page->created;
+                creation_state(ROOM_CREATION_CREATED, "Created. Open it to read the conversation.");
+            } else {
+                bool failed = !done->submitted || done->rejected;
+                creation_state(failed ? ROOM_CREATION_FAILED : ROOM_CREATION_UNKNOWN,
+                    !done->submitted ? "Could not queue. Review and try again." :
+                    done->rejected ? "Gateway rejected creation. Check access or refresh." :
+                    "Outcome unknown. Check Chats before creating another.");
+            }
+        } else if (done->kind != CREATE && current(done)) {
             if (esp_timer_get_time() >= done->deadline) done->state = ROOM_AGENTS_TIMEOUT;
             publish(done, page);
         }
@@ -421,26 +608,38 @@ void room_agent_directory_poll(bool defer_request)
     if (directory.inflight != NULL && current(directory.inflight) &&
         esp_timer_get_time() >= directory.inflight->deadline) {
         directory_request_t *request = directory.inflight;
-        request->state = ROOM_AGENTS_TIMEOUT;
-        publish(request, NULL);
-        if (request->kind == AGENTS) ++directory.revision;
-        else if (request->kind == SESSIONS) ++directory.conversations_revision;
-        else ++directory.preview_revision;
+        if (request->kind == CREATE) {
+            if (directory.creation.state == ROOM_CREATION_CREATING)
+                creation_state(ROOM_CREATION_UNKNOWN, "Outcome unknown. Check Chats before creating another.");
+        } else {
+            request->state = ROOM_AGENTS_TIMEOUT;
+            publish(request, NULL);
+            if (request->kind == AGENTS) ++directory.revision;
+            else if (request->kind == SESSIONS) ++directory.conversations_revision;
+            else ++directory.preview_revision;
+        }
         /* The socket also owns Talk and Canvas. Keep the callback context and
          * wait for completion instead of disconnecting or accumulating RPCs. */
     }
-    bool pending = directory.pending || directory.sessions_pending || directory.preview_pending;
+    if (directory.creation_pending && (!creation_target() || !creation_enabled())) {
+        directory.creation_pending = false;
+        creation_state(ROOM_CREATION_FAILED, "Selection or connection changed. Nothing was queued.");
+    }
+    bool pending = directory.creation_pending || directory.pending || directory.sessions_pending || directory.preview_pending;
     if (defer_request || !pending || !directory.ready || directory.inflight != NULL) {
         xSemaphoreGive(directory.lock);
         return;
     }
-    request_kind_t kind = directory.pending ? AGENTS : directory.sessions_pending ? SESSIONS : PREVIEW;
+    request_kind_t kind = directory.creation_pending ? CREATE : directory.pending ? AGENTS :
+        directory.sessions_pending ? SESSIONS : PREVIEW;
     directory_request_t *request = calloc(1, sizeof(*request));
-    if (kind == AGENTS) directory.pending = false;
+    if (kind == CREATE) directory.creation_pending = false;
+    else if (kind == AGENTS) directory.pending = false;
     else if (kind == SESSIONS) directory.sessions_pending = false;
     else directory.preview_pending = false;
     if (request == NULL) {
-        if (kind == AGENTS) directory.state = ROOM_AGENTS_ERROR;
+        if (kind == CREATE) creation_state(ROOM_CREATION_FAILED, "Could not queue. Review and try again.");
+        else if (kind == AGENTS) directory.state = ROOM_AGENTS_ERROR;
         else if (kind == SESSIONS) directory.conversations->state = ROOM_AGENTS_ERROR;
         else directory.conversations->preview_state = ROOM_AGENTS_ERROR;
         xSemaphoreGive(directory.lock);
@@ -450,9 +649,19 @@ void room_agent_directory_poll(bool defer_request)
         .incarnation = directory.incarnation, .connection = directory.connection,
         .revision = kind == AGENTS ? directory.revision : kind == SESSIONS
             ? directory.conversations_revision : directory.preview_revision,
-        .offset = kind == AGENTS ? directory.offset : directory.conversations->page.offset,
+        .offset = kind == AGENTS ? directory.offset : kind == CREATE ? 0 : directory.conversations->page.offset,
         .deadline = esp_timer_get_time() + DIRECTORY_TIMEOUT_US, .state = ROOM_AGENTS_ERROR};
-    if (kind != AGENTS) {
+    if (kind == CREATE) {
+        request->creation_intent = directory.creation_intent;
+        strcpy(request->agent_id, directory.creation.agent.id);
+        unsigned char random[16];
+        esp_fill_random(random, sizeof(random));
+        const char hex[] = "0123456789abcdef";
+        for (size_t i = 0; i < sizeof(random); ++i) {
+            request->idempotency_key[i * 2] = hex[random[i] >> 4];
+            request->idempotency_key[i * 2 + 1] = hex[random[i] & 15];
+        }
+    } else if (kind != AGENTS) {
         memcpy(request->agent_id, directory.conversations->agent.id, sizeof(request->agent_id));
         if (kind == PREVIEW) memcpy(request->key,
             directory.conversations->page.sessions[directory.conversations->selected].key, sizeof(request->key));
@@ -460,9 +669,22 @@ void room_agent_directory_poll(bool defer_request)
     directory.inflight = request;
     xSemaphoreGive(directory.lock);
     char *params = request_params(request);
-    const char *method = kind == AGENTS ? "agents.list" : kind == SESSIONS ? "sessions.list" : "sessions.preview";
+    const char *method = kind == CREATE ? "sessions.create" : kind == AGENTS ? "agents.list" :
+        kind == SESSIONS ? "sessions.list" : "sessions.preview";
     esp_err_t err = params != NULL ? esp_timer_start_once(directory.timer, DIRECTORY_TIMEOUT_US) : ESP_ERR_NO_MEM;
-    if (err == ESP_OK) err = esp_openclaw_node_gateway_request_on_connection(request->client,
+    if (kind == CREATE) {
+        /* Serialization may allocate. Revalidate authority at the nonblocking
+         * SDK enqueue boundary; its callback only publishes the mailbox. */
+        xSemaphoreTake(directory.lock, portMAX_DELAY);
+        if (!creation_target() || !creation_enabled() ||
+            request->creation_intent != directory.creation_intent ||
+            directory.creation.state != ROOM_CREATION_CREATING) err = ESP_ERR_INVALID_STATE;
+        if (err == ESP_OK) err = esp_openclaw_node_gateway_request_on_connection(request->client,
+            request->connection, method, params, response, request);
+        request->submitted = err == ESP_OK;
+        directory.creation_submitted = request->submitted;
+        xSemaphoreGive(directory.lock);
+    } else if (err == ESP_OK) err = esp_openclaw_node_gateway_request_on_connection(request->client,
         request->connection, method, params, response, request);
     free(params);
     if (err != ESP_OK) {

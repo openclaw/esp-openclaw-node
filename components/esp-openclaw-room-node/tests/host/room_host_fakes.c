@@ -540,7 +540,10 @@ esp_err_t esp_openclaw_node_gateway_request(esp_openclaw_node_handle_t node,
 {
     bool transcription = strncmp(method, "talk.session.", 13) == 0;
     bool chat = strcmp(method, "chat.history") == 0 || strcmp(method, "chat.send") == 0;
-    host_require(host.critical_depth == 0 && (transcription || chat || mutex_depth == 0), "non-transcription RPC outside locks");
+    bool creation = strcmp(method, "sessions.create") == 0;
+    host_require(host.critical_depth == 0 && (transcription || chat || creation || mutex_depth == 0),
+        "read-only RPC outside owner locks");
+    if (creation) host_require(mutex_depth == 1, "creation authority held through nonblocking enqueue");
     pending_rpc_t request = {.callback = callback, .ctx = ctx, .node = node};
     if (chat) {
         if (strcmp(method, "chat.send") == 0 && host.fail_chat_send) return ESP_FAIL;
@@ -581,7 +584,8 @@ esp_err_t esp_openclaw_node_gateway_request(esp_openclaw_node_handle_t node,
         host_require(strcmp(params, "{}") == 0, "node.list has no pagination or filters");
         devices_rpc = request;
         ++host.device_requests;
-    } else if (strcmp(method, "agents.list") == 0 || strcmp(method, "sessions.list") == 0 || strcmp(method, "sessions.preview") == 0) {
+    } else if (strcmp(method, "agents.list") == 0 || strcmp(method, "sessions.list") == 0 ||
+        strcmp(method, "sessions.preview") == 0 || strcmp(method, "sessions.create") == 0) {
         if (host.fail_agent_submit) return ESP_FAIL;
         host_require(agents_rpc.callback == NULL, "one directory request outstanding");
         host_require(strlen(method) < sizeof(host.reader_method) && strlen(params) < sizeof(host.reader_params),
@@ -591,7 +595,8 @@ esp_err_t esp_openclaw_node_gateway_request(esp_openclaw_node_handle_t node,
         if (strcmp(method, "agents.list") == 0) {
             host_require(strcmp(params, "{}") == 0, "directory reads current roster without routing changes");
             ++host.agent_requests;
-        } else ++host.conversation_requests;
+        } else if (strcmp(method, "sessions.create") == 0) ++host.session_creations;
+        else ++host.conversation_requests;
         agents_rpc = request;
     } else if (strcmp(method, "device.scopes.requestUpgrade") == 0 || strcmp(method, "device.scopes.waitUpgrade") == 0) {
         if (host.fail_scope_submit) return ESP_FAIL;
@@ -692,6 +697,20 @@ void host_reply_devices(bool ok, const char *payload)
 void host_reply_agents(bool ok, const char *payload)
 {
     reply(&agents_rpc, ok, payload);
+}
+void host_reply_creation(bool ok, const char *payload, const char *error_code)
+{
+    pending_rpc_t request = agents_rpc;
+    agents_rpc = (pending_rpc_t){0};
+    host_require(request.callback != NULL, "creation reply requires an outstanding RPC");
+    char *borrowed = payload != NULL ? strdup(payload) : NULL;
+    const esp_openclaw_node_gateway_result_t result = {
+        .ok = ok, .payload_json = borrowed, .error_code = error_code,
+    };
+    ++host.callback_depth;
+    request.callback(request.node, &result, request.ctx);
+    --host.callback_depth;
+    free(borrowed);
 }
 void host_reply_config(void)
 {

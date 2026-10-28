@@ -19,6 +19,19 @@ typedef struct {
     esp_openclaw_agent_page_t page;
 } room_agents_snapshot_t;
 
+typedef enum {
+    ROOM_CREATION_IDLE, ROOM_CREATION_REVIEW, ROOM_CREATION_CREATING,
+    ROOM_CREATION_CREATED, ROOM_CREATION_UNKNOWN, ROOM_CREATION_FAILED,
+} room_creation_state_t;
+
+typedef struct {
+    room_creation_state_t state;
+    unsigned revision, conversation_revision;
+    esp_openclaw_agent_t agent;
+    char detail[160];
+    bool can_create, can_open;
+} room_creation_snapshot_t;
+
 typedef struct {
     room_agents_state_t state, preview_state;
     unsigned revision, preview_revision;
@@ -26,6 +39,7 @@ typedef struct {
     esp_openclaw_session_page_t page;
     esp_openclaw_session_preview_t preview;
     size_t selected;
+    room_creation_snapshot_t creation;
 } room_conversations_snapshot_t;
 
 esp_err_t room_agent_directory_init(SemaphoreHandle_t owner_lock, void (*wake)(void));
@@ -43,6 +57,12 @@ esp_err_t room_conversations_refresh(size_t offset);
 esp_err_t room_conversations_preview(size_t index, unsigned revision);
 void room_conversations_close(void);
 void room_conversations_copy(room_conversations_snapshot_t *snapshot);
+/* Review and submission are separate. A submitted write is never replayed. */
+esp_err_t room_conversations_creation_begin(unsigned conversation_revision);
+esp_err_t room_conversations_creation_submit(unsigned revision);
+void room_conversations_creation_dismiss(unsigned revision);
+/* Adopt only the confirmed server key; this never changes the Talk target. */
+esp_err_t room_conversations_creation_open(unsigned revision);
 /* Copy one live roster/reader pair under the owner lock. The display checks the
  * epoch again after acquiring its own lock, without reversing lock order. */
 esp_err_t room_conversations_copy_resume(room_agents_snapshot_t *agents,

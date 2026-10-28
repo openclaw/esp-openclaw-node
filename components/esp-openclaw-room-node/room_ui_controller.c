@@ -231,7 +231,8 @@ void room_ui_store_conversations(const room_conversations_snapshot_t *snapshot, 
     bool changed = current != NULL && generation == conversation_generation && (current->revision != snapshot->revision ||
         current->preview_revision != snapshot->preview_revision || current->selected != snapshot->selected ||
         current->state != snapshot->state ||
-        current->preview_state != snapshot->preview_state);
+        current->preview_state != snapshot->preview_state ||
+        memcmp(&current->creation, &snapshot->creation, sizeof(current->creation)) != 0);
     if (changed) {
         *current = *snapshot;
         pressed_chat_action = -100;
@@ -708,12 +709,15 @@ static void watch_conversations_clicked(lv_event_t *event)
             current_conversations->preview_revision == painted_conversations->preview_revision &&
             current_conversations->selected == painted_conversations->selected &&
             current_conversations->state == painted_conversations->state &&
-            current_conversations->preview_state == painted_conversations->preview_state;
+            current_conversations->preview_state == painted_conversations->preview_state &&
+            memcmp(&current_conversations->creation, &painted_conversations->creation,
+                sizeof(current_conversations->creation)) == 0;
     }
     bool activate = code == LV_EVENT_SHORT_CLICKED && current && pressed_chat_action == action;
     if (code == LV_EVENT_PRESSED) pressed_chat_action = current && !wake ? action : -100;
     else pressed_chat_action = -100;
     unsigned revision = current_conversations != NULL ? current_conversations->revision : 0;
+    unsigned creation_revision = current_conversations != NULL ? current_conversations->creation.revision : 0;
     taskEXIT_CRITICAL(&state_mux);
     if (wake) { room_ui_show_face_hint(10000); return; }
     if (!activate) return;
@@ -734,6 +738,13 @@ static void watch_conversations_clicked(lv_event_t *event)
         taskEXIT_CRITICAL(&state_mux);
         conversation_handler(result == ROOM_CHAT_LOAD ? ROOM_CONVERSATIONS_LOAD : ROOM_CONVERSATIONS_READ,
             "", revision, value, conversation_generation);
+    } else if (conversation_handler != NULL && result >= ROOM_CHAT_NEW) {
+        room_ui_conversation_action_t intent = result == ROOM_CHAT_NEW ? ROOM_CONVERSATIONS_NEW
+            : result == ROOM_CHAT_CREATE ? ROOM_CONVERSATIONS_CREATE
+            : result == ROOM_CHAT_OPEN_CREATED ? ROOM_CONVERSATIONS_OPEN_CREATED
+            : ROOM_CONVERSATIONS_DISMISS_CREATION;
+        conversation_handler(intent, "", result == ROOM_CHAT_NEW ? revision : creation_revision,
+            0, conversation_generation);
     }
     room_ui_refresh();
 }
@@ -1351,7 +1362,9 @@ static bool room_ui_render_locked(void)
          current_conversations->preview_revision != painted_conversations->preview_revision ||
          current_conversations->selected != painted_conversations->selected ||
          current_conversations->state != painted_conversations->state ||
-         current_conversations->preview_state != painted_conversations->preview_state);
+         current_conversations->preview_state != painted_conversations->preview_state ||
+         memcmp(&current_conversations->creation, &painted_conversations->creation,
+             sizeof(current_conversations->creation)) != 0);
     if (chats_changed) *painted_conversations = *current_conversations;
     bool devices_changed = current_devices != NULL && painted_devices != NULL &&
         (current_devices->revision != painted_devices->revision || current_devices->state != painted_devices->state);

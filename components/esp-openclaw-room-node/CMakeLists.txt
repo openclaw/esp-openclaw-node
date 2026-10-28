@@ -27,6 +27,7 @@ idf_component_register(
         "room_watch_navigation.c"
         "room_watch_settings.c"
         "room_watch_agents.c"
+        "room_watch_devices.c"
         "room_watch_conversations.c"
     INCLUDE_DIRS "include"
     PRIV_INCLUDE_DIRS "."

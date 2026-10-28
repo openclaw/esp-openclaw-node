@@ -129,6 +129,7 @@ def main():
             str(component / "room_watch_home.c"),
             str(component / "room_watch_navigation.c"), str(component / "room_watch_settings.c"),
             str(component / "room_watch_agents.c"),
+            str(component / "room_watch_devices.c"),
             str(avatars / "esp_openclaw_avatar.c"), str(avatar_pixels),
             str(component / "room_watch_conversations.c"),
             str(component / "room_face.c"),

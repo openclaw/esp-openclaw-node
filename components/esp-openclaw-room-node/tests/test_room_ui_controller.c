@@ -55,6 +55,15 @@ static bool agent_open;
 static size_t agent_offset;
 static void request_agents(bool open, size_t offset)
 { ++agent_requests; agent_open = open; agent_offset = offset; }
+static unsigned device_requests, device_generation;
+static bool device_open;
+static void request_devices(bool open, unsigned generation)
+{
+    assert(critical_depth == 0);
+    ++device_requests;
+    device_open = open;
+    device_generation = generation;
+}
 static lv_indev_t *touchscreen;
 static lv_indev_state_t touch_state;
 static lv_point_t touch_point;
@@ -1156,6 +1165,112 @@ static void check_watch_home_gesture(void)
     room_ui_set(ROOM_UI_IDLE, NULL);
 }
 
+static void check_watch_devices(const char *path)
+{
+    unsigned starts = talk_starts, stops = talk_stops, selections = agent_selections;
+    assert(room_ui_watch_menu("devices") == ESP_OK);
+    assert(device_open && room_ui_wants_devices());
+    assert(visible_watch_text("Finding your devices..."));
+    lv_obj_t *refresh = lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_REFRESH " Refresh"));
+    unsigned requests = device_requests;
+    click_talk(refresh);
+    assert(device_requests == requests);
+    room_devices_snapshot_t view = {.state = ROOM_DEVICES_READY, .revision = 1, .count = 4};
+    const char *names[] = {"Studio Dial", "Kitchen speaker", "Desk display", "Pocket node"};
+    for (size_t i = 0; i < view.count; ++i) {
+        snprintf(view.devices[i].id, sizeof(view.devices[i].id), "node-%u", (unsigned)i);
+        snprintf(view.devices[i].name, sizeof(view.devices[i].name), "%s", names[i]);
+    }
+    strcpy(view.devices[0].model, "M5Stack Dial");
+    view.devices[0].connected_known = view.devices[0].connected = true;
+    view.devices[0].paired_known = view.devices[0].paired = true;
+    room_ui_store_devices(&view, device_generation);
+    assert(visible_watch_text("1-3 / 4") && visible_watch_text("Studio Dial"));
+    assert(!visible_watch_text("Pocket node"));
+    lv_obj_t *row = lv_obj_get_parent(find_visible_text(lv_layer_top(), "Studio Dial"));
+    lv_area_t area;
+    lv_obj_get_coords(row, &area);
+    assert(lv_obj_get_height(row) >= 44 && area.x1 >= 26 && area.x2 < 342 && area.y2 < 376);
+    if (path) {
+        char output[1024];
+        snprintf(output, sizeof(output), "%s-devices.ppm", path);
+        write_frame(output);
+    }
+    click_talk(row);
+    assert(visible_watch_text("Model: M5Stack Dial") && visible_watch_text("Connection: Online"));
+    assert(visible_watch_text("Pairing: Paired") && !visible_watch_text("Use for next Talk"));
+    if (path) {
+        char output[1024];
+        snprintf(output, sizeof(output), "%s-device-detail.ppm", path);
+        write_frame(output);
+    }
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " Devices")));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_RIGHT)));
+    assert(visible_watch_text("4-4 / 4") && visible_watch_text("Pocket node"));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), "Pocket node")));
+    assert(visible_watch_text("Model: Unknown") && visible_watch_text("Connection: Unknown"));
+    assert(visible_watch_text("Pairing: Unknown"));
+    view.devices[3].connected_known = view.devices[3].paired_known = true;
+    ++view.revision;
+    room_ui_store_devices(&view, device_generation);
+    assert(visible_watch_text("Connection: Offline") && visible_watch_text("Pairing: Not paired"));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " Devices")));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT)));
+    assert(visible_watch_text("1-3 / 4"));
+
+    // Neither a repaint nor a blocked display can transfer a held tap to a new node.
+    touch_talk(row, true);
+    ++view.revision;
+    strcpy(view.devices[0].id, "replacement");
+    strcpy(view.devices[0].name, "Replacement");
+    room_ui_store_devices(&view, device_generation);
+    touch_talk(row, false);
+    assert(visible_watch_text("Devices") && !visible_watch_text("Model: M5Stack Dial"));
+    touch_talk(row, true);
+    deny_display = true;
+    view.state = ROOM_DEVICES_OFFLINE;
+    ++view.revision;
+    room_ui_store_devices(&view, device_generation);
+    touch_talk(row, false);
+    deny_display = false;
+    room_ui_refresh();
+    assert(visible_watch_text("Gateway offline.\nThis Watch still works."));
+    const struct { room_devices_state_t state; const char *text; } failures[] = {
+        {ROOM_DEVICES_EMPTY, "No Gateway devices yet.\nPair a device to see it here."},
+        {ROOM_DEVICES_TIMEOUT, "Gateway did not reply.\nTap Refresh to try again."},
+        {ROOM_DEVICES_TOO_LARGE, "Too many devices for this view.\nOpen the mobile app."},
+        {ROOM_DEVICES_ERROR, "Devices unavailable.\nTap Refresh to try again."},
+        {ROOM_DEVICES_IDLE, "Devices paused.\nTap Refresh to load."},
+    };
+    for (size_t i = 0; i < sizeof(failures) / sizeof(*failures); ++i) {
+        view.state = failures[i].state;
+        ++view.revision;
+        room_ui_store_devices(&view, device_generation);
+        assert(visible_watch_text(failures[i].text));
+    }
+    unsigned old_generation = device_generation;
+    click_talk(refresh);
+    assert(device_open && device_generation != old_generation && visible_watch_text("Finding your devices..."));
+    view.state = ROOM_DEVICES_READY;
+    ++view.revision;
+    room_ui_store_devices(&view, old_generation);
+    assert(visible_watch_text("Finding your devices...") && !visible_watch_text("Replacement"));
+    room_ui_store_devices(&view, device_generation);
+    assert(visible_watch_text("Replacement"));
+    view.state = ROOM_DEVICES_OFFLINE;
+    ++view.revision;
+    room_ui_store_devices(&view, device_generation);
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_HOME "  This Watch")));
+    assert(!device_open && !room_ui_wants_devices() && visible_watch_text("This Watch"));
+    room_ui_store_devices(&view, old_generation);
+    assert(visible_watch_text("This Watch"));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " Devices")));
+    assert(device_open && visible_watch_text("Finding your devices..."));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " Menu")));
+    assert(!device_open && !room_ui_wants_devices() && visible_watch_text("Menu"));
+    assert(starts == talk_starts && stops == talk_stops && selections == agent_selections);
+}
+
 static void check_watch_display_settings(const char *path)
 {
     room_ui_facts_t facts = {.wifi = ROOM_UI_WIFI_CONNECTED,
@@ -1330,6 +1445,7 @@ int main(int argc, char **argv)
     assert(room_board_bind(&board) == ESP_OK);
     room_ui_set_talk_action_handler(talk_action);
     room_ui_set_agents_action_handler(request_agents);
+    room_ui_set_devices_action_handler(request_devices);
     room_ui_set_agent_selection_handler(select_agent);
     room_ui_set_conversation_handler(request_conversation);
     room_ui_init();
@@ -1449,6 +1565,7 @@ int main(int argc, char **argv)
         check_watch_agents(argc == 3 ? argv[2] : NULL);
         check_watch_conversations(argc == 3 ? argv[2] : NULL);
         check_watch_home_gesture();
+        check_watch_devices(argc == 3 ? argv[2] : NULL);
         check_watch_display_settings(argc == 3 ? argv[2] : NULL);
         // This isolated fixture replaces and destroys the mascot singleton.
         check_watch_repaint();

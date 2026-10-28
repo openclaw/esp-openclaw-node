@@ -797,6 +797,12 @@ void room_ui_set(room_ui_state_t state, const char *detail)
 { (void)detail; host.ui = state; }
 void room_ui_store_facts(const room_ui_facts_t *facts) { host.home = *facts; }
 void room_ui_set_agents_action_handler(void (*handler)(bool, size_t)) { (void)handler; }
+void room_ui_set_devices_action_handler(void (*handler)(bool, unsigned)) { (void)handler; }
+bool room_ui_wants_devices(void) { return host.devices_wanted; }
+void room_ui_store_devices(const room_devices_snapshot_t *snapshot, unsigned generation)
+{ host.devices_state = snapshot->state; host.devices_generation = generation; }
+void room_ui_devices_failed(unsigned generation)
+{ host.devices_state = ROOM_DEVICES_ERROR; host.devices_generation = generation; }
 void room_ui_store_agents(const room_agents_snapshot_t *snapshot) { host.agents_state = snapshot->state; }
 void room_ui_set_agent_selection_handler(void (*handler)(const char *, unsigned)) { (void)handler; }
 void room_ui_store_talk_target(const room_ui_talk_target_t *target) { host.ui_target = *target; }

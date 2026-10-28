@@ -2526,6 +2526,11 @@ static void check_watch_voice(const char *path)
 static void check_watch_reading_size(const char *path)
 {
     unsigned starts = talk_starts, sends = voice_sends, begins = voice_begins;
+    assert(room_ui_watch_menu("menu") == ESP_OK);
+    lv_obj_t *menu_text = find_visible_text(lv_layer_top(), LV_SYMBOL_ENVELOPE "  Conversations");
+    lv_obj_update_layout(menu_text);
+    int standard_menu_height = lv_obj_get_height(menu_text);
+    int standard_row_height = lv_obj_get_height(lv_obj_get_parent(menu_text));
     assert(room_ui_watch_menu("display") == ESP_OK);
     click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LIST "  Reading text")));
     assert(visible_watch_text("Reading text") && visible_watch_text(LV_SYMBOL_OK "  Standard"));
@@ -2535,6 +2540,20 @@ static void check_watch_reading_size(const char *path)
     assert(lv_obj_get_style_text_font(sample, 0) == &lv_font_montserrat_20);
     assert(visible_watch_text(LV_SYMBOL_OK "  Larger"));
     if (path) { char output[1024]; snprintf(output, sizeof(output), "%s-reading-settings.ppm", path); write_frame(output); }
+    assert(room_ui_watch_menu("menu") == ESP_OK);
+    lv_obj_update_layout(menu_text);
+    assert(lv_obj_get_height(menu_text) > standard_menu_height);
+    assert(lv_obj_get_height(lv_obj_get_parent(menu_text)) == standard_row_height);
+    lv_area_t text_area, row_area;
+    lv_obj_get_coords(menu_text, &text_area);
+    lv_obj_get_coords(lv_obj_get_parent(menu_text), &row_area);
+    assert(text_area.y1 >= row_area.y1 && text_area.y2 <= row_area.y2);
+    if (path) { char output[1024]; snprintf(output, sizeof(output), "%s-reading-menu-large.ppm", path); write_frame(output); }
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_SETTINGS "  Settings")));
+    lv_obj_t *display_text = find_visible_text(lv_layer_top(), LV_SYMBOL_IMAGE "  Display");
+    lv_obj_update_layout(display_text);
+    assert(lv_obj_get_height(display_text) > standard_menu_height);
+    if (path) { char output[1024]; snprintf(output, sizeof(output), "%s-reading-nav-settings-large.ppm", path); write_frame(output); }
     assert(room_ui_watch_menu("brightness") == ESP_OK);
     char percentage[16]; snprintf(percentage, sizeof(percentage), "%d%%", brightness);
     const lv_font_t *brightness_font = lv_obj_get_style_text_font(find_visible_text(lv_layer_top(), percentage), 0);
@@ -2571,6 +2590,10 @@ static void check_watch_reading_size(const char *path)
     assert(lv_obj_get_style_text_font(text, 0) == &lv_font_montserrat_14 && lv_obj_get_height(text) < larger_height);
     assert(talk_starts == starts && voice_sends == sends && voice_begins == begins);
     draft.state = ROOM_VOICE_READY; room_ui_store_voice(&draft); room_ui_refresh();
+    assert(room_ui_watch_menu("menu") == ESP_OK);
+    lv_obj_update_layout(menu_text);
+    assert(lv_obj_get_height(menu_text) == standard_menu_height);
+    assert(room_ui_watch_menu("home") == ESP_OK);
     puts("watch reading size: native preview, draft reflow and no send/capture side effects passed");
 }
 

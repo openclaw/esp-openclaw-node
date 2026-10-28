@@ -39,9 +39,10 @@ button's action changes during a press, release and press again; a held Start
 press cannot become Stop when wake word or a remote command starts Talk.
 
 On the Watch, **Settings → Display** contains **Brightness** and **Reading
-text**. Standard and Larger reflow conversation previews, reviewed voice drafts,
-and the scrollable Connection details. The preference lasts until restart;
-menus and status icons keep their existing size. **This Watch → Display**
+text**. Standard and Larger resize menu and settings labels, conversation previews,
+reviewed voice drafts, and scrollable Connection details. Menu touch targets and
+status icons keep their size; list spacing remains a separate choice. The
+preference lasts until restart. **This Watch → Display**
 opens the same controls. USB `menu brightness` and `menu reading` open the
 corresponding subpages.
 

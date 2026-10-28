@@ -62,10 +62,12 @@ leave the call running. Start is disabled while Talk is unavailable or stopping,
 and a changed recipient must be repainted before a new press is accepted.
 Diagnostics hides the Talk control until closed.
 
-The watch Home shares the Dial's compact Wi-Fi, OpenClaw link, and battery
-strip above the lobster, with a bounded headline and a separate bottom action.
-Signal is sampled once per second while Home is visible and the display is
-awake. Missing signal stays neutral; the battery outline with a dash means
+The Watch shares the Dial's compact Wi-Fi, OpenClaw link, and battery strip.
+It appears on Home, Menu, settings subpages, Connection and Live call. Home
+keeps its bounded headline and separate bottom action. Signal is sampled once
+per second while the strip is visible and the display is awake. Canvas,
+diagnostics and camera overlays hide the strip. Missing signal stays neutral;
+the battery outline with a dash means
 unknown. The Connection page keeps the text descriptions. A live connection
 says **Conversation live**; it does not infer speech playback from the
 connection state. Missing clock telemetry is omitted. The display still sleeps when idle;

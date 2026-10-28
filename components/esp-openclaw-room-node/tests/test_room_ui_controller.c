@@ -686,13 +686,40 @@ static void check_watch_status(const char *path)
     assert(wifi_reads > reads && watch_status_pixels(248, 275) == strong);
     assert(room_ui_watch_menu("settings") == ESP_OK);
     reads = wifi_reads;
+    wifi_status.rssi = -85;
     status_tick();
-    assert(wifi_reads == reads);
+    assert(wifi_reads == reads + 1 && watch_status_pixels(248, 275) == weak);
+    facts.gateway = ROOM_UI_GATEWAY_CONNECTED;
+    room_ui_store_facts(&facts); room_ui_refresh();
+    assert(watch_status_pixels(284, 307) > 0);
+    assert(room_ui_watch_menu("menu") == ESP_OK);
+    assert(watch_status_pixels(248, 275) == weak);
+    if (path) {
+        char output[1024];
+        snprintf(output, sizeof(output), "%s-status-menu.ppm", path);
+        write_frame(output);
+    }
+    assert(room_ui_camera_indicator_begin() == ESP_OK);
+    reads = wifi_reads;
+    status_tick();
+    assert(wifi_reads == reads && watch_status_pixels(248, 275) == 0);
+    room_ui_camera_indicator_end();
+    assert(watch_status_pixels(248, 275) == weak);
+    assert(room_diagnostics_open() == ESP_OK);
+    reads = wifi_reads;
+    status_tick();
+    assert(wifi_reads == reads && watch_status_pixels(248, 275) == 0);
+    room_diagnostics_close();
+    assert(watch_status_pixels(248, 275) == weak);
+    assert(room_ui_watch_menu("agents") == ESP_OK);
+    reads = wifi_reads;
+    status_tick();
+    assert(wifi_reads == reads && watch_status_pixels(248, 275) == 0);
     assert(room_ui_watch_menu("home") == ESP_OK);
     assert(wifi_reads > reads);
     wifi_status = (esp_openclaw_node_wifi_status_t){.connected = true};
     expire_watch_hint();
-    puts("watch status: live signal, unavailable observations, independent link, sleep and hidden-page polling passed");
+    puts("watch status: system-page signal, independent link, sleep and hidden-page polling passed");
 }
 
 static void check_watch_navigation(const char *path)
@@ -818,6 +845,7 @@ static void check_watch_live_call(const char *path)
     lv_obj_t *entry = lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_CALL "  Live call"));
     click_talk(entry);
     assert(visible_watch_text("Live call") && talk_starts == starts);
+    assert(watch_status_pixels(284, 307) > 0);
     if (path) { char output[1024]; snprintf(output, sizeof(output), "%s-live-call-ready.ppm", path); write_frame(output); }
     click_talk(start);
     assert(talk_starts == starts + 1);
@@ -825,6 +853,7 @@ static void check_watch_live_call(const char *path)
     room_ui_store_facts(&facts); room_ui_set(ROOM_UI_SPEAKING, NULL);
     assert(visible_watch_text("End call") && !visible_watch_text("Return to call"));
     assert(visible_watch_text("Your call is active.\n\nYou can browse without ending it."));
+    assert(watch_status_pixels(284, 307) > 0);
     if (path) { char output[1024]; snprintf(output, sizeof(output), "%s-live-call-active.ppm", path); write_frame(output); }
     click_talk(back);
     assert(visible_watch_text("Menu") && visible_watch_text("Return to call") && talk_stops == stops);
@@ -1074,7 +1103,7 @@ static void check_watch_connection(const char *path)
     room_ui_store_facts(&facts);
     reads = wifi_reads;
     room_ui_refresh();
-    assert(wifi_reads == reads && visible_watch_text("Gateway: Offline"));
+    assert(wifi_reads == reads + 1 && visible_watch_text("Gateway: Offline"));
     assert(room_ui_apply_display_brightness(0) == ESP_OK);
     reads = wifi_reads;
     status_tick();
@@ -1088,7 +1117,7 @@ static void check_watch_connection(const char *path)
     assert(room_ui_watch_menu("settings") == ESP_OK);
     reads = wifi_reads;
     status_tick();
-    assert(wifi_reads == reads);
+    assert(wifi_reads == reads + 1);
     wifi_status.has_saved_network = false;
     assert(room_ui_watch_menu("connection") == ESP_OK);
     details = find_visible_fragment(lv_layer_top(), "Wi-Fi not set up");

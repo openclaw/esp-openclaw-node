@@ -26,6 +26,7 @@ idf_component_register(
         "room_ui_controller.c"
         "room_voice_draft.c"
         "room_watch_home.c"
+        "room_watch_status.c"
         "room_watch_navigation.c"
         "room_watch_settings.c"
         "room_watch_agents.c"

@@ -134,6 +134,7 @@ def main():
             "-I", str(component.parent / "esp-openclaw-chat/include"),
             str(component / "room_ui_controller.c"), str(component / "room_board.c"),
             str(component / "room_watch_home.c"),
+            str(component / "room_watch_status.c"),
             str(component.parent / "esp-openclaw-ui/openclaw_status_bar.c"),
             str(component.parent / "esp-openclaw-ui/openclaw_connection_details.c"),
             str(component.parent / "esp-openclaw-ui/openclaw_reading.c"),

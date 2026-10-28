@@ -1297,7 +1297,7 @@ static void capture_source_scheduler(void)
 }
 
 static const char *agent_roster = "{\"agents\":[{\"id\":\"fixture\",\"name\":\"Fixture\"}]}";
-static const char *target_roster = "{\"mainKey\":\"work\",\"agents\":[{\"id\":\"fixture\",\"name\":\"Fixture\"},{\"id\":\"builder\",\"name\":\"Builder\"}]}";
+static const char *target_roster = "{\"mainKey\":\"work\",\"agents\":[{\"id\":\"fixture\",\"name\":\"Fixture\"},{\"id\":\"builder\",\"name\":\"Builder\",\"identity\":{\"emoji\":\"🦊\"}}]}";
 
 static room_agents_snapshot_t agents_snapshot(void)
 {
@@ -1804,6 +1804,9 @@ static void target_selection(void)
         "owner acknowledges a current agent before Talk admission");
     CHECK(host.ui_target.selected && strcmp(host.ui_target.id, "builder") == 0 && host.ui_refreshes > refreshes,
         "selection is published and repainted in the same supervisor turn");
+    CHECK(talk_target.avatar.kind == ESP_OPENCLAW_AVATAR_FOX &&
+        host.ui_target.avatar.kind == ESP_OPENCLAW_AVATAR_FOX,
+        "the accepted identity avatar reaches Home with its target");
     request_local_talk(true, talk_target_revision);
     request_local_agent_selection("fixture", revision);
     host_run_task("talk_teardown");
@@ -1820,6 +1823,8 @@ static void target_selection(void)
         request_local_talk(true, host.ui_target.revision);
         if (change == 1) {
             CHECK(agents_console_command(2, use_default) == 0, "console selects default");
+            CHECK(!host.ui_target.selected && host.ui_target.avatar.kind == ESP_OPENCLAW_AVATAR_TEXT &&
+                host.ui_target.avatar.text[0] == '\0', "default clears the previous target avatar");
         } else {
             CHECK(agents_console_command(3, select_fixture) == 0, "console replaces recipient");
             if (change == 2)

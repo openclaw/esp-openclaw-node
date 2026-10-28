@@ -327,7 +327,9 @@ void room_ui_store_talk_target(const room_ui_talk_target_t *target)
     taskENTER_CRITICAL(&state_mux);
     if (target->revision != current_target.revision ||
         target->selected != current_target.selected || target->expired != current_target.expired ||
-        strcmp(target->id, current_target.id) != 0 || strcmp(target->name, current_target.name) != 0) {
+        strcmp(target->id, current_target.id) != 0 || strcmp(target->name, current_target.name) != 0 ||
+        target->avatar.kind != current_target.avatar.kind ||
+        strcmp(target->avatar.text, current_target.avatar.text) != 0) {
         current_target = *target;
         pressed_talk_action = TALK_CONTROL_NONE;
     }
@@ -646,6 +648,12 @@ static void watch_messaging_clicked(lv_event_t *event)
 static void watch_home_menu_clicked(lv_event_t *event)
 {
     watch_navigation_input(event, ROOM_WATCH_MENU);
+}
+
+static void watch_home_agent_clicked(lv_event_t *event)
+{
+    if (!lv_obj_is_visible(lv_event_get_current_target(event))) return;
+    watch_navigation_input(event, ROOM_WATCH_AGENTS);
 }
 
 static void watch_home_continue_clicked(lv_event_t *event)
@@ -1249,8 +1257,8 @@ void room_ui_init(void)
         lv_obj_set_style_bg_color(lv_screen_active(), lv_color_hex(0x15101b), 0);
         lv_obj_set_style_bg_grad_color(lv_screen_active(), lv_color_hex(0x362031), 0);
         lv_obj_set_style_bg_grad_dir(lv_screen_active(), LV_GRAD_DIR_VER, 0);
-        room_watch_home_create(lv_layer_top(), watch_home_menu_clicked, watch_home_continue_clicked,
-            watch_voice_clicked, watch_voice_discard, watch_voice_send);
+        room_watch_home_create(lv_layer_top(), watch_home_menu_clicked, watch_home_agent_clicked,
+            watch_home_continue_clicked, watch_voice_clicked, watch_voice_discard, watch_voice_send);
         room_watch_navigation_create(lv_layer_top(), watch_navigation_clicked);
         room_watch_settings_create(lv_layer_top(), watch_navigation_clicked, watch_messaging_clicked);
         room_watch_agents_create(lv_layer_top(), watch_agents_clicked);

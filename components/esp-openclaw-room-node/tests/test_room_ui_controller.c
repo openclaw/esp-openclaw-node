@@ -79,7 +79,7 @@ static lv_indev_t *touchscreen;
 static lv_indev_state_t touch_state;
 static lv_point_t touch_point;
 static lv_obj_t *modal;
-static lv_obj_t *watch_menu_button, *watch_continue_button, *watch_voice_button, *watch_discard_button, *watch_send_button, *watch_review_body;
+static lv_obj_t *watch_menu_button, *watch_agent_button, *watch_continue_button, *watch_voice_button, *watch_discard_button, *watch_send_button, *watch_review_body;
 static room_canvas_action_handler_t canvas_action;
 struct ui_timer { esp_timer_create_args_t args; bool active; };
 static struct ui_timer timers[4];
@@ -424,7 +424,7 @@ static unsigned check_home_tree(lv_obj_t *parent)
 {
     unsigned count = 1;
     assert(lv_obj_has_flag(parent, LV_OBJ_FLAG_SCROLLABLE) == (parent == watch_review_body));
-    if (parent == watch_review_body || parent == watch_menu_button || parent == watch_continue_button ||
+    if (parent == watch_review_body || parent == watch_menu_button || parent == watch_agent_button || parent == watch_continue_button ||
         parent == watch_voice_button || parent == watch_discard_button || parent == watch_send_button)
         assert(lv_obj_has_flag(parent, LV_OBJ_FLAG_CLICKABLE));
     else assert(!lv_obj_has_flag(parent, LV_OBJ_FLAG_CLICKABLE));
@@ -502,7 +502,8 @@ static void check_watch_home(const char *path)
     room_ui_store_facts(&facts);
     room_ui_set(ROOM_UI_IDLE, NULL);
     lv_obj_t *title = find_text(lv_layer_top(), "Ready when you are");
-    watch_menu_button = lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_BARS "  Menu"));
+    watch_menu_button = lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_BARS));
+    watch_agent_button = lv_obj_get_parent(find_text(lv_layer_top(), "Automatic"));
     watch_continue_button = lv_obj_get_parent(find_text(lv_layer_top(), "Continue conversations"));
     watch_voice_button = lv_obj_get_parent(find_text(lv_layer_top(), "Hold to record"));
     watch_discard_button = lv_obj_get_parent(find_text(lv_layer_top(), "Discard"));
@@ -528,6 +529,12 @@ static void check_watch_home(const char *path)
     assert(action_area.x1 >= 24 && action_area.x2 < width - 24);
     assert(action_area.y1 >= 376 && action_area.y2 < height - 16);
     snapshot(path);
+    assert(visible_watch_text("Automatic"));
+    lv_area_t agent_area, menu_area;
+    lv_obj_get_coords(watch_agent_button, &agent_area);
+    lv_obj_get_coords(watch_menu_button, &menu_area);
+    assert(lv_area_get_height(&agent_area) == 44 && lv_area_get_height(&menu_area) == 44);
+    assert(agent_area.y1 == 39 && agent_area.y2 < 100 && agent_area.x2 < menu_area.x1);
     int left = width, right = 0, top = height, bottom = 0;
     for (int y = 0; y < 300; ++y) {
         for (int x = 0; x < width; ++x) {
@@ -544,6 +551,7 @@ static void check_watch_home(const char *path)
     facts.talk = ROOM_UI_TALK_ACTIVE;
     room_ui_store_facts(&facts);
     room_ui_set(ROOM_UI_SPEAKING, NULL);
+    assert(!lv_obj_is_visible(watch_agent_button));
     assert(find_text(lv_layer_top(), "Conversation live"));
     assert(!find_text(lv_layer_top(), "Speaking"));
     canvas_active = true;
@@ -600,7 +608,7 @@ static unsigned watch_status_pixels(int left, int right)
 {
     lv_refr_now(display);
     unsigned count = 0;
-    for (int y = 22; y < 44; ++y)
+    for (int y = 10; y < 32; ++y)
         for (int x = left; x < right; ++x) {
             const uint8_t *pixel = frame + (y * width + x) * 4;
             count += pixel[2] == 0xbf && pixel[1] == 0xe5 && pixel[0] == 0xd9;
@@ -1019,7 +1027,8 @@ static void check_watch_agents(const char *path)
     assert(lv_obj_is_visible(find_text(lv_layer_top(), "Choosing...")));
     assert(!visible_watch_text("Choosing agent..."));
     assert(talk_starts == starts); // No start before the owner acknowledges its target.
-    room_ui_talk_target_t target = {.selected = true, .revision = 1, .id = "agent-0", .name = "Kitsune"};
+    room_ui_talk_target_t target = {.selected = true, .revision = 1, .id = "agent-0", .name = "Kitsune",
+        .avatar = {.kind = ESP_OPENCLAW_AVATAR_FOX}};
     room_ui_store_talk_target(&target);
     room_ui_agent_selection_complete(ESP_OK);
     room_ui_refresh();
@@ -1029,6 +1038,42 @@ static void check_watch_agents(const char *path)
     if (path) { snprintf(output, sizeof(output), "%s-agent-detail.ppm", path); write_frame(output); }
     assert(room_ui_watch_menu("home") == ESP_OK);
     assert(visible_watch_text("with Kitsune"));
+    assert(lv_obj_is_visible(watch_agent_button));
+    assert(visible_watch_text("Kitsune"));
+    write_frame(NULL);
+    uint32_t home_fox = avatar_hash(34, 47, 28);
+    target.avatar.kind = ESP_OPENCLAW_AVATAR_LOBSTER;
+    room_ui_store_talk_target(&target);
+    room_ui_refresh();
+    write_frame(NULL);
+    assert(home_fox != avatar_hash(34, 47, 28));
+    target.avatar.kind = ESP_OPENCLAW_AVATAR_TEXT;
+    strcpy(target.avatar.text, "KI");
+    lv_obj_t *name = find_visible_text(watch_agent_button, "Kitsune");
+    assert(name != NULL);
+    strcpy(target.name, "A very long agent name that must fit in the Home header");
+    room_ui_store_talk_target(&target);
+    room_ui_refresh();
+    assert(visible_watch_text("KI"));
+    lv_obj_update_layout(watch_agent_button);
+    lv_area_t name_area, header_area;
+    lv_obj_get_coords(name, &name_area);
+    lv_obj_get_coords(watch_agent_button, &header_area);
+    assert(name_area.x1 > header_area.x1 && name_area.x2 < header_area.x2);
+    assert(name_area.y1 >= header_area.y1 && name_area.y2 < header_area.y2);
+    strcpy(target.name, "Kitsune");
+    target.avatar.kind = ESP_OPENCLAW_AVATAR_FOX;
+    room_ui_store_talk_target(&target);
+    room_ui_refresh();
+    if (path) { snprintf(output, sizeof(output), "%s-home-agent.ppm", path); write_frame(output); }
+    expire_watch_hint();
+    assert(brightness == 0);
+    click_talk(watch_agent_button);
+    assert(brightness > 0 && lv_obj_is_visible(watch_agent_button));
+    click_talk(watch_agent_button);
+    assert(visible_watch_text("Agents") && !lv_obj_is_visible(watch_agent_button));
+    assert(talk_starts == starts && agent_selections == selections + 1);
+    assert(room_ui_watch_menu("home") == ESP_OK);
     // A new press cannot use a changed recipient before the button is repainted.
     lv_obj_t *start = lv_obj_get_parent(find_text(lv_layer_top(), "Start Talk"));
     click_talk(start);
@@ -1054,6 +1099,7 @@ static void check_watch_agents(const char *path)
     touch_talk(start, false);
     assert(talk_starts == starts);
     assert(lv_obj_is_visible(find_text(lv_layer_top(), "Choose an agent")));
+    assert(visible_watch_text("Choose agent"));
     assert(!visible_watch_text("with Kitsune"));
     target.expired = false;
     room_ui_store_talk_target(&target);
@@ -1061,6 +1107,7 @@ static void check_watch_agents(const char *path)
     room_ui_store_facts(&facts);
     room_ui_refresh();
     assert(!visible_watch_text("with Kitsune"));
+    assert(!lv_obj_is_visible(watch_agent_button));
     assert(room_ui_watch_menu("agents") == ESP_OK);
     room_ui_store_agents(&roster);
     click_talk(first);
@@ -2123,6 +2170,7 @@ static void check_watch_voice(const char *path)
     hold_voice(button);
     assert(voice_begins == 1);
     show_voice(ROOM_VOICE_RECORDING);
+    assert(!lv_obj_is_visible(watch_agent_button));
     fire_timer("text_hint");
     assert(brightness > 0 && visible_watch_text("Recording: 4.2 s"));
     voice_snapshot(path, "recording");

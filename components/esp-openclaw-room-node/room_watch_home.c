@@ -7,6 +7,8 @@
 #include <stdio.h>
 
 static lv_obj_t *root, *title_label, *detail_label;
+static lv_obj_t *agent_button, *agent_name, *agent_initials, *agent_image;
+static lv_image_dsc_t agent_images[3];
 static lv_obj_t *continue_card, *reader_label;
 static lv_obj_t *voice_button, *voice_label, *discard_button, *send_button, *send_label;
 static lv_obj_t *review_panel, *review_heading, *review_recipient, *review_notice, *review_body, *review_text;
@@ -80,7 +82,7 @@ static lv_obj_t *action(lv_obj_t *parent, const char *text, lv_event_cb_t handle
     return button;
 }
 
-void room_watch_home_create(lv_obj_t *parent, lv_event_cb_t menu_handler, lv_event_cb_t continue_handler,
+void room_watch_home_create(lv_obj_t *parent, lv_event_cb_t menu_handler, lv_event_cb_t agent_handler, lv_event_cb_t continue_handler,
                             lv_event_cb_t voice_handler, lv_event_cb_t discard_handler, lv_event_cb_t send_handler)
 {
     root = lv_obj_create(parent);
@@ -89,19 +91,55 @@ void room_watch_home_create(lv_obj_t *parent, lv_event_cb_t menu_handler, lv_eve
     lv_obj_remove_flag(root, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t *menu = lv_obj_create(root);
     lv_obj_remove_style_all(menu);
-    lv_obj_set_pos(menu, 26, 12);
-    lv_obj_set_size(menu, 132, 44);
+    lv_obj_set_pos(menu, 298, 39);
+    lv_obj_set_size(menu, 44, 44);
+    lv_obj_set_style_bg_color(menu, lv_color_hex(0x302535), 0);
+    lv_obj_set_style_bg_opa(menu, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(menu, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_clickable(menu, true);
     lv_obj_set_scrollable(menu, false);
     lv_obj_add_event_cb(menu, menu_handler, LV_EVENT_ALL, NULL);
     lv_obj_t *menu_label = lv_label_create(menu);
-    lv_label_set_text_static(menu_label, LV_SYMBOL_BARS "  Menu");
+    lv_label_set_text_static(menu_label, LV_SYMBOL_BARS);
     lv_obj_set_style_text_color(menu_label, lv_color_hex(0xf4efee), 0);
     lv_obj_set_style_text_font(menu_label, &lv_font_montserrat_14, 0);
     lv_obj_remove_flag(menu_label, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_align(menu_label, LV_ALIGN_LEFT_MID, 0, 0);
+    lv_obj_center(menu_label);
+    agent_button = lv_obj_create(root);
+    lv_obj_remove_style_all(agent_button);
+    lv_obj_set_pos(agent_button, 26, 39);
+    lv_obj_set_size(agent_button, 244, 44);
+    lv_obj_set_style_bg_color(agent_button, lv_color_hex(0x302535), 0);
+    lv_obj_set_style_bg_opa(agent_button, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(agent_button, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_clickable(agent_button, true);
+    lv_obj_set_scrollable(agent_button, false);
+    lv_obj_add_event_cb(agent_button, agent_handler, LV_EVENT_ALL, NULL);
+    agent_name = label(agent_button, "Automatic", 44, 14, 174, 0xf4efee);
+    lv_obj_set_height(agent_name, 20);
+    label(agent_button, LV_SYMBOL_DOWN, 224, 15, 14, 0xb8b0bd);
+    agent_initials = label(agent_button, LV_SYMBOL_SHUFFLE, 8, 8, 28, 0xf4efee);
+    lv_obj_set_height(agent_initials, 28);
+    lv_obj_set_style_text_align(agent_initials, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_pad_top(agent_initials, 6, 0);
+    agent_image = lv_image_create(agent_button);
+    lv_obj_set_pos(agent_image, 8, 8);
+    lv_obj_set_size(agent_image, 28, 28);
+    lv_image_set_inner_align(agent_image, LV_IMAGE_ALIGN_CONTAIN);
+    lv_image_set_antialias(agent_image, true);
+    lv_obj_set_clickable(agent_image, false);
+    lv_obj_set_scrollable(agent_image, false);
+    for (int kind = ESP_OPENCLAW_AVATAR_FOX; kind <= ESP_OPENCLAW_AVATAR_LOBSTER; ++kind) {
+        agent_images[kind] = (lv_image_dsc_t){
+            .header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_ARGB8888,
+                .w = ESP_OPENCLAW_AVATAR_SIZE, .h = ESP_OPENCLAW_AVATAR_SIZE,
+                .stride = ESP_OPENCLAW_AVATAR_SIZE * 4},
+            .data_size = ESP_OPENCLAW_AVATAR_SIZE * ESP_OPENCLAW_AVATAR_SIZE * 4,
+            .data = esp_openclaw_avatar_pixels(kind),
+        };
+    }
     openclaw_status_bar_create(&status_bar, root);
-    lv_obj_set_pos(status_bar.root, 248, 22);
+    lv_obj_set_pos(status_bar.root, 248, 10);
     status_timer = lv_timer_create(refresh_status, 1000, NULL);
     if (!display_awake) lv_timer_pause(status_timer);
     title_label = label(root, "Your OpenClaw", 26, 312, 316, 0xf4efee);
@@ -211,6 +249,17 @@ bool room_watch_home_render(const room_ui_facts_t *facts, const room_ui_talk_tar
     bool review = (draft || transcribing || transcription_failed || submitted) && !holding;
     bool retry = voice != NULL && (voice->state == ROOM_VOICE_ERROR || transcription_failed);
     bool split = (draft || transcription_failed) && !holding;
+    bool call = facts->talk == ROOM_UI_TALK_CONNECTING || facts->talk == ROOM_UI_TALK_ACTIVE ||
+        facts->talk == ROOM_UI_TALK_STOPPING;
+    lv_obj_set_hidden(agent_button, call || voice_busy);
+    lv_label_set_text(agent_name, target->expired ? "Choose agent" : target->selected ? target->name : "Automatic");
+    bool picture = target->selected && !target->expired &&
+        (target->avatar.kind == ESP_OPENCLAW_AVATAR_FOX || target->avatar.kind == ESP_OPENCLAW_AVATAR_LOBSTER);
+    lv_obj_set_hidden(agent_image, !picture);
+    lv_obj_set_hidden(agent_initials, picture);
+    if (picture) lv_image_set_src(agent_image, &agent_images[target->avatar.kind]);
+    else lv_label_set_text(agent_initials, target->expired ? LV_SYMBOL_REFRESH : !target->selected ? LV_SYMBOL_SHUFFLE :
+        target->avatar.text[0] ? target->avatar.text : "?");
     lv_obj_set_hidden(review_panel, !review);
     lv_obj_set_hidden(voice_button, voice == NULL || ((transcribing || draft || submitted) && !holding));
     lv_obj_set_hidden(send_button, !(draft || submitted) || holding);

@@ -27,6 +27,8 @@ static size_t requested_offset;
 static int brightness = 65;
 static bool brightness_failure;
 static unsigned brightness_requests;
+static unsigned messaging_requests, messaging_cancels;
+static bool messaging_rejected;
 static uint16_t pixels[240 * 240];
 
 static void flush(lv_display_t *display, const lv_area_t *area, uint8_t *data)
@@ -97,6 +99,12 @@ static void navigation_event(dial_navigation_event_t kind, size_t offset, void *
         requested_offset = offset;
         if (!brightness_failure) brightness = (int)offset;
         dial_navigation_set_brightness(&navigation, brightness, brightness_failure);
+    }
+    else if (kind == DIAL_NAV_MESSAGING_REQUEST || kind == DIAL_NAV_MESSAGING_CANCEL) {
+        if (kind == DIAL_NAV_MESSAGING_REQUEST) ++messaging_requests;
+        else ++messaging_cancels;
+        requested_offset = offset;
+        dial_navigation_messaging_result(&navigation, !messaging_rejected);
     }
     else if (kind == DIAL_NAV_CONVERSATIONS) { ++opens; requested_offset = offset; }
     else if (kind == DIAL_NAV_READ) { ++reads; requested_offset = offset; }
@@ -281,6 +289,146 @@ static void check_avatar_identity(void)
         esp_openclaw_avatar_t avatar = esp_openclaw_agent_avatar(&agent);
         assert(avatar.kind == cases[i].kind && strcmp(avatar.text, cases[i].text) == 0);
     }
+}
+
+static void press_encoder(lv_indev_t *encoder)
+{
+    encoder_state = LV_INDEV_STATE_PRESSED;
+    lv_indev_read(encoder); advance(40);
+    encoder_state = LV_INDEV_STATE_RELEASED;
+    lv_indev_read(encoder); advance(40);
+}
+
+static void messaging_snapshot(const char *name)
+{
+    lv_obj_update_layout(navigation.root);
+    for (unsigned child = 0; child < lv_obj_get_child_count(navigation.root); ++child)
+        check_home_bounds(lv_obj_get_child(navigation.root, child));
+    lv_obj_t *labels[] = {navigation.messaging_status, navigation.messaging_detail, navigation.names[0]};
+    for (unsigned i = 0; i < sizeof(labels) / sizeof(*labels); ++i) {
+        lv_point_t size;
+        lv_text_get_size(&size, lv_label_get_text(labels[i]), lv_obj_get_style_text_font(labels[i], 0), 0, 0,
+            i == 1 ? lv_obj_get_width(labels[i]) : LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+        if (size.x > lv_obj_get_width(labels[i]) || size.y > lv_obj_get_height(labels[i]))
+            fprintf(stderr, "%s: label %s needs %ld x %ld, has %ld x %ld\n", name,
+                lv_label_get_text(labels[i]), (long)size.x, (long)size.y,
+                (long)lv_obj_get_width(labels[i]), (long)lv_obj_get_height(labels[i]));
+        assert(size.x <= lv_obj_get_width(labels[i]));
+        assert(size.y <= lv_obj_get_height(labels[i]));
+    }
+    snapshot(name);
+}
+
+static void check_messaging(lv_indev_t *encoder)
+{
+    unsigned before = confirmations;
+    navigating = true;
+    lv_obj_set_hidden(home.root, true);
+    lv_obj_set_hidden(input.arc, true);
+    dial_input_set_control(&input, false);
+    dial_navigation_open_settings(&navigation, DIAL_NAV_SETTINGS);
+    encoder_diff = 2;
+    lv_indev_read(encoder); advance(40);
+    assert(strcmp(lv_label_get_text(navigation.names[2]), "Messaging") == 0);
+    press_encoder(encoder);
+    assert(navigation.view == DIAL_NAV_MESSAGING && messaging_requests == 0);
+    assert(strcmp(lv_label_get_text(navigation.messaging_status), "Access off") == 0);
+    assert(strstr(lv_label_get_text(navigation.messaging_detail), "Read only") != NULL);
+    messaging_snapshot("messaging-off");
+
+    dial_messaging_snapshot_t permission = {.revision = 41};
+    dial_navigation_messaging_update(&navigation, &permission);
+    touch(120, 184, true); touch(120, 184, false);
+    assert(messaging_requests == 1 && requested_offset == 41 && messaging_cancels == 0);
+    assert(navigation.messaging.state == DIAL_MESSAGING_OFF); // Intent is not permission.
+    touch(120, 184, true);
+    permission.state = DIAL_MESSAGING_REQUESTING;
+    ++permission.revision;
+    dial_navigation_messaging_update(&navigation, &permission);
+    touch(120, 184, false);
+    assert(messaging_requests == 1 && messaging_cancels == 0);
+    assert(strcmp(lv_label_get_text(navigation.messaging_status), "Requesting") == 0);
+    messaging_snapshot("messaging-requesting");
+    permission.state = DIAL_MESSAGING_WAITING;
+    ++permission.revision;
+    strcpy(permission.request_id, "approval-1");
+    dial_navigation_messaging_update(&navigation, &permission);
+    assert(strcmp(lv_label_get_text(navigation.names[0]), "Cancel") == 0);
+    assert(strstr(lv_label_get_text(navigation.messaging_detail), "Approve on Gateway") != NULL);
+    messaging_snapshot("messaging-waiting");
+    touch(68, 44, true); touch(68, 44, false);
+    assert(navigation.view == DIAL_NAV_SETTINGS && navigation.focus == 2 && messaging_cancels == 0);
+    press_encoder(encoder);
+    assert(navigation.view == DIAL_NAV_MESSAGING && navigation.messaging.state == DIAL_MESSAGING_WAITING);
+
+    // A new permission observation cancels a held pointer or encoder action.
+    touch(120, 184, true);
+    permission.state = DIAL_MESSAGING_CONNECTING;
+    ++permission.revision;
+    dial_navigation_messaging_update(&navigation, &permission);
+    touch(120, 184, false);
+    assert(messaging_cancels == 0);
+    assert(strcmp(lv_label_get_text(navigation.messaging_status), "Reconnecting") == 0);
+    messaging_snapshot("messaging-connecting");
+    encoder_state = LV_INDEV_STATE_PRESSED;
+    lv_indev_read(encoder); advance(40);
+    ++permission.revision;
+    dial_navigation_messaging_update(&navigation, &permission);
+    encoder_state = LV_INDEV_STATE_RELEASED;
+    lv_indev_read(encoder); advance(40);
+    assert(messaging_cancels == 0);
+    press_encoder(encoder);
+    assert(messaging_cancels == 1 && requested_offset == permission.revision);
+    permission.state = DIAL_MESSAGING_READY;
+    ++permission.revision;
+    dial_navigation_messaging_update(&navigation, &permission);
+    assert(strcmp(lv_label_get_text(navigation.messaging_status), "Access ready") == 0);
+    assert(strcmp(lv_label_get_text(navigation.names[0]), "Turn off") == 0);
+    messaging_snapshot("messaging-ready");
+    press_encoder(encoder);
+    assert(navigation.view == DIAL_NAV_MESSAGING && messaging_requests == 1 && messaging_cancels == 2);
+    assert(requested_offset == permission.revision);
+    assert(navigation.messaging.state == DIAL_MESSAGING_READY); // Wait for the owner to confirm local off.
+    permission.state = DIAL_MESSAGING_OFF;
+    ++permission.revision;
+    dial_navigation_messaging_update(&navigation, &permission);
+    touch(68, 44, true); touch(68, 44, false);
+    assert(navigation.view == DIAL_NAV_SETTINGS && navigation.focus == 2);
+
+    const dial_messaging_state_t retry_states[] = {
+        DIAL_MESSAGING_REJECTED, DIAL_MESSAGING_EXPIRED, DIAL_MESSAGING_ERROR,
+    };
+    const char *snapshots[] = {"messaging-rejected", "messaging-expired", "messaging-error"};
+    for (unsigned i = 0; i < sizeof(retry_states) / sizeof(*retry_states); ++i) {
+        permission.state = retry_states[i];
+        ++permission.revision;
+        dial_navigation_messaging_update(&navigation, &permission);
+        dial_navigation_open_settings(&navigation, DIAL_NAV_MESSAGING);
+        assert(strcmp(lv_label_get_text(navigation.names[0]), "Request") == 0);
+        messaging_snapshot(snapshots[i]);
+        press_encoder(encoder);
+        assert(messaging_requests == i + 2 && requested_offset == permission.revision);
+        assert(navigation.messaging.state == retry_states[i]);
+    }
+    messaging_rejected = true;
+    press_encoder(encoder);
+    assert(strstr(lv_label_get_text(navigation.messaging_detail), "Connect to Gateway") != NULL);
+    dial_navigation_messaging_update(&navigation, &permission);
+    assert(strstr(lv_label_get_text(navigation.messaging_detail), "Connect to Gateway") != NULL);
+    messaging_snapshot("messaging-offline-request");
+    messaging_rejected = false;
+    // The same state with a new request identity also invalidates a held action.
+    touch(120, 184, true);
+    strcpy(permission.request_id, "approval-2");
+    dial_navigation_messaging_update(&navigation, &permission);
+    unsigned requests = messaging_requests;
+    touch(120, 184, false);
+    assert(messaging_requests == requests);
+    touch(120, 184, true); touch(150, 184, true); touch(150, 184, false);
+    assert(messaging_requests == requests);
+    touch(120, 184, true); advance(1000); touch(120, 184, false);
+    assert(!navigating && messaging_requests == requests && confirmations == before);
+    puts("Messaging: permission-only state, fenced request/cancel, retry, Back and circular layout passed");
 }
 
 int main(int argc, char **argv)
@@ -822,7 +970,7 @@ int main(int argc, char **argv)
     dial_navigation_update(&navigation, &roster);
     assert(navigation.view == DIAL_NAV_SETTINGS);
     // Display uses the same row objects: returning must restore normal touch
-    // locations, including both the Display row and the in-list Back row.
+    // locations, including the Display row and Back arrow.
     touch(120, 82, true); touch(120, 82, false);
     assert(navigation.view == DIAL_NAV_DISPLAY);
     touch(68, 44, true); touch(68, 44, false);
@@ -903,7 +1051,7 @@ int main(int argc, char **argv)
     touch(120, 82, true); touch(120, 82, false);
     assert(navigation.view == DIAL_NAV_DISPLAY);
     touch(68, 44, true); touch(68, 44, false);
-    touch(120, 170, true); touch(120, 170, false);
+    touch(68, 44, true); touch(68, 44, false);
     assert(navigation.view == DIAL_NAV_MENU);
     dial_navigation_open_settings(&navigation, DIAL_NAV_DISPLAY);
     encoder_state = LV_INDEV_STATE_PRESSED;
@@ -919,6 +1067,7 @@ int main(int argc, char **argv)
     lv_indev_read(encoder); advance(40);
     assert(!navigating && confirmations == before_settings);
     puts("local display and connection input, bounds, failures, offline focus and return: passed");
+    check_messaging(encoder);
 
     /* Read the latest request through real menu/encoder/touch input. Browsing
      * and result updates never confirm the numeric control. */

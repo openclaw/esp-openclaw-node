@@ -4,11 +4,15 @@
 #include "esp_openclaw_node.h"
 #include "esp_openclaw_devices.h"
 #include "dial_directory.h"
+#include "dial_messaging.h"
 
 /* The node remains usable when optional operator access is unavailable. */
 esp_err_t dial_reader_start(esp_openclaw_node_handle_t node);
 void dial_reader_node_event(esp_openclaw_node_event_t event);
 cJSON *dial_reader_status(void);
+void dial_reader_messaging_copy(dial_messaging_snapshot_t *snapshot);
+esp_err_t dial_reader_messaging_request(unsigned revision);
+esp_err_t dial_reader_messaging_cancel(unsigned revision);
 /* Read-only inventory shares the reader connection, never the assigned control
  * session. Copy clears stale devices immediately when either connection is lost. */
 esp_err_t dial_reader_devices_refresh(void);

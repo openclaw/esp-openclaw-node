@@ -26,7 +26,7 @@ typedef struct {
     uint32_t connection;
     size_t offset;
     int64_t started;
-    bool ok, too_large;
+    bool ok, too_large, timed_out;
     char *json;
     union {
         esp_openclaw_agent_page_t agents;
@@ -36,6 +36,15 @@ typedef struct {
 } reader_request_t;
 
 static _Atomic(reader_request_t *) completed_request;
+
+typedef struct {
+    unsigned revision, generation;
+    uint32_t connection;
+    bool waiting, ok;
+    char *json;
+} approval_request_t;
+
+static _Atomic(approval_request_t *) completed_approval;
 
 static struct {
     SemaphoreHandle_t lock;
@@ -57,7 +66,42 @@ static struct {
     dial_conversations_snapshot_t *conversations;
     unsigned conversations_revision, preview_revision;
     bool sessions_pending, preview_pending;
+    dial_messaging_snapshot_t messaging;
+    approval_request_t *approval;
+    int64_t approval_started;
+    char *approved_token;
+    bool write_registered, reset_client;
 } reader;
+
+static void messaging_state(dial_messaging_state_t state)
+{
+    reader.messaging.state = state;
+    ++reader.messaging.revision;
+}
+
+static void clear_approved_token(void)
+{
+    if (reader.approved_token != NULL) {
+        memset(reader.approved_token, 0, strlen(reader.approved_token));
+        free(reader.approved_token);
+        reader.approved_token = NULL;
+    }
+}
+
+static bool messaging_pending(void)
+{
+    return reader.messaging.state == DIAL_MESSAGING_REQUESTING ||
+        reader.messaging.state == DIAL_MESSAGING_WAITING ||
+        reader.messaging.state == DIAL_MESSAGING_CONNECTING;
+}
+
+static void reset_messaging(dial_messaging_state_t state)
+{
+    messaging_state(state);
+    reader.messaging.request_id[0] = '\0';
+    clear_approved_token();
+    reader.reset_client = reader.write_registered;
+}
 
 static void wake_reader(void)
 {
@@ -135,7 +179,10 @@ static void refresh_node(void)
     free(reader.uri);
     reader.uri = uri;
     reader.node_id = id;
-    if (reader.generation != generation) invalidate_directory();
+    if (reader.generation != generation) {
+        invalidate_directory();
+        reset_messaging(DIAL_MESSAGING_OFF);
+    }
     reader.generation = generation;
     reader.reader_id = 0;
     reader.retry = id != 0;
@@ -153,13 +200,19 @@ static void consume_event(void)
     reader.reader_id = 0;
     if (event == UP) {
         reader.phase = CONNECTED;
-        if (reader.attempt == reader.generation && current_node()) {
+        if (reader.attempt == reader.generation && current_node() &&
+            !reader.force_disconnect && !reader.reset_client) {
             /* A saved operator token can belong to the previous Gateway. A
              * failed URI allocation is retryable, not a credential failure. */
             bool same_gateway = uri != NULL && strcmp(uri, reader.uri) == 0;
             reader.reader_id = same_gateway ? id : 0;
             reader.status = uri == NULL || id == 0 ? ERROR : same_gateway ? READY : ACCESS_NEEDED;
             reader.retry = uri == NULL || id == 0;
+            if (reader.messaging.state == DIAL_MESSAGING_CONNECTING &&
+                reader.write_registered && !reader.reset_client && reader.status == READY) {
+                clear_approved_token();
+                messaging_state(DIAL_MESSAGING_READY);
+            }
         }
     } else {
         invalidate_directory();
@@ -172,6 +225,16 @@ static void consume_event(void)
             reader.status = event == LOST ? STARTING : event == AUTH_REJECTED ? ACCESS_NEEDED : ERROR;
         }
         if (!current_node()) reader.status = OFFLINE;
+        if (reader.messaging.state == DIAL_MESSAGING_REQUESTING ||
+            reader.messaging.state == DIAL_MESSAGING_WAITING) {
+            reset_messaging(DIAL_MESSAGING_ERROR);
+        } else if (reader.write_registered && !reader.reset_client) {
+            if (event == LOST) messaging_state(DIAL_MESSAGING_CONNECTING);
+            else if (event != CLOSED) {
+                reset_messaging(DIAL_MESSAGING_ERROR);
+                reader.retry = current_node();
+            }
+        }
     }
     xSemaphoreGive(reader.lock);
     free(uri);
@@ -352,6 +415,216 @@ static esp_err_t create_client(void)
     return err;
 }
 
+static void approval_response(esp_openclaw_node_handle_t client,
+                              const esp_openclaw_node_gateway_result_t *result, void *context)
+{
+    (void)client;
+    approval_request_t *request = context;
+    if (result->ok && result->payload_json != NULL) {
+        size_t length = strnlen(result->payload_json, 4097);
+        if (length <= 4096) {
+            request->json = malloc(length + 1);
+            if (request->json != NULL) {
+                memcpy(request->json, result->payload_json, length + 1);
+                request->ok = true;
+            }
+        }
+    }
+    atomic_store(&completed_approval, request);
+    wake_reader();
+}
+
+static bool has_write_scopes(const cJSON *root)
+{
+    bool read = false, write = false;
+    const cJSON *scopes = cJSON_GetObjectItemCaseSensitive(root, "scopes"), *scope;
+    if (!cJSON_IsArray(scopes)) return false;
+    cJSON_ArrayForEach(scope, scopes) {
+        if (!cJSON_IsString(scope)) return false;
+        read |= strcmp(scope->valuestring, "operator.read") == 0;
+        write |= strcmp(scope->valuestring, "operator.write") == 0;
+    }
+    return read && write;
+}
+
+static cJSON *parse_approval(const char *json)
+{
+    if (json == NULL) return NULL;
+    unsigned depth = 0;
+    bool quoted = false, escaped = false;
+    for (size_t i = 0; json[i] != '\0'; ++i) {
+        char c = json[i];
+        if (quoted) {
+            if (escaped) {
+                /* Do not let a decoded NUL truncate an approval ID or token. */
+                if (c == 'u' && strncmp(json + i + 1, "0000", 4) == 0) return NULL;
+                escaped = false;
+            } else if (c == '\\') escaped = true;
+            else if (c == '"') quoted = false;
+        } else if (c == '"') quoted = true;
+        else if (c == '{' || c == '[') { if (++depth > 4) return NULL; }
+        else if (c == '}' || c == ']') { if (depth == 0) return NULL; --depth; }
+    }
+    if (depth != 0 || quoted) return NULL;
+    cJSON *root = cJSON_ParseWithLengthOpts(json, strlen(json) + 1, NULL, true);
+    if (cJSON_IsObject(root)) return root;
+    cJSON_Delete(root);
+    return NULL;
+}
+
+static void consume_approval(void)
+{
+    approval_request_t *request = atomic_exchange(&completed_approval, NULL);
+    if (request == NULL) return;
+    cJSON *root = request->ok ? parse_approval(request->json) : NULL;
+    const cJSON *id = cJSON_GetObjectItemCaseSensitive(root, "requestId");
+    xSemaphoreTake(reader.lock, portMAX_DELAY);
+    reader.approval = NULL;
+    /* The SDK can deliver this reply and then close the socket before the
+     * worker runs. Preserve its rotated token using the captured owner, while
+     * a canceled intent or changed primary connection still invalidates it. */
+    if (request->revision == reader.messaging.revision &&
+        request->generation == reader.generation && current_node() &&
+        reader.attempt == reader.generation && reader.phase == CONNECTED &&
+        request->connection != 0 && request->connection == reader.reader_id) {
+        bool valid_id = cJSON_IsString(id) && id->valuestring[0] != '\0' &&
+            strlen(id->valuestring) < sizeof(reader.messaging.request_id);
+        if (!request->waiting) {
+            if (valid_id) {
+                strcpy(reader.messaging.request_id, id->valuestring);
+                messaging_state(DIAL_MESSAGING_WAITING);
+            } else messaging_state(DIAL_MESSAGING_ERROR);
+        } else {
+            const cJSON *status = cJSON_GetObjectItemCaseSensitive(root, "status");
+            const cJSON *token = cJSON_GetObjectItemCaseSensitive(root, "deviceToken");
+            bool matches = valid_id && strcmp(id->valuestring, reader.messaging.request_id) == 0 &&
+                cJSON_IsString(status);
+            if (matches && strcmp(status->valuestring, "rejected") == 0)
+                messaging_state(DIAL_MESSAGING_REJECTED);
+            else if (matches && strcmp(status->valuestring, "expired") == 0)
+                messaging_state(DIAL_MESSAGING_EXPIRED);
+            else if (matches && strcmp(status->valuestring, "approved") == 0 &&
+                     cJSON_IsString(token) && token->valuestring[0] != '\0' &&
+                     strlen(token->valuestring) <= 2048 && has_write_scopes(root) &&
+                     (reader.approved_token = strdup(token->valuestring)) != NULL) {
+                messaging_state(DIAL_MESSAGING_CONNECTING);
+                reader.force_disconnect = reader.retry = true;
+            } else messaging_state(DIAL_MESSAGING_ERROR);
+        }
+    }
+    xSemaphoreGive(reader.lock);
+    cJSON_Delete(root);
+    if (request->json != NULL) memset(request->json, 0, strlen(request->json));
+    free(request->json);
+    free(request);
+}
+
+static void request_approval(void)
+{
+    xSemaphoreTake(reader.lock, portMAX_DELAY);
+    if (reader.approval != NULL || !current_reader() ||
+        (reader.messaging.state != DIAL_MESSAGING_REQUESTING && reader.messaging.state != DIAL_MESSAGING_WAITING)) {
+        xSemaphoreGive(reader.lock);
+        return;
+    }
+    approval_request_t *request = calloc(1, sizeof(*request));
+    if (request == NULL) {
+        messaging_state(DIAL_MESSAGING_ERROR);
+        xSemaphoreGive(reader.lock);
+        return;
+    }
+    request->revision = reader.messaging.revision;
+    request->generation = reader.generation;
+    request->connection = reader.reader_id;
+    request->waiting = reader.messaging.state == DIAL_MESSAGING_WAITING;
+    cJSON *params = cJSON_CreateObject();
+    bool ok;
+    if (request->waiting)
+        ok = cJSON_AddStringToObject(params, "requestId", reader.messaging.request_id) != NULL;
+    else {
+        const char *scopes[] = {"operator.read", "operator.write"};
+        cJSON *array = cJSON_CreateStringArray(scopes, 2);
+        ok = array != NULL && cJSON_AddItemToObject(params, "scopes", array);
+        if (!ok) cJSON_Delete(array);
+    }
+    char *json = ok ? cJSON_PrintUnformatted(params) : NULL;
+    cJSON_Delete(params);
+    reader.approval = request;
+    xSemaphoreGive(reader.lock);
+    esp_err_t err = json != NULL ? esp_openclaw_node_gateway_request_on_connection(
+        reader.client, request->connection,
+        request->waiting ? "device.scopes.waitUpgrade" : "device.scopes.requestUpgrade",
+        json, approval_response, request) : ESP_ERR_NO_MEM;
+    free(json);
+    if (err != ESP_OK) {
+        atomic_store(&completed_approval, request);
+        wake_reader();
+    }
+}
+
+static void reset_idle_client(void)
+{
+    xSemaphoreTake(reader.lock, portMAX_DELAY);
+    bool reset = reader.reset_client && reader.phase == IDLE &&
+        reader.inflight == NULL && reader.approval == NULL;
+    if (reset && reader.devices_available)
+        esp_openclaw_devices_set_owner_locked(NULL, reader.generation, 0, false);
+    xSemaphoreGive(reader.lock);
+    if (!reset) return;
+    /* Registration is idle-only and has no unregister operation. Recreate the
+     * operator after canceled/failed elevation; the independent node stays up. */
+    esp_err_t err = esp_openclaw_node_destroy(reader.client);
+    xSemaphoreTake(reader.lock, portMAX_DELAY);
+    if (err == ESP_OK) {
+        reader.client = NULL;
+        reader.write_registered = reader.reset_client = false;
+    }
+    xSemaphoreGive(reader.lock);
+}
+
+static esp_err_t connect_reader(void)
+{
+    esp_err_t err = reader.client != NULL ? ESP_OK : create_client();
+    if (err != ESP_OK) return err;
+    xSemaphoreTake(reader.lock, portMAX_DELAY);
+    bool has_token = reader.approved_token != NULL;
+    char *token = has_token ? strdup(reader.approved_token) : NULL;
+    unsigned revision = reader.messaging.revision;
+    xSemaphoreGive(reader.lock);
+    if (has_token && token == NULL) return ESP_ERR_NO_MEM;
+    if (token != NULL) {
+        err = esp_openclaw_node_register_scope(reader.client, "operator.write");
+        xSemaphoreTake(reader.lock, portMAX_DELAY);
+        if (err == ESP_OK) reader.write_registered = true;
+        bool current = current_node() && revision == reader.messaging.revision &&
+            reader.messaging.state == DIAL_MESSAGING_CONNECTING;
+        if (!current) {
+            reader.reset_client = reader.write_registered;
+            err = ESP_ERR_INVALID_STATE;
+        }
+        xSemaphoreGive(reader.lock);
+    }
+    if (err == ESP_OK) {
+        const esp_openclaw_node_connect_request_t request = {
+            .source = token != NULL ? ESP_OPENCLAW_NODE_CONNECT_SOURCE_DEVICE_TOKEN :
+                ESP_OPENCLAW_NODE_CONNECT_SOURCE_SAVED_SESSION,
+            .gateway_uri = token != NULL ? reader.uri : NULL,
+            .value = token,
+        };
+        err = esp_openclaw_node_request_connect(reader.client, &request);
+    }
+    if (token != NULL) {
+        memset(token, 0, strlen(token));
+        free(token);
+        if (err != ESP_OK && err != ESP_ERR_NO_MEM && err != ESP_ERR_INVALID_STATE && err != ESP_FAIL) {
+            xSemaphoreTake(reader.lock, portMAX_DELAY);
+            if (revision == reader.messaging.revision) reset_messaging(DIAL_MESSAGING_ERROR);
+            xSemaphoreGive(reader.lock);
+        }
+    }
+    return err;
+}
+
 static void reader_task(void *context)
 {
     (void)context;
@@ -366,23 +639,41 @@ static void reader_task(void *context)
          * This bounds reconnects without polling NVS or retrying auth failures. */
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
         refresh_node();
+        consume_approval();
         consume_event();
         consume_response();
+        reset_idle_client();
         xSemaphoreTake(reader.lock, portMAX_DELAY);
-        if (reader.inflight != NULL && !reader.force_disconnect &&
+        if ((reader.messaging.state == DIAL_MESSAGING_REQUESTING ||
+             reader.messaging.state == DIAL_MESSAGING_WAITING) &&
+            esp_timer_get_time() - reader.approval_started >=
+                (reader.messaging.state == DIAL_MESSAGING_WAITING ? 315000000 : 15000000)) {
+            reset_messaging(reader.messaging.state == DIAL_MESSAGING_WAITING ?
+                DIAL_MESSAGING_EXPIRED : DIAL_MESSAGING_ERROR);
+            reader.force_disconnect = reader.approval != NULL;
+            reader.retry = true;
+        }
+        if (reader.inflight != NULL && !reader.inflight->timed_out &&
             esp_timer_get_time() - reader.inflight->started >= 15000000) {
-            /* SDK requests have no response deadline. Closing this read-only
-             * transport completes its callbacks before another request starts. */
+            reader.inflight->timed_out = true;
             ++reader.directory_revision;
             clear_conversations();
             reader.directory_state = DIAL_AGENTS_ERROR;
             reader.directory_enabled = reader.directory_pending = false;
+        }
+        if (reader.inflight != NULL && reader.inflight->timed_out &&
+            reader.messaging.state != DIAL_MESSAGING_REQUESTING &&
+            reader.messaging.state != DIAL_MESSAGING_WAITING) {
+            /* Report the read deadline immediately, but keep an outstanding
+             * approval wait alive until its own bounded deadline. Closing the
+             * socket earlier can orphan a newly rotated operator token. */
             reader.force_disconnect = reader.retry = true;
         }
         bool stale = reader.attempt != reader.generation || !current_node();
         bool stop = reader.phase != IDLE && reader.phase != STOPPING &&
             (stale || reader.force_disconnect || (reader.phase == CONNECTED && reader.status != READY));
-        bool start = reader.phase == IDLE && reader.retry && current_node();
+        bool start = reader.phase == IDLE && reader.retry && current_node() &&
+            !reader.reset_client && reader.inflight == NULL && reader.approval == NULL;
         unsigned attempt = reader.attempt;
         if (start) {
             reader.attempt = reader.generation;
@@ -411,25 +702,20 @@ static void reader_task(void *context)
             }
             xSemaphoreGive(reader.lock);
             if (!current) continue;
-            esp_err_t err = reader.client != NULL ? ESP_OK : create_client();
-            if (err == ESP_OK) {
-                const esp_openclaw_node_connect_request_t request = {
-                    .source = ESP_OPENCLAW_NODE_CONNECT_SOURCE_SAVED_SESSION,
-                };
-                err = esp_openclaw_node_request_connect(reader.client, &request);
-            }
+            esp_err_t err = connect_reader();
             if (err != ESP_OK) {
                 xSemaphoreTake(reader.lock, portMAX_DELAY);
                 reader.phase = IDLE;
                 if (attempt == reader.generation) {
                     reader.status = err == ESP_ERR_NOT_FOUND ? ACCESS_NEEDED : ERROR;
-                    reader.retry = err == ESP_ERR_NO_MEM || err == ESP_ERR_INVALID_STATE || err == ESP_FAIL;
+                    reader.retry = reader.reset_client || err == ESP_ERR_NO_MEM || err == ESP_ERR_INVALID_STATE || err == ESP_FAIL;
                 } else {
                     reader.retry = current_node();
                 }
                 xSemaphoreGive(reader.lock);
             }
         }
+        request_approval();
         request_next();
         xSemaphoreTake(reader.lock, portMAX_DELAY);
         bool defer_devices = reader.inflight != NULL;
@@ -482,6 +768,59 @@ cJSON *dial_reader_status(void)
         return NULL;
     }
     return status;
+}
+
+void dial_reader_messaging_copy(dial_messaging_snapshot_t *snapshot)
+{
+    memset(snapshot, 0, sizeof(*snapshot));
+    if (reader.lock == NULL) return;
+    xSemaphoreTake(reader.lock, portMAX_DELAY);
+    *snapshot = reader.messaging;
+    /* Revoke displayed authority immediately, before the worker sees a loss. */
+    if (snapshot->state == DIAL_MESSAGING_READY && !current_reader())
+        snapshot->state = DIAL_MESSAGING_CONNECTING;
+    if (!current_node()) {
+        snapshot->state = DIAL_MESSAGING_OFF;
+        snapshot->request_id[0] = '\0';
+    }
+    xSemaphoreGive(reader.lock);
+}
+
+esp_err_t dial_reader_messaging_request(unsigned revision)
+{
+    if (reader.lock == NULL) return ESP_ERR_INVALID_STATE;
+    xSemaphoreTake(reader.lock, portMAX_DELAY);
+    if (revision != reader.messaging.revision || !current_reader() ||
+        reader.reset_client || reader.approval != NULL || reader.write_registered ||
+        reader.messaging.state == DIAL_MESSAGING_READY || messaging_pending()) {
+        xSemaphoreGive(reader.lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    reader.messaging.request_id[0] = '\0';
+    messaging_state(DIAL_MESSAGING_REQUESTING);
+    reader.approval_started = esp_timer_get_time();
+    xSemaphoreGive(reader.lock);
+    wake_reader();
+    return ESP_OK;
+}
+
+esp_err_t dial_reader_messaging_cancel(unsigned revision)
+{
+    if (reader.lock == NULL) return ESP_ERR_INVALID_STATE;
+    xSemaphoreTake(reader.lock, portMAX_DELAY);
+    if (revision != reader.messaging.revision ||
+        (!messaging_pending() && reader.messaging.state != DIAL_MESSAGING_READY)) {
+        xSemaphoreGive(reader.lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    reset_messaging(DIAL_MESSAGING_OFF);
+    /* Closing only the operator completes the outstanding wait callback. It
+     * cannot revoke a grant the administrator may already have approved. */
+    reader.force_disconnect = reader.phase != IDLE;
+    reader.retry = true;
+    xSemaphoreGive(reader.lock);
+    wake_reader();
+    return ESP_OK;
 }
 
 esp_err_t dial_reader_devices_refresh(void)

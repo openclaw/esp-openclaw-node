@@ -38,7 +38,7 @@ when Wi-Fi or the Gateway changes.
 ### Read access
 
 The Dial also starts a separate operator connection after the node connects.
-It requests only `operator.read` and reuses the operator session handed off
+By default it requests only `operator.read` and reuses the operator session handed off
 during pairing. It does not grant itself access or change the node connection's
 permissions. The on-device agent browser uses this connection. Conversation selection
 is a separate feature.
@@ -87,7 +87,9 @@ Directory states are `idle`, `loading`, `ready`, `empty`, `offline`, `connecting
 failure. Reconnects free old pages before the next handshake and refresh a previously requested
 directory. A newer refresh supersedes an older result; only one request can be
 outstanding. A request with no response after 15 seconds closes only the reader
-connection and reports an error; run `agents refresh` to retry. Node commands
+connection and reports an error; run `agents refresh` to retry. During a messaging
+approval, the read still reports its error at 15 seconds, but transport cleanup
+waits for approval to finish or expire. Node commands
 and numeric controls remain independent.
 
 The Gateway currently sends the whole roster, so pages do not avoid receiving
@@ -133,6 +135,24 @@ there). Opening the page starts at the top. The USB command
 Display-state responses include `wifiConnected` alongside the existing Gateway
 `connected` flag. Phone pairing remains planned work; this page does not offer a
 nonfunctional pairing or retry button.
+
+Settings → Messaging shows this Dial's messaging permission. It starts off with
+read-only access. **Request** asks the Gateway for approval; the page
+then shows whether the request is being sent, waiting for approval, or reconnecting
+to check the grant. **Access ready** appears only after the reader confirms its
+authenticated access. This page manages permission; it does not send messages.
+
+Back and a long press preserve a pending request. **Cancel** stops the local
+request and returns the reader to read-only access. Once ready, **Turn off**
+restores read-only access on this Dial. Neither action revokes a grant already
+approved on the Gateway. Rejected, expired, and failed requests can be
+requested again. If the Dial is offline, reconnect before retrying. The node's
+configured numeric control is unchanged. The USB command
+`local display.menu "{\"page\":\"messaging\"}"` opens the same page.
+
+Cancel stops the local wait; dismiss the pending approval on the Gateway too.
+Approving it afterward can rotate the saved operator token and require pairing
+again. A Gateway connection change or restart resets messaging to read-only.
 
 Agents shows a bounded page of the Gateway roster. Turn to browse names, then
 open an identity to see its canonical ID. The back arrow returns to the list;

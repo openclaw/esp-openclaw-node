@@ -55,6 +55,12 @@ static void back(dial_navigation_t *nav)
 {
     if (nav->view == DIAL_NAV_MENU) nav->handler(DIAL_NAV_HOME, 0, nav->context);
     else {
+        if (nav->view == DIAL_NAV_MESSAGING) {
+            nav->view = DIAL_NAV_SETTINGS;
+            nav->focus = 2;
+            changed(nav);
+            return;
+        }
         if (nav->view == DIAL_NAV_DEVICE_DETAIL || nav->view == DIAL_NAV_LOCAL_DEVICE) {
             bool local = nav->view == DIAL_NAV_LOCAL_DEVICE;
             nav->view = DIAL_NAV_DEVICES;
@@ -203,6 +209,14 @@ void dial_navigation_create(dial_navigation_t *nav, lv_obj_t *parent,
     lv_obj_set_style_text_font(nav->detail_initials, &lv_font_montserrat_24, 0);
 #endif
     lv_obj_set_hidden(nav->detail_initials, true);
+    nav->messaging_icon = text(nav->root, LV_SYMBOL_ENVELOPE, 108, 68, 24);
+    nav->messaging_status = text(nav->root, "", 38, 96, 164);
+    lv_obj_set_style_text_font(nav->messaging_status, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_align(nav->messaging_status, LV_TEXT_ALIGN_CENTER, 0);
+    nav->messaging_detail = text(nav->root, "", 38, 122, 164);
+    lv_obj_set_height(nav->messaging_detail, 40);
+    lv_label_set_long_mode(nav->messaging_detail, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_align(nav->messaging_detail, LV_TEXT_ALIGN_CENTER, 0);
     nav->preview_body = lv_obj_create(nav->root);
     lv_obj_remove_style_all(nav->preview_body);
     lv_obj_set_pos(nav->preview_body, 44, 70);
@@ -270,8 +284,8 @@ static void item(dial_navigation_t *nav, unsigned index, const char **name, cons
         return;
     }
     if (nav->view == DIAL_NAV_SETTINGS) {
-        const char *names[] = {"Display", "Connection", "Back"};
-        const char *icons[] = {LV_SYMBOL_IMAGE, LV_SYMBOL_WIFI, LV_SYMBOL_LEFT};
+        const char *names[] = {"Display", "Connection", "Messaging", "Back"};
+        const char *icons[] = {LV_SYMBOL_IMAGE, LV_SYMBOL_WIFI, LV_SYMBOL_ENVELOPE, LV_SYMBOL_LEFT};
         *name = names[index];
         *icon = icons[index];
         return;
@@ -322,6 +336,65 @@ static void render_display(dial_navigation_t *nav)
         lv_obj_set_style_bg_color(nav->rows[i], lv_color_hex(0x302535), 0);
         lv_obj_set_style_text_color(nav->names[i], lv_color_hex(0xf4efee), 0);
         lv_obj_set_style_text_color(nav->icons[i], lv_color_hex(0xf4efee), 0);
+    }
+}
+
+static bool messaging_pending(dial_messaging_state_t state)
+{
+    return state == DIAL_MESSAGING_REQUESTING || state == DIAL_MESSAGING_WAITING ||
+        state == DIAL_MESSAGING_CONNECTING;
+}
+
+static void render_messaging(dial_navigation_t *nav)
+{
+    const char *status, *detail;
+    switch (nav->messaging.state) {
+    case DIAL_MESSAGING_OFF:
+        status = "Access off"; detail = "Read only.\nRequest access below."; break;
+    case DIAL_MESSAGING_REQUESTING:
+        status = "Requesting"; detail = "Contacting Gateway.\nStill read only."; break;
+    case DIAL_MESSAGING_WAITING:
+        status = "Approval needed"; detail = "Approve on Gateway.\nStill read only."; break;
+    case DIAL_MESSAGING_CONNECTING:
+        status = "Reconnecting"; detail = "Checking access.\nPlease wait."; break;
+    case DIAL_MESSAGING_READY:
+        status = "Access ready"; detail = "Turn off only here.\nGateway grant stays."; break;
+    case DIAL_MESSAGING_REJECTED:
+        status = "Request rejected"; detail = "Still read only.\nRequest again."; break;
+    case DIAL_MESSAGING_EXPIRED:
+        status = "Request expired"; detail = "Still read only.\nRequest again."; break;
+    default:
+        status = "Request failed"; detail = "Check connection.\nThen request again."; break;
+    }
+    if (nav->messaging_action_failed) detail = "Connect to Gateway.\nThen try again.";
+    nav->count = 1;
+    nav->focus = nav->first = 0;
+    lv_label_set_text_static(nav->heading, "Messaging");
+    lv_obj_set_hidden(nav->description, true);
+    lv_obj_set_hidden(nav->identity, true);
+    lv_obj_set_hidden(nav->preview_body, true);
+    lv_obj_set_hidden(nav->messaging_icon, false);
+    lv_obj_set_hidden(nav->messaging_status, false);
+    lv_obj_set_hidden(nav->messaging_detail, false);
+    lv_label_set_text_static(nav->messaging_status, status);
+    lv_label_set_text_static(nav->messaging_detail, detail);
+    lv_obj_set_hidden(nav->hint, false);
+    lv_label_set_text_static(nav->hint, "Press or tap");
+    for (unsigned i = 0; i < 3; ++i) {
+        lv_obj_set_hidden(nav->rows[i], i != 0);
+        if (i != 0) continue;
+        bool ready = nav->messaging.state == DIAL_MESSAGING_READY;
+        bool cancel = ready || messaging_pending(nav->messaging.state);
+        lv_obj_set_pos(nav->rows[i], 44, 168);
+        lv_obj_set_size(nav->rows[i], 152, 32);
+        lv_obj_set_pos(nav->icons[i], 12, 7);
+        lv_obj_set_pos(nav->names[i], 40, 7);
+        lv_obj_set_width(nav->names[i], 100);
+        lv_label_set_text_static(nav->icons[i], cancel ? LV_SYMBOL_CLOSE : LV_SYMBOL_PLUS);
+        lv_label_set_text_static(nav->names[i], ready ? "Turn off" : cancel ? "Cancel" : "Request");
+        lv_obj_set_style_bg_color(nav->rows[i], lv_color_hex(0xf4efee), 0);
+        lv_obj_set_style_text_color(nav->names[i], lv_color_hex(0x302131), 0);
+        lv_obj_set_style_text_color(nav->icons[i], lv_color_hex(0x302131), 0);
     }
 }
 
@@ -409,6 +482,9 @@ static void render(dial_navigation_t *nav)
     lv_obj_set_y(nav->description, 80);
     lv_obj_set_hidden(nav->detail_avatar, true);
     lv_obj_set_hidden(nav->detail_initials, true);
+    lv_obj_set_hidden(nav->messaging_icon, true);
+    lv_obj_set_hidden(nav->messaging_status, true);
+    lv_obj_set_hidden(nav->messaging_detail, true);
     if (nav->view != DIAL_NAV_AGENTS) {
         for (unsigned i = 0; i < 3; ++i) {
             lv_obj_set_hidden(nav->avatars[i], true);
@@ -421,6 +497,10 @@ static void render(dial_navigation_t *nav)
     }
     if (nav->view == DIAL_NAV_DISPLAY) {
         render_display(nav);
+        return;
+    }
+    if (nav->view == DIAL_NAV_MESSAGING) {
+        render_messaging(nav);
         return;
     }
     if (nav->view == DIAL_NAV_ACTIVITY) {
@@ -477,12 +557,12 @@ static void render(dial_navigation_t *nav)
     bool sessions = nav->view == DIAL_NAV_SESSIONS;
     bool preview = nav->view == DIAL_NAV_PREVIEW;
     bool message = (nav->view == DIAL_NAV_AGENTS || sessions) && agent_count(nav) == 0;
-    nav->count = detail || preview ? 1 : nav->view == DIAL_NAV_MENU ? 5 : nav->view == DIAL_NAV_SETTINGS ? 3 :
+    nav->count = detail || preview ? 1 : nav->view == DIAL_NAV_MENU ? 5 : nav->view == DIAL_NAV_SETTINGS ? 4 :
         agent_count(nav) + has_next(nav) + has_previous(nav) + 2;
     if (!detail && !preview && nav->focus >= nav->count) nav->focus = 0;
     unsigned visible = message ? 2 : 3;
     nav->first = nav->focus / visible * visible;
-    if (nav->view == DIAL_NAV_MENU && nav->first + visible > nav->count)
+    if ((nav->view == DIAL_NAV_MENU || nav->view == DIAL_NAV_SETTINGS) && nav->first + visible > nav->count)
         nav->first = nav->count - visible;
     lv_label_set_text_static(nav->heading, preview ? "Preview" : sessions ? "Chats" : nav->view == DIAL_NAV_MENU ? "Menu" : nav->view == DIAL_NAV_SETTINGS ? "Settings" : "Agents");
     if (sessions && nav->conversations != NULL && nav->conversations->agent.name[0] != '\0')
@@ -665,6 +745,7 @@ bool dial_navigation_show_reader(dial_navigation_t *nav, const dial_agents_snaps
 
 void dial_navigation_move(dial_navigation_t *nav, int direction)
 {
+    if (nav->view == DIAL_NAV_MESSAGING) return;
     if (nav->view == DIAL_NAV_DISPLAY) {
         int percent = nav->brightness + (direction > 0 ? 5 : -5);
         if (percent < 10) percent = nav->brightness < 10 && direction < 0 ? nav->brightness : 10;
@@ -686,6 +767,11 @@ void dial_navigation_move(dial_navigation_t *nav, int direction)
 
 void dial_navigation_activate(dial_navigation_t *nav)
 {
+    if (nav->view == DIAL_NAV_MESSAGING) {
+        nav->handler((nav->messaging.state == DIAL_MESSAGING_READY || messaging_pending(nav->messaging.state))
+            ? DIAL_NAV_MESSAGING_CANCEL : DIAL_NAV_MESSAGING_REQUEST, nav->messaging.revision, nav->context);
+        return;
+    }
     if (nav->view == DIAL_NAV_DEVICE_DETAIL) { back(nav); return; }
     if (nav->view == DIAL_NAV_LOCAL_DEVICE) {
         if (nav->focus == 0) nav->handler(DIAL_NAV_CONTROL, 0, nav->context);
@@ -705,7 +791,8 @@ void dial_navigation_activate(dial_navigation_t *nav)
     }
     if (nav->view == DIAL_NAV_DISPLAY || nav->view == DIAL_NAV_CONNECTION) { back(nav); return; }
     if (nav->view == DIAL_NAV_SETTINGS) {
-        if (nav->focus < 2) dial_navigation_open_settings(nav, nav->focus == 0 ? DIAL_NAV_DISPLAY : DIAL_NAV_CONNECTION);
+        if (nav->focus < 3) dial_navigation_open_settings(nav, nav->focus == 0 ? DIAL_NAV_DISPLAY :
+            nav->focus == 1 ? DIAL_NAV_CONNECTION : DIAL_NAV_MESSAGING);
         else back(nav);
         return;
     }
@@ -760,7 +847,7 @@ void dial_navigation_activate(dial_navigation_t *nav)
 
 void dial_navigation_open_settings(dial_navigation_t *nav, dial_navigation_view_t page)
 {
-    if (page != DIAL_NAV_SETTINGS && page != DIAL_NAV_DISPLAY && page != DIAL_NAV_CONNECTION) return;
+    if (page != DIAL_NAV_SETTINGS && page != DIAL_NAV_DISPLAY && page != DIAL_NAV_CONNECTION && page != DIAL_NAV_MESSAGING) return;
     nav->settings_parent = nav->view == DIAL_NAV_LOCAL_DEVICE ? DIAL_NAV_LOCAL_DEVICE : DIAL_NAV_SETTINGS;
     nav->view = page;
     nav->focus = 0;
@@ -783,6 +870,22 @@ void dial_navigation_set_connection(dial_navigation_t *nav, const esp_openclaw_n
     nav->wifi = *wifi;
     nav->gateway_connected = gateway;
     if (nav->view == DIAL_NAV_CONNECTION) render(nav);
+}
+
+void dial_navigation_messaging_update(dial_navigation_t *nav, const dial_messaging_snapshot_t *snapshot)
+{
+    if (nav->messaging.revision == snapshot->revision && nav->messaging.state == snapshot->state &&
+        strcmp(nav->messaging.request_id, snapshot->request_id) == 0) return;
+    nav->messaging = *snapshot;
+    nav->messaging_action_failed = false;
+    /* A held Request or Cancel belongs to the exact permission observation. */
+    if (nav->view == DIAL_NAV_MESSAGING) changed(nav);
+}
+
+void dial_navigation_messaging_result(dial_navigation_t *nav, bool accepted)
+{
+    nav->messaging_action_failed = !accepted;
+    if (nav->view == DIAL_NAV_MESSAGING) render(nav);
 }
 
 void dial_navigation_open_activity(dial_navigation_t *nav)

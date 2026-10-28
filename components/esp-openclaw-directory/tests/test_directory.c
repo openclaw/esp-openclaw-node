@@ -11,6 +11,43 @@ static esp_openclaw_directory_result_t parse(const char *json, size_t offset, es
     return esp_openclaw_directory_parse(json, strlen(json), offset, page);
 }
 
+static void creation_cases(void)
+{
+    esp_openclaw_session_created_t created;
+    const char *valid = "{\"ok\":true,\"key\":\"agent:kitsune:chat:generated\",\"sessionId\":\"session-new\",\"runStarted\":false}";
+    assert(esp_openclaw_session_created_parse(valid, strlen(valid), "kitsune", &created) == ESP_OPENCLAW_DIRECTORY_OK);
+    assert(strcmp(created.key, "agent:kitsune:chat:generated") == 0);
+    assert(strcmp(created.session_id, "session-new") == 0);
+    assert(esp_openclaw_session_created_parse(valid, strlen(valid), "other", &created) == ESP_OPENCLAW_DIRECTORY_INVALID);
+    const char *invalid[] = {
+        "{}",
+        "{\"ok\":true,\"key\":\"agent:kitsune:new\",\"sessionId\":\"s\",\"runStarted\":true}",
+        "{\"ok\":true,\"key\":\"agent:kitsune:new\",\"sessionId\":\"s\"}",
+        "{\"ok\":true,\"key\":\"agent:kitsune:new\",\"key\":\"agent:other:new\",\"sessionId\":\"s\",\"runStarted\":false}",
+        "{\"ok\":true,\"key\":\"agent:kitsune:new\",\"sessionId\":\"s\",\"sessionId\":\"other\",\"runStarted\":false}",
+        "{\"ok\":true,\"key\":\"agent:kitsune:new\",\"sessionId\":\"s\",\"runStarted\":false,\"runStarted\":true}",
+        "{\"ok\":true,\"ok\":false,\"key\":\"agent:kitsune:new\",\"sessionId\":\"s\",\"runStarted\":false}",
+        "{\"ok\":true,\"key\":\"agent:kitsune:new\\u0000suffix\",\"sessionId\":\"s\",\"runStarted\":false}",
+    };
+    for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i) {
+        assert(esp_openclaw_session_created_parse(invalid[i], strlen(invalid[i]), "kitsune", &created) == ESP_OPENCLAW_DIRECTORY_INVALID);
+        assert(created.key[0] == '\0' && created.session_id[0] == '\0');
+    }
+    cJSON *root = cJSON_Parse(valid);
+    char large[ESP_OPENCLAW_SESSION_KEY_BYTES + 1];
+    memset(large, 'x', sizeof(large) - 1); large[sizeof(large) - 1] = '\0';
+    memcpy(large, "agent:kitsune:", 14);
+    cJSON_ReplaceItemInObjectCaseSensitive(root, "key", cJSON_CreateString(large));
+    char *json = cJSON_PrintUnformatted(root);
+    assert(esp_openclaw_session_created_parse(json, strlen(json), "kitsune", &created) == ESP_OPENCLAW_DIRECTORY_TOO_LARGE);
+    assert(created.key[0] == '\0'); cJSON_free(json);
+    cJSON_ReplaceItemInObjectCaseSensitive(root, "key", cJSON_CreateString("agent:kitsune:new"));
+    cJSON_ReplaceItemInObjectCaseSensitive(root, "sessionId", cJSON_CreateString(large));
+    json = cJSON_PrintUnformatted(root);
+    assert(esp_openclaw_session_created_parse(json, strlen(json), "kitsune", &created) == ESP_OPENCLAW_DIRECTORY_TOO_LARGE);
+    cJSON_free(json); cJSON_Delete(root);
+}
+
 static void conversation_cases(void)
 {
     esp_openclaw_session_page_t page;
@@ -212,6 +249,7 @@ int main(void)
     assert(esp_openclaw_directory_parse("", ESP_OPENCLAW_DIRECTORY_MAX_JSON_BYTES + 1, 0, &page) == ESP_OPENCLAW_DIRECTORY_TOO_LARGE);
     assert(parse(" {\"agents\":[{\"id\":\"quoted\",\"name\":\"a \\\" { [\"}]} \n", 0, &page) == ESP_OPENCLAW_DIRECTORY_OK);
     conversation_cases();
+    creation_cases();
     puts("Directory: agent identities, conversation routing, preview states and UTF-8 bounds passed");
     return 0;
 }

@@ -6,6 +6,7 @@
 #include "dial_directory.h"
 #include "dial_messaging.h"
 #include "dial_reply.h"
+#include "dial_creation.h"
 
 /* The node remains usable when optional operator access is unavailable. */
 esp_err_t dial_reader_start(esp_openclaw_node_handle_t node);
@@ -40,3 +41,10 @@ esp_err_t dial_reader_reply_send(unsigned revision);
 void dial_reader_reply_close(unsigned revision);
 void dial_reader_reply_copy(dial_reply_snapshot_t *snapshot);
 esp_err_t dial_reader_reply_read(unsigned revision);
+
+/* Creating an empty conversation and sending a message are separate intents. */
+esp_err_t dial_reader_creation_begin(unsigned conversation_revision);
+esp_err_t dial_reader_creation_submit(unsigned revision);
+esp_err_t dial_reader_creation_open(unsigned revision);
+void dial_reader_creation_close(unsigned revision);
+void dial_reader_creation_copy(dial_creation_snapshot_t *snapshot);

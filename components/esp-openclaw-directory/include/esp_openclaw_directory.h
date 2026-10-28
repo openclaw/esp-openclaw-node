@@ -77,3 +77,13 @@ esp_openclaw_directory_result_t esp_openclaw_sessions_parse(
 esp_openclaw_directory_result_t esp_openclaw_preview_parse(
     const char *json, size_t length, const char *key,
     esp_openclaw_session_preview_t *preview);
+
+/* A confirmed empty sessions.create result. Neither routing value is shortened. */
+typedef struct {
+    char key[ESP_OPENCLAW_SESSION_KEY_BYTES];
+    char session_id[129];
+} esp_openclaw_session_created_t;
+
+esp_openclaw_directory_result_t esp_openclaw_session_created_parse(
+    const char *json, size_t length, const char *agent_id,
+    esp_openclaw_session_created_t *created);

@@ -371,3 +371,20 @@ previous turn reaches an outcome.
 Quick replies use the separately approved messaging connection. They do not
 change the numeric control's configured action or owner, and require no
 microphone. A changed permission, target, or reply state cancels a held press.
+
+### New conversations
+
+Open an agent's **Conversations** list and choose **New chat**, including when
+the list is empty. Review the full agent name and ID, then press **Create** to
+create an empty conversation. This sends no initial message and does not reset
+the agent's main conversation. If messaging access is missing, **Messaging**
+opens its approval settings; Back returns to this review. Creation remains
+unavailable until the agent is verified again after reconnecting.
+
+**Creating** is pending, and **Created → Open** opens the returned conversation
+preview. Back before Create discards the review. Back or Home after Create only
+hides the status; a created empty conversation remains if you leave. An unknown
+outcome offers **Chats** to refresh that agent's list before an explicit new
+attempt. A failed request offers **Retry**, which prepares a new review and
+still requires Create. Numeric controls and existing quick replies keep their
+current owners.

@@ -19,7 +19,7 @@ typedef enum { NONE, UP, LOST, AUTH_REJECTED, FAILED, CLOSED } reader_event_t;
 static atomic_uint node_generation;
 static atomic_uint pending_event;
 
-typedef enum { AGENTS, SESSIONS, PREVIEW } request_kind_t;
+typedef enum { AGENTS, SESSIONS, PREVIEW, CREATE } request_kind_t;
 
 typedef struct {
     request_kind_t kind;
@@ -28,12 +28,13 @@ typedef struct {
     uint32_t connection;
     size_t offset;
     int64_t started;
-    bool ok, too_large, timed_out;
+    bool ok, too_large, timed_out, queued, rejected;
     char *json;
     union {
         esp_openclaw_agent_page_t agents;
         esp_openclaw_session_page_t sessions;
         esp_openclaw_session_preview_t preview;
+        esp_openclaw_session_created_t created;
     } page;
 } reader_request_t;
 
@@ -79,6 +80,11 @@ static struct {
     unsigned reply_generation;
     uint32_t reply_connection;
     bool reply_prepare, reply_send, reply_submitted;
+    dial_creation_snapshot_t creation;
+    esp_openclaw_session_created_t created;
+    unsigned creation_generation;
+    uint32_t creation_connection, creation_review_connection;
+    bool creation_pending, creation_submitted;
 } reader;
 
 static void messaging_state(dial_messaging_state_t state)
@@ -134,6 +140,50 @@ static bool current_reader(void)
 static bool reply_active(void)
 {
     return reader.reply.state == DIAL_REPLY_SENDING || reader.reply.state == DIAL_REPLY_ACCEPTED;
+}
+
+static bool creation_owner(void)
+{
+    if (!current_reader() || reader.creation_generation != reader.generation ||
+        reader.directory_state != DIAL_AGENTS_READY || reader.directory_page == NULL) return false;
+    for (size_t i = 0; i < reader.directory_page->count; ++i)
+        if (strcmp(reader.directory_page->agents[i].id, reader.creation.agent.id) == 0) return true;
+    return false;
+}
+
+static bool creation_target(void)
+{
+    if (!creation_owner()) return false;
+    const dial_conversations_snapshot_t *view = reader.conversations;
+    if (reader.creation_review_connection == reader.reader_id)
+        return view != NULL && view->revision == reader.creation.conversation_revision &&
+            strcmp(view->agent.id, reader.creation.agent.id) == 0;
+    /* The write-approval reconnect clears the view. A fresh roster must attest
+     * the captured agent before a reviewed intent may use the new connection. */
+    return view == NULL || strcmp(view->agent.id, reader.creation.agent.id) == 0;
+}
+
+static void creation_state(dial_creation_state_t state, const char *detail)
+{
+    reader.creation.state = state;
+    strcpy(reader.creation.detail, detail);
+    ++reader.creation.revision;
+}
+
+static void poll_creation(void)
+{
+    xSemaphoreTake(reader.lock, portMAX_DELAY);
+    if (reader.creation.state == DIAL_CREATION_CREATING &&
+        (reader.creation_submitted ? !current_reader() ||
+            reader.creation_generation != reader.generation ||
+            reader.creation_connection != reader.reader_id : !creation_target() ||
+            reader.messaging.state != DIAL_MESSAGING_READY)) {
+        reader.creation_pending = false;
+        creation_state(reader.creation_submitted ? DIAL_CREATION_UNKNOWN : DIAL_CREATION_FAILED,
+            reader.creation_submitted ? "Outcome unknown. Check Chats before creating another." :
+                "Selection or connection changed. Nothing was queued.");
+    }
+    xSemaphoreGive(reader.lock);
 }
 
 static bool reply_owner(void)
@@ -373,6 +423,12 @@ static void reader_response(esp_openclaw_node_handle_t client,
     (void)client;
     reader_request_t *request = context;
     request->ok = result->ok && result->payload_json != NULL;
+    /* These validation/authority errors precede creation. Transport errors,
+     * missing error metadata, and server availability failures remain unknown. */
+    request->rejected = !result->ok && result->error_code != NULL &&
+        (strcmp(result->error_code, "INVALID_REQUEST") == 0 ||
+         strcmp(result->error_code, "FORBIDDEN") == 0 ||
+         strcmp(result->error_code, "STALE_CONNECTION") == 0);
     if (request->ok) {
         size_t length = strnlen(result->payload_json, ESP_OPENCLAW_DIRECTORY_MAX_JSON_BYTES + 1);
         request->too_large = length > ESP_OPENCLAW_DIRECTORY_MAX_JSON_BYTES;
@@ -404,6 +460,10 @@ static void consume_response(void)
                                                 request->offset, &request->page.sessions);
             if (parsed == ESP_OPENCLAW_DIRECTORY_OK)
                 state = request->page.sessions.count == 0 ? DIAL_AGENTS_EMPTY : DIAL_AGENTS_READY;
+        } else if (request->kind == CREATE) {
+            parsed = esp_openclaw_session_created_parse(request->json, length, request->agent_id,
+                                                       &request->page.created);
+            if (parsed == ESP_OPENCLAW_DIRECTORY_OK) state = DIAL_AGENTS_READY;
         } else {
             parsed = esp_openclaw_preview_parse(request->json, length, request->key, &request->page.preview);
             if (parsed == ESP_OPENCLAW_DIRECTORY_OK) state = DIAL_AGENTS_READY;
@@ -412,8 +472,26 @@ static void consume_response(void)
     }
     xSemaphoreTake(reader.lock, portMAX_DELAY);
     reader.inflight = NULL;
-    if (request->generation == reader.generation && current_reader() &&
-        request->connection == reader.reader_id) {
+    if (request->kind == CREATE) {
+        /* A conclusive response already received survives a subsequent operator
+         * disconnect. It never crosses a primary-node replacement or timeout. */
+        if (reader.creation.state == DIAL_CREATION_CREATING &&
+            request->revision == reader.creation.revision &&
+            request->generation == reader.generation && current_node() &&
+            request->connection == reader.creation_connection) {
+            if (state == DIAL_AGENTS_READY) {
+                reader.created = request->page.created;
+                creation_state(DIAL_CREATION_CREATED, "Created. Open it to choose a reply.");
+            } else {
+                bool unknown = request->queued && !request->rejected;
+                creation_state(unknown ? DIAL_CREATION_UNKNOWN : DIAL_CREATION_FAILED,
+                    unknown ? "Outcome unknown. Check Chats before creating another." :
+                    request->rejected ? "Gateway rejected creation. Check access or refresh." :
+                        "Could not queue. Review and try again.");
+            }
+        }
+    } else if (request->generation == reader.generation && current_reader() &&
+               request->connection == reader.reader_id) {
         dial_conversations_snapshot_t *view = reader.conversations;
         if (request->kind == AGENTS && request->revision == reader.directory_revision) {
             free(reader.directory_page);
@@ -444,7 +522,10 @@ static char *request_params(const reader_request_t *request)
     cJSON *root = cJSON_CreateObject();
     if (root == NULL) return NULL;
     bool ok = true;
-    if (request->kind == SESSIONS) {
+    if (request->kind == CREATE) {
+        ok = cJSON_AddStringToObject(root, "agentId", request->agent_id) != NULL &&
+            cJSON_AddStringToObject(root, "idempotencyKey", request->key) != NULL;
+    } else if (request->kind == SESSIONS) {
         ok = cJSON_AddStringToObject(root, "agentId", request->agent_id) != NULL &&
             cJSON_AddNumberToObject(root, "limit", ESP_OPENCLAW_DIRECTORY_PAGE_SIZE) != NULL &&
             cJSON_AddNumberToObject(root, "offset", request->offset) != NULL &&
@@ -469,15 +550,24 @@ static char *request_params(const reader_request_t *request)
 static void request_next(void)
 {
     xSemaphoreTake(reader.lock, portMAX_DELAY);
-    bool pending = reader.directory_pending || reader.sessions_pending || reader.preview_pending;
+    bool pending = reader.creation_pending || reader.directory_pending || reader.sessions_pending || reader.preview_pending;
     if (!pending || reader.inflight != NULL || !current_reader()) {
         xSemaphoreGive(reader.lock);
         return;
     }
-    request_kind_t kind = reader.preview_pending ? PREVIEW : reader.sessions_pending ? SESSIONS : AGENTS;
+    request_kind_t kind = reader.creation_pending ? CREATE : reader.preview_pending ? PREVIEW : reader.sessions_pending ? SESSIONS : AGENTS;
+    if (kind == CREATE && (!creation_target() || reader.messaging.state != DIAL_MESSAGING_READY || reply_active())) {
+        reader.creation_pending = false;
+        creation_state(DIAL_CREATION_FAILED, "Selection or connection changed. Nothing was queued.");
+        xSemaphoreGive(reader.lock);
+        return;
+    }
     reader_request_t *request = calloc(1, sizeof(*request));
     if (request == NULL) {
-        if (kind == AGENTS) {
+        if (kind == CREATE) {
+            reader.creation_pending = false;
+            creation_state(DIAL_CREATION_FAILED, "Could not queue. Review and try again.");
+        } else if (kind == AGENTS) {
             reader.directory_pending = false;
             reader.directory_state = DIAL_AGENTS_ERROR;
         } else if (kind == SESSIONS) {
@@ -494,7 +584,19 @@ static void request_next(void)
     request->generation = reader.generation;
     request->connection = reader.reader_id;
     request->started = esp_timer_get_time();
-    if (kind == AGENTS) {
+    if (kind == CREATE) {
+        reader.creation_pending = false;
+        reader.creation_connection = reader.reader_id;
+        request->revision = reader.creation.revision;
+        strcpy(request->agent_id, reader.creation.agent.id);
+        unsigned char random[16];
+        static const char hex[] = "0123456789abcdef";
+        esp_fill_random(random, sizeof(random));
+        for (size_t i = 0; i < sizeof(random); ++i) {
+            request->key[i * 2] = hex[random[i] >> 4];
+            request->key[i * 2 + 1] = hex[random[i] & 15];
+        }
+    } else if (kind == AGENTS) {
         reader.directory_pending = false;
         request->revision = reader.directory_revision;
         request->offset = reader.directory_offset;
@@ -512,9 +614,26 @@ static void request_next(void)
     reader.inflight = request;
     xSemaphoreGive(reader.lock);
     char *params = request_params(request);
-    const char *method = kind == AGENTS ? "agents.list" : kind == SESSIONS ? "sessions.list" : "sessions.preview";
-    esp_err_t err = params != NULL ? esp_openclaw_node_gateway_request_on_connection(
-        reader.client, request->connection, method, params, reader_response, request) : ESP_ERR_NO_MEM;
+    const char *method = kind == CREATE ? "sessions.create" : kind == AGENTS ? "agents.list" :
+        kind == SESSIONS ? "sessions.list" : "sessions.preview";
+    esp_err_t err = ESP_ERR_NO_MEM;
+    if (kind == CREATE) {
+        /* Serialization allocates outside the owner lock. Revalidate at the
+         * enqueue boundary; the SDK queues without waiting and callbacks only
+         * publish the mailbox, so no callback needs this lock. */
+        xSemaphoreTake(reader.lock, portMAX_DELAY);
+        bool current = request->revision == reader.creation.revision && creation_target() &&
+            reader.messaging.state == DIAL_MESSAGING_READY && !reply_active();
+        if (!current) err = ESP_ERR_INVALID_STATE;
+        else if (params != NULL) err = esp_openclaw_node_gateway_request_on_connection(
+            reader.client, request->connection, method, params, reader_response, request);
+        request->queued = err == ESP_OK;
+        reader.creation_submitted = request->queued;
+        xSemaphoreGive(reader.lock);
+    } else {
+        err = params != NULL ? esp_openclaw_node_gateway_request_on_connection(
+            reader.client, request->connection, method, params, reader_response, request) : ESP_ERR_NO_MEM;
+    }
     free(params);
     if (err != ESP_OK) {
         /* Immediate rejection owns no callback; use the same completion path. */
@@ -768,8 +887,9 @@ static void reader_task(void *context)
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
         refresh_node();
         consume_approval();
-        consume_event();
         consume_response();
+        consume_event();
+        poll_creation();
         poll_reply();
         reset_idle_client();
         xSemaphoreTake(reader.lock, portMAX_DELAY);
@@ -783,12 +903,17 @@ static void reader_task(void *context)
             reader.retry = true;
         }
         if (reader.inflight != NULL && !reader.inflight->timed_out &&
-            esp_timer_get_time() - reader.inflight->started >= 15000000) {
+            esp_timer_get_time() - reader.inflight->started >=
+                (reader.inflight->kind == CREATE ? 30000000 : 15000000)) {
             reader.inflight->timed_out = true;
-            ++reader.directory_revision;
-            clear_conversations();
-            reader.directory_state = DIAL_AGENTS_ERROR;
-            reader.directory_enabled = reader.directory_pending = false;
+            if (reader.inflight->kind == CREATE) {
+                creation_state(DIAL_CREATION_UNKNOWN, "Outcome unknown. Check Chats before creating another.");
+            } else {
+                ++reader.directory_revision;
+                clear_conversations();
+                reader.directory_state = DIAL_AGENTS_ERROR;
+                reader.directory_enabled = reader.directory_pending = false;
+            }
         }
         if (reader.inflight != NULL && reader.inflight->timed_out &&
             reader.messaging.state != DIAL_MESSAGING_REQUESTING &&
@@ -960,6 +1085,7 @@ esp_err_t dial_reader_reply_begin(dial_reply_preset_t preset, unsigned preview_r
     xSemaphoreTake(reader.lock, portMAX_DELAY);
     const dial_conversations_snapshot_t *view = reader.conversations;
     if (!current_reader() || reader.messaging.state != DIAL_MESSAGING_READY || reply_active() ||
+        reader.creation.state == DIAL_CREATION_CREATING ||
         view == NULL || view->state != DIAL_AGENTS_READY || view->selected >= view->page.count ||
         preview_revision != reader.preview_revision || view->preview_state != DIAL_AGENTS_READY ||
         (view->preview.status != ESP_OPENCLAW_PREVIEW_OK && view->preview.status != ESP_OPENCLAW_PREVIEW_EMPTY)) {
@@ -1225,4 +1351,98 @@ void dial_reader_home_copy(dial_home_context_t *context)
         }
     }
     xSemaphoreGive(reader.lock);
+}
+
+esp_err_t dial_reader_creation_begin(unsigned conversation_revision)
+{
+    if (reader.lock == NULL) return ESP_ERR_INVALID_STATE;
+    xSemaphoreTake(reader.lock, portMAX_DELAY);
+    const dial_conversations_snapshot_t *view = reader.conversations;
+    if (!current_reader() || view == NULL || conversation_revision != view->revision ||
+        (view->state != DIAL_AGENTS_READY && view->state != DIAL_AGENTS_EMPTY) ||
+        reply_active() || reader.creation.state == DIAL_CREATION_CREATING ||
+        (reader.inflight != NULL && reader.inflight->kind == CREATE)) {
+        xSemaphoreGive(reader.lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    reader.creation = (dial_creation_snapshot_t){.state = DIAL_CREATION_REVIEW,
+        .revision = reader.creation.revision + 1, .conversation_revision = view->revision,
+        .agent = view->agent};
+    strcpy(reader.creation.detail, "Creates an empty chat. No message is sent.");
+    reader.creation_generation = reader.generation;
+    reader.creation_connection = reader.creation_review_connection = reader.reader_id;
+    reader.creation_pending = reader.creation_submitted = false;
+    memset(&reader.created, 0, sizeof(reader.created));
+    xSemaphoreGive(reader.lock);
+    return ESP_OK;
+}
+
+esp_err_t dial_reader_creation_submit(unsigned revision)
+{
+    if (reader.lock == NULL) return ESP_ERR_INVALID_STATE;
+    xSemaphoreTake(reader.lock, portMAX_DELAY);
+    if (revision != reader.creation.revision || reader.creation.state != DIAL_CREATION_REVIEW ||
+        !creation_target() || reader.messaging.state != DIAL_MESSAGING_READY || reply_active()) {
+        xSemaphoreGive(reader.lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    creation_state(DIAL_CREATION_CREATING, "Creating an empty conversation.");
+    reader.creation_pending = true;
+    xSemaphoreGive(reader.lock);
+    wake_reader();
+    return ESP_OK;
+}
+
+void dial_reader_creation_copy(dial_creation_snapshot_t *snapshot)
+{
+    memset(snapshot, 0, sizeof(*snapshot));
+    if (reader.lock == NULL) return;
+    xSemaphoreTake(reader.lock, portMAX_DELAY);
+    *snapshot = reader.creation;
+    snapshot->can_create = snapshot->state == DIAL_CREATION_REVIEW && creation_target() &&
+        reader.messaging.state == DIAL_MESSAGING_READY && !reply_active();
+    snapshot->can_open = snapshot->state == DIAL_CREATION_CREATED && creation_owner();
+    if (snapshot->state == DIAL_CREATION_REVIEW && !creation_target())
+        strcpy(snapshot->detail, "Refresh Chats and choose New chat again.");
+    else if (snapshot->state == DIAL_CREATION_REVIEW && reader.messaging.state != DIAL_MESSAGING_READY)
+        strcpy(snapshot->detail, "Enable messaging, then review and create. No message is sent.");
+    xSemaphoreGive(reader.lock);
+}
+
+void dial_reader_creation_close(unsigned revision)
+{
+    if (reader.lock == NULL) return;
+    xSemaphoreTake(reader.lock, portMAX_DELAY);
+    if (revision == reader.creation.revision &&
+        (reader.creation.state == DIAL_CREATION_REVIEW || reader.creation.state == DIAL_CREATION_FAILED))
+        reader.creation = (dial_creation_snapshot_t){.revision = revision + 1};
+    xSemaphoreGive(reader.lock);
+}
+
+esp_err_t dial_reader_creation_open(unsigned revision)
+{
+    if (reader.lock == NULL) return ESP_ERR_INVALID_STATE;
+    xSemaphoreTake(reader.lock, portMAX_DELAY);
+    if (revision != reader.creation.revision || reader.creation.state != DIAL_CREATION_CREATED ||
+        !creation_owner()) {
+        xSemaphoreGive(reader.lock);
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (reader.conversations == NULL) reader.conversations = calloc(1, sizeof(*reader.conversations));
+    if (reader.conversations == NULL) { xSemaphoreGive(reader.lock); return ESP_ERR_NO_MEM; }
+    dial_conversations_snapshot_t *view = reader.conversations;
+    memset(view, 0, sizeof(*view));
+    view->state = DIAL_AGENTS_READY;
+    view->preview_state = DIAL_AGENTS_LOADING;
+    view->revision = ++reader.conversations_revision;
+    view->preview_revision = ++reader.preview_revision;
+    view->agent = reader.creation.agent;
+    view->page.count = 1;
+    strcpy(view->page.sessions[0].key, reader.created.key);
+    strcpy(view->page.sessions[0].title, "New conversation");
+    reader.sessions_pending = false;
+    reader.preview_pending = true;
+    xSemaphoreGive(reader.lock);
+    wake_reader();
+    return ESP_OK;
 }

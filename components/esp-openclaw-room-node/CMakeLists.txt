@@ -36,6 +36,7 @@ idf_component_register(
         console
         esp-openclaw-node
         esp-openclaw-directory
+        esp-openclaw-ui
         esp-openclaw-node-provisioning
         esp-openclaw-talk
         esp_app_format

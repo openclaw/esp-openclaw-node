@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.16)
 set(EXTRA_COMPONENT_DIRS
     "../../components/esp-openclaw-node"
     "../../components/esp-openclaw-directory"
+    "../../components/esp-openclaw-ui"
     "../../components/esp-openclaw-node-provisioning"
     "../../components/esp-openclaw-talk"
     "../../components/esp-openclaw-room-node")

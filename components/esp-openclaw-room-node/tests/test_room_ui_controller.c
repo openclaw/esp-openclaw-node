@@ -11,6 +11,7 @@
 #include "room_face.h"
 #include "room_lobster.h"
 #include "room_ui_controller.h"
+#include "esp_openclaw_node_wifi.h"
 
 static lv_display_t *display;
 static uint8_t *frame, *draw_buffer;
@@ -22,6 +23,14 @@ static esp_openclaw_node_command_handler_t face_gesture;
 static unsigned toggles, holds;
 static unsigned talk_starts, talk_stops, display_flushes;
 static uint64_t talk_recipient;
+static esp_openclaw_node_wifi_status_t wifi_status = {.connected = true};
+static unsigned wifi_reads;
+void esp_openclaw_node_wifi_get_status(esp_openclaw_node_wifi_status_t *status)
+{
+    assert(critical_depth == 0);
+    ++wifi_reads;
+    *status = wifi_status;
+}
 static unsigned agent_requests, agent_selections, selected_revision;
 static char selected_agent[65];
 static void select_agent(const char *id, unsigned revision)
@@ -517,7 +526,7 @@ static void check_watch_home(const char *path)
     facts.talk = ROOM_UI_TALK_NO_SESSION;
     room_ui_store_facts(&facts);
     room_ui_set(ROOM_UI_SETUP, "USB console: gateway setup-code");
-    assert(find_text(lv_layer_top(), "Pairing needed"));
+    assert(find_text(lv_layer_top(), "Let's get connected"));
     assert(room_face_is_visible());
     room_ui_set(ROOM_UI_SETUP, "USB console:\nwifi set + setup-code");
     lv_obj_t *setup = find_text(lv_layer_top(), "USB console: wifi set + setup-code");
@@ -544,6 +553,80 @@ static void expire_watch_hint(void)
     lv_timer_handler();
     fire_timer("text_hint");
     assert(brightness == 0);
+}
+
+static unsigned watch_status_pixels(int left, int right)
+{
+    lv_refr_now(display);
+    unsigned count = 0;
+    for (int y = 22; y < 44; ++y)
+        for (int x = left; x < right; ++x) {
+            const uint8_t *pixel = frame + (y * width + x) * 4;
+            count += pixel[2] == 0xbf && pixel[1] == 0xe5 && pixel[0] == 0xd9;
+        }
+    return count;
+}
+
+static void status_tick(void)
+{
+    now_us += 1100000;
+    lv_tick_inc(1100);
+    lv_timer_handler();
+}
+
+static void check_watch_status(const char *path)
+{
+    room_ui_facts_t facts = {.wifi = ROOM_UI_WIFI_CONNECTED,
+        .gateway = ROOM_UI_GATEWAY_CONNECTED, .talk = ROOM_UI_TALK_READY};
+    wifi_status = (esp_openclaw_node_wifi_status_t){
+        .connected = true, .ap_info_valid = true, .rssi = -85,
+    };
+    room_ui_store_facts(&facts);
+    room_ui_set(ROOM_UI_IDLE, NULL);
+    assert(room_ui_watch_menu("home") == ESP_OK);
+    unsigned weak = watch_status_pixels(248, 275);
+    unsigned reads = wifi_reads;
+    for (int i = 0; i < 10; ++i) room_ui_refresh();
+    assert(wifi_reads == reads);
+    wifi_status.rssi = -50;
+    status_tick();
+    unsigned strong = watch_status_pixels(248, 275);
+    assert(wifi_reads > reads && strong > weak);
+    if (path) {
+        char output[1024];
+        snprintf(output, sizeof(output), "%s-status-online.ppm", path);
+        write_frame(output);
+    }
+    wifi_status.ap_info_valid = false;
+    status_tick();
+    assert(watch_status_pixels(248, 275) < weak);
+    assert(watch_status_pixels(284, 307) > 0);
+    facts.gateway = ROOM_UI_GATEWAY_OFFLINE;
+    room_ui_store_facts(&facts);
+    room_ui_refresh();
+    assert(watch_status_pixels(284, 307) == 0);
+
+    assert(room_ui_apply_display_brightness(0) == ESP_OK && brightness == 0);
+    reads = wifi_reads;
+    status_tick();
+    assert(wifi_reads == reads);
+    fail_brightness = true;
+    assert(room_ui_apply_display_brightness(60) == ESP_ERR_TIMEOUT);
+    status_tick();
+    assert(wifi_reads == reads);
+    fail_brightness = false;
+    wifi_status.ap_info_valid = true;
+    assert(room_ui_apply_display_brightness(60) == ESP_OK);
+    assert(wifi_reads > reads && watch_status_pixels(248, 275) == strong);
+    assert(room_ui_watch_menu("settings") == ESP_OK);
+    reads = wifi_reads;
+    status_tick();
+    assert(wifi_reads == reads);
+    assert(room_ui_watch_menu("home") == ESP_OK);
+    assert(wifi_reads > reads);
+    wifi_status = (esp_openclaw_node_wifi_status_t){.connected = true};
+    expire_watch_hint();
+    puts("watch status: live signal, unavailable observations, independent link, sleep and hidden-page polling passed");
 }
 
 static void check_watch_navigation(void)
@@ -1561,6 +1644,7 @@ int main(int argc, char **argv)
     }
     if (watch) {
         check_watch_home(argc == 3 ? argv[2] : NULL);
+        check_watch_status(argc == 3 ? argv[2] : NULL);
         check_watch_navigation();
         check_watch_agents(argc == 3 ? argv[2] : NULL);
         check_watch_conversations(argc == 3 ? argv[2] : NULL);

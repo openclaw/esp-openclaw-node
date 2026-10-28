@@ -9,6 +9,7 @@ import tempfile
 
 
 SDK_HEADERS = {
+    "esp_wifi.h": "typedef struct { int unused; } wifi_ap_record_t;",
     "esp_err.h": """
 typedef int esp_err_t;
 #define ESP_OK 0
@@ -50,6 +51,7 @@ int64_t esp_timer_get_time(void);
 """,
     "freertos/FreeRTOS.h": """
 #include <stddef.h>
+typedef unsigned TickType_t;
 typedef unsigned portMUX_TYPE;
 #define portMUX_INITIALIZER_UNLOCKED 0
 void ui_enter_critical(portMUX_TYPE *);
@@ -125,8 +127,11 @@ def main():
             "-I", str(lvgl), str(tests / "test_room_ui_controller.c"),
             "-I", str(cjson), str(cjson / "cJSON.c"),
             "-I", str(component.parent / "esp-openclaw-directory/include"),
+            "-I", str(component.parent / "esp-openclaw-node-provisioning/include"),
+            "-I", str(component.parent / "esp-openclaw-ui/include"),
             str(component / "room_ui_controller.c"), str(component / "room_board.c"),
             str(component / "room_watch_home.c"),
+            str(component.parent / "esp-openclaw-ui/openclaw_status_bar.c"),
             str(component / "room_watch_navigation.c"), str(component / "room_watch_settings.c"),
             str(component / "room_watch_agents.c"),
             str(component / "room_watch_devices.c"),

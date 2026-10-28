@@ -1091,7 +1091,9 @@ esp_err_t room_ui_apply_display_brightness(int percent)
     int preference = watch_brightness;
     bool camera = camera_indicator_active;
     taskEXIT_CRITICAL(&state_mux);
-    esp_err_t err = room_board_display_brightness_set(watch_display_level(percent, preference, camera));
+    int level = watch_display_level(percent, preference, camera);
+    esp_err_t err = room_board_display_brightness_set(level);
+    if (err == ESP_OK) room_watch_home_set_awake(level > 0);
     room_board_display_unlock();
     return err;
 }
@@ -1114,7 +1116,9 @@ esp_err_t room_ui_watch_brightness(int percent)
     pressed_watch_page = -1;
     taskEXIT_CRITICAL(&state_mux);
     int requested = room_ui_target_brightness(state, room_canvas_is_active());
-    esp_err_t err = room_board_display_brightness_set(watch_display_level(requested, percent, camera));
+    int level = watch_display_level(requested, percent, camera);
+    esp_err_t err = room_board_display_brightness_set(level);
+    if (err == ESP_OK) room_watch_home_set_awake(level > 0);
     taskENTER_CRITICAL(&state_mux);
     if (err == ESP_OK) watch_brightness = percent;
     watch_brightness_failed = err != ESP_OK;

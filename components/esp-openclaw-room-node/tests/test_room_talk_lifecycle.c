@@ -1873,7 +1873,136 @@ static void devices_errors(void)
     CHECK(devices_snapshot().state == ESP_OPENCLAW_DEVICES_ERROR, "local submission failure completes visibly");
 }
 
+static void voice_begin(unsigned generation)
+{
+    request_local_voice(ROOM_VOICE_BEGIN, generation, talk_target_revision, operator_incarnation);
+    host_run_task("talk_teardown");
+}
+
+static void voice_complete(void)
+{
+    host.recording_active = false;
+    host.recording = (room_recording_snapshot_t){.state = ROOM_RECORDING_READY, .audio_bytes = 32000};
+    host.expire_queue_wait = true;
+    host_run_task("talk_teardown");
+}
+
+static void voice_draft_lifecycle(void)
+{
+    voice_begin(1);
+    CHECK(host.recording_starts == 1 && host.voice.state == ROOM_VOICE_STARTING,
+        "UI intent opens one asynchronous recording");
+    host.recording.state = ROOM_RECORDING_ACTIVE;
+    host.recording.audio_bytes = 16000;
+    host.expire_queue_wait = true;
+    host_run_task("talk_teardown");
+    CHECK(host.voice.state == ROOM_VOICE_RECORDING && host.voice.duration_ms == 2000,
+        "supervisor publishes actual captured duration");
+    request_local_voice(ROOM_VOICE_FINISH, 1, 0, 0);
+    host_run_task("talk_teardown");
+    CHECK(host.recording_stops == 1 && host.voice.state == ROOM_VOICE_FINISHING,
+        "release finishes the capture without blocking the UI");
+    voice_complete();
+    CHECK(host.voice.state == ROOM_VOICE_DRAFT && host.voice.duration_ms == 4000,
+        "terminal audio becomes a local draft");
+    request_local_voice(ROOM_VOICE_FINISH, 1, 0, 0);
+    host_run_task("talk_teardown");
+    CHECK(host.voice.state == ROOM_VOICE_DRAFT && host.recording_stops == 1,
+        "late release after a duration cap preserves the draft");
+    CHECK(host.opens == 0 && host.create_requests == 0 && host.speech_requests == 0,
+        "a local draft sends no Talk or speech request");
+    request_local_voice(ROOM_VOICE_CANCEL, 1, 0, 0);
+    host_run_task("talk_teardown");
+    CHECK(host.voice.state == ROOM_VOICE_READY, "discard frees the draft and restores readiness");
+}
+
+static void voice_canceled_intent(void)
+{
+    request_local_voice(ROOM_VOICE_BEGIN, 1, talk_target_revision, operator_incarnation);
+    request_local_voice(ROOM_VOICE_CANCEL, 1, 0, 0);
+    request_local_voice(ROOM_VOICE_FINISH, 1, 0, 0);
+    host_run_task("talk_teardown");
+    CHECK(host.recording_starts == 0, "cancel dominates a coalesced begin and release");
+    request_local_voice(ROOM_VOICE_BEGIN, 2, talk_target_revision, operator_incarnation);
+    request_local_voice(ROOM_VOICE_FINISH, 2, 0, 0);
+    host_run_task("talk_teardown");
+    CHECK(host.recording_starts == 0 && host.voice.state == ROOM_VOICE_ERROR,
+        "a release before worker admission never starts a stray recording");
+    voice_begin(3);
+    request_local_voice(ROOM_VOICE_CANCEL, 2, 0, 0);
+    host_run_task("talk_teardown");
+    CHECK(host.recording_cancels == 0 && host.voice.state == ROOM_VOICE_STARTING,
+        "an old gesture cannot cancel its replacement");
+    request_local_voice(ROOM_VOICE_CANCEL, 3, 0, 0);
+    host_run_task("talk_teardown");
+    CHECK(host.recording_cancels == 1, "current cancel reaches recording cleanup");
+    host.recording_active = false;
+    host.expire_queue_wait = true;
+    host_run_task("talk_teardown");
+    CHECK(host.voice.state == ROOM_VOICE_READY, "cancellation waits for backend cleanup");
+}
+
+static void voice_context_loss(void)
+{
+    voice_begin(1);
+    ++operator_incarnation;
+    wake_talk_teardown(); host_run_task("talk_teardown");
+    CHECK(host.recording_cancels == 1, "default-agent capture is fenced across operator replacement");
+    host.recording_active = false;
+    host.expire_queue_wait = true; host_run_task("talk_teardown");
+    CHECK(host.voice.state == ROOM_VOICE_ERROR, "capture owner loss is visible");
+    voice_begin(2);
+    voice_complete();
+    ++talk_target_revision;
+    wake_talk_teardown(); host_run_task("talk_teardown");
+    CHECK(host.voice.state == ROOM_VOICE_ERROR, "recipient change discards a completed draft");
+    voice_begin(3);
+    host.recording_active = false;
+    host.recording = (room_recording_snapshot_t){.state = ROOM_RECORDING_FAILED, .error = ROOM_RECORDING_ERROR_SOURCE};
+    host.expire_queue_wait = true; host_run_task("talk_teardown");
+    CHECK(host.voice.state == ROOM_VOICE_ERROR && strstr(host.voice.detail, "Microphone") != NULL,
+        "microphone failure produces actionable feedback");
+}
+
+static void voice_media_exclusion(void)
+{
+    host.media_busy = true;
+    voice_begin(1);
+    CHECK(host.voice.state == ROOM_VOICE_ERROR && host.recording_starts == 0,
+        "busy audio rejects capture visibly");
+    host.media_busy = false;
+    voice_begin(2);
+    admit(); host_run_task("talk_start");
+    CHECK(host.opens == 0 && host.voice.state == ROOM_VOICE_STARTING,
+        "Live Talk cannot steal the recording's media gate");
+    request_local_voice(ROOM_VOICE_CANCEL, 2, 0, 0); host_run_task("talk_teardown");
+    host.recording_active = false;
+    host.expire_queue_wait = true; host_run_task("talk_teardown");
+}
+
+static void voice_completion_race(void)
+{
+    voice_begin(1);
+    host.recording.state = ROOM_RECORDING_ACTIVE;
+    host.recording.audio_bytes = 16000;
+    host.finish_after_recording_snapshot = true;
+    host.expire_queue_wait = true; host_run_task("talk_teardown");
+    host.expire_queue_wait = true; host_run_task("talk_teardown");
+    CHECK(host.voice.state == ROOM_VOICE_DRAFT && host.voice.duration_ms == 2000,
+        "completion between status reads must retain the backend draft");
+    request_local_voice(ROOM_VOICE_CANCEL, 1, 0, 0); host_run_task("talk_teardown");
+    voice_begin(2);
+    CHECK(host.recording_starts == 2 && host.voice.state == ROOM_VOICE_STARTING,
+        "racing completion cannot wedge the next recording");
+    request_local_voice(ROOM_VOICE_CANCEL, 2, 0, 0); host_run_task("talk_teardown");
+    host.recording_active = false;
+    host.expire_queue_wait = true; host_run_task("talk_teardown");
+}
+
 static const struct { const char *name; void (*run)(void); } cases[] = {
+    {"voice-draft-lifecycle", voice_draft_lifecycle}, {"voice-canceled-intent", voice_canceled_intent},
+    {"voice-context-loss", voice_context_loss}, {"voice-media-exclusion", voice_media_exclusion},
+    {"voice-completion-race", voice_completion_race},
     {"devices-ready", devices_ready}, {"devices-ui", devices_ui}, {"devices-reconnect", devices_reconnect},
     {"devices-timeout", devices_timeout}, {"devices-reopen-timeout", devices_reopen_timeout}, {"devices-cancel", devices_cancel}, {"devices-errors", devices_errors},
     {"conversations-resume-retry", conversations_resume_retry},

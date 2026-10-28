@@ -7,6 +7,7 @@
 
 static lv_obj_t *root, *title_label, *detail_label;
 static lv_obj_t *continue_card, *reader_label;
+static lv_obj_t *voice_button, *voice_label, *discard_button;
 static openclaw_status_bar_t status_bar;
 static bool wifi_connected, gateway_connected;
 static bool display_awake;
@@ -54,7 +55,29 @@ static lv_obj_t *label(lv_obj_t *parent, const char *text, int x, int y, int wid
     return obj;
 }
 
-void room_watch_home_create(lv_obj_t *parent, lv_event_cb_t menu_handler, lv_event_cb_t continue_handler)
+static lv_obj_t *action(lv_obj_t *parent, const char *text, lv_event_cb_t handler, lv_obj_t **text_label)
+{
+    lv_obj_t *button = lv_obj_create(parent);
+    lv_obj_remove_style_all(button);
+    lv_obj_set_pos(button, 26, 376);
+    lv_obj_set_size(button, 316, 52);
+    lv_obj_set_style_radius(button, 20, 0);
+    lv_obj_set_style_bg_color(button, lv_color_hex(0xf4efee), 0);
+    lv_obj_set_style_bg_color(button, lv_color_hex(0xcbbdcf), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(button, LV_OPA_COVER, 0);
+    lv_obj_set_style_opa(button, LV_OPA_50, LV_STATE_DISABLED);
+    lv_obj_add_flag(button, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(button, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_PRESS_LOCK);
+    lv_obj_add_event_cb(button, handler, LV_EVENT_ALL, NULL);
+    lv_obj_t *text_obj = label(button, text, 0, 0, 200, 0x251b2b);
+    lv_obj_set_style_text_align(text_obj, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_center(text_obj);
+    if (text_label != NULL) *text_label = text_obj;
+    return button;
+}
+
+void room_watch_home_create(lv_obj_t *parent, lv_event_cb_t menu_handler, lv_event_cb_t continue_handler,
+                            lv_event_cb_t voice_handler, lv_event_cb_t discard_handler)
 {
     root = lv_obj_create(parent);
     lv_obj_remove_style_all(root);
@@ -109,10 +132,20 @@ void room_watch_home_create(lv_obj_t *parent, lv_event_cb_t menu_handler, lv_eve
     label(continue_card, "Continue conversations", 50, 35, 228, 0xb8b0bd);
     label(continue_card, LV_SYMBOL_RIGHT, 288, 23, 14, 0xc9b9db);
     lv_obj_set_hidden(continue_card, true);
+    voice_button = action(root, "Hold to record", voice_handler, &voice_label);
+    discard_button = action(root, "Discard", discard_handler, NULL);
+    lv_obj_set_size(discard_button, 104, 52);
+    lv_obj_set_style_bg_color(discard_button, lv_color_hex(0x382b40), 0);
+    lv_obj_set_style_text_color(lv_obj_get_child(discard_button, 0), lv_color_hex(0xf4efee), 0);
+    lv_obj_set_width(lv_obj_get_child(discard_button, 0), 100);
+    lv_obj_center(lv_obj_get_child(discard_button, 0));
+    lv_obj_set_hidden(voice_button, true);
+    lv_obj_set_hidden(discard_button, true);
 }
 
 bool room_watch_home_render(const room_ui_facts_t *facts, const room_ui_talk_target_t *target, room_ui_state_t state,
-                           const char *detail, const char *reader_agent, bool hidden)
+                           const char *detail, const char *reader_agent, const room_voice_snapshot_t *voice,
+                           bool voice_enabled, bool holding, bool hidden)
 {
     if (root == NULL) return false;
     bool was_hidden = !lv_obj_is_visible(root);
@@ -125,7 +158,22 @@ bool room_watch_home_render(const room_ui_facts_t *facts, const room_ui_talk_tar
     gateway_connected = connected;
     if (was_hidden || connection_changed) refresh_status(NULL);
 
-    bool reading = reader_agent != NULL && reader_agent[0] != '\0' && wifi && connected &&
+    bool voice_busy = voice != NULL && voice->state >= ROOM_VOICE_STARTING;
+    bool draft = voice != NULL && voice->state == ROOM_VOICE_DRAFT;
+    bool retry = voice != NULL && voice->state == ROOM_VOICE_ERROR;
+    bool split = draft && !holding;
+    lv_obj_set_hidden(voice_button, voice == NULL);
+    lv_obj_set_hidden(discard_button, !split);
+    lv_obj_set_pos(voice_button, split ? 138 : 26, 376);
+    lv_obj_set_width(voice_button, split ? 204 : 316);
+    lv_obj_center(voice_label);
+    lv_label_set_text_static(voice_label, split || retry ? "Hold to record again" :
+        voice != NULL && voice->state == ROOM_VOICE_FINISHING ? "Finishing..." :
+        voice_busy ? "Release to keep" : "Hold to record");
+    /* Keep a pressed recording target enabled through the duration cap so its
+     * release cannot activate the replacement draft controls. */
+    lv_obj_set_state(voice_button, LV_STATE_DISABLED, !voice_enabled);
+    bool reading = !voice_busy && reader_agent != NULL && reader_agent[0] != '\0' && wifi && connected &&
         state != ROOM_UI_ERROR && state != ROOM_UI_SETUP &&
         facts->talk != ROOM_UI_TALK_CONNECTING && facts->talk != ROOM_UI_TALK_ACTIVE &&
         facts->talk != ROOM_UI_TALK_STOPPING;
@@ -180,6 +228,27 @@ bool room_watch_home_render(const room_ui_facts_t *facts, const room_ui_talk_tar
             snprintf(next_agent, sizeof(next_agent), "Next Talk: %s", target->name);
             title = next_agent;
             subtitle = "Ready for your next conversation";
+        }
+    }
+    if (voice != NULL) {
+        if (voice->state == ROOM_VOICE_STARTING) {
+            title = "Opening microphone";
+            subtitle = "Release to keep / slide up to discard";
+        } else if (voice->state == ROOM_VOICE_RECORDING || draft) {
+            snprintf(next_agent, sizeof(next_agent), "%s: %u.%u s", draft ? "Audio draft" : "Recording",
+                (unsigned)(voice->duration_ms / 1000), (unsigned)(voice->duration_ms / 100 % 10));
+            title = next_agent;
+            subtitle = draft ? "Not sent. Discarded when you leave." : "Release to keep / slide up to discard";
+        } else if (voice->state == ROOM_VOICE_FINISHING) {
+            title = "Finishing recording";
+            subtitle = "Keeping your audio on this device";
+        } else if (retry) {
+            title = "Couldn't record";
+            subtitle = voice->detail;
+        } else if (voice_enabled) {
+            snprintf(next_agent, sizeof(next_agent), "For %s", target->selected ? target->name : "default agent");
+            title = "Ready when you are";
+            subtitle = next_agent;
         }
     }
     if (strcmp(lv_label_get_text(title_label), title) != 0) lv_label_set_text(title_label, title);

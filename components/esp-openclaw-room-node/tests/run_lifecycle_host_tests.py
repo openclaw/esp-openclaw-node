@@ -61,7 +61,7 @@ def main():
             command += ["-I", str(include)]
         command += ["-include", str(tests / "host/room_host_fakes.h")]
         if args.analyze:
-            for source in [tests / "test_room_talk_lifecycle.c", tests / "host/room_host_fakes.c",
+            for source in [tests / "test_room_talk_lifecycle.c", tests / "host/room_host_fakes.c", tests.parent / "room_voice_draft.c",
                            tests / "test_room_host_queue.c"]:
                 result = subprocess.run(command + ["--analyze", "-Xanalyzer", "-analyzer-output=text",
                     str(source)], cwd=directory)
@@ -86,6 +86,7 @@ def main():
             str(tests / "test_room_talk_lifecycle.c"), str(tests / "host/room_host_fakes.c"),
             str(repo / "components/esp-openclaw-talk/src/esp_openclaw_talk.c"),
             str(tests.parent / "room_agent_directory.c"),
+            str(tests.parent / "room_voice_draft.c"),
             str(repo / "components/esp-openclaw-directory/esp_openclaw_devices.c"),
             str(repo / "components/esp-openclaw-directory/esp_openclaw_directory.c"),
             *link, "-o", str(binary),

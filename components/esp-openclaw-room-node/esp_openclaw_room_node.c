@@ -585,6 +585,30 @@ static void request_local_talk(bool start, uint64_t recipient_revision)
     wake_talk_teardown();
 }
 
+static void request_local_voice(room_voice_action_t action, uint32_t generation, uint64_t revision, uint64_t owner)
+{
+    room_voice_draft_request(action, generation, revision, owner);
+    wake_talk_teardown();
+}
+
+static void refresh_voice(void)
+{
+    xSemaphoreTake(state_lock, portMAX_DELAY);
+    room_voice_context_t context = {
+        .valid = node_ready && operator_ready && !talk_target.expired,
+        .recipient_revision = talk_target_revision,
+        .owner_incarnation = operator_incarnation,
+    };
+    context.available = context.valid && media_ready && talk_call == NULL;
+    strlcpy(context.recipient, talk_target.selected ? talk_target.name : "Default agent", sizeof(context.recipient));
+    xSemaphoreGive(state_lock);
+    room_voice_snapshot_t snapshot;
+    if (room_voice_draft_poll(&context, &snapshot)) {
+        room_ui_store_voice(&snapshot);
+        room_ui_refresh();
+    }
+}
+
 /* Caller holds state_lock. Cancellation is durable, including during admission
  * and media-gate waits; no later CONNECTED event can undo it. */
 static bool request_talk_stop_locked(uint32_t generation, const char *message)
@@ -610,8 +634,9 @@ static void talk_teardown_task(void *arg)
     (void)arg;
     for (;;) {
         talk_teardown_request_t wake;
-        TickType_t wait = conversation_resume.pending ? pdMS_TO_TICKS(100) : portMAX_DELAY;
-        if (xQueueReceive(talk_teardown_queue, &wake, wait) != pdTRUE && !conversation_resume.pending) continue;
+        bool poll = conversation_resume.pending || room_voice_draft_needs_poll();
+        TickType_t wait = poll ? pdMS_TO_TICKS(100) : portMAX_DELAY;
+        if (xQueueReceive(talk_teardown_queue, &wake, wait) != pdTRUE && !poll) continue;
         /* Publish the target and repaint once below, after selection and Talk work. */
         apply_local_agent_selection();
         portENTER_CRITICAL(&talk_timeout_lock);
@@ -660,6 +685,7 @@ static void talk_teardown_task(void *arg)
         }
         if (local_start) xTaskNotifyGive(talk_start_worker);
         refresh_home_facts();
+        refresh_voice();
         /* One worker serializes call/operator UI. A delayed callback never
          * paints over a replacement call's newer connecting/speaking state. */
         if (speaking) room_ui_set(ROOM_UI_SPEAKING, NULL);
@@ -737,6 +763,7 @@ static void talk_teardown_task(void *arg)
         xSemaphoreGive(state_lock);
         esp_openclaw_talk_call_release(call);
         refresh_home_facts();
+        refresh_voice();
         start_node_if_pending();
         start_operator_if_pending();
     }
@@ -2218,6 +2245,7 @@ esp_err_t esp_openclaw_room_node_start(const esp_openclaw_room_node_config_t *co
     ESP_ERROR_CHECK(teardown_task == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
 
     room_ui_set_talk_action_handler(request_local_talk);
+    room_ui_set_voice_action_handler(request_local_voice);
     room_ui_set_agents_action_handler(request_local_agents);
     room_ui_set_devices_action_handler(request_local_devices);
     room_ui_set_conversation_handler(request_local_conversation);

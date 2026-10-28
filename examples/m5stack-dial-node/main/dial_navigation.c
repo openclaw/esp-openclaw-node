@@ -1,5 +1,6 @@
 #include "dial_navigation.h"
 #include "esp_openclaw_avatar.h"
+#include "openclaw_connection_details.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -452,27 +453,23 @@ static void render(dial_navigation_t *nav)
     }
     if (nav->view == DIAL_NAV_CONNECTION) {
         lv_label_set_text_static(nav->heading, "Connection");
-        lv_obj_set_hidden(nav->preview_body, true);
+        lv_obj_set_hidden(nav->preview_body, false);
+        lv_obj_set_pos(nav->preview_body, 44, 70);
+        lv_obj_set_height(nav->preview_body, 116);
         lv_obj_set_hidden(nav->description, true);
         lv_obj_set_hidden(nav->identity, true);
         lv_obj_set_hidden(nav->hint, false);
-        lv_label_set_text_static(nav->hint, "Press: back");
-        for (unsigned i = 0; i < 3; ++i) {
-            lv_obj_set_hidden(nav->rows[i], i == 2);
-            if (i == 2) continue;
-            bool online = i == 0 ? nav->wifi_connected : nav->gateway_connected;
-            lv_obj_set_pos(nav->rows[i], 38, 80 + (int)i * 48);
-            lv_obj_set_size(nav->rows[i], 164, 36);
-            lv_obj_set_pos(nav->icons[i], 12, 9);
-            lv_obj_set_pos(nav->names[i], 40, 9);
-            lv_obj_set_width(nav->names[i], 112);
-            lv_label_set_text_static(nav->icons[i], i == 0 ? LV_SYMBOL_WIFI : LV_SYMBOL_LOOP);
-            lv_label_set_text_fmt(nav->names[i], "%s %s", i == 0 ? "Wi-Fi" : "Gateway",
-                !nav->connection_known ? "..." : online ? "online" : "offline");
-            lv_obj_set_style_bg_color(nav->rows[i], lv_color_hex(0x302535), 0);
-            lv_obj_set_style_text_color(nav->names[i], lv_color_hex(0xf4efee), 0);
-            lv_obj_set_style_text_color(nav->icons[i], lv_color_hex(online ? 0x58d5c4 : 0xb8b0bd), 0);
-        }
+        lv_label_set_text_static(nav->hint, "Turn to read");
+        for (unsigned i = 0; i < 3; ++i) lv_obj_set_hidden(nav->rows[i], true);
+        char wifi[384], details[640];
+        openclaw_wifi_details_format(wifi, sizeof(wifi), &nav->wifi);
+        snprintf(details, sizeof(details), "%s\n\nGateway %s\n\n%s", wifi,
+            nav->gateway_connected ? "connected" : "offline",
+            nav->gateway_connected ? "This Dial has an active OpenClaw connection." :
+            "After Wi-Fi connects, check that the Gateway is reachable. Use USB setup if the destination or access has changed.");
+        const char *value = nav->connection_known ? details : "Reading connection...";
+        if (strcmp(lv_label_get_text(nav->preview_text), value) != 0)
+            lv_label_set_text(nav->preview_text, value);
         return;
     }
     lv_obj_set_y(nav->identity, 142);
@@ -668,13 +665,16 @@ bool dial_navigation_show_reader(dial_navigation_t *nav, const dial_agents_snaps
 
 void dial_navigation_move(dial_navigation_t *nav, int direction)
 {
-    if (nav->view == DIAL_NAV_CONNECTION) return;
     if (nav->view == DIAL_NAV_DISPLAY) {
         int percent = nav->brightness + (direction > 0 ? 5 : -5);
         if (percent < 10) percent = nav->brightness < 10 && direction < 0 ? nav->brightness : 10;
         if (percent > 100) percent = 100;
         if (percent != nav->brightness || nav->brightness_failed)
             nav->handler(DIAL_NAV_BRIGHTNESS, (size_t)percent, nav->context);
+        return;
+    }
+    if (nav->view == DIAL_NAV_CONNECTION) {
+        lv_obj_scroll_by_bounded(nav->preview_body, 0, direction > 0 ? -24 : 24, LV_ANIM_OFF);
         return;
     }
     if (nav->view == DIAL_NAV_PREVIEW || nav->view == DIAL_NAV_ACTIVITY || nav->view == DIAL_NAV_DEVICE_DETAIL) {
@@ -769,6 +769,7 @@ void dial_navigation_open_settings(dial_navigation_t *nav, dial_navigation_view_
     nav->focus = 0;
     lv_obj_set_hidden(nav->root, false);
     changed(nav);
+    if (page == DIAL_NAV_CONNECTION) lv_obj_scroll_to_y(nav->preview_body, 0, LV_ANIM_OFF);
 }
 
 void dial_navigation_set_brightness(dial_navigation_t *nav, int percent, bool failed)
@@ -779,11 +780,10 @@ void dial_navigation_set_brightness(dial_navigation_t *nav, int percent, bool fa
     if (nav->view == DIAL_NAV_DISPLAY) changed(nav);
 }
 
-void dial_navigation_set_connection(dial_navigation_t *nav, bool wifi, bool gateway)
+void dial_navigation_set_connection(dial_navigation_t *nav, const esp_openclaw_node_wifi_status_t *wifi, bool gateway)
 {
-    if (nav->connection_known && nav->wifi_connected == wifi && nav->gateway_connected == gateway) return;
     nav->connection_known = true;
-    nav->wifi_connected = wifi;
+    nav->wifi = *wifi;
     nav->gateway_connected = gateway;
     if (nav->view == DIAL_NAV_CONNECTION) render(nav);
 }

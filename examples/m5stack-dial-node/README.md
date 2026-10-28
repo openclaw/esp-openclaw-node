@@ -121,13 +121,18 @@ keeps focus during Gateway reconnects. Brightness lasts until restart; the
 existing `display.brightness` command updates the same value and retains its
 0–100% range. Hold still to return Home from any settings page.
 
-Settings → Connection shows Wi-Fi and Gateway reachability separately. It
-updates in place when the network changes, so a working Wi-Fi link is not
-mistaken for a connected Gateway. Turning or tapping the status rows does not
-change setup or submit a control; press the encoder or back arrow to return
-to Settings. The USB command `local display.menu "{\"page\":\"connection\"}"`
-opens the same page. Display-state responses include `wifiConnected` alongside
-the existing Gateway `connected` flag.
+Settings → Connection is a read-only, scrollable network summary. Turn the
+encoder or swipe to read the saved network, signal and channel (when available),
+current IP address, and independent Gateway state. Offline details include the
+last disconnect reason code and USB recovery guidance. An unavailable AP
+observation is shown as unavailable; disconnected pages hide old IP/signal data.
+The page refreshes once per second without resetting the reading position.
+Press the encoder or back arrow to return to Settings (or This Dial when opened
+there). Opening the page starts at the top. The USB command
+`local display.menu "{\"page\":\"connection\"}"` opens the same page.
+Display-state responses include `wifiConnected` alongside the existing Gateway
+`connected` flag. Phone pairing remains planned work; this page does not offer a
+nonfunctional pairing or retry button.
 
 Agents shows a bounded page of the Gateway roster. Turn to browse names, then
 open an identity to see its canonical ID. The back arrow returns to the list;

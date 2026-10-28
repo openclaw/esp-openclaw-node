@@ -4,6 +4,7 @@
 #include "dial_directory.h"
 #include "esp_openclaw_device_types.h"
 #include "lvgl.h"
+#include "esp_openclaw_node_wifi.h"
 
 typedef enum { DIAL_NAV_MENU, DIAL_NAV_AGENTS, DIAL_NAV_DETAIL, DIAL_NAV_SESSIONS, DIAL_NAV_PREVIEW, DIAL_NAV_SETTINGS, DIAL_NAV_DISPLAY, DIAL_NAV_CONNECTION, DIAL_NAV_ACTIVITY, DIAL_NAV_DEVICES, DIAL_NAV_DEVICE_DETAIL, DIAL_NAV_LOCAL_DEVICE } dial_navigation_view_t;
 typedef enum { DIAL_NAV_HOME, DIAL_NAV_CONTROL, DIAL_NAV_REFRESH, DIAL_NAV_CHANGED, DIAL_NAV_CONVERSATIONS, DIAL_NAV_SESSIONS_REFRESH, DIAL_NAV_READ, DIAL_NAV_RESUME, DIAL_NAV_BRIGHTNESS, DIAL_NAV_DEVICES_REFRESH } dial_navigation_event_t;
@@ -27,7 +28,8 @@ typedef struct {
     bool moved;
     int brightness;
     bool brightness_failed;
-    bool connection_known, wifi_connected, gateway_connected;
+    bool connection_known, gateway_connected;
+    esp_openclaw_node_wifi_status_t wifi;
     dial_activity_t activity;
     /* Owned by the application and refreshed only on the LVGL task. */
     const dial_agents_snapshot_t *snapshot;
@@ -54,6 +56,6 @@ void dial_navigation_activate(dial_navigation_t *nav);
 /* Opens SETTINGS, DISPLAY or CONNECTION without changing the configured control. */
 void dial_navigation_open_settings(dial_navigation_t *nav, dial_navigation_view_t page);
 void dial_navigation_set_brightness(dial_navigation_t *nav, int percent, bool failed);
-void dial_navigation_set_connection(dial_navigation_t *nav, bool wifi, bool gateway);
+void dial_navigation_set_connection(dial_navigation_t *nav, const esp_openclaw_node_wifi_status_t *wifi, bool gateway);
 void dial_navigation_open_activity(dial_navigation_t *nav);
 void dial_navigation_activity_update(dial_navigation_t *nav, const dial_activity_t *activity);

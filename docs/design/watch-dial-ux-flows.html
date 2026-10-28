@@ -60,153 +60,228 @@
     @keyframes presence-blink{0%,43%,47%,100%{transform:scaleY(1)}45%{transform:scaleY(.1)}}
     @keyframes presence-orbit{to{transform:rotate(332deg)}}
     @media(prefers-reduced-motion:reduce){.home-mascot *,.presence-orb:before,.home-variant .w-footer button,.dial-home .d-footer button{animation:none!important;transition:none!important}.home-variant .w-footer button:active,.dial-home .d-footer button:active{transform:none}}
-    /* Tab5 / 1280 × 720 landscape. Same palette, icons and ownership rules; tablet density, standing rail, master and detail. */
+    /* Tab5 / 1280 × 720 landscape on a 5-inch capacitive panel. Same palette, icons, scenes and ownership rules as watch and Dial.
+       Nominal geometry: a 127 mm diagonal at 16:9 gives 110.69 × 62.26 mm, so 1280 / 110.69 = 11.564 native px per mm (~293.7 ppi).
+       That makes this a large-touch surface, not a desktop. One header (where am I), one reading zone, one action zone, one task.
+       Primary touch surfaces ≥ 104 px (9 mm); ordinary controls ≥ 96 px (8.3 mm); gutters 24 px; gaps 18 px; reading text 32–36 px.
+       Nothing below assumes hover, pen precision, a multitouch gesture, pressure or a physical key. */
     .layout>section{min-width:0}.tab5-panel{margin-top:34px}#tab5-stage{overflow-x:auto;padding-bottom:6px}#tab5-stage.native .tab5-wrap{width:1280px;max-width:none}
+    #tab5-stage.physical .tab5-wrap{width:calc(1280px * var(--phys,.32683));max-width:none}
     .tab5-wrap{width:100%;max-width:1280px;aspect-ratio:1280/720;position:relative;margin:0 auto}
     .tab5-wrap .t5{position:absolute;top:0;left:0;transform:scale(var(--t5,1));transform-origin:top left}
-    .t5{width:1280px;height:720px;border-radius:22px;display:flex;overflow:hidden;background:#0a1211;color:var(--ink);box-shadow:0 14px 40px #1c2d2014}
-    .t5 button{color:inherit}
-    .t5-rail{width:266px;flex:none;display:flex;flex-direction:column;gap:14px;padding:20px 16px;background:linear-gradient(180deg,#0e1a17,#0a1412);border-right:1px solid #1d2c25}
-    .t5-brand{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:2px 6px 4px}
-    .t5-brand .mascot-mark{width:34px;height:34px;margin:0;animation:none;filter:drop-shadow(0 3px 4px #17060755)}
-    .t5-brand b{font-size:17px;font-weight:600;letter-spacing:-.2px}
-    .t5-brand i{margin-left:auto;font:10px var(--mono);font-style:normal;letter-spacing:.1em;color:#7b9185;border:1px solid #27382f;border-radius:6px;padding:3px 7px}
-    .t5-presence{display:flex;align-items:center;gap:11px;width:100%;text-align:left;border:1px solid #243a30;border-radius:15px;background:linear-gradient(145deg,#ffffff0d,#ffffff03);padding:11px}
-    .t5-presence .avatar{width:42px;height:42px}
-    .t5-presence .row-text{flex:1;min-width:0}
-    .t5-presence strong,.t5-presence small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .t5-presence strong{display:block;font-size:16px;font-weight:550;line-height:1.2}
-    .t5-presence small{display:block;font-size:12px;line-height:1.3;color:var(--dim);margin-top:3px}
-    .t5-presence .end{width:14px;height:14px;color:#9fb4a7}
-    .t5-nav{display:flex;flex-direction:column;gap:2px}
-    .t5-nav button{display:flex;align-items:center;gap:11px;width:100%;text-align:left;border:0;background:transparent;border-radius:11px;padding:10px 11px;font-size:15px;color:#ccdbd2}
-    .t5-nav button[aria-current=page]{background:#193026;color:#eaf4ed;font-weight:600}
-    .t5-nav .icon{width:19px;height:19px;color:#9dbfab}
-    .t5-foot{margin-top:auto;display:flex;flex-direction:column;gap:8px;border-top:1px solid #1d2c25;padding-top:12px}
-    .t5-strip{display:flex;align-items:center;gap:7px;font:11px var(--mono);color:#8ca396}
-    .t5-strip .icon{width:14px;height:14px}.t5-strip time{margin-left:auto}.t5-strip.warn{color:#e3b18f}
-    .t5-foot-note{font-size:11px;line-height:1.45;color:#6f8379;margin:0}
-    .t5-main{flex:1;min-width:0;display:flex;flex-direction:column}
-    .t5-top{flex:none;height:70px;display:flex;align-items:center;gap:14px;padding:0 22px;border-bottom:1px solid #18261f}
-    .t5-back{width:36px;height:36px;flex:none;display:grid;place-items:center;border:1px solid #27382f;border-radius:10px;background:transparent}
-    .t5-crumb{font:11px var(--mono);letter-spacing:.08em;color:#7b9185}
-    .t5-title{font-size:22px;font-weight:600;letter-spacing:-.35px;line-height:1.15;margin:3px 0 0}
-    .t5-chips{margin-left:auto;display:flex;gap:8px;align-items:center}
-    .t5-chip{display:inline-flex;align-items:center;gap:7px;border:1px solid #2b3d34;border-radius:18px;padding:6px 12px;font-size:12.5px;color:#b6cdbf;background:#101d18}
-    .t5-chip .icon{width:14px;height:14px}
-    .t5-chip.warn{border-color:#6b4a36;color:#f0c09e;background:#1d1613}
-    .t5-stage{flex:1;min-height:0;display:grid;gap:16px;padding:16px 22px 20px}
-    .t5-stage.browse{grid-template-columns:minmax(0,1fr) 340px}
-    .t5-stage.work{grid-template-columns:286px minmax(0,1fr)}
-    .t5-stage.focus,.t5-stage.home{grid-template-columns:minmax(0,1fr) 324px}
-    .t5-panel{min-width:0;min-height:0;display:flex;flex-direction:column;border:1px solid #1d2c25;border-radius:18px;background:#0d1815;padding:16px}
-    .t5-head{display:flex;align-items:center;gap:9px;font:11px var(--mono);letter-spacing:.08em;color:#89a194;margin-bottom:11px;flex:none}
-    .t5-head .avatar{width:26px;height:26px}.t5-head .icon{width:15px;height:15px}.t5-head .end{margin-left:auto}
+    .t5{width:1280px;height:720px;border-radius:22px;display:flex;flex-direction:column;overflow:hidden;background:#0a1211;color:var(--ink);box-shadow:0 14px 40px #1c2d2014}
+    .t5 button{color:inherit;font-family:inherit}
+    .tab5-panel:has(#tab5-stage.native){min-width:1280px}
+    /* Header. Back, one title, the selected agent and an ambient system reading. 112 px ≈ 9.7 mm. */
+    .t5-top{flex:none;height:112px;display:flex;align-items:center;gap:20px;padding:0 24px;border-bottom:1px solid #1b2a23}
+    .t5-back{width:120px;height:96px;flex:none;display:grid;place-items:center;border:1px solid #2c4037;border-radius:18px;background:#101d18}
+    .t5-back .icon{width:38px;height:38px}
+    .t5-heads{flex:1;min-width:0}
+    .t5-crumb{font:22px/1.2 var(--mono);letter-spacing:.07em;color:#8aa396;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .t5-title{font-size:36px;line-height:1.12;letter-spacing:-.8px;font-weight:600;margin:5px 0 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .t5-presence{display:flex;align-items:center;gap:13px;flex:none;height:96px;min-width:104px;max-width:300px;padding:0 16px 0 12px;border:1px solid #28402f;border-radius:22px;background:linear-gradient(145deg,#ffffff10,#ffffff04);text-align:left}
+    .t5-presence .avatar{width:56px;height:56px}
+    .t5-presence .row-text{min-width:0}
+    .t5-presence strong{display:block;font-size:28px;font-weight:550;line-height:1.15;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+    .t5-presence small{display:block;font-size:20px;line-height:1.2;color:var(--dim);margin-top:3px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+    .t5-presence .end{width:22px;height:22px;color:#9fb4a7;flex:none}
+    .t5-sys{display:flex;align-items:center;gap:9px;flex:none;font:22px var(--mono);color:#9bb3a5}
+    .t5-sys .icon{width:28px;height:28px}
+    .t5-sys.warn{color:#efbf9d}
+    /* Reading zone. */
+    .t5-body{flex:1;min-height:0;display:flex;flex-direction:column;gap:18px;padding:22px 24px}
     .t5-scroll{flex:1;min-height:0;overflow:auto;scrollbar-width:thin;scrollbar-color:#51665a transparent}
-    .t5-row{display:flex;align-items:center;gap:12px;width:100%;text-align:left;border:0;border-bottom:1px solid #1e2d26;background:transparent;padding:10px;min-height:58px}
-    .roomy .t5-row{min-height:66px}
+    .t5-row{display:flex;align-items:center;gap:20px;width:100%;text-align:left;border:0;border-bottom:1px solid #1e2d26;background:transparent;padding:12px 16px;min-height:112px}
+    .roomy .t5-row{min-height:122px}
     .t5-row .row-text{flex:1;min-width:0}
-    .t5-row strong{display:block;font-size:16px;font-weight:500;line-height:1.25}
-    .t5-row small{display:block;font-size:12.5px;line-height:1.3;color:var(--dim);margin-top:4px}
-    .t5-row .end{width:16px;height:16px;color:#9fc0ad}
-    .t5-row .avatar{width:32px;height:32px}.t5-row .icon{width:20px;height:20px;color:#9dbfab}
-    .t5-row.current{background:#18302a;border-radius:12px;border-bottom-color:transparent}
-    .t5-count{font:11px var(--mono);color:#7b9185;margin-left:auto}
-    .t5-thread{display:flex;flex-direction:column;gap:12px;padding:2px}
-    .t5-bubble{max-width:78%;border:1px solid #1f3328;background:#132019;border-radius:16px;padding:13px 16px}
-    .t5-bubble.me{align-self:flex-end;background:#1b3328;border-color:#2a4a39}
-    .t5-bubble p{margin:0;line-height:1.45}
-    .t5-bubble .who{display:flex;align-items:center;gap:8px;font-size:12px;color:#a9c3b3;margin-bottom:8px}
-    .t5-bubble .who .avatar{width:22px;height:22px}
-    .t5-bubble .who em{margin-left:auto;font:11px var(--mono);font-style:normal;color:#8aa396}
-    .t5-thinking{display:flex;align-items:center;gap:9px;font-size:13px;color:#a9c3b3}
-    .t5-thinking .avatar{width:24px;height:24px}
-    .t5-alert{font-size:14px;line-height:1.45;color:#f0c09e;margin:0}
-    .t5-composer{flex:none;margin-top:14px;border-top:1px solid #1e2d26;padding-top:13px;display:flex;flex-direction:column;gap:10px}
-    .t5-draft{border:1px solid #2b4436;border-radius:13px;background:#101d17;padding:12px 14px;line-height:1.4;min-height:50px}
-    .t5-draft.empty{color:#7e9389}
-    .t5-tools{display:flex;gap:9px;flex-wrap:wrap;align-items:center}
-    .t5-tools.center{justify-content:center}.t5-tools .spacer{flex:1}
-    .t5-btn{display:inline-flex;align-items:center;gap:8px;border:1px solid #2d4337;border-radius:12px;background:#15241d;padding:10px 15px;font-size:14px;color:#dceae1}
-    .t5-btn .icon{width:16px;height:16px}
-    .t5-btn.primary{background:var(--mint);border-color:var(--mint);color:#143126;font-weight:600}
+    .t5-row strong{display:block;font-size:30px;font-weight:500;line-height:1.2}
+    .t5-row small{display:block;font-size:24px;line-height:1.25;color:var(--dim);margin-top:5px}
+    .t5-row .end{width:28px;height:28px;color:#9fc0ad;flex:none}
+    .t5-row .avatar{width:56px;height:56px}
+    .t5-row .icon{width:36px;height:36px;color:#9dbfab;flex:none}
+    .t5-row.current{background:#18302a;border-radius:18px;border-bottom-color:transparent}
+    .t5-listnote{flex:none;font:21px var(--mono);letter-spacing:.06em;color:#7f968a;margin:0}
+    /* Action zone: one obvious primary, generous secondaries, nothing smaller than 96 px. */
+    .t5-bar{flex:none;display:flex;align-items:center;gap:18px;padding:16px 24px;border-top:1px solid #1b2a23;background:#0c1714}
+    .t5-bar .spacer{flex:1}
+    .t5-btn{display:inline-flex;align-items:center;justify-content:center;gap:13px;min-width:104px;min-height:112px;padding:0 26px;border:1px solid #2d4337;border-radius:20px;background:#15241d;font-size:30px;color:#dceae1}
+    .t5-btn .icon{width:32px;height:32px;flex:none}
+    .t5-btn.primary{flex:1;min-height:120px;font-size:32px;font-weight:600;background:var(--mint);border-color:var(--mint);color:#123125}
     .t5-btn.danger{background:#361f1a;border-color:#5d352a;color:#f6c6ae}
     .t5-btn.ghost{background:transparent;border-color:#2a3b33;color:#b9cdc1}
-    .t5-note{font-size:12.5px;line-height:1.45;color:#8ea79a;margin:0}
-    .t5-capbar{flex:none;margin-top:12px;border-top:1px solid #1e2d26;padding-top:11px;display:flex;flex-direction:column;gap:7px}
-    .t5-cap{display:flex;align-items:center;gap:8px;font-size:12.5px;color:#a8bfb2}
-    .t5-cap .icon{width:15px;height:15px;color:#8fb3a0}
-    .t5-cap b{margin-left:auto;font:11px var(--mono);font-weight:400;color:#86a093}
-    .t5-focuspanel{align-items:center;justify-content:center}
-    .t5-hero{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:15px;padding:16px;max-width:640px}
-    .t5-hero .avatar{width:66px;height:66px}
-    .t5-hero-icon{width:46px;height:46px;color:#bdd7c7}
-    .t5-hero h3{font-size:36px;line-height:1.08;letter-spacing:-1px;margin:0;text-wrap:balance}
-    .t5-hero p{font-size:18px;line-height:1.45;color:#c5d7cb;margin:0}
-    .t5-stagecard{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;text-align:center}
-    .t5-capture{height:auto;flex:none}
-    .t5-capture .avatar{width:58px;height:58px}
-    .t5-capture .wave{height:60px;margin:14px 0 6px}.t5-capture .wave i{width:8px}
-    .t5-capture h3{font-size:34px;margin:4px 0}
-    .t5-capture .capture-time{font-size:26px}.t5-capture .capture-hint{font-size:16px}
-    .t5-qr{flex-direction:row;gap:40px;text-align:left;align-items:center}
-    .t5-qr h3{font-size:26px;margin:0 0 12px;letter-spacing:-.5px}
-    .t5-qr .qr-tile{width:234px;height:234px;padding:8px}
-    .t5-steps{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:10px;font-size:15px;color:#cadbd0}
-    .t5-steps li{display:flex;align-items:center;gap:10px}
-    .t5-steps li i{width:9px;height:9px;border-radius:50%;border:1px solid #4d6758;flex:none}
+    .t5-btn.grow{flex:1}
+    .t5-navbar button{flex:1;min-width:0;height:120px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;border:1px solid #233930;border-radius:20px;background:#101c17;font-size:28px;color:#cadbd1}
+    .t5-navbar .icon{width:38px;height:38px;color:#9dbfab}
+    .t5-navbar button[aria-current=page]{background:#1b3328;border-color:#31543f;color:#eef7f1;font-weight:600}
+    .t5-navbar button[aria-current=page] .icon{color:#bfe3cd}
+    /* Transcript: the reading surface comes first, the voice action second. */
+    .t5-thread{display:flex;flex-direction:column;gap:18px;padding:2px 2px 6px}
+    .t5-bubble{max-width:880px;border:1px solid #1f3328;background:#132019;border-radius:22px;padding:18px 24px}
+    .t5-bubble.me{align-self:flex-end;background:#1b3328;border-color:#2a4a39}
+    .t5-bubble p{margin:0;line-height:1.45}
+    .t5-bubble .who{display:flex;align-items:center;gap:12px;font-size:22px;color:#a9c3b3;margin-bottom:9px}
+    .t5-bubble .who .avatar{width:40px;height:40px}
+    .t5-bubble .who em{margin-left:auto;font:20px var(--mono);font-style:normal;color:#8aa396}
+    .t5-thinking{display:flex;align-items:center;gap:13px;font-size:26px;color:#a9c3b3}
+    .t5-thinking .avatar{width:44px;height:44px}
+    .t5-alert{font-size:26px;line-height:1.4;color:#f0c09e;margin:0}
+    .t5-note{font-size:24px;line-height:1.4;color:#8ea79a;margin:0;flex:none}
+    .t5-meta{font:22px var(--mono);letter-spacing:.05em;color:#8ea79a;margin:0}
+    .t5-draftcard{flex:none;display:flex;align-items:center;gap:18px;border:1px dashed #3a5a46;border-radius:20px;background:#101d17;padding:16px 20px}
+    .t5-draftcard .row-text{flex:1;min-width:0}
+    .t5-draftcard p{margin:0;line-height:1.35}
+    .t5-fact-label{display:block;font:20px var(--mono);letter-spacing:.08em;color:#8fab9c;margin-bottom:7px}
+    .t5-discard{flex:none;min-width:104px;min-height:96px;padding:0 24px;border:1px solid #2a3b33;border-radius:16px;background:transparent;color:#b9cdc1;font-size:28px}
+    /* Focused cards: hero decisions, capture, pairing. */
+    .t5-hero{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:18px;padding:4px 36px;overflow:auto}
+    .t5-hero .avatar{width:88px;height:88px}
+    .t5-hero-icon{width:62px;height:62px;color:#bdd7c7}
+    .t5-hero h3{font-size:46px;line-height:1.08;letter-spacing:-1.3px;margin:0;max-width:940px;text-wrap:balance}
+    .t5-hero p{font-size:30px;line-height:1.4;color:#c6d8cc;margin:0;max-width:860px}
+    .t5-capture{flex:1;min-height:0;height:auto;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
+    .t5-capture .avatar{width:80px;height:80px}
+    .t5-capture .capture-agent{font-size:24px;color:var(--dim);margin:12px 0 0}
+    .t5-capture .wave{height:84px;margin:14px 0 6px}.t5-capture .wave i{width:10px}
+    .t5-capture h3{font-size:42px;letter-spacing:-1px;margin:4px 0}
+    .t5-capture .capture-time{font:30px var(--mono);color:#c3d9cc;margin:8px 0}
+    .t5-capture .capture-hint{font-size:24px;color:var(--dim);margin:0}
+    .t5-qr{flex:1;min-height:0;display:flex;flex-direction:row;align-items:center;justify-content:center;gap:48px;text-align:left}
+    .t5-qr-copy{max-width:640px}
+    .t5-qr h3{font-size:36px;margin:0 0 14px;letter-spacing:-.8px}
+    .t5-qr .qr-tile{width:262px;height:262px;padding:10px;margin:0}
+    .t5 .qr-caption{font-size:20px;margin:12px 0 0}
+    .t5 .compare{font-size:62px;letter-spacing:8px;margin:10px 0}
+    .t5 .match-pattern{gap:14px;margin:12px}
+    .t5 .match-pattern i{width:30px;height:30px}
+    .t5-steps{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:13px;font-size:24px;color:#cadbd0}
+    .t5-steps li{display:flex;align-items:center;gap:13px}
+    .t5-steps li i{width:13px;height:13px;border-radius:50%;border:1px solid #4d6758;flex:none}
     .t5-steps li.at i{background:var(--mint);border-color:var(--mint)}
     .t5-steps li.at{color:#eaf4ed;font-weight:600}
     .t5-steps li.done{color:#8fa89a}
-    .t5-steps li .icon{width:15px;height:15px;color:#8fc4a6}
-    .t5-h3{font-size:30px;letter-spacing:-.7px;margin:0}
-    .t5-p{font-size:17px;line-height:1.45;color:#c5d7cb;margin:0;max-width:580px}
-    .t5-value{font:76px/1.1 var(--mono);letter-spacing:-3px}
-    .t5-value .unit{font-size:32px;letter-spacing:0}
-    .t5-stagecard .setting-range{width:440px;margin:4px 0}
-    .t5-draftline{font-size:22px;min-height:40px;flex:none}
-    .t5-pad{height:250px;flex:none}
-    .t5-keys{display:flex;flex-direction:column;gap:8px;margin:14px 0}.t5-key-row{display:flex;justify-content:center;gap:8px}.t5-key-row button{flex:1;min-width:0}.t5-key-row:nth-child(2){padding-inline:4%}.t5-key-row:nth-child(3){padding-inline:10%}.t5-key-row:last-child button:first-child{flex:4}
-    .t5-keys button{min-height:54px;border:0;border-radius:10px;background:#1b2f26;font-size:19px;color:var(--ink)}
-    .t5-stack{display:flex;flex-direction:column;gap:2px}
-    .t5-line{display:flex;align-items:baseline;gap:10px;padding:9px 2px;border-bottom:1px solid #1b2a23;font-size:13.5px;color:#a9c0b3}
-    .t5-line b{margin-left:auto;font:12.5px var(--mono);font-weight:400;color:#e2eee6;text-align:right}
-    .t5-fact{display:flex;flex-direction:column;gap:5px;width:100%;text-align:left;border:0;border-bottom:1px solid #1b2a23;background:transparent;padding:10px 2px}
-    .t5-fact-label{font:10.5px var(--mono);letter-spacing:.08em;color:#7f968a}
-    .t5-fact-value{display:flex;align-items:center;gap:9px;font-size:14.5px;color:#e4efe8}
-    .t5-fact .avatar{width:24px;height:24px}.t5-fact .icon{width:17px;height:17px;color:#9dbfab}
-    .t5-agentcard{display:flex;flex-direction:column;align-items:center;text-align:center;gap:4px;padding:6px 0 14px;border-bottom:1px solid #1b2a23;margin-bottom:10px}
-    .t5-agentcard .avatar{width:62px;height:62px;margin-bottom:5px}
-    .t5-agentcard strong{font-size:19px;font-weight:600}
-    .t5-agentcard small{font-size:12.5px;color:var(--dim)}
-    .t5-aside .t5-tools{margin-top:auto;padding-top:12px}
-    .t5-linkbtn{border:0;background:transparent;font:11px var(--mono);letter-spacing:.06em;color:#9ec3ad;padding:0;margin-left:auto}
-    .t5-home{--aura:224,102,77;background:radial-gradient(ellipse at 50% 44%,rgba(var(--aura),.2),transparent 62%),radial-gradient(ellipse at 97% 0%,#313044 0%,transparent 62%),#101116;color:#faf6f2;border-color:#262630;align-items:center;justify-content:center}
-    .t5-home .home-mascot{gap:16px;height:auto}
-    .t5-home .presence-orb{width:212px;height:212px}
-    .t5-home .home-mascot .mascot-mark{width:176px;height:176px}
-    .t5-home .home-state{font-size:46px;max-width:640px;min-height:0;letter-spacing:-1.4px}
-    .t5-home-sub{font:12px var(--mono);letter-spacing:.03em;color:#cdc6c4;margin:0}
+    .t5-steps li .icon{width:20px;height:20px;color:#8fc4a6;flex:none}
+    /* Device and setting editor: a huge value, a thumb you can actually hit, and ± for precision without a pen. */
+    .t5-editor{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
+    .t5-value{font:104px/1 var(--mono);letter-spacing:-4px}
+    .t5-value .unit{font-size:40px;letter-spacing:0;margin-left:4px}
+    .t5-sliderrow{display:flex;align-items:center;gap:20px;width:100%;max-width:1040px}
+    .t5-nudge{width:112px;height:112px;flex:none;border:1px solid #2d4337;border-radius:20px;background:#15241d;font-size:40px;line-height:1;color:#dceae1}
+    .t5 input.setting-range{-webkit-appearance:none;appearance:none;flex:1;width:auto;height:96px;margin:0;background:transparent}
+    .t5 input.setting-range::-webkit-slider-runnable-track{height:18px;border-radius:9px;background:#2a4336}
+    .t5 input.setting-range::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:72px;height:72px;margin-top:-27px;border:0;border-radius:50%;background:var(--mint)}
+    .t5 input.setting-range::-moz-range-track{height:18px;border-radius:9px;background:#2a4336}
+    .t5 input.setting-range::-moz-range-thumb{width:72px;height:72px;border:0;border-radius:50%;background:var(--mint)}
+    /* Typing is its own full-screen task: a readable preview plus four rows of ~114 × 104 px keys. */
+    .t5-entry{flex:1;min-height:0;display:flex;flex-direction:column;gap:14px;justify-content:flex-end}
+    .t5-preview{flex:none;min-height:96px;display:flex;align-items:center;border:1px solid #2b4436;border-radius:18px;background:#101d17;padding:0 22px;overflow:hidden;white-space:nowrap}
+    .t5-preview>span{overflow:hidden;text-overflow:ellipsis}
+    .t5-preview.empty{color:#7e9389}
+    .t5-caret{display:inline-block;width:3px;height:36px;background:var(--mint);margin-left:5px;flex:none}
+    .t5-keys{display:flex;flex-direction:column;gap:10px;flex:none}
+    .t5-krow{display:flex;gap:10px}
+    .t5-krow.inset-1{padding-inline:62px}
+    .t5-krow.inset-2{padding-inline:186px}
+    .t5-krow button{flex:1;min-width:0;height:104px;border:0;border-radius:16px;background:#1b2f26;font-size:34px;color:var(--ink)}
+    .t5-krow button.wide{flex:4}
+    .t5-krow button.act{flex:2;background:#223a2e;font-size:30px}
+    .t5-krow button.done{flex:2.4;background:var(--mint);color:#123125;font-weight:600;font-size:30px}
+    .t5-draftline{flex:none;font-size:30px;min-height:62px;border-bottom:1px solid #4a6253;padding-bottom:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .t5-pad{flex:1;min-height:230px;width:100%;height:auto;margin:0;border-radius:18px}
+    /* Home keeps presence and one floating action; the four destinations stay in the bar below it. */
+    .t5-home{--aura:224,102,77;background:radial-gradient(ellipse at 50% 46%,rgba(var(--aura),.2),transparent 62%),radial-gradient(ellipse at 97% 0%,#313044 0%,transparent 62%),#101116;color:#faf6f2}
+    .t5-home .t5-top,.t5-home .t5-bar{border-color:#ffffff14}
+    .t5-home .t5-bar{background:#ffffff08}
+    .t5-home .t5-back,.t5-home .t5-presence{border-color:#ffffff22;background:#ffffff10;color:#f4eeea}
+    .t5-home .t5-presence small{color:#c9c2c6}
+    .t5-home .t5-sys{color:#cbc5cb}
+    .t5-home .t5-navbar button{border-color:#ffffff1a;background:#ffffff0c;color:#efe9e6}
+    .t5-home .t5-navbar .icon{color:#d7cac5}
+    .t5-home .t5-navbar button[aria-current=page]{background:#ffffff1c;border-color:#ffffff38;color:#fff8f3}
+    .t5-homestage{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
+    .t5-home .home-mascot{gap:12px;height:auto}
+    .t5-home .presence-orb{width:186px;height:186px}
+    .t5-home .home-mascot .mascot-mark{width:154px;height:154px}
+    .t5-home .home-state{font-size:50px;max-width:880px;min-height:0;letter-spacing:-1.5px}
+    .t5-home-sub{font:22px var(--mono);letter-spacing:.05em;color:#cfc8c6;margin:0;text-align:center}
+    .t5-homeact{display:flex;gap:18px;justify-content:center;width:100%;max-width:780px}
     .t5-home .t5-btn{border-color:#ffffff22;background:#ffffff10;color:#f4eeea}
     .t5-home .t5-btn.primary{border:1px solid #fff8;background:linear-gradient(170deg,#fffaf5,#ded8d2);color:#282227;box-shadow:inset 0 1px #fff,0 7px 20px #0004}
+    .guides .t5-top,.guides .t5-body,.guides .t5-bar{outline:1px dashed #e8ba6570;outline-offset:-1px}
+    .guides .t5 button{outline:1px dashed #e8ba6545;outline-offset:-1px}
     .catalog-card.tab5-card .tab5-wrap{width:294.4px;height:165.6px;aspect-ratio:auto}
     .catalog-card .t5{transform:scale(.23)}
-    @media(max-width:680px){.t5-stage{gap:12px}}
+    .catalog-card .t5 button{pointer-events:none}
+    /* Sizing and calibration review. Page chrome, not device UX: a full-screen review layer over the explorer. */
+    .review{position:fixed;inset:0;z-index:60;background:#f4f2ec;overflow:auto;padding:24px 28px 72px}
+    .review[hidden]{display:none}
+    .review-inner{max-width:1180px;margin:auto}
+    .review-bar{display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap;border-bottom:1px solid #c8d0c5;padding-bottom:16px;margin-bottom:8px}
+    .review-bar h2{font-size:28px;line-height:1.1;letter-spacing:-.8px;margin:6px 0 0}
+    .review-bar label{font-size:14px;display:flex;gap:8px;align-items:center}
+    .review-bar select{background:#fff;border:1px solid #bdcbbb;border-radius:6px;padding:8px;max-width:230px}
+    .badge{font:11px var(--mono);letter-spacing:.09em;border-radius:20px;padding:7px 13px;border:1px solid #b08a3e;background:#f8eed7;color:#6b4e12;white-space:nowrap}
+    .badge.ok{border-color:#4d7a5c;background:#e2f0e4;color:#265236}
+    .review-close{border:1px solid #9fae9f;border-radius:10px;background:#fff;padding:13px 18px;font-size:15px;margin-left:auto}
+    .review-lead{font-size:15px;color:#55655b;max-width:900px;margin:18px 0 0}
+    .review-step{border-top:1px solid #d3dad0;margin-top:26px;padding-top:22px}
+    .review-step>h3{font-size:19px;margin:0 0 6px;letter-spacing:-.2px}
+    .review-step>p{font-size:14px;line-height:1.55;color:#55655b;max-width:900px;margin:0 0 14px}
+    .review-step>.eyebrow{font:11px var(--mono);letter-spacing:.09em;color:#6b7c71;margin-bottom:6px}
+    .scale-row{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:16px 0 20px}
+    .scale-row input[type=range]{flex:1;min-width:260px;accent-color:#2f6b4c}
+    .scale-row button{border:1px solid #b2c0b2;background:#fff;border-radius:9px;min-width:52px;padding:11px 14px;font-size:16px}
+    .scale-read{font:12px var(--mono);color:#4e5f55;background:#e8ebe3;border-radius:8px;padding:9px 12px}
+    .ruler-area{overflow-x:auto;padding:4px 0 2px}
+    .ruler{position:relative;height:84px;background:#fff;border:1px solid #c3cdc1;border-radius:4px;flex:none}
+    .ruler i{position:absolute;top:0;width:1px;background:#6c7a6e;height:14px}
+    .ruler i.mid{height:24px}
+    .ruler i.maj{height:40px;background:#26332b;width:2px}
+    .ruler b{position:absolute;top:44px;transform:translateX(-50%);font:12px var(--mono);color:#394a3f;font-weight:400}
+    .ruler:after{content:'100 mm reference — hold a ruler against this edge';position:absolute;left:8px;bottom:6px;font:11px var(--mono);color:#7b8a7e}
+    .card-template{position:relative;border:2px dashed #7b8a7e;border-radius:9px;background:#fff;flex:none}
+    .card-template span{position:absolute;left:10px;top:10px;font:11px var(--mono);color:#53645a;line-height:1.5}
+    .sample-row{display:flex;align-items:flex-end;gap:20px;flex-wrap:wrap}
+    .sample{display:flex;flex-direction:column;align-items:center;gap:7px;font:11px var(--mono);color:#4e5f55;text-align:center}
+    .sample i{display:block;border-radius:8px;background:#1d3a2b;border:2px solid #0f1f17}
+    .sample.warn i{background:#f4f2ec;border:2px dashed #b4553f}
+    .device-area{display:flex;gap:26px;align-items:flex-start;flex-wrap:wrap}
+    .device-frame{position:relative;padding:0 0 30px 0}
+    .review-device .tab5-wrap{margin:0}
+    .review-device .t5 button,.review-device .t5 input,.review-device .t5 canvas{pointer-events:none}
+    .measure-x{position:absolute;left:0;bottom:4px;height:18px;border-left:1px solid #5d6d61;border-right:1px solid #5d6d61}
+    .measure-x:before{content:'';position:absolute;left:0;right:0;top:9px;border-top:1px solid #5d6d61}
+    .measure-x span{position:absolute;left:50%;top:-2px;transform:translateX(-50%);background:#f4f2ec;padding:0 8px;font:11px var(--mono);color:#41544a;white-space:nowrap}
+    .measure-y{position:absolute;top:0;right:-26px;width:18px;border-top:1px solid #5d6d61;border-bottom:1px solid #5d6d61}
+    .measure-y:before{content:'';position:absolute;top:0;bottom:0;left:9px;border-left:1px solid #5d6d61}
+    .measure-y span{position:absolute;top:50%;left:2px;transform:translateY(-50%);writing-mode:vertical-rl;background:#f4f2ec;padding:8px 0;font:11px var(--mono);color:#41544a;white-space:nowrap}
+    .review-device.targets .tgt-ok{outline:1.5px solid #3f9b68;outline-offset:-1.5px}
+    .review-device.targets .tgt-warn{outline:1.5px solid #c99a3c;outline-offset:-1.5px}
+    .review-device.targets .tgt-bad{outline:1.5px solid #cc5a42;outline-offset:-1.5px}
+    .target-table{flex:1;min-width:330px;border-collapse:collapse;font-size:13px}
+    .target-table caption{text-align:left;font:11px var(--mono);letter-spacing:.08em;color:#6b7c71;padding-bottom:8px}
+    .target-table th,.target-table td{text-align:left;padding:7px 10px 7px 0;border-bottom:1px solid #d8ded5;vertical-align:top}
+    .target-table th{font:11px var(--mono);letter-spacing:.06em;color:#62736a;font-weight:400}
+    .target-table td.n{font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+    .target-table .v-ok{color:#246039}.target-table .v-warn{color:#8a6414}.target-table .v-bad{color:#9c3a23;font-weight:600}
+    .review-limits{margin:0;padding-left:20px;font-size:14px;line-height:1.6;color:#4f6056;max-width:940px}
+    .review-limits li{margin-bottom:7px}
+    @media(max-width:720px){.review{padding:18px 14px 60px}.review-close{margin-left:0}.device-area{gap:40px}.measure-y{right:-4px}}
   </style>
 </head>
 <body><main>
   <header>
-    <div class="eyebrow">OPENCLAW / REVISION 09 / INTERACTIVE DESIGN PROPOSAL</div>
+    <div class="eyebrow">OPENCLAW / REVISION 10 / INTERACTIVE DESIGN PROPOSAL</div>
     <h1>A little presence.<br>A clear next step.</h1>
-    <p>Scan the device with OpenClaw mobile. Pair over Bluetooth, then let it run independently. A quiet Home leads into the same agents, conversations and controls on watch, Dial and Tab5 — a glance, a knob and a desk tablet reading from one set of scenes.</p>
-    <nav><a href="watch-dial-ux-plan.html">Layout overview</a><a href="watch-dial-interaction-plan.md">Interaction plan</a><a href="#catalog">Screen sheets</a></nav>
+    <p>Scan the device with OpenClaw mobile. Pair over Bluetooth, then let it run independently. A quiet Home leads into the same agents, conversations and controls on watch, Dial and Tab5 — a glance, a knob and a five-inch touch panel reading from one set of scenes.</p>
+    <nav><a href="watch-dial-ux-plan.html">Layout overview</a><a href="watch-dial-interaction-plan.md">Interaction plan</a><a href="#catalog">Screen sheets</a><a href="#review=sizing" id="review-link">Sizing &amp; calibration review</a></nav>
   </header>
   <div class="controls">
     <label>Journey <select id="journey"></select></label>
     <label>Preview <select id="preview-mode"><option value="all">Watch + Dial + Tab5</option><option value="watch-dial">Watch + Dial</option><option value="tab5">Tab5 review only</option></select></label>
-    <label>Tab5 size <select id="tab5-size"><option value="fit">Responsive fit</option><option value="native">Native 1280 × 720</option></select></label>
+    <label>Tab5 size <select id="tab5-size"><option value="fit">Responsive fit</option><option value="native">Native 1280 × 720</option><option value="physical">Physical size (calibrate)</option></select></label>
     <label><input id="roomy" type="checkbox"> Comfortable spacing</label>
     <label><input id="guides" type="checkbox"> Layout boundaries</label>
+    <button id="open-review">Sizing &amp; calibration review</button>
     <button id="reset-preview">Reset preview</button>
   </div>
   <p class="facts">Browser simulation only. Agents, transcripts, networks and outcomes are fixtures. No microphone, network, device or storage access. The 9:41 clock is a fixed design fixture. PTT, handwriting recognition, consumer pairing and settings persistence still need firmware work. Tab5 microphone, speaker and camera behaviour is disclosed as hardware-dependent and simulated here.</p>
@@ -218,14 +293,66 @@
         <div><div class="device-label">WATCH / 368 × 448</div><div id="watch-preview"></div><p class="input-note">Tap a row or action. Back returns to the actual parent. Hold the Talk action for a simulated recording.</p></div>
         <div><div class="device-label">DIAL / 240 × 240</div><div id="dial-preview"></div><div class="device-tools"><button data-turn="-1" aria-label="Turn Dial left">↶ Turn</button><button id="dial-press">Press</button><button data-turn="1" aria-label="Turn Dial right">Turn ↷</button><button data-home>Home</button></div><p class="input-note">From Home, turn opens Menu; press activates the visible action. In lists, turn focuses a row; press selects. Touch selects the named item. Audio is unavailable on this Dial; conversations and touch input remain available.</p></div>
       </div>
-      <div class="tab5-panel" id="tab5-panel"><div class="device-label">TAB5 / 1280 × 720 / LANDSCAPE TOUCH</div><div id="tab5-stage"><div id="tab5-preview"></div></div><p class="input-note">The rail keeps agent, destinations and system status in place; the stage changes. Lists open their detail beside them, conversations keep their thread column, and one quiet panel carries context. Hold the mint Talk action for a simulated recording. Responsive fit scales 1280 × 720 to the page; native size renders 1:1 and scrolls.</p></div>
+      <div class="tab5-panel" id="tab5-panel"><div class="device-label">TAB5 / 1280 × 720 / 5-INCH CAPACITIVE TOUCH / LANDSCAPE</div><div id="tab5-stage"><div id="tab5-preview"></div></div><p class="input-note">One task per screen: a header that says where you are, one reading zone and one action zone. Four destinations — Home, Conversations, Devices, Menu — sit in the bar only on destination screens; everywhere else that bar carries the actions and Back lives in the header. Typing and handwriting are deliberate full-screen modes. Hold the mint Talk action for a simulated recording. Responsive fit scales 1280 × 720 to the page, native renders 1:1 for pixel inspection, and calibrated physical size uses the scale you set in the sizing review.</p><p class="input-note" id="tab5-physnote" hidden>Physical size is <b>uncalibrated</b>. Browser CSS millimetres are not physical millimetres — open the sizing review and align a real ruler or bank card first.</p></div>
       <section id="phone-companion" class="phone-companion hidden" aria-label="Mobile pairing companion"></section>
       <div class="flow-actions"><h3>Related states and recovery</h3><div id="related"></div><p class="facts" id="implementation-note"></p><div class="toast" id="toast" role="status" aria-live="polite"></div></div>
     </section>
   </div>
   <section class="catalog" id="catalog"><div class="catalog-bar"><div><h2>Screen sheets</h2><p id="catalog-count"></p></div><div><button id="all-settings">All settings screens</button> <button data-sheet="watch">Watch sheet</button> <button data-sheet="dial">Dial sheet</button> <button data-sheet="tab5">Tab5 sheet</button></div></div><p>Choose a journey above to review its complete sheet. These are the same screens as the clickable preview, at fixed native proportions. Use the sidebar to inspect a state at full size.</p><div class="catalog-grid" id="catalog-grid"></div></section>
-  <footer>Authored vector identities illustrate avatar, emoji and initials fallbacks. The fox is a sample rendering of Kitsune, not a downloaded private profile image. Watch, Dial and Tab5 read the same scenes, so a state written once is reviewable on every form factor. Hardware-dependent options are disclosed in the preview and plan. No firmware changes or real actions.</footer>
+  <footer>Authored vector identities illustrate avatar, emoji and initials fallbacks. The fox is a sample rendering of Kitsune, not a downloaded private profile image. Watch, Dial and Tab5 read the same scenes, so a state written once is reviewable on every form factor. Tab5 geometry is a nominal calculation from the published 5-inch 16:9 panel, not a measured active area, and nothing here has been tried on hardware. Hardware-dependent options are disclosed in the preview and plan. No firmware changes or real actions.</footer>
 </main>
+<div class="review" id="sizing-review" role="dialog" aria-modal="true" aria-labelledby="review-title" hidden><div class="review-inner">
+  <div class="review-bar">
+    <div><div class="eyebrow">SIZING &amp; CALIBRATION REVIEW / OUTSIDE THE DEVICE UX</div><h2 id="review-title">Is a target really nine millimetres?</h2></div>
+    <span class="badge" id="calib-badge">UNCALIBRATED</span>
+    <label>Scene <select id="review-screen"></select></label>
+    <button class="review-close" id="review-close">Close review (Esc)</button>
+  </div>
+  <p class="review-lead">This layer reviews physical size only; it is not part of the device interface and nothing in it sends an action. Your browser cannot tell this page how large a millimetre is on your monitor: <b>CSS millimetres are not physical millimetres</b>, and device pixel ratio, retina scaling and screenshot resolution prove nothing about real-world size. So calibrate by hand with a physical ruler or an ID-1 bank card, at your current browser zoom, and recalibrate whenever you change zoom, monitor or window scaling.</p>
+  <section class="review-step">
+    <div class="eyebrow">STEP 1 / SET ONE SCALE</div>
+    <h3>Match the reference against something real.</h3>
+    <p>Drag the slider until the 100 mm ruler below measures exactly 100 mm against a physical ruler, or until the dashed outline matches a credit, debit or ID card (the ID-1 standard is 85.60 × 53.98 mm). One ratio drives everything on this page — the ruler, the target samples and the device below all use the same millimetre.</p>
+    <div class="scale-row">
+      <button id="scale-down" aria-label="Smaller">−</button>
+      <input id="scale" type="range" min="1.5" max="9" step="0.001" value="3.7795" aria-label="Millimetre scale">
+      <button id="scale-up" aria-label="Larger">+</button>
+      <span class="scale-read" id="scale-read"></span>
+      <button id="scale-reset">Reset to CSS nominal</button>
+      <button id="scale-confirm">I checked this with a ruler or card</button>
+    </div>
+    <div class="ruler-area"><div class="ruler" id="ruler"></div></div>
+    <div class="ruler-area" style="margin-top:16px"><div class="card-template" id="card"><span>ID-1 card template<br>85.60 × 53.98 mm</span></div></div>
+  </section>
+  <section class="review-step">
+    <div class="eyebrow">STEP 2 / WHAT A TARGET FEELS LIKE</div>
+    <h3>Nine millimetres is the floor, not the ambition.</h3>
+    <p>At the nominal 11.564 native px per millimetre, these squares are what the Tab5 design is built from. Put a fingertip on each one. The 4 mm square is the familiar 44–48 pixel desktop and phone target applied literally at this density — it is far too small here, which is why this revision does not use it.</p>
+    <div class="sample-row" id="samples"></div>
+  </section>
+  <section class="review-step">
+    <div class="eyebrow">STEP 3 / THE SCREEN AT NOMINAL PHYSICAL SIZE</div>
+    <h3>1280 × 720 rendered as 110.69 × 62.26 mm.</h3>
+    <p>The frame below is the currently selected scene drawn at the same millimetre you just set. Native size (the explorer’s <i>Native 1280 × 720</i> option) is for pixel inspection only — it is 1:1 in CSS pixels, not life size. The measurements and the table are computed from the real laid-out element boxes in native pixels, so they describe the design, not a screenshot.</p>
+    <p><label><input type="checkbox" id="show-targets" checked> Outline every touch target and colour it by size</label></p>
+    <div class="device-area">
+      <div class="device-frame"><div class="review-device targets" id="review-device" inert></div><div class="measure-x" id="measure-x"><span></span></div><div class="measure-y" id="measure-y"><span></span></div></div>
+      <table class="target-table" id="target-table"><caption>MEASURED TOUCH TARGETS IN THIS SCENE</caption><tbody></tbody></table>
+    </div>
+  </section>
+  <section class="review-step">
+    <div class="eyebrow">STEP 4 / WHAT THIS DOES AND DOES NOT PROVE</div>
+    <h3>Limitations.</h3>
+    <ul class="review-limits">
+      <li><b>Geometry is a nominal calculation, not a measured active area.</b> A 5-inch (127.00 mm) diagonal at 16:9 gives 110.69 × 62.26 mm and 1280 / 110.69 = 11.564 px/mm (≈ 293.7 ppi). <a href="https://docs.m5stack.com/en/core/Tab5">M5Stack publishes</a> the enclosure as 128 × 80 × 12 mm — that is the case, not the glass. Bezel, panel variant and vendor tolerance can move these numbers.</li>
+      <li><b>Nothing here is verified on a device.</b> No hardware was used. Physical device and firmware proof is tracked separately and is blocked; this page is a browser simulation with synthetic data.</li>
+      <li><b>Landscape is a design choice.</b> This revision targets 1280 × 720 landscape. Auto-rotation is not claimed or verified.</li>
+      <li><b>No input assumptions beyond a finger.</b> The panel is <a href="https://uiflow-micropython.readthedocs.io/en/master/controllers/tab5.html">documented as capacitive touch</a> (2026 variants ST7121/ST7123, earlier units GT911). Hover, pen precision, multitouch gestures, pressure and physical keys are not assumed, and controller variants may differ in sampling and minimum contact area.</li>
+      <li><b>A simulator cannot prove legibility.</b> Type sizes here are chosen against the nominal density; reading text at ~293.7 ppi still needs a hardware review before anything is called usable.</li>
+      <li><b>Calibration is per browser state and is not stored.</b> It lives in memory for this page view only. Changing zoom, display or window scaling invalidates it; the badge returns to UNCALIBRATED when a device pixel ratio change is detected, but it cannot catch every case.</li>
+    </ul>
+  </section>
+</div></div>
 <script>
   'use strict';
   const paths={
@@ -271,7 +398,7 @@
 
   add('home','Daily','Home',{kind:'home'},'Agent and Menu above a shaded OpenClaw mascot, a sculpted color field, one headline and one floating action. Hold on the watch starts capture here. Turn the Dial to open Menu; press its button to continue.',{parent:null,related:['home-empty','home-working','home-reply','home-offline','home-live']});
   for(const [id,title,variant] of [['home-empty','Home · first conversation','empty'],['home-working','Home · working','working'],['home-reply','Home · reply ready','reply'],['home-offline','Home · offline','offline'],['home-live','Home · live conversation','live']])add(id,'Daily',title,{kind:'home',variant},'Home reflects one real state. Only the status line and primary action adapt; the layout stays still. Status alone does not claim a successful result.',{parent:null,related:['home','input','connection'],dialView:variant==='live'?'home':undefined});
-  list('menu','Daily','Menu',[R('Agents','agents','Kitsune selected','agents'),R('Conversations','threads','Project plan','chat'),R('Devices','devices','Local and permitted targets','devices'),R('Activity','activity','Results and pending work','activity'),R('Settings','settings','Display, input, connection…','settings')],'The same five destinations and icons everywhere: five watch rows, one focused Dial entry, a standing Tab5 rail.',{parent:'home'});
+  list('menu','Daily','Menu',[R('Agents','agents','Kitsune selected','agents'),R('Conversations','threads','Project plan','chat'),R('Devices','devices','Local and permitted targets','devices'),R('Activity','activity','Results and pending work','activity'),R('Settings','settings','Display, input, connection…','settings')],'The same five destinations and icons everywhere: five watch rows, one focused Dial entry, five large Tab5 rows. Tab5 also keeps Home, Conversations and Devices in its bottom bar, so Menu is a hub rather than the only way in.',{parent:'home'});
   list('threads','Daily','Conversations',[R('Project plan','conversation','Current · today','chat'),R('Shopping list','conversation','Yesterday','chat'),R('New conversation','new-thread','Start with selected agent','chat'),R('Change agent','agents','Kitsune · fox','agents')],'Each conversation belongs to its agent. Choosing New must create a thread, never reset an old one.');
   add('conversation','Daily','Project plan',{kind:'message',eyebrow:'Kitsune · recent reply',text:'The outline is ready. Which section should we tackle next?',actions:[R('Hold to reply','ptt-ready'),R('More','input')]},'The selected agent avatar stays with the conversation. Long messages scroll on the watch and paginate on the Dial.',{parent:'threads',dialText:'The outline is ready. Which part is next?',dialActions:[R('Reply','input')]});
   hero('new-thread','Daily','New conversation','Start a new thread?','Your current conversation stays available.',R('Create','thread-created'),'Creation is a server result; a failed request retains the prior selection.',{parent:'threads',related:['thread-failed']});
@@ -351,7 +478,7 @@
     ['setup-qr-expired','QR code expired','Start a fresh session','The old QR no longer opens this setup session.','setup-qr']
   ])hero(id,'Setup & pairing',title,headline,text,R('Try again',target),'Recovery resumes only the missing step. Cancellation, timeout and background loss close or suspend the setup session without erasing established credentials.',{parent:'setup-method',dialText:text});
 
-  list('settings','Settings','Settings',[R('Display','display','Layout, text, brightness, motion','display'),R('Talk & input','input-settings','PTT, microphone, finger input','mic'),R('Sound','sound','Speech and device feedback','speaker'),R('Privacy & alerts','privacy','Previews and notifications','lock'),R('Agent & context','context-settings','Default agent and resume','agents'),R('Connection','connection','Wi-Fi, OpenClaw, mobile setup','wifi'),R('Power','power','Battery and source','power'),R('About this device','about','Identity and firmware','devices'),R('Help & diagnostics','help','Learn and test','help'),R('Recovery','recovery','Reconnect, restart, reset','activity')],'All ten settings groups are reachable everywhere. Long watch lists scroll; the Dial exposes one focused entry and neighbors; Tab5 shows the list beside the current values.');
+  list('settings','Settings','Settings',[R('Display','display','Layout, text, brightness, motion','display'),R('Talk & input','input-settings','PTT, microphone, finger input','mic'),R('Sound','sound','Speech and device feedback','speaker'),R('Privacy & alerts','privacy','Previews and notifications','lock'),R('Agent & context','context-settings','Default agent and resume','agents'),R('Connection','connection','Wi-Fi, OpenClaw, mobile setup','wifi'),R('Power','power','Battery and source','power'),R('About this device','about','Identity and firmware','devices'),R('Help & diagnostics','help','Learn and test','help'),R('Recovery','recovery','Reconnect, restart, reset','activity')],'All ten settings groups are reachable everywhere. Long watch lists scroll; the Dial exposes one focused entry and neighbors; Tab5 scrolls the same list at 112 px rows and carries each current value in the row itself, so no second column is needed.');
   list('display','Display','Display',[R('Layout','layout','Compact','display'),R('Text size','text-size','Standard','display'),R('Brightness','brightness','65%','display'),R('Motion','motion','Normal','activity'),R('Display sleep','sleep','30 seconds','power')],'No hidden second display store: Devices → This device opens these same controls.',{parent:'settings'});
   list('layout','Display','Layout',[R('Compact','layout','Selected · denser spacing','check'),R('Comfortable','layout','More space between rows','display')],'This browser choice updates spacing on the watch. Font size is a separate setting; no persistent firmware preference is implied.',{parent:'display',setting:'layout'});
   list('text-size','Display','Text size',[R('Standard','text-size','Selected · 19 px reading','check'),R('Larger','text-size','21 px reading','display'),R('Largest','text-size','23 px reading','display')],'Choose a real reading size, allow scroll or fewer visible items, and never shrink a long name to make it fit.',{parent:'display',setting:'text'});
@@ -500,122 +627,151 @@
     const footer=isHome(s)?homeButton(s,'dial'):s.view.kind==='list'?'<button data-press>Open · '+(Math.min(state.focus,rowsFor(s,'dial').length-1)+1)+'/'+rowsFor(s,'dial').length+'</button>':(s.parent&&actions.length===1?[R('Back','@back'),...actions]:actions).map(a=>act({...a,label:({'Conversations':'Threads','Back to threads':'Threads','Hold to reply':'Reply','Input settings':'Settings','Reply options':'Reply','Other agents':'Agents','Choose network':'Wi-Fi','Choose Wi-Fi':'Wi-Fi','Continue in app':'Open app','Pair with phone':'Pair','Other ways':'Other ways','Try again':'Retry','It matches':'Matches','Choose agent':'Agents','End & switch':'Switch','Sample result':'Sample','Review erase':'Review'})[a.label]||a.label})).join('');
     return '<div class="device dial'+(isHome(s)?' dial-home'+homeTheme(s,'dial'):'')+(s.view.kind==='qr'?' qr-scene':'')+'" data-kind="dial">'+(isHome(s)?homeTime():'')+status(s)+'<div class="d-head">'+(isHome(s)?homeAgent()+'<button class="plain home-menu" data-go="menu" aria-label="Menu">'+icon('menu')+'</button>':esc(contextText(s,s.view.kind==='qr'?'Scan in mobile app':s.title)))+'</div><div class="d-body">'+dialBody(original)+'</div><div class="d-footer">'+footer+'</div></div>';
   }
-  // Tab5 reads the same scene objects. The rail, status strip and ownership rules stay; only the composition becomes tablet-shaped.
-  const t5Nav=[['home','Home','home'],['agents','Agents','agents'],['threads','Conversations','chat'],['devices','Devices','devices'],['activity','Activity','activity'],['settings','Settings','settings']];
-  const t5NavIds=t5Nav.map(n=>n[0]);
-  const t5WorkIds=['threads','conversation','new-thread','thread-created','thread-failed'];
+  // Tab5 reads the same scene objects as watch and Dial. The scenes, copy and ownership rules are unchanged;
+  // only the composition changes, and it is a 5-inch touch composition rather than a desktop one.
+  // Four destinations, Back in the header, one task on screen, one obvious primary action. No standing rail,
+  // no simultaneous list + detail + context columns, no composer squeezed beside a transcript.
+  const t5Nav=[['home','Home','home'],['threads','Conversations','chat'],['devices','Devices','devices'],['menu','Menu','menu']];
+  const t5Dest=new Set(['home','home-empty','home-working','home-reply','home-offline','home-live','menu','threads','devices','activity','agents','settings']);
   const t5SetupSteps=[
     ['Identify this device',['welcome','setup-method','setup-qr','setup-bluetooth','setup-ble-connecting','setup-camera-denied','setup-bluetooth-off','setup-bluetooth-denied','setup-not-found','setup-qr-expired','setup-connect','setup-usb']],
     ['Confirm it is yours',['setup-confirm','setup-mismatch','setup-ble-lost']],
     ['Join Wi-Fi',['setup-wifi','setup-wifi-password','setup-wifi-joining','setup-wifi-failed','setup-network-unsupported','setup-wifi-ready']],
     ['Connect OpenClaw',['setup-gateway','setup-code','setup-gateway-check','setup-authorizing','setup-pending','setup-expired','setup-rejected']],
     ['Ready to use',['setup-ready']]];
-  function t5Section(s){let cur=s,guard=0;while(cur&&guard++<16){if(t5NavIds.includes(cur.id))return cur.id;if(!cur.parent)break;cur=byId.get(cur.parent)}return {Agents:'agents','Talk & input':'threads','Finger input':'threads',Daily:'home'}[s.group]||'settings'}
-  function t5Layout(s){return s.view.kind==='home'?'home':['Talk & input','Finger input'].includes(s.group)||t5WorkIds.includes(s.id)?'work':s.view.kind==='list'?'browse':'focus'}
+  // Which of the four destinations owns this scene. Everything deeper is reached by opening a row, and left by Back.
+  function t5NavCurrent(s){let cur=s,guard=0;while(cur&&guard++<16){if(cur.view.kind==='home')return 'home';if(['threads','devices','menu'].includes(cur.id))return cur.id;if(!cur.parent)break;cur=byId.get(cur.parent)}return 'menu'}
+  function t5ShowNav(s){return t5Dest.has(s.id)}
+  // Reading size follows the Display setting, scaled for 11.564 px/mm: 32–36 px is a 2.8–3.1 mm em.
+  function t5Reading(){return {19:32,21:34,23:36}[state.textSize]||32}
   function t5Button(a,cls=''){return '<button class="t5-btn '+cls+'" data-go="'+esc(a.to)+'">'+esc(a.label)+'</button>'}
   function t5Tool(label,attr,cls='',disabled=false){return '<button class="t5-btn '+cls+'" '+attr+(disabled?' disabled':'')+'>'+esc(label)+'</button>'}
-  function t5Panel(head,body,cls=''){return '<section class="t5-panel '+cls+'">'+(head?'<div class="t5-head">'+head+'</div>':'')+body+'</section>'}
-  function t5Line(label,value){return '<div class="t5-line"><span>'+esc(label)+'</span><b>'+esc(value)+'</b></div>'}
-  function t5Fact(label,value,media,to){return '<button class="t5-fact" data-go="'+esc(to)+'"><span class="t5-fact-label">'+esc(label)+'</span><span class="t5-fact-value">'+media+'<span>'+esc(value)+'</span></span></button>'}
   function t5IsLive(s){return state.live||s.view.variant==='live'}
   function t5Turn(s){return ['turn-sending','turn-thinking','turn-reply','turn-failed'].includes(s.id)?state.pendingTurn||{agent:state.agent,thread:state.thread,text:byId.get('ptt-review').view.text}:null}
-  function t5Availability(s){return s.id==='agent-unavailable'?'Unavailable for new work':state.agent==='initials'?'Text conversations · no voice':t5IsLive(s)?'In a live conversation':state.micEnabled?'Available · voice and text':'Available · microphone off'}
-  function t5Strip(s){const l=linkState(s);return '<div class="t5-strip'+(l.offline||l.setup?' warn':'')+'">'+icon('wifi')+'<span>'+(l.setup?'Setup':'Studio')+'</span>'+(l.offline?brokenLink:icon('link'))+'<span>'+(l.setup?'Not ready':l.offline?'Offline':'OpenClaw')+'</span>'+icon('battery')+'<span>—</span><time>9:41</time></div>'}
-  function t5Chips(s){
-    const chips=[],l=linkState(s);
-    if(t5Layout(s)!=='work'&&['home','threads','activity'].includes(t5Section(s)))chips.push('<button class="t5-chip" data-go="threads">'+icon('chat')+esc(state.thread)+'</button>');
-    if(l.offline)chips.push('<span class="t5-chip warn">'+brokenLink+'OpenClaw offline</span>');
-    else if(l.setup)chips.push('<span class="t5-chip warn">'+icon('link')+'Not connected yet</span>');
-    if(t5IsLive(s))chips.push('<span class="t5-chip warn">'+icon('mic')+'Live conversation</span>');
-    else if(!state.micEnabled)chips.push('<span class="t5-chip">'+icon('lock')+'Microphone off</span>');
-    if(state.pendingTurn&&['turn-sending','turn-thinking'].includes(s.id))chips.push('<span class="t5-chip">'+icon('activity')+'Message pending</span>');
-    return chips.slice(0,3).join('');
+  function t5Availability(s){return s.id==='agent-unavailable'?'Unavailable for new work':state.agent==='initials'?'Text only · no voice':t5IsLive(s)?'In a live conversation':state.micEnabled?'Voice and text':'Microphone off'}
+  function t5SetupStep(s){const at=t5SetupSteps.findIndex(([,ids])=>ids.includes(s.id));return at<0?null:{at,label:t5SetupSteps[at][0]}}
+  // One line of stable context above the title. Setup counts its steps here instead of standing in a side panel.
+  function t5Crumb(s){
+    const step=s.group==='Setup & pairing'?t5SetupStep(s):null;
+    if(step)return 'SETUP · STEP '+(step.at+1)+' OF '+t5SetupSteps.length+' · '+step.label;
+    const turn=t5Turn(s)||state.editingTurn;
+    if(turn)return agentName(turn.agent)+' · '+turn.thread;
+    if(s.view.kind==='message'||['input','quick-replies','scribble','scribble-result','scribble-uncertain','keyboard','ptt-ready','ptt-capture','ptt-transcribe','ptt-empty','live-talk','live-speaking'].includes(s.id))return agentName(responseAgent(s))+' · '+state.thread;
+    if(isHome(s))return 'OpenClaw';
+    return String(s.parent?contextText(byId.get(s.parent),byId.get(s.parent).title):s.group);
   }
-  function t5Bubble(side,who,text,meta){return '<div class="t5-bubble '+side+'">'+(who?'<div class="who">'+avatar(who)+'<span>'+esc(agentName(who))+'</span><em>'+esc(meta)+'</em></div>':'<div class="who"><span>You</span><em>'+esc(meta)+'</em></div>')+'<p style="font-size:'+state.textSize+'px">'+esc(text)+'</p></div>'}
-  function t5Thread(s){
-    const conv=byId.get('conversation'),turn=t5Turn(s),agent=turn?.agent||state.agent,out=[];
+  function t5Sys(s){const l=linkState(s),label=l.setup?'Not connected':l.offline?'Offline':'';
+    return '<div class="t5-sys'+(l.offline||l.setup?' warn':'')+'" aria-label="Synthetic status: '+(l.setup?'setup in progress, connection not ready':l.offline?'Wi-Fi connected, OpenClaw unavailable':'Wi-Fi connected, OpenClaw connected')+', battery unknown">'+icon('wifi')+(l.offline?brokenLink:icon('link'))+(label?'<span>'+label+'</span>':'')+icon('battery')+'<span>—</span><time>9:41</time></div>'}
+  function t5Bubble(side,who,text,meta){return '<div class="t5-bubble '+side+'">'+(who?'<div class="who">'+avatar(who)+'<span>'+esc(agentName(who))+'</span><em>'+esc(meta)+'</em></div>':'<div class="who"><span>You</span><em>'+esc(meta)+'</em></div>')+'<p style="font-size:'+t5Reading()+'px">'+esc(text)+'</p></div>'}
+  // Conversation: the transcript owns the reading zone, the draft sits under it, and the action zone stays one row.
+  function t5Draft(s){const turn=t5Turn(s);return s.id==='turn-failed'?(turn?.text||''):/review/.test(s.id)?(state.draft||s.view.text):state.draft}
+  function t5Transcript(s){
+    const conv=byId.get('conversation'),turn=t5Turn(s),agent=turn?.agent||state.editingTurn?.agent||responseAgent(s),out=[];
     out.push(t5Bubble('them',agent,contextText(conv,conv.view.text),'Earlier today'));
-    if(turn&&['turn-sending','turn-thinking','turn-reply','turn-failed'].includes(s.id))out.push(t5Bubble('me',null,turn.text||'(no text captured)',s.id==='turn-failed'?'Not sent':s.id==='turn-reply'?'Sent':'Sending…'));
+    if(turn)out.push(t5Bubble('me',null,turn.text||'(no text captured)',s.id==='turn-failed'?'Not sent':s.id==='turn-reply'?'Sent':'Sending…'));
     if(s.id==='turn-reply')out.push(t5Bubble('them',agent,contextText(s,s.view.text),'Just now'));
     if(s.id==='turn-thinking')out.push('<div class="t5-thinking">'+avatar(agent)+'<span>'+esc(agentName(agent))+' is working on it. You can keep browsing.</span></div>');
     if(s.id==='turn-failed')out.push('<p class="t5-alert">'+esc(contextText(s,s.view.text))+'</p>');
-    return '<div class="t5-scroll"><div class="t5-thread">'+out.join('')+'</div></div>';
+    const draft=t5Draft(s),pending=['turn-sending','turn-thinking'].includes(s.id);
+    const note=pending?'Sent. You can keep browsing while the reply arrives.':'Nothing sends until you choose Send.';
+    return '<div class="t5-scroll"><div class="t5-thread">'+out.join('')+'</div></div>'
+      +(draft?'<div class="t5-draftcard"><span class="row-text"><span class="t5-fact-label">'+(s.id==='turn-failed'?'NOT SENT · DRAFT KEPT':'NOT SENT · YOUR DRAFT')+'</span><p style="font-size:'+t5Reading()+'px">'+esc(draft)+'</p></span><button class="t5-discard" data-draft-clear>Discard</button></div>'
+             :'<p class="t5-note">'+esc(note)+'</p>');
   }
-  function t5Composer(s){
-    const pending=['turn-sending','turn-thinking'].includes(s.id),failed=s.id==='turn-failed',review=/review/.test(s.id);
-    const draft=failed?t5Turn(s).text:state.draft;
-    const note=pending?'Sent. You can keep browsing while the reply arrives.':failed?'Not sent. The draft is kept; reconnect, then send again.':review?'Not sent. Check the words and the recipient first.':'Nothing sends until you choose Send.';
-    const tools=[canUseVoice()?'<button class="t5-btn capture" data-go="ptt-ready">'+icon('mic')+'Hold to talk</button>':t5Button(R(state.micEnabled?'Why no voice?':'Microphone is off',state.micEnabled?'agent-text-only':'mic-blocked')),
-      t5Button(R('Quick replies','quick-replies')),t5Button(R('Write','scribble')),t5Button(R('Keyboard','keyboard')),'<span class="spacer"></span>',
-      t5Tool('Clear draft','data-draft-clear','ghost',!draft),
-      failed?'<button class="t5-btn primary" data-retry-turn'+(draft?'':' disabled')+'>Retry send</button>':'<button class="t5-btn primary" data-go="turn-sending"'+(!draft||pending?' disabled':'')+'>Send</button>'];
-    return '<div class="t5-composer"><p class="t5-note">'+esc(note)+'</p><div class="t5-draft'+(draft?'':' empty')+'" style="font-size:'+state.textSize+'px">'+esc(draft||'No draft yet — hold to talk, choose a quick reply, write or type.')+'</div><div class="t5-tools">'+tools.join('')+'</div></div>';
+  function t5ConvActions(s){
+    const pending=['turn-sending','turn-thinking'].includes(s.id),failed=s.id==='turn-failed',draft=t5Draft(s);
+    const noVoice=()=>t5Button(R(state.micEnabled?'Why no voice?':'Microphone is off',state.micEnabled?'agent-text-only':'mic-blocked'));
+    const talk=label=>canUseVoice()?'<button class="t5-btn capture" data-go="ptt-ready">'+icon('mic')+esc(label)+'</button>':noVoice();
+    const write=t5Tool(draft?'Edit text':'Write','data-edit-draft data-go="'+(draft?'keyboard':'input')+'"');
+    if(failed)return talk('Talk again')+write+'<button class="t5-btn primary" data-retry-turn'+(draft?'':' disabled')+'>'+icon('next')+'Retry send</button>';
+    if(pending)return t5Button(R('Activity','activity'))+write+'<button class="t5-btn primary" disabled>'+icon('activity')+'Sending…</button>';
+    if(draft)return talk('Talk again')+write+'<button class="t5-btn primary" data-go="turn-sending">'+icon('check')+'Send</button>';
+    return write+t5Button(R('Quick replies','quick-replies'))+'<span class="spacer"></span>'
+      +(canUseVoice()?'<button class="t5-btn primary capture" data-go="ptt-ready">'+icon('mic')+'Hold to talk</button>':t5Button(R(state.micEnabled?'Why no voice?':'Microphone is off',state.micEnabled?'agent-text-only':'mic-blocked'),'primary'));
   }
-  function t5Conversation(s){const turn=t5Turn(s),agent=turn?.agent||state.agent,thread=turn?.thread||state.thread;
-    return '<div class="t5-head">'+avatar(agent)+'<span>'+esc(agentName(agent))+' · '+esc(thread)+'</span><button class="t5-linkbtn" data-go="activity">ACTIVITY</button></div>'+t5Thread(s)+t5Composer(s)}
   function t5Row(s,r,i){const sel=selectedRow(s,i);return '<button class="t5-row'+(sel?' current':'')+'" data-row="'+i+'" data-device="tab5" data-screen="'+esc(s.id)+'">'+(r.avatar?avatar(r.avatar):icon(r.icon))+'<span class="row-text"><strong>'+esc(r.label)+'</strong>'+(r.sub?'<small>'+esc(rowSummary(s,r,i))+'</small>':'')+'</span>'+icon(sel?'check':'next','end')+'</button>'}
-  function t5List(s){const rows=rowsFor(s,'tab5');return '<div class="t5-head"><span>'+esc(contextText(s,s.title).toUpperCase())+'</span><span class="t5-count">'+rows.length+' ITEMS</span></div><div class="t5-scroll">'+rows.map((r,i)=>t5Row(s,r,i)).join('')+'</div>'}
-  function t5Threads(){const t=byId.get('threads'),mic=state.agent==='initials'?'Agent has no voice':state.micEnabled?'Enabled':'Off';
-    return '<section class="t5-panel"><div class="t5-head">'+icon('chat')+'<span>CONVERSATIONS</span></div><div class="t5-scroll">'+t.view.rows.map((r,i)=>t5Row(t,r,i)).join('')+'</div><div class="t5-capbar"><div class="t5-cap">'+icon('mic')+'<span>Microphone</span><b>'+esc(mic)+'</b></div><div class="t5-cap">'+icon('speaker')+'<span>Speech output</span><b>Available</b></div><div class="t5-cap">'+icon('display')+'<span>Touch keyboard</span><b>Available</b></div></div></section>'}
-  function t5Hero(s){const v=s.view,actions=actionsFor(s),text=s.id==='control-result'?'Desk lamp reported '+state.reportedControl+'%.':s.id==='control-wait'?'Desk lamp · requested '+(state.controlRequest?.value??byId.get('control').view.value)+'%. You can leave this screen.':v.text,extra=s.id==='mic-blocked'?t5Tool('Turn the microphone on','data-mic="on"','primary'):'';
-    return '<div class="t5-hero">'+(s.avatar?avatar(s.group==='Talk & input'?responseAgent(s):s.avatar):icon(/failed|unknown|unavailable|rejected|expired|mismatch|empty|denied|not-found/.test(s.id)?'help':s.group==='Setup & pairing'?'link':'activity','t5-hero-icon'))+'<h3>'+esc(contextText(s,v.headline))+'</h3><p>'+esc(contextText(s,text))+'</p><div class="t5-tools center">'+extra+actions.map((a,i)=>t5Button(a,i||extra?'':'primary')).join('')+(s.parent?t5Tool('Back','data-back','ghost'):'')+'</div></div>'}
-  function t5Ptt(){return '<div class="t5-stagecard"><div class="capture-stage t5-capture">'+avatar(state.agent)+'<p class="capture-agent">To '+esc(agentName())+' · '+esc(state.thread)+'</p>'+wave()+'<h3>Hold. Speak. Release.</h3><p class="capture-hint">Release to review. Nothing sends until you confirm.</p></div><div class="t5-tools center"><button class="t5-btn primary capture" data-go="ptt-capture">'+icon('mic')+'Hold to talk</button>'+t5Button(R('Quick replies','quick-replies'))+t5Button(R('Keyboard','keyboard'))+'</div></div>'}
-  function t5Capture(){return '<div class="t5-stagecard"><div class="capture-stage capturing t5-capture">'+avatar(state.agent)+'<p class="capture-agent">To '+esc(agentName())+' · '+esc(state.thread)+'</p>'+wave()+'<h3 data-capture-label>Listening</h3><div class="capture-time" data-capture-time>00:00 / 00:30</div><p class="capture-hint" data-capture-hint>Release to review · slide up to cancel</p></div><div class="t5-tools center">'+t5Button(R('Cancel','ptt-ready'),'danger')+'</div></div>'}
+  function t5List(s){const rows=rowsFor(s,'tab5');
+    return '<div class="t5-scroll">'+rows.map((r,i)=>t5Row(s,r,i)).join('')+'</div>'+(rows.length>4?'<p class="t5-listnote">'+rows.length+' ITEMS · SCROLL FOR THE REST</p>':'')}
+  // The facts the old side panel carried now travel with the thing they describe, as one mono line.
+  function t5HeroMeta(s){
+    if(['control-wait','control-result','control-unknown'].includes(s.id))return 'OWNER '+agentName(s.id==='control-result'?state.reportedControlAgent:state.controlRequest?.agent||state.agent)+' · LAST REPORTED '+state.reportedControl+'% · '+(s.id==='control-wait'?'WAITING FOR A RESULT':s.id==='control-unknown'?'OUTCOME UNKNOWN':'RESULT RECEIVED');
+    if(profileAgents[s.id])return (profileAgents[s.id]===state.agent?'SELECTED FOR NEW WORK':'AVAILABLE TO SELECT')+' · VOICE '+(profileAgents[s.id]==='initials'?'NOT OFFERED':'OFFERED')+' · MICROPHONE '+(state.micEnabled?'ON':'OFF');
+    if(s.id==='agent-switch'&&state.pendingAgent)return 'KEEPS ITS OWNER: '+agentName(state.agent)+' STILL OWNS PENDING WORK';
+    return '';
+  }
+  function t5Hero(s){const v=s.view,text=s.id==='control-result'?'Desk lamp reported '+state.reportedControl+'%.':s.id==='control-wait'?'Desk lamp · requested '+(state.controlRequest?.value??byId.get('control').view.value)+'%. You can leave this screen.':v.text,meta=t5HeroMeta(s);
+    return '<div class="t5-hero">'+(s.avatar?avatar(s.group==='Talk & input'?responseAgent(s):s.avatar):icon(/failed|unknown|unavailable|rejected|expired|mismatch|empty|denied|not-found/.test(s.id)?'help':s.group==='Setup & pairing'?'link':'activity','t5-hero-icon'))+'<h3>'+esc(contextText(s,v.headline))+'</h3><p>'+esc(contextText(s,text))+'</p>'+(meta?'<p class="t5-meta">'+esc(meta)+'</p>':'')+'</div>'}
+  function t5CaptureStage(s,listening){
+    return '<div class="capture-stage t5-capture'+(listening?' capturing':'')+'">'+avatar(state.agent)+'<p class="capture-agent">To '+esc(agentName())+' · '+esc(state.thread)+'</p>'+wave()
+      +(listening?'<h3 data-capture-label>Listening</h3><div class="capture-time" data-capture-time>00:00 / 00:30</div><p class="capture-hint" data-capture-hint>Release to review · slide up to cancel</p>'
+                 :'<h3>Hold. Speak. Release.</h3><p class="capture-hint">Release to review. Nothing sends until you confirm.</p>')+'</div>'}
   function t5Live(s){const speaking=s.id==='live-speaking';
-    return '<div class="t5-stagecard"><div class="capture-stage t5-capture'+(speaking?'':' capturing')+'">'+avatar(responseAgent(s))+'<p class="capture-agent">'+esc(agentName(responseAgent(s)))+' · live conversation</p>'+wave()+'<h3>'+esc(contextText(s,s.view.headline))+'</h3><p class="capture-hint">'+esc(contextText(s,s.view.text))+'</p></div><div class="t5-tools center">'+(speaking?t5Button(R('Back to listening','live-talk')):'')+t5Tool('Mute microphone','data-mic="off"')+t5Button(R('End','conversation'),'danger')+'</div><p class="t5-note">Listen to the reply, then speak when the microphone is ready.</p></div>'}
-  function t5Qr(){return '<div class="t5-stagecard t5-qr"><div><h3>Add this device in OpenClaw mobile</h3><ol class="t5-steps"><li><i></i><span>Open OpenClaw on your phone.</span></li><li><i></i><span>Devices → Add device → Scan.</span></li><li><i></i><span>Point the camera at this code.</span></li></ol><p class="t5-note">Scan in the mobile app, then confirm the matching code on this device.</p><div class="t5-tools">'+t5Button(R('Other ways','setup-method'))+t5Button(R('Find with Bluetooth','setup-bluetooth'))+'</div></div><div><div class="qr-tile">'+pairingQR+'</div><p class="qr-caption">OpenClaw DEMO · Bluetooth setup</p></div></div>'}
-  function t5Confirm(s){return '<div class="t5-stagecard"><h3 class="t5-h3">'+esc(contextText(s,s.view.headline))+'</h3><p class="t5-p">'+esc(contextText(s,s.view.text))+'</p>'+matchPattern()+'<p class="t5-note">Confirm only when your phone shows the same shapes and digits.</p><div class="t5-tools center">'+actionsFor(s).map(a=>t5Button(a,'primary')).join('')+t5Button(R('Codes do not match','setup-mismatch'),'danger')+'</div></div>'}
-  function t5Slider(s){const v=s.view,val=state.sliders[s.id]??v.value,lamp=s.id==='control';
-    return '<div class="t5-stagecard"><p class="t5-note">'+(lamp?'Desk lamp · last reported '+state.reportedControl+'%':'Adjust this display')+'</p><div class="t5-value"><span class="slider-value">'+val+'</span><span class="unit">'+esc(v.unit)+'</span></div><input class="setting-range" aria-label="'+esc(s.title)+'" data-slider="'+s.id+'" type="range" min="0" max="100" value="'+val+'"><p class="t5-p">'+(lamp?'Choose a level, then Apply. Wait for the lamp to confirm the change.':'Back restores the previous setting.')+'</p><div class="t5-tools center">'+actionsFor(s).map(a=>t5Button(a,'primary')).join('')+(lamp?t5Tool('Back','data-back','ghost'):'')+'</div></div>'}
-  function t5Scribble(){return '<div class="t5-head">'+icon('pen')+'<span>HANDWRITING · SAMPLE RECOGNIZER</span></div><div class="draft-line t5-draftline">'+esc(state.draft||'Write one word')+'</div><canvas class="draw-pad t5-pad" data-pad="tab5" width="1600" height="500" aria-label="Finger drawing demonstration"></canvas><div class="t5-tools">'+t5Tool('Undo','data-undo="tab5"')+t5Tool('Clear','data-clear="tab5"')+'<span class="spacer"></span>'+t5Tool('Clear draft','data-draft-clear','ghost',!state.draft)+t5Button(R('Sample result','scribble-result'),'primary')+'</div><p class="t5-note">Write a word, then review it before sending.</p>'}
-  function t5Keyboard(){const rows=[[...'QWERTYUIOP'],[...'ASDFGHJKL'],[...'ZXCVBNM'],[' ','⌫']];
-    return '<div class="t5-head">'+icon('display')+'<span>TOUCH KEYBOARD · SHORT TEXT</span></div><div class="draft-line t5-draftline">'+esc(state.draft||'Your message')+'</div><div class="t5-keys">'+rows.map(keys=>'<div class="t5-key-row">'+keys.map(c=>'<button data-char="'+esc(c)+'" aria-label="'+esc(c===' '?'Space':c==='⌫'?'Delete':c)+'">'+esc(c===' '?'Space':c)+'</button>').join('')+'</div>').join('')+'</div><div class="t5-tools">'+t5Tool('Clear draft','data-draft-clear','ghost',!state.draft)+'<span class="spacer"></span>'+t5Button(R('Review','text-review'),'primary')+'</div><p class="t5-note">Review your message before sending.</p>'}
+    return '<div class="capture-stage t5-capture'+(speaking?'':' capturing')+'">'+avatar(responseAgent(s))+'<p class="capture-agent">'+esc(agentName(responseAgent(s)))+' · live conversation</p>'+wave()+'<h3>'+esc(contextText(s,s.view.headline))+'</h3><p class="capture-hint">'+esc(contextText(s,s.view.text))+'</p></div>'}
+  function t5Qr(){return '<div class="t5-qr"><div class="t5-qr-copy"><h3>Add this device in OpenClaw mobile</h3><ol class="t5-steps"><li><i></i><span>Open OpenClaw on your phone.</span></li><li><i></i><span>Devices → Add device → Scan.</span></li><li><i></i><span>Point the camera at this code.</span></li></ol><p class="t5-note">Then confirm the matching code on this device.</p></div><div><div class="qr-tile">'+pairingQR+'</div><p class="qr-caption">DEMO QR — not a pairing credential</p></div></div>'}
+  function t5Confirm(s){return '<div class="t5-hero"><h3>'+esc(contextText(s,s.view.headline))+'</h3><p>'+esc(contextText(s,s.view.text))+'</p>'+matchPattern()+'<p class="t5-note">Confirm only when your phone shows the same shapes and digits.</p></div>'}
+  function t5Editor(s){const v=s.view,val=state.sliders[s.id]??v.value,lamp=s.id==='control';
+    return '<div class="t5-editor"><p class="t5-note">'+(lamp?'Desk lamp · last reported '+state.reportedControl+'%':'Preview for this device')+'</p>'
+      +'<div class="t5-value"><span class="slider-value">'+val+'</span><span class="unit">'+esc(v.unit)+'</span></div>'
+      +'<div class="t5-sliderrow"><button class="t5-nudge" data-nudge="-5" aria-label="Lower by 5">−</button><input class="setting-range" aria-label="'+esc(s.title)+'" data-slider="'+s.id+'" type="range" min="0" max="100" step="1" value="'+val+'"><button class="t5-nudge" data-nudge="5" aria-label="Raise by 5">+</button></div>'
+      +'<p class="t5-meta">'+(lamp?'DRAFT ONLY · OWNER '+agentName(state.controlRequest?.agent||state.agent)+' · REPORTED '+state.reportedControl+'%':'PREVIEW ONLY · NO DEVICE SETTING IS SAVED')+'</p>'
+      +'<p class="t5-note">'+(lamp?'Nothing is sent until you choose Apply, and an acknowledgment is not a result.':'Back restores the previous setting.')+'</p></div>'}
+  function t5Scribble(){return '<div class="draft-line t5-draftline">'+esc(state.draft||'Write one word')+'</div><canvas class="draw-pad t5-pad" data-pad="tab5" width="1600" height="600" aria-label="Finger drawing demonstration"></canvas><p class="t5-note">Write one word at a time, then review it. Recognition here is a labelled fixture, not a recognizer.</p>'}
+  // Typing is a deliberate full-screen mode: 10-column QWERTY, ~114 × 104 px keys, four rows, one preview line.
+  function t5Entry(){
+    const rows=[[...'QWERTYUIOP'],[...'ASDFGHJKL'],[...'ZXCVBNM']];
+    const key=c=>'<button data-char="'+esc(c)+'" aria-label="'+esc(c)+'">'+esc(c)+'</button>';
+    return '<div class="t5-entry"><div class="t5-preview'+(state.draft?'':' empty')+'" style="font-size:'+t5Reading()+'px"><span>'+esc(state.draft||'Type a short message')+'</span>'+(state.draft?'<i class="t5-caret" aria-hidden="true"></i>':'')+'</div>'
+      +'<div class="t5-keys"><div class="t5-krow">'+rows[0].map(key).join('')+'</div>'
+      +'<div class="t5-krow inset-1">'+rows[1].map(key).join('')+'</div>'
+      +'<div class="t5-krow inset-2">'+rows[2].map(key).join('')+'</div>'
+      +'<div class="t5-krow"><button class="act" data-back>Back</button><button class="wide" data-char=" " aria-label="Space">Space</button><button class="act" data-char="⌫" aria-label="Delete">⌫</button><button class="done" data-go="text-review">Done</button></div>'
+      +'</div></div>'}
   function t5Home(s){const info=homeInfo(s,'tab5'),a=homeAction(s,'tab5'),titles=homeTitles(info,'tab5');
-    return '<div class="home-mascot"><div class="presence-orb" aria-hidden="true">'+lobsterMark('t5-'+s.id)+'</div><p class="home-state">'+esc(titles[info.status]||info.status)+'</p><p class="t5-home-sub">'+esc(info.status.toUpperCase()+' · '+agentName()+' · '+state.thread)+'</p><div class="t5-tools center">'+(a.to==='ptt-ready'&&canUseVoice()?'<button class="t5-btn primary capture" data-go="ptt-ready">'+icon('mic')+esc(a.label)+'</button>':t5Button(a,'primary'))+t5Button(R('Conversations','threads'))+t5Button(R('Activity','activity'))+'</div></div>'}
-  function t5Detail(s){const v=s.view;
-    if(s.id==='threads')return t5Conversation(byId.get('conversation'));
-    if(v.kind==='message'||t5Turn(s))return t5Conversation(s);
-    if(v.kind==='capture')return t5Capture();
-    if(s.id==='ptt-ready')return t5Ptt();
+    const symbol=a.to==='ptt-ready'?'mic':a.to==='connection'?'link':a.to==='live-talk'?'speaker':a.to==='turn-thinking'?'activity':'chat';
+    const button=a.to==='ptt-ready'&&canUseVoice()?'<button class="t5-btn primary capture" data-go="ptt-ready">'+icon('mic')+esc(a.label)+'</button>':'<button class="t5-btn primary" data-go="'+esc(a.to)+'">'+icon(symbol)+esc(a.label)+'</button>';
+    return '<div class="t5-homestage"><div class="home-mascot"><div class="presence-orb" aria-hidden="true">'+lobsterMark('t5-'+s.id)+'</div><p class="home-state">'+esc(titles[info.status]||info.status)+'</p></div><p class="t5-home-sub">'+esc((info.status+' · '+agentName()+' · '+state.thread).toUpperCase())+'</p><div class="t5-homeact">'+button+'</div></div>'}
+  function t5Body(s){const v=s.view;
+    if(v.kind==='home')return t5Home(s);
+    if(v.kind==='capture')return t5CaptureStage(s,true);
+    if(s.id==='ptt-ready')return t5CaptureStage(s,false);
     if(['live-talk','live-speaking'].includes(s.id))return t5Live(s);
+    if(v.kind==='message'||t5Turn(s))return t5Transcript(s);
     if(v.kind==='qr')return t5Qr();
     if(s.comparison)return t5Confirm(s);
-    if(v.kind==='slider')return t5Slider(s);
+    if(v.kind==='slider')return t5Editor(s);
     if(v.kind==='scribble')return t5Scribble();
-    if(v.kind==='keyboard')return t5Keyboard();
+    if(v.kind==='keyboard')return t5Entry();
     if(v.kind==='list')return t5List(s);
     return t5Hero(s);
   }
-  function t5Now(s){return '<div class="t5-scroll">'+t5Fact('Selected agent',agentName(),avatar(state.agent),'agents')+t5Fact('Conversation',state.thread,icon('chat'),'threads')+t5Fact('Latest result','Desk lamp · '+state.reportedControl+'%',icon('lamp'),'control-result')+t5Fact('Pending work',['sending','thinking'].includes(state.pendingTurn?.phase)?'One message with '+agentName(state.pendingTurn.agent):state.controlRequest?.status==='pending'?'Desk lamp result':state.controlRequest?.status==='unknown'?'Check the desk lamp':s.view.variant==='working'?'One message with '+agentName():t5IsLive(s)?'Live conversation':'Nothing pending',icon('activity'),'activity')+'</div><div class="t5-tools">'+t5Button(R('Connection','connection'))+(linkState(s).offline?t5Button(R('Reconnect','gateway-reconnect'),'primary'):t5Button(R('Settings','settings')))+'</div>'}
-  function t5Agent(s){const id=profileAgents[s.id]||state.pendingAgent&&s.id==='agent-switch'&&state.pendingAgent||state.agent;
-    return '<div class="t5-agentcard">'+avatar(id)+'<strong>'+esc(agentName(id))+'</strong><small>'+esc(id===state.agent?'Selected for new work':'Available to select')+'</small></div><div class="t5-stack">'+t5Line('Voice',id==='initials'?'Not offered':'Offered by this agent')+t5Line('Text','Available')+t5Line('Avatar',{kitsune:'Fox',builder:'Cube',guide:'Compass',initials:'Initials'}[id]||'Symbol')+t5Line('Microphone',state.micEnabled?'Enabled on this device':'Disabled on this device')+'</div><p class="t5-note">Review the agent before switching. Your message is sent only after you confirm.</p><div class="t5-tools">'+t5Button(R('Conversations','threads'))+t5Button(R('All agents','agents'))+'</div>'}
-  function t5Device(s){const draft=state.sliders.control??byId.get('control').view.value,owner=s.id==='control-result'?state.reportedControlAgent:state.controlRequest?.agent||state.agent;
-    return '<div class="t5-stack">'+t5Line('Reported',state.reportedControl+'%')+t5Line('Draft',draft+'%')+t5Line('Request',s.id==='control-wait'?'Sent · waiting':s.id==='control-result'?'Reported '+state.reportedControl+'%':s.id==='control-unknown'?'Outcome unknown':'Not sent')+t5Line('Owner',agentName(owner))+'</div><p class="t5-note">Apply submits once. If the connection ends before a result, the action may still have run — check before retrying.</p><div class="t5-tools">'+t5Button(R('Activity','activity'))+t5Button(R('Devices','devices'))+'</div>'}
-  function t5Settings(){const rows={Spacing:document.body.classList.contains('roomy')?'Comfortable':'Compact',Reading:{19:'Standard 19 px',21:'Larger 21 px',23:'Largest 23 px'}[state.textSize],Brightness:(state.savedSliders.brightness??65)+'%',Motion:state.choices.motion===1?'Reduced':'Normal','Speech volume':(state.savedSliders.volume??70)+'%',Microphone:state.micEnabled?'Enabled':'Disabled',Previews:state.choices.previews?'Show summaries':'Hidden on Home',Alerts:['Quiet badge','Badge + sound','Off'][state.choices.alerts],Battery:'Unavailable'};
-    return '<div class="t5-scroll"><div class="t5-stack">'+Object.entries(rows).map(([k,v])=>t5Line(k,v)).join('')+'</div></div><p class="t5-note">Display and input preferences for this device.</p><div class="t5-tools">'+t5Button(R('Display','display'))+t5Button(R('Connection','connection'))+t5Button(R('Recovery','recovery'))+'</div>'}
-  function t5Setup(s){const at=Math.max(0,t5SetupSteps.findIndex(([,ids])=>ids.includes(s.id)));
-    return '<ol class="t5-steps">'+t5SetupSteps.map(([label],i)=>'<li class="'+(i<at?'done':i===at?'at':'')+'">'+(i<at?icon('check'):'<i></i>')+'<span>'+esc(label)+'</span></li>').join('')+'</ol><p class="t5-note">Keep this device nearby while setup finishes. Connecting to Wi-Fi and connecting to OpenClaw are separate steps.</p><div class="t5-tools">'+t5Button(R('Pairing methods','setup-method'))+t5Button(R('Connection','connection'))+'</div>'}
-  function t5Aside(s){
-    if(s.group==='Setup & pairing')return t5Panel(icon('link')+'<span>SETUP PROGRESS</span>',t5Setup(s),'t5-aside');
-    if(['devices','control','control-wait','control-result','control-unknown'].includes(s.id))return t5Panel(icon('lamp')+'<span>DESK LAMP</span>',t5Device(s),'t5-aside');
-    if(t5Section(s)==='agents')return t5Panel(icon('agents')+'<span>AGENT</span>',t5Agent(s),'t5-aside');
-    if(t5Section(s)==='settings')return t5Panel(icon('settings')+'<span>ON THIS DEVICE</span>',t5Settings(),'t5-aside');
-    return t5Panel(icon('activity')+'<span>NOW</span>',t5Now(s),'t5-aside');
+  // The action zone. One row, one obvious primary, Back in the header. Destination screens trade it for the nav bar.
+  function t5ActionBar(s){const v=s.view;
+    if(v.kind==='capture')return '<span class="spacer"></span>'+t5Button(R('Cancel','ptt-ready'),'danger grow')+'<span class="spacer"></span>';
+    if(s.id==='ptt-ready')return t5Button(R('Quick replies','quick-replies'))+t5Button(R('Type instead','keyboard'))+'<span class="spacer"></span><button class="t5-btn primary capture" data-go="ptt-capture">'+icon('mic')+'Hold to talk</button>';
+    if(['live-talk','live-speaking'].includes(s.id))return (s.id==='live-speaking'?t5Button(R('Back to listening','live-talk')):'')+t5Tool('Mute microphone','data-mic="off"')+'<span class="spacer"></span>'+t5Button(R('End','conversation'),'danger grow');
+    if(v.kind==='message'||t5Turn(s))return t5ConvActions(s);
+    if(v.kind==='keyboard')return '';
+    if(v.kind==='scribble')return t5Tool('Undo','data-undo="tab5"')+t5Tool('Clear','data-clear="tab5"')+'<span class="spacer"></span>'+t5Tool('Clear draft','data-draft-clear','ghost',!state.draft)+t5Button(R('Sample result','scribble-result'),'primary');
+    if(v.kind==='slider')return t5Tool('Back','data-back','ghost')+'<span class="spacer"></span>'+actionsFor(s).map(a=>t5Button(a,'primary')).join('');
+    if(s.comparison)return t5Button(R('Codes do not match','setup-mismatch'),'danger')+'<span class="spacer"></span>'+actionsFor(s).map(a=>t5Button(a,'primary')).join('');
+    if(v.kind==='qr')return t5Button(R('Find with Bluetooth','setup-bluetooth'))+'<span class="spacer"></span>'+actionsFor(s).map(a=>t5Button(a,'primary')).join('');
+    if(v.kind==='list')return '';
+    const extra=s.id==='mic-blocked'?t5Tool('Turn the microphone on','data-mic="on"','primary'):'',acts=actionsFor(s);
+    if(!acts.length&&!extra)return '';
+    return (s.parent?t5Tool('Back','data-back','ghost'):'')+'<span class="spacer"></span>'+extra+acts.map((a,i)=>t5Button(a,i||extra?'':'primary')).join('');
   }
-  function t5Stage(s,layout){
-    if(layout==='home')return '<section class="t5-panel t5-home'+homeTheme(s,'tab5')+'">'+t5Home(s)+'</section>'+t5Aside(s);
-    if(layout==='work')return t5Threads()+'<section class="t5-panel">'+t5Detail(s)+'</section>';
-    if(layout==='browse')return '<section class="t5-panel">'+t5Detail(s)+'</section>'+t5Aside(s);
-    return '<section class="t5-panel t5-focuspanel">'+t5Detail(s)+'</section>'+t5Aside(s);
-  }
+  function t5NavBar(s){const cur=t5NavCurrent(s);
+    return t5Nav.map(([id,label,ico])=>'<button data-go="'+id+'"'+(cur===id?' aria-current="page"':'')+'>'+icon(ico)+'<span>'+label+'</span></button>').join('')}
   function t5Frame(s){
-    const layout=t5Layout(s),section=t5Section(s),crumb=s.parent?contextText(byId.get(s.parent),byId.get(s.parent).title):isHome(s)?'OpenClaw':s.group;
-    const rail='<div class="t5-rail"><button class="plain t5-brand" data-go="home" aria-label="OpenClaw Home">'+lobsterMark('t5rail-'+s.id)+'<b>OpenClaw</b><i>TAB5</i></button>'
-      +'<button class="plain t5-presence" data-go="agents" aria-label="Change agent, '+esc(agentName())+' selected">'+avatar(state.agent)+'<span class="row-text"><strong>'+esc(agentName())+'</strong><small>'+esc(t5Availability(s))+'</small></span>'+icon('next','end')+'</button>'
-      +'<nav class="t5-nav" aria-label="Destinations">'+t5Nav.map(([id,label,ico])=>'<button data-go="'+id+'"'+(section===id?' aria-current="page"':'')+'>'+icon(ico)+'<span>'+label+'</span></button>').join('')+'</nav>'
-      +'<div class="t5-foot">'+t5Strip(s)+'</div></div>';
-    const top='<div class="t5-top">'+(s.parent?'<button class="t5-back" data-back aria-label="Back">'+icon('back')+'</button>':'')+'<div><div class="t5-crumb">'+esc(String(crumb).toUpperCase())+'</div><h2 class="t5-title">'+esc(contextText(s,s.title))+'</h2></div><div class="t5-chips">'+t5Chips(s)+'</div></div>';
-    return '<div class="tab5-wrap"><div class="t5" data-kind="tab5">'+rail+'<div class="t5-main">'+top+'<div class="t5-stage '+layout+'">'+t5Stage(s,layout)+'</div></div></div></div>';
+    const nav=t5ShowNav(s),bar=nav?t5NavBar(s):t5ActionBar(s);
+    const top='<div class="t5-top">'+(s.parent?'<button class="t5-back" data-back aria-label="Back">'+icon('back')+'</button>':'')
+      +'<div class="t5-heads"><div class="t5-crumb">'+esc(String(t5Crumb(s)).toUpperCase())+'</div><h2 class="t5-title">'+esc(contextText(s,s.title))+'</h2></div>'
+      +t5Sys(s)
+      +(s.group==='Setup & pairing'?'':'<button class="t5-presence" data-go="agents" aria-label="Change agent, '+esc(agentName())+' selected">'+avatar(state.agent)+'<span class="row-text"><strong>'+esc(agentName())+'</strong><small>'+esc(t5Availability(s))+'</small></span>'+icon('next','end')+'</button>')
+      +'</div>';
+    return '<div class="tab5-wrap"><div class="t5'+(isHome(s)?' t5-home'+homeTheme(s,'tab5'):'')+'" data-kind="tab5">'+top
+      +'<div class="t5-body">'+t5Body(s)+'</div>'
+      +(bar?nav?'<nav class="t5-bar t5-navbar" aria-label="Destinations">'+bar+'</nav>':'<div class="t5-bar" role="group" aria-label="Actions">'+bar+'</div>':'')+'</div></div>';
   }
   const observer=new ResizeObserver(entries=>{for(const entry of entries)entry.target.style.setProperty('--scale',entry.contentRect.width/368)});
   const t5Observer=new ResizeObserver(entries=>{for(const entry of entries)entry.target.style.setProperty('--t5',entry.contentRect.width/1280)});
@@ -630,7 +786,7 @@
     if(['ptt-ready','ptt-capture','live-talk'].includes(id)){if(state.agent==='initials')id='agent-text-only';else if(!state.micEnabled)id='mic-blocked'}
     if(id!=='ptt-capture'){capturePointer=null;clearTimeout(captureTimer);clearInterval(captureTick);captureTimer=null;captureTick=null}
     clearTimeout(flowTimer);flowTimer=null;
-    if(id==='ptt-capture')state.draft='';
+    if(id==='ptt-capture'){state.draft='';state.editingTurn=null}
     if(id==='ptt-transcribe')state.draft='Set the desk lamp to fifty percent.';
     const transient=['ptt-capture','ptt-transcribe'];
     if(transient.includes(state.screen)&&id==='ptt-ready')while(state.history.at(-1)===id||transient.includes(state.history.at(-1)))state.history.pop();
@@ -638,9 +794,9 @@
     if(id==='agent-switch'){state.pendingAgent=profileAgents[state.screen]||state.pendingAgent||'builder';if(state.live)id='agent-call-switch'}
     if(id==='agent-selected'&&state.screen==='agent-call-switch')state.live=false;
     if(['live-talk','live-speaking'].includes(id))state.live=true;
-    if(id==='thread-created')state.thread='New conversation';
-    if(id==='agent-selected'&&state.pendingAgent&&state.pendingAgent!==state.agent){state.agent=state.pendingAgent;state.draft='';state.strokes=blankStrokes()}
-    if(id==='turn-sending'){const retry=source.id==='turn-failed'?state.pendingTurn:null;state.pendingTurn={agent:retry?.agent||state.agent,thread:retry?.thread||state.thread,text:retry?.text||state.draft||state.pendingTurn?.text||source.view.text||'',phase:'sending'}}
+    if(id==='thread-created'){state.thread='New conversation';state.editingTurn=null}
+    if(id==='agent-selected'&&state.pendingAgent&&state.pendingAgent!==state.agent){state.agent=state.pendingAgent;state.draft='';state.strokes=blankStrokes();state.editingTurn=null}
+    if(id==='turn-sending'){const edit=state.editingTurn,retry=source.id==='turn-failed'?state.pendingTurn:null;state.pendingTurn={agent:edit?.agent||retry?.agent||state.agent,thread:edit?.thread||retry?.thread||state.thread,text:edit?state.draft:retry?.text||state.draft||state.pendingTurn?.text||source.view.text||'',phase:'sending'};state.editingTurn=null}
     if(state.pendingTurn&&['turn-thinking','turn-reply','turn-failed'].includes(id))state.pendingTurn.phase={'turn-thinking':'thinking','turn-reply':'replied','turn-failed':'failed'}[id];
     if(id==='control-wait'&&source.id==='control')state.controlRequest={value:state.sliders.control??source.view.value,agent:state.agent,status:'pending'};
     // Reading an old result must not complete a newly submitted control.
@@ -678,11 +834,15 @@
     document.getElementById('dial-preview').innerHTML=pair?dialFrame(s):'';
     dialPages=pair?paginateDial(document.querySelector('#dial-preview .dial'),state.page):[];
     document.getElementById('tab5-preview').innerHTML=tab5?t5Frame(s):'';
-    document.getElementById('tab5-stage').classList.toggle('native',state.t5Size==='native');
+    const stage=document.getElementById('tab5-stage');
+    stage.classList.toggle('native',state.t5Size==='native');
+    stage.classList.toggle('physical',state.t5Size==='physical');
+    document.getElementById('tab5-physnote').hidden=!(tab5&&state.t5Size==='physical');
     document.querySelectorAll('#watch-preview .watch-wrap').forEach(e=>observer.observe(e));
     document.querySelectorAll('#tab5-preview .tab5-wrap').forEach(e=>t5Observer.observe(e));
     document.querySelectorAll('canvas[data-pad]').forEach(setupPad);
     settleFocusedRows(document.getElementById('dial-preview'));
+    renderReview();
   }
   function settleFocusedRows(root){root.querySelectorAll('.d-focus').forEach(f=>{const next=f.parentElement.querySelector('.d-next');if(next&&f.getBoundingClientRect().bottom>next.getBoundingClientRect().top-3)next.style.visibility='hidden'})}
   function paginateDial(frame,page){
@@ -762,13 +922,108 @@
   function setupPad(canvas){
     const ctx=canvas.getContext('2d'),owner=canvas.dataset.pad;ctx.strokeStyle='#b7e3cf';ctx.lineWidth=5;ctx.lineCap='round';ctx.lineJoin='round';
     for(const stroke of state.strokes[owner]){ctx.beginPath();stroke.forEach((p,i)=>i?ctx.lineTo(p[0],p[1]):ctx.moveTo(p[0],p[1]));ctx.stroke()}
-    if(canvas.closest('#catalog-grid'))return;
+    if(canvas.closest('#catalog-grid,#sizing-review'))return;
     let stroke=null;
     const point=e=>{const r=canvas.getBoundingClientRect();return [(e.clientX-r.left)*canvas.width/r.width,(e.clientY-r.top)*canvas.height/r.height]};
     canvas.addEventListener('pointerdown',e=>{canvas.setPointerCapture(e.pointerId);stroke=[point(e)];if(state.strokes[owner].length===32)state.strokes[owner].shift();state.strokes[owner].push(stroke)});
     canvas.addEventListener('pointermove',e=>{if(!stroke||stroke.length>=2048)return;stroke.push(point(e));const p=stroke.at(-2),n=stroke.at(-1);ctx.beginPath();ctx.moveTo(...p);ctx.lineTo(...n);ctx.stroke()});
     for(const event of ['pointerup','pointercancel'])canvas.addEventListener(event,()=>{stroke=null});
   }
+  /* Sizing and calibration review. Explorer chrome, never part of the device UX.
+     Nominal Tab5 geometry: 5 in = 127.00 mm diagonal at 16:9 → 110.69 × 62.26 mm → 1280 / 110.69 = 11.564 px/mm (~293.7 ppi).
+     A browser cannot know how large a physical millimetre is: CSS mm are a 96 dpi fiction and DPR proves nothing.
+     So one variable — CSS pixels per physical millimetre — is set by hand against a real ruler or ID-1 card,
+     and that single ratio drives the ruler, the target samples and the device frame alike. Nothing is stored. */
+  const T5_W_MM=110.69,T5_H_MM=62.26,T5_PX_MM=1280/T5_W_MM,CSS_NOMINAL=96/25.4;
+  let pxPerMm=CSS_NOMINAL,calibrated=false,reviewOpener=null,lastDpr=window.devicePixelRatio;
+  const reviewEl=()=>document.getElementById('sizing-review');
+  const isReviewOpen=()=>!reviewEl().hidden;
+  const mmPx=mm=>mm*pxPerMm;
+  function applyScale(){
+    document.documentElement.style.setProperty('--phys',pxPerMm/T5_PX_MM);
+    document.getElementById('tab5-physnote').innerHTML=calibrated?'Physical size is <b>calibrated by you at this zoom</b>. Recalibrate after changing zoom, display or window scaling.':'Physical size is <b>uncalibrated</b>. Browser CSS millimetres are not physical millimetres — open the sizing review and align a real ruler or bank card first.';
+  }
+  function setScale(value,{confirmed=false,invalidate=false}={}){
+    const next=Math.min(9,Math.max(1.5,Number(value)||CSS_NOMINAL));
+    if(next!==pxPerMm||invalidate)calibrated=false;
+    pxPerMm=next;
+    if(confirmed)calibrated=true;
+    applyScale();renderReview();
+  }
+  function renderRuler(){
+    const ruler=document.getElementById('ruler');let marks='';
+    for(let mm=0;mm<=100;mm++){marks+='<i class="'+(mm%10===0?'maj':mm%5===0?'mid':'')+'" style="left:'+mmPx(mm).toFixed(2)+'px"></i>';if(mm%10===0)marks+='<b style="left:'+mmPx(mm).toFixed(2)+'px">'+mm+'</b>'}
+    ruler.style.width=mmPx(100).toFixed(2)+'px';ruler.innerHTML=marks;
+    const card=document.getElementById('card');card.style.width=mmPx(85.6).toFixed(2)+'px';card.style.height=mmPx(53.98).toFixed(2)+'px';
+  }
+  function renderSamples(){
+    const spec=[[10,'10 mm','115.6 px','',''],[9,'9 mm','104.1 px','','Design floor for a primary target'],[8,'8 mm','92.5 px','','Below the floor used here'],[4,'4 mm','46.3 px','warn','A 44–48 px desktop target, literally']];
+    document.getElementById('samples').innerHTML=spec.map(([mm,a,b,cls,note])=>'<span class="sample '+cls+'"><i style="width:'+mmPx(mm).toFixed(2)+'px;height:'+mmPx(mm).toFixed(2)+'px"></i>'+esc(a)+' · '+esc(b)+(note?'<br>'+esc(note):'')+'</span>').join('');
+  }
+  function measureTargets(host){
+    const seen=[];
+    for(const el of host.querySelectorAll('.t5 button,.t5 input,.t5 canvas')){
+      const w=Math.round(el.offsetWidth),h=Math.round(el.offsetHeight);if(!w||!h)continue;
+      const least=Math.min(w,h),verdict=least>=104?['ok','Primary ≥ 9 mm']:least>=96?['warn','Secondary ≥ 8.3 mm']:['bad','Under 96 px'];
+      el.classList.add('tgt-'+verdict[0]);
+      seen.push({label:(el.getAttribute('aria-label')||el.textContent||el.tagName).trim().replace(/\s+/g,' ').slice(0,44)||'control',w,h,verdict});
+    }
+    seen.sort((a,b)=>Math.min(a.w,a.h)-Math.min(b.w,b.h));
+    const shown=seen.slice(0,12);
+    document.querySelector('#target-table tbody').innerHTML=
+      '<tr><th>Control</th><th>Native px</th><th>Millimetres</th><th>Verdict</th></tr>'
+      +shown.map(t=>'<tr><td>'+esc(t.label)+'</td><td class="n">'+t.w+' × '+t.h+'</td><td class="n">'+(t.w/T5_PX_MM).toFixed(1)+' × '+(t.h/T5_PX_MM).toFixed(1)+'</td><td class="v-'+t.verdict[0]+'">'+esc(t.verdict[1])+'</td></tr>').join('')
+      +(seen.length>shown.length?'<tr><td colspan="4">'+(seen.length-shown.length)+' further targets in this scene are at least as large as the smallest shown.</td></tr>':'')
+      +(seen.length?'':'<tr><td colspan="4">This scene has no interactive targets.</td></tr>');
+  }
+  function renderReview(){
+    if(!isReviewOpen())return;
+    document.getElementById('scale').value=pxPerMm;
+    document.getElementById('scale-read').textContent='1 mm = '+pxPerMm.toFixed(3)+' CSS px · '+(pxPerMm*25.4).toFixed(0)+' CSS dpi · device scale '+(pxPerMm/T5_PX_MM).toFixed(4);
+    const badge=document.getElementById('calib-badge');
+    badge.textContent=calibrated?'CALIBRATED BY YOU · THIS ZOOM ONLY':'UNCALIBRATED · NOMINAL CSS GUESS';
+    badge.classList.toggle('ok',calibrated);
+    renderRuler();renderSamples();
+    const host=document.getElementById('review-device'),w=mmPx(T5_W_MM),h=mmPx(T5_H_MM);
+    host.classList.toggle('targets',document.getElementById('show-targets').checked);
+    host.innerHTML=t5Frame(byId.get(state.screen));
+    const wrap=host.querySelector('.tab5-wrap');
+    wrap.style.width=w.toFixed(2)+'px';wrap.style.height=h.toFixed(2)+'px';
+    wrap.style.maxWidth='none';wrap.style.aspectRatio='auto';wrap.style.margin='0';
+    wrap.style.setProperty('--t5',w/1280);
+    const mx=document.getElementById('measure-x'),my=document.getElementById('measure-y');
+    mx.style.width=w.toFixed(2)+'px';my.style.height=h.toFixed(2)+'px';
+    mx.firstElementChild.textContent=T5_W_MM+' mm nominal · 1280 native px';
+    my.firstElementChild.textContent=T5_H_MM+' mm · 720 px';
+    document.getElementById('review-screen').value=state.screen;
+    measureTargets(host);
+  }
+  function openReview(opener){
+    reviewOpener=opener||null;reviewEl().hidden=false;document.body.style.overflow='hidden';
+    document.querySelector('main').inert=true;
+    renderReview();document.getElementById('review-close').focus();
+  }
+  function closeReview(){
+    if(!isReviewOpen())return;
+    reviewEl().hidden=true;document.body.style.overflow='';document.querySelector('main').inert=false;
+    if(reviewOpener&&document.contains(reviewOpener))reviewOpener.focus();
+    reviewOpener=null;
+    // Drop the deep link so Close is not undone by a later re-read of the hash. Harmless if the browser refuses.
+    if(location.hash.includes('review=sizing'))try{history.replaceState(null,'',location.pathname+location.search)}catch{}
+  }
+  document.getElementById('review-screen').innerHTML=screens.map(s=>'<option value="'+esc(s.id)+'">'+esc(s.title)+'</option>').join('');
+  document.getElementById('review-screen').addEventListener('change',e=>enter(e.target.value));
+  document.getElementById('scale').addEventListener('input',e=>setScale(e.target.value));
+  document.getElementById('scale-up').addEventListener('click',()=>setScale(pxPerMm+0.02));
+  document.getElementById('scale-down').addEventListener('click',()=>setScale(pxPerMm-0.02));
+  document.getElementById('scale-reset').addEventListener('click',()=>setScale(CSS_NOMINAL,{invalidate:true}));
+  document.getElementById('scale-confirm').addEventListener('click',()=>setScale(pxPerMm,{confirmed:true}));
+  document.getElementById('show-targets').addEventListener('change',renderReview);
+  document.getElementById('review-close').addEventListener('click',closeReview);
+  document.getElementById('open-review').addEventListener('click',e=>openReview(e.currentTarget));
+  document.getElementById('review-link').addEventListener('click',e=>{e.preventDefault();openReview(e.currentTarget)});
+  window.addEventListener('resize',()=>{if(window.devicePixelRatio===lastDpr)return;lastDpr=window.devicePixelRatio;if(calibrated){calibrated=false;applyScale();renderReview()}});
+  applyScale();
   document.getElementById('journey').innerHTML=[...groups,'All settings'].map(g=>'<option>'+g+'</option>').join('');
   function showAllSettings(){enter('settings');state.group='All settings';document.getElementById('journey').value=state.group;renderCatalog()}
   document.getElementById('journey').addEventListener('change',e=>e.target.value==='All settings'?showAllSettings():enter(screens.find(s=>s.group===e.target.value).id));
@@ -781,13 +1036,14 @@
   document.getElementById('tab5-size').addEventListener('change',e=>{state.t5Size=e.target.value;renderDevices()});
   document.getElementById('reset-preview').addEventListener('click',()=>{cancelCapture();state={screen:'home',focus:0,page:0,group:'Daily',sheet:'watch',preview:state.preview,t5Size:state.t5Size,agent:'kitsune',micEnabled:true,pendingTurn:null,reportedControl:42,reportedControlAgent:'kitsune',controlRequest:null,thread:'Project plan',live:false,setupPurpose:'initial',history:[],draft:'',keyPage:0,textSize:19,choices:{...initialChoices},sliders:{},savedSliders:{},strokes:blankStrokes()};document.getElementById('search').value='';document.getElementById('roomy').checked=false;document.getElementById('guides').checked=false;document.body.classList.remove('roomy','guides','reduced');render()});
   document.addEventListener('click',e=>{
-    const b=e.target.closest('button');if(!b||b.closest('#catalog-grid'))return;
+    const b=e.target.closest('button');if(!b||b.closest('#catalog-grid,#sizing-review'))return;
     if(b.classList.contains('capture')){if(e.detail===0)beginCapture({id:'assistive'});return;}
-    if(b.hasAttribute('data-retry-turn')){state.pendingTurn={...t5Turn(byId.get(state.screen))};enter('turn-sending')}
+    if(b.hasAttribute('data-edit-draft')){const s=byId.get(state.screen);state.draft=t5Draft(s)||'';if(s.id==='turn-failed'){const turn=t5Turn(s);state.editingTurn={agent:turn.agent,thread:turn.thread}}enter(b.dataset.go)}
+    else if(b.hasAttribute('data-retry-turn')){state.pendingTurn={...t5Turn(byId.get(state.screen))};enter('turn-sending')}
     else if(b.dataset.go){if(b.dataset.go==='@back')back();else runAction(b.dataset.go)}
     else if(b.hasAttribute('data-back'))back();else if(b.hasAttribute('data-home'))enter('home');
     else if(b.dataset.row!==undefined)chooseRow(Number(b.dataset.row),b.dataset.device,b.dataset.screen);
-    else if(b.hasAttribute('data-draft-clear')){if(state.screen==='turn-failed')state.pendingTurn={...t5Turn(byId.get(state.screen)),text:''};state.draft='';state.strokes=blankStrokes();setToast('Draft cleared in this preview. Nothing was sent.');renderDevices()}
+    else if(b.hasAttribute('data-draft-clear')){if(state.screen==='turn-failed')state.pendingTurn={...t5Turn(byId.get(state.screen)),text:''};state.draft='';state.editingTurn=null;state.strokes=blankStrokes();setToast('Draft cleared in this preview. Nothing was sent.');renderDevices()}
     else if(b.dataset.mic){const on=b.dataset.mic==='on';state.micEnabled=on;state.choices.microphone=on?0:1;if(!on)state.live=false;enter(on?'ptt-ready':'mic-blocked');setToast(on?'Microphone enabled in this preview.':'Microphone disabled; capture and wake listening stop.')}
     else if(b.dataset.turn)turn(Number(b.dataset.turn));else if(b.hasAttribute('data-press'))press();
     else if(b.dataset.sheet){state.sheet=b.dataset.sheet;renderCatalog()}
@@ -796,6 +1052,8 @@
     else if(b.dataset.undo){state.strokes[b.dataset.undo].pop();renderDevices()}
     else if(b.dataset.clear){state.strokes[b.dataset.clear]=[];renderDevices()}
     else if(b.dataset.page){state.page+=Number(b.dataset.page);renderDevices()}
+    // Tab5 ± keeps a precise value reachable without pen precision; it edits the same draft as the slider.
+    else if(b.dataset.nudge){const s=byId.get(state.screen);if(s.view.kind==='slider'){state.sliders[s.id]=Math.max(0,Math.min(100,(state.sliders[s.id]??s.view.value)+Number(b.dataset.nudge)));renderDevices()}}
   });
   document.addEventListener('input',e=>{if(e.target.dataset.slider){state.sliders[e.target.dataset.slider]=Number(e.target.value);document.querySelectorAll('.slider-value').forEach(n=>n.textContent=e.target.value)}});
   function beginCapture(input){
@@ -815,19 +1073,31 @@
   function cancelCapture(){if(capturePointer){capturePointer=null;enter('ptt-ready')}}
   document.addEventListener('pointercancel',cancelCapture);window.addEventListener('blur',cancelCapture);
   document.addEventListener('visibilitychange',()=>{if(document.hidden)cancelCapture()});
-  // Deep links from the plan: #preview=tab5&size=native&scene=conversation. Reading only; navigation inside the preview does not rewrite the hash.
+  // Deep links from the plan: #preview=tab5&size=physical&scene=keyboard&review=sizing. Reading only;
+  // navigation inside the preview does not rewrite the hash.
   function applyHash(){
     const q=new URLSearchParams(location.hash.replace(/^#/,''));
     const mode=q.get('preview');if(['all','watch-dial','tab5'].includes(mode))state.preview=mode;
-    const size=q.get('size');if(['fit','native'].includes(size))state.t5Size=size;
+    const size=q.get('size');if(['fit','native','physical'].includes(size))state.t5Size=size;
     const scene=q.get('scene');if(scene&&byId.has(scene)){state.screen=scene;state.group=byId.get(scene).group;state.focus=0;state.page=0;state.history=[]}
     document.getElementById('preview-mode').value=state.preview;
     document.getElementById('tab5-size').value=state.t5Size;
     document.getElementById('tab5-size').disabled=state.preview==='watch-dial';
+    if(q.get('review')==='sizing')openReview(null);else if(q.has('review'))closeReview();
   }
   window.addEventListener('hashchange',()=>{cancelCapture();applyHash();render()});
   document.addEventListener('keyup',e=>{if(capturePointer?.id==='keyboard'&&[' ','Enter'].includes(e.key)){e.preventDefault();const quick=performance.now()-capturePointer.started<250;enter(quick?'ptt-ready':'ptt-transcribe')}});
-  document.addEventListener('keydown',e=>{if(e.target.closest('#watch-preview .capture,#tab5-preview .capture')&&[' ','Enter'].includes(e.key)){e.preventDefault();if(!e.repeat)beginCapture({id:'keyboard'});return}if(e.target.matches('input,select,textarea'))return;if(e.key==='ArrowLeft'){e.preventDefault();turn(-1)}if(e.key==='ArrowRight'){e.preventDefault();turn(1)}if(e.key==='Escape'){cancelCapture();back()}});
+  // The review layer is review-only and always escapable; it takes Escape before the device shortcuts do.
+  document.addEventListener('keydown',e=>{if(isReviewOpen()){
+      if(e.key==='Escape'){e.preventDefault();closeReview()}
+      if(e.key==='Tab'){
+        const targets=[...reviewEl().querySelectorAll('button,input,select,a[href],[tabindex]')].filter(n=>!n.disabled&&!n.closest('[inert]')&&n.tabIndex>=0&&n.getClientRects().length);
+        const first=targets[0],last=targets.at(-1),active=document.activeElement;
+        if(e.shiftKey&&(active===first||!reviewEl().contains(active))){e.preventDefault();last?.focus()}
+        else if(!e.shiftKey&&(active===last||!reviewEl().contains(active))){e.preventDefault();first?.focus()}
+      }
+      return;
+    }if(e.target.closest('#watch-preview .capture,#tab5-preview .capture')&&[' ','Enter'].includes(e.key)){e.preventDefault();if(!e.repeat)beginCapture({id:'keyboard'});return}if(e.target.matches('input,select,textarea'))return;if(e.key==='ArrowLeft'){e.preventDefault();turn(-1)}if(e.key==='ArrowRight'){e.preventDefault();turn(1)}if(e.key==='Escape'){cancelCapture();back()}});
   applyHash();render();
 </script>
 </body></html>

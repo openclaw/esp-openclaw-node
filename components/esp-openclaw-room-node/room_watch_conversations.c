@@ -1,4 +1,5 @@
 #include "room_watch_conversations.h"
+#include "openclaw_reading.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -171,6 +172,7 @@ void room_watch_conversations_render(const room_conversations_snapshot_t *snapsh
     if (root == NULL) return;
     lv_obj_set_hidden(root, hidden);
     if (hidden) { current = NULL; return; }
+    lv_obj_set_style_text_font(body_text, openclaw_reading_font(), 0);
     if (snapshot == NULL) {
         painted_preview = preview;
         painted_creation = creation;

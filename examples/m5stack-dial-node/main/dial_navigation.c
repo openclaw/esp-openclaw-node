@@ -1,6 +1,7 @@
 #include "dial_navigation.h"
 #include "esp_openclaw_avatar.h"
 #include "openclaw_connection_details.h"
+#include "openclaw_reading.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -138,6 +139,12 @@ static void back(dial_navigation_t *nav)
             changed(nav);
             return;
         }
+        if (nav->view == DIAL_NAV_BACKLIGHT || nav->view == DIAL_NAV_READING) {
+            nav->focus = nav->view == DIAL_NAV_READING ? 1 : 0;
+            nav->view = DIAL_NAV_DISPLAY;
+            changed(nav);
+            return;
+        }
         if (nav->view == DIAL_NAV_DISPLAY || nav->view == DIAL_NAV_CONNECTION) {
             bool local = nav->settings_parent == DIAL_NAV_LOCAL_DEVICE;
             nav->focus = (nav->view == DIAL_NAV_CONNECTION ? 1 : 0) + (local ? 1 : 0);
@@ -193,7 +200,7 @@ static void touch(lv_event_t *event)
         if (target == nav->rows[i]) {
             if (nav->view == DIAL_NAV_CONNECTION) return;
             if (nav->view != DIAL_NAV_DETAIL) nav->focus = nav->first + i;
-            if (nav->view == DIAL_NAV_DISPLAY) dial_navigation_move(nav, i == 0 ? -1 : 1);
+            if (nav->view == DIAL_NAV_BACKLIGHT) dial_navigation_move(nav, i == 0 ? -1 : 1);
             else dial_navigation_activate(nav);
             return;
         }
@@ -340,6 +347,14 @@ static void item(dial_navigation_t *nav, unsigned index, const char **name, cons
         *icon = icons[index];
         return;
     }
+    if (nav->view == DIAL_NAV_DISPLAY || nav->view == DIAL_NAV_READING) {
+        bool reading = nav->view == DIAL_NAV_READING;
+        const char *names[] = {reading ? "Standard" : "Brightness", reading ? "Larger" : "Reading text", "Back"};
+        *name = names[index];
+        *icon = index == 2 ? LV_SYMBOL_LEFT : reading ?
+            (index == (unsigned)openclaw_reading_size() ? LV_SYMBOL_OK : "") : LV_SYMBOL_IMAGE;
+        return;
+    }
     if (nav->view == DIAL_NAV_SETTINGS) {
         const char *names[] = {"Display", "Connection", "Messaging", "Back"};
         const char *icons[] = {LV_SYMBOL_IMAGE, LV_SYMBOL_WIFI, LV_SYMBOL_ENVELOPE, LV_SYMBOL_LEFT};
@@ -371,7 +386,7 @@ static void item(dial_navigation_t *nav, unsigned index, const char **name, cons
 
 static void render_display(dial_navigation_t *nav)
 {
-    lv_label_set_text_static(nav->heading, "Display");
+    lv_label_set_text_static(nav->heading, "Brightness");
     lv_obj_set_hidden(nav->preview_body, true);
     lv_obj_set_hidden(nav->description, false);
     lv_obj_set_height(nav->description, 32);
@@ -677,6 +692,11 @@ static void render_devices(dial_navigation_t *nav)
 static void render(dial_navigation_t *nav)
 {
     lv_obj_set_y(nav->description, 80);
+    lv_obj_set_style_text_font(nav->preview_text, openclaw_reading_font(), 0);
+    for (unsigned i = 0; i < 3; ++i) {
+        lv_obj_set_style_text_font(nav->names[i], &lv_font_montserrat_14, 0);
+        lv_obj_set_height(nav->names[i], 20);
+    }
     lv_obj_set_hidden(nav->detail_avatar, true);
     lv_obj_set_hidden(nav->detail_initials, true);
     lv_obj_set_hidden(nav->messaging_icon, true);
@@ -692,7 +712,7 @@ static void render(dial_navigation_t *nav)
         render_devices(nav);
         return;
     }
-    if (nav->view == DIAL_NAV_DISPLAY) {
+    if (nav->view == DIAL_NAV_BACKLIGHT) {
         render_display(nav);
         return;
     }
@@ -763,13 +783,14 @@ static void render(dial_navigation_t *nav)
     bool preview = nav->view == DIAL_NAV_PREVIEW;
     bool message = (nav->view == DIAL_NAV_AGENTS || sessions) && agent_count(nav) == 0;
     nav->count = detail || preview ? 1 : nav->view == DIAL_NAV_MENU ? 5 : nav->view == DIAL_NAV_SETTINGS ? 4 :
-        agent_count(nav) + creation_entry(nav) + has_next(nav) + has_previous(nav) + 2;
+        (nav->view == DIAL_NAV_DISPLAY || nav->view == DIAL_NAV_READING) ? 3 : agent_count(nav) + creation_entry(nav) + has_next(nav) + has_previous(nav) + 2;
     if (!detail && !preview && nav->focus >= nav->count) nav->focus = 0;
     unsigned visible = message ? 2 : 3;
     nav->first = nav->focus / visible * visible;
     if ((nav->view == DIAL_NAV_MENU || nav->view == DIAL_NAV_SETTINGS) && nav->first + visible > nav->count)
         nav->first = nav->count - visible;
-    lv_label_set_text_static(nav->heading, preview ? "Preview" : sessions ? "Chats" : nav->view == DIAL_NAV_MENU ? "Menu" : nav->view == DIAL_NAV_SETTINGS ? "Settings" : "Agents");
+    lv_label_set_text_static(nav->heading, preview ? "Preview" : sessions ? "Chats" : nav->view == DIAL_NAV_MENU ? "Menu" : nav->view == DIAL_NAV_SETTINGS ? "Settings" :
+        nav->view == DIAL_NAV_DISPLAY ? "Display" : nav->view == DIAL_NAV_READING ? "Reading" : "Agents");
     if (sessions && nav->conversations != NULL && nav->conversations->agent.name[0] != '\0')
         lv_label_set_text(nav->heading, nav->conversations->agent.name);
     else if (preview && nav->conversations != NULL && nav->conversations->selected < nav->conversations->page.count)
@@ -785,6 +806,7 @@ static void render(dial_navigation_t *nav)
     lv_label_set_text_static(nav->hint, preview ? readable ? "Turn to read" : "Press: back" : detail ? "Press: open" : sessions ? "Chats / turn" : "Turn + press");
     if (nav->view == DIAL_NAV_MENU)
         lv_label_set_text_fmt(nav->hint, "Turn  %u / %u", nav->focus + 1, nav->count);
+    if (nav->view == DIAL_NAV_READING) lv_label_set_text_static(nav->hint, "Until restart");
     if (preview) {
         const dial_conversations_snapshot_t *view = nav->conversations;
         const char *roles[] = {"You", "Assistant", "Tool", "System", "Other"};
@@ -830,8 +852,11 @@ static void render(dial_navigation_t *nav)
         bool hidden = preview || (detail ? i != 0 : index >= nav->count || (message && i == 2));
         lv_obj_set_hidden(nav->rows[i], hidden);
         if (hidden) continue;
-        lv_obj_set_pos(nav->rows[i], message ? 58 : 38, detail ? 156 : message ? 150 + (int)i * 34 : 64 + (int)i * 44);
-        lv_obj_set_size(nav->rows[i], message ? 124 : 164, detail ? 32 : message ? 28 : 36);
+        bool reading = nav->view == DIAL_NAV_READING;
+        lv_obj_set_pos(nav->rows[i], message ? 58 : reading ? 44 : 38,
+            detail ? 156 : message ? 150 + (int)i * 34 : reading ? 58 + (int)i * 46 : 64 + (int)i * 44);
+        lv_obj_set_size(nav->rows[i], message ? 124 : reading ? 152 : 164,
+            detail ? 32 : message ? 28 : reading ? 44 : 36);
         lv_obj_set_pos(nav->icons[i], 12, message ? 5 : 9);
         lv_obj_set_pos(nav->names[i], 40, message ? 5 : 9);
         lv_obj_set_width(nav->names[i], message ? 76 : 112);
@@ -839,6 +864,12 @@ static void render(dial_navigation_t *nav)
         if (detail) { name = "Conversations"; icon = LV_SYMBOL_LIST; }
         else item(nav, index, &name, &icon);
         lv_label_set_text(nav->names[i], name);
+        if (reading) {
+            lv_obj_set_style_text_font(nav->names[i], openclaw_reading_font(), 0);
+            lv_obj_set_height(nav->names[i], LV_SIZE_CONTENT);
+            lv_obj_set_y(nav->names[i], (44 - openclaw_reading_font()->line_height) / 2);
+            lv_obj_set_width(nav->names[i], 100);
+        }
         if (nav->view == DIAL_NAV_AGENTS && index < agent_count(nav)) {
             render_avatar(nav->icons[i], nav->avatars[i], &nav->snapshot->page.agents[index]);
         } else {
@@ -956,7 +987,7 @@ bool dial_navigation_show_reader(dial_navigation_t *nav, const dial_agents_snaps
 void dial_navigation_move(dial_navigation_t *nav, int direction)
 {
     if (nav->view == DIAL_NAV_MESSAGING) return;
-    if (nav->view == DIAL_NAV_DISPLAY) {
+    if (nav->view == DIAL_NAV_BACKLIGHT) {
         int percent = nav->brightness + (direction > 0 ? 5 : -5);
         if (percent < 10) percent = nav->brightness < 10 && direction < 0 ? nav->brightness : 10;
         if (percent > 100) percent = 100;
@@ -1063,7 +1094,22 @@ void dial_navigation_activate(dial_navigation_t *nav)
         else back(nav);
         return;
     }
-    if (nav->view == DIAL_NAV_DISPLAY || nav->view == DIAL_NAV_CONNECTION) { back(nav); return; }
+    if (nav->view == DIAL_NAV_DISPLAY) {
+        if (nav->focus < 2) {
+            nav->view = nav->focus == 0 ? DIAL_NAV_BACKLIGHT : DIAL_NAV_READING;
+            nav->focus = nav->view == DIAL_NAV_READING ? (unsigned)openclaw_reading_size() : 0;
+            changed(nav);
+        } else back(nav);
+        return;
+    }
+    if (nav->view == DIAL_NAV_READING) {
+        if (nav->focus < 2) {
+            openclaw_reading_set_size((openclaw_reading_size_t)nav->focus);
+            changed(nav);
+        } else back(nav);
+        return;
+    }
+    if (nav->view == DIAL_NAV_BACKLIGHT || nav->view == DIAL_NAV_CONNECTION) { back(nav); return; }
     if (nav->view == DIAL_NAV_SETTINGS) {
         if (nav->focus < 3) dial_navigation_open_settings(nav, nav->focus == 0 ? DIAL_NAV_DISPLAY :
             nav->focus == 1 ? DIAL_NAV_CONNECTION : DIAL_NAV_MESSAGING);
@@ -1154,7 +1200,7 @@ void dial_navigation_set_brightness(dial_navigation_t *nav, int percent, bool fa
     if (nav->brightness == percent && nav->brightness_failed == failed) return;
     nav->brightness = percent;
     nav->brightness_failed = failed;
-    if (nav->view == DIAL_NAV_DISPLAY) changed(nav);
+    if (nav->view == DIAL_NAV_BACKLIGHT) changed(nav);
 }
 
 void dial_navigation_set_connection(dial_navigation_t *nav, const esp_openclaw_node_wifi_status_t *wifi, bool gateway)

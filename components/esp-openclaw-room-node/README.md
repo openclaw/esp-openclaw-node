@@ -32,6 +32,13 @@ display; tap the visible control again to start or stop Talk. If the
 button's action changes during a press, release and press again; a held Start
 press cannot become Stop when wake word or a remote command starts Talk.
 
+On the Watch, **Settings → Display** contains **Brightness** and **Reading
+text**. Standard and Larger reflow conversation previews, reviewed voice drafts,
+and the scrollable Connection details. The preference lasts until restart;
+menus and status icons keep their existing size. **This Watch → Display**
+opens the same controls. USB `menu brightness` and `menu reading` open the
+corresponding subpages.
+
 On the 1.8-inch Watch, **Menu → Agents** opens the agent directory.
 Swipe the list to browse up to eight agents per page; use the arrows for more
 pages, and tap a row to inspect its name and exact ID. Initials replace emoji

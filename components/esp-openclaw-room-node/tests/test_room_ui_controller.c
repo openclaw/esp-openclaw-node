@@ -11,6 +11,7 @@
 #include "room_face.h"
 #include "room_lobster.h"
 #include "room_ui_controller.h"
+#include "openclaw_reading.h"
 #include "esp_openclaw_node_wifi.h"
 
 static lv_display_t *display;
@@ -1687,11 +1688,13 @@ static void check_watch_display_settings(const char *path)
     room_diagnostics_close();
     assert(visible_watch_text("This Watch"));
     click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_IMAGE "  Display")));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_IMAGE "  Brightness")));
     assert(lv_obj_is_visible(find_visible_text(lv_layer_top(), "80%")) && brightness == 80);
     lv_obj_t *minus = lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_MINUS "  5%"));
     lv_obj_t *plus = lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_PLUS "  5%"));
     click_talk(minus);
     assert(brightness == 75 && lv_obj_is_visible(find_visible_text(lv_layer_top(), "75%")));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " Display")));
     click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " This Watch")));
     assert(visible_watch_text("This Watch"));
     click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " Devices")));
@@ -1699,6 +1702,7 @@ static void check_watch_display_settings(const char *path)
     assert(room_ui_watch_menu("home") == ESP_OK);
     assert(room_ui_watch_menu("settings") == ESP_OK);
     click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_IMAGE "  Display")));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_IMAGE "  Brightness")));
     assert(visible_watch_text("75%") && brightness == 75);
     fail_brightness = true;
     assert(room_ui_watch_brightness(50) == ESP_ERR_TIMEOUT && brightness == 75);
@@ -1737,7 +1741,7 @@ static void check_watch_display_settings(const char *path)
     assert(brightness == 10);
     expire_watch_hint();
     assert(room_ui_watch_brightness(45) == ESP_OK && brightness == 0);
-    assert(room_ui_watch_menu("display") == ESP_OK && brightness == 45);
+    assert(room_ui_watch_menu("brightness") == ESP_OK && brightness == 45);
     // A newer accepted setting consumes an already-held old button press.
     touch_talk(plus, true);
     assert(room_ui_watch_brightness(55) == ESP_OK && brightness == 55);
@@ -1766,7 +1770,9 @@ static void check_watch_display_settings(const char *path)
     assert(room_ui_watch_menu("devices") == ESP_OK);
     click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_HOME "  This Watch")));
     click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_IMAGE "  Display")));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_IMAGE "  Brightness")));
     assert(visible_watch_text("65%"));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " Display")));
     click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " This Watch")));
     click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_WIFI "  Connection")));
     assert(find_visible_fragment(lv_layer_top(), "Wi-Fi offline"));
@@ -1778,12 +1784,14 @@ static void check_watch_display_settings(const char *path)
     assert(lv_obj_is_visible(watch_menu_button));
     assert(room_ui_watch_menu("settings") == ESP_OK);
     click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_IMAGE "  Display")));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_IMAGE "  Brightness")));
     assert(talk_starts == starts && talk_stops == stops && agent_selections == selections);
     if (path) {
         char output[1024];
         snprintf(output, sizeof(output), "%s-display.ppm", path);
         write_frame(output);
     }
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " Display")));
     click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " Settings")));
     assert(lv_obj_is_visible(find_visible_text(lv_layer_top(), "Settings")));
     click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " Menu")));
@@ -2181,6 +2189,57 @@ static void check_watch_voice(const char *path)
     puts("watch voice: wake, recording, review, guarded Send, delivery states and conversation routing passed");
 }
 
+static void check_watch_reading_size(const char *path)
+{
+    unsigned starts = talk_starts, sends = voice_sends, begins = voice_begins;
+    assert(room_ui_watch_menu("display") == ESP_OK);
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LIST "  Reading text")));
+    assert(visible_watch_text("Reading text") && visible_watch_text(LV_SYMBOL_OK "  Standard"));
+    lv_obj_t *sample = find_visible_text(lv_layer_top(), "Hello from your assistant.");
+    assert(lv_obj_get_style_text_font(sample, 0) == &lv_font_montserrat_14);
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), "Larger")));
+    assert(lv_obj_get_style_text_font(sample, 0) == &lv_font_montserrat_20);
+    assert(visible_watch_text(LV_SYMBOL_OK "  Larger"));
+    if (path) { char output[1024]; snprintf(output, sizeof(output), "%s-reading-settings.ppm", path); write_frame(output); }
+    assert(room_ui_watch_menu("brightness") == ESP_OK);
+    char percentage[16]; snprintf(percentage, sizeof(percentage), "%d%%", brightness);
+    const lv_font_t *brightness_font = lv_obj_get_style_text_font(find_visible_text(lv_layer_top(), percentage), 0);
+#if LV_FONT_MONTSERRAT_28
+    bool brightness_restored = brightness_font == &lv_font_montserrat_28;
+#else
+    bool brightness_restored = brightness_font == &lv_font_montserrat_14;
+#endif
+    assert(room_ui_watch_menu("device") == ESP_OK);
+    assert(room_ui_watch_menu("display") == ESP_OK);
+    assert(room_ui_watch_menu("home") == ESP_OK);
+    assert(room_ui_watch_menu("reading") == ESP_OK);
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " Display")));
+    bool direct_parent_restored = visible_watch_text(LV_SYMBOL_LEFT " Settings");
+    if (!brightness_restored) fputs("Reading leaked its font into Brightness\n", stderr);
+    if (!direct_parent_restored) fputs("Direct reading entry reused the old This Watch parent\n", stderr);
+    assert(brightness_restored && direct_parent_restored);
+    assert(room_ui_watch_menu("home") == ESP_OK);
+    room_voice_snapshot_t draft = {.state = ROOM_VOICE_DRAFT, .generation = 900,
+        .recipient_revision = 42, .owner_incarnation = 7, .recipient = "Kitsune",
+        .text = "A longer draft should stay readable. Its words wrap inside the existing reading area, and the rest remains available by scrolling. A larger font must never submit this message or start the microphone."};
+    room_ui_store_voice(&draft); room_ui_refresh();
+    lv_obj_t *text = find_visible_text(lv_layer_top(), draft.text);
+    assert(text != NULL && lv_obj_get_style_text_font(text, 0) == &lv_font_montserrat_20);
+    lv_obj_update_layout(text);
+    int larger_height = lv_obj_get_height(text);
+    if (path) { char output[1024]; snprintf(output, sizeof(output), "%s-reading-large.ppm", path); write_frame(output); }
+    assert(room_ui_watch_menu("reading") == ESP_OK);
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), "Standard")));
+    assert(room_ui_watch_menu("home") == ESP_OK);
+    ++draft.generation; room_ui_store_voice(&draft); room_ui_refresh();
+    text = find_visible_text(lv_layer_top(), draft.text);
+    lv_obj_update_layout(text);
+    assert(lv_obj_get_style_text_font(text, 0) == &lv_font_montserrat_14 && lv_obj_get_height(text) < larger_height);
+    assert(talk_starts == starts && voice_sends == sends && voice_begins == begins);
+    draft.state = ROOM_VOICE_READY; room_ui_store_voice(&draft); room_ui_refresh();
+    puts("watch reading size: native preview, draft reflow and no send/capture side effects passed");
+}
+
 int main(int argc, char **argv)
 {
     assert(argc >= 2);
@@ -2337,6 +2396,7 @@ int main(int argc, char **argv)
         check_watch_display_settings(argc == 3 ? argv[2] : NULL);
         check_watch_messaging(argc == 3 ? argv[2] : NULL);
         check_watch_voice(argc == 3 ? argv[2] : NULL);
+        check_watch_reading_size(argc == 3 ? argv[2] : NULL);
         // This isolated fixture replaces and destroys the mascot singleton.
         check_watch_repaint();
     }

@@ -1,6 +1,7 @@
 #include "dial_input.h"
 #include "dial_home.h"
 #include "dial_navigation.h"
+#include "openclaw_reading.h"
 #include "esp_openclaw_avatar.h"
 
 #include <assert.h>
@@ -1314,6 +1315,9 @@ int main(int argc, char **argv)
     snapshot("settings");
     touch(120, 82, true); touch(120, 82, false);
     assert(navigation.view == DIAL_NAV_DISPLAY);
+    snapshot("display-menu");
+    touch(120, 82, true); touch(120, 82, false);
+    assert(navigation.view == DIAL_NAV_BACKLIGHT);
     assert(strcmp(lv_label_get_text(navigation.description), "65%") == 0);
     snapshot("display");
     lv_obj_update_layout(screen);
@@ -1344,7 +1348,7 @@ int main(int argc, char **argv)
     roster.state = DIAL_AGENTS_OFFLINE;
     ++roster.revision;
     dial_navigation_update(&navigation, &roster);
-    assert(navigation.view == DIAL_NAV_DISPLAY && brightness == 75);
+    assert(navigation.view == DIAL_NAV_BACKLIGHT && brightness == 75);
     for (unsigned i = 0; i < 30; ++i) dial_navigation_move(&navigation, 1);
     assert(brightness == 100);
     unsigned before_limit = brightness_requests;
@@ -1361,6 +1365,8 @@ int main(int argc, char **argv)
     dial_navigation_set_brightness(&navigation, brightness, false);
     touch(165, 168, false);
     assert(brightness == 55);
+    touch(68, 44, true); touch(68, 44, false);
+    assert(navigation.view == DIAL_NAV_DISPLAY && navigation.focus == 0);
     touch(68, 44, true); touch(68, 44, false);
     assert(navigation.view == DIAL_NAV_SETTINGS && navigation.focus == 0);
     ++roster.revision;
@@ -1451,6 +1457,8 @@ int main(int argc, char **argv)
     touch(68, 44, true); touch(68, 44, false);
     assert(navigation.view == DIAL_NAV_MENU);
     dial_navigation_open_settings(&navigation, DIAL_NAV_DISPLAY);
+    dial_navigation_move(&navigation, 1);
+    dial_navigation_move(&navigation, 1);
     encoder_state = LV_INDEV_STATE_PRESSED;
     lv_indev_read(encoder); advance(40);
     encoder_state = LV_INDEV_STATE_RELEASED;
@@ -1663,6 +1671,41 @@ int main(int argc, char **argv)
     assert(confirmations == before_settings);
     puts("Control Back: tap, drag, replaced press and hold preserve confirmation semantics");
 
+    navigating = true;
+    dial_input_set_control(&input, false);
+    lv_obj_set_hidden(home.root, true);
+    lv_obj_set_hidden(arc, true);
+    dial_activity_t reading_activity = {.stage = DIAL_ACTIVITY_FAILED,
+        .label = "Reading test", .message = "A longer response wraps inside the reading area. Turn to read the remaining words. Text size never submits a control request."};
+    dial_navigation_activity_update(&navigation, &reading_activity);
+    dial_navigation_open_activity(&navigation);
+    lv_obj_update_layout(screen);
+    int standard_height = lv_obj_get_height(navigation.preview_text);
+    unsigned reading_confirmations = confirmations;
+    dial_navigation_open_settings(&navigation, DIAL_NAV_DISPLAY);
+    touch(120, 126, true); touch(120, 126, false);
+    assert(navigation.view == DIAL_NAV_READING);
+    touch(120, 126, true); touch(120, 126, false);
+    assert(openclaw_reading_size() == OPENCLAW_READING_LARGE);
+    lv_obj_update_layout(screen);
+    for (unsigned i = 0; i < 3; ++i) {
+        assert(lv_obj_get_height(navigation.rows[i]) >= 44);
+        check_home_bounds(navigation.rows[i]);
+        assert(lv_obj_get_style_text_font(navigation.names[i], 0) == &lv_font_montserrat_20);
+    }
+    snapshot("reading-settings");
+    dial_navigation_open_activity(&navigation);
+    lv_obj_update_layout(screen);
+    assert(lv_obj_get_style_text_font(navigation.preview_text, 0) == &lv_font_montserrat_20);
+    assert(lv_obj_get_height(navigation.preview_text) > standard_height);
+    dial_navigation_move(&navigation, 1);
+    assert(lv_obj_get_scroll_y(navigation.preview_body) > 0);
+    snapshot("reading-large");
+    dial_navigation_open_settings(&navigation, DIAL_NAV_DISPLAY);
+    touch(120, 126, true); touch(120, 126, false);
+    touch(120, 82, true); touch(120, 82, false);
+    assert(openclaw_reading_size() == OPENCLAW_READING_STANDARD && confirmations == reading_confirmations);
+    puts("Dial reading size: input, reflow, scrolling and no control submission passed");
     assert(reader_boundary_failures == 0);
     lv_deinit();
 }

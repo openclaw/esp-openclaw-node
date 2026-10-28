@@ -29,6 +29,10 @@ static bool brightness_failure;
 static unsigned brightness_requests;
 static unsigned messaging_requests, messaging_cancels;
 static bool messaging_rejected;
+static dial_reply_snapshot_t reply;
+static unsigned reply_begins, reply_sends, reply_closes, reply_reads;
+static unsigned reply_requested_preview, reply_requested_revision;
+static bool reply_rejected;
 static uint16_t pixels[240 * 240];
 
 static void flush(lv_display_t *display, const lv_area_t *area, uint8_t *data)
@@ -105,6 +109,43 @@ static void navigation_event(dial_navigation_event_t kind, size_t offset, void *
         else ++messaging_cancels;
         requested_offset = offset;
         dial_navigation_messaging_result(&navigation, !messaging_rejected);
+    }
+    else if (kind == DIAL_NAV_REPLY_BEGIN || kind == DIAL_NAV_REPLY_SEND ||
+             kind == DIAL_NAV_REPLY_CLOSE || kind == DIAL_NAV_REPLY_READ) {
+        if (kind == DIAL_NAV_REPLY_BEGIN) {
+            ++reply_begins;
+            reply_requested_preview = navigation.reply_preview_revision;
+            assert(offset < DIAL_REPLY_PRESET_COUNT);
+            if (!reply_rejected) {
+                reply = (dial_reply_snapshot_t){.state = DIAL_REPLY_PREPARING, .revision = reply.revision + 1,
+                    .preview_revision = reply_requested_preview, .agent = conversations.agent};
+                strcpy(reply.title, conversations.page.sessions[conversations.selected].title);
+                strcpy(reply.detail, "Checking this conversation.");
+                strcpy(reply.text, offset == DIAL_REPLY_CONTINUE ? "Please continue." :
+                    offset == DIAL_REPLY_SUMMARIZE ? "Please summarize the conversation so far." : "Please explain the last response in more detail.");
+            }
+        } else if (kind == DIAL_NAV_REPLY_SEND) {
+            ++reply_sends;
+            reply_requested_revision = offset;
+            if (!reply_rejected) {
+                reply.state = DIAL_REPLY_SENDING; reply.can_send = false; ++reply.revision;
+                strcpy(reply.detail, "Waiting for the Gateway.");
+            }
+        } else if (kind == DIAL_NAV_REPLY_CLOSE) {
+            ++reply_closes;
+            reply_requested_revision = offset;
+            if (reply.state == DIAL_REPLY_PREPARING || reply.state == DIAL_REPLY_REVIEW)
+                reply = (dial_reply_snapshot_t){.revision = reply.revision + 1};
+        } else {
+            ++reply_reads;
+            reply_requested_revision = offset;
+            if (!reply_rejected) {
+                ++conversations.preview_revision;
+                assert(dial_navigation_show_reader(&navigation, &roster, &conversations, true));
+            }
+        }
+        dial_navigation_reply_update(&navigation, &reply);
+        dial_navigation_reply_result(&navigation, !reply_rejected);
     }
     else if (kind == DIAL_NAV_CONVERSATIONS) { ++opens; requested_offset = offset; }
     else if (kind == DIAL_NAV_READ) { ++reads; requested_offset = offset; }
@@ -429,6 +470,149 @@ static void check_messaging(lv_indev_t *encoder)
     touch(120, 184, true); advance(1000); touch(120, 184, false);
     assert(!navigating && messaging_requests == requests && confirmations == before);
     puts("Messaging: permission-only state, fenced request/cancel, retry, Back and circular layout passed");
+}
+
+static void check_replies(lv_indev_t *encoder)
+{
+    unsigned confirms = confirmations;
+    navigating = true;
+    lv_obj_set_hidden(home.root, true);
+    lv_obj_set_hidden(input.arc, true);
+    dial_input_set_control(&input, false);
+    roster.state = DIAL_AGENTS_READY;
+    ++roster.revision;
+    roster.page.count = roster.page.total = 1;
+    strcpy(roster.page.agents[0].id, "beta");
+    strcpy(roster.page.agents[0].name, "Beta");
+    conversations = (dial_conversations_snapshot_t){.state = DIAL_AGENTS_READY,
+        .preview_state = DIAL_AGENTS_READY, .revision = 50, .preview_revision = 51,
+        .agent = roster.page.agents[0], .page = {.count = 1},
+        .preview = {.status = ESP_OPENCLAW_PREVIEW_EMPTY}};
+    strcpy(conversations.page.sessions[0].title, "A careful next step");
+    assert(dial_navigation_show_reader(&navigation, &roster, &conversations, true));
+    lv_obj_set_hidden(navigation.root, false); // The application owns view visibility.
+    assert(lv_obj_is_visible(navigation.root));
+    assert(strcmp(lv_label_get_text(navigation.names[0]), "Reply") == 0);
+    snapshot("reply-empty-preview");
+    press_encoder(encoder);
+    assert(navigation.view == DIAL_NAV_REPLY_PICKER && reply_begins == 0);
+    assert(strstr(lv_label_get_text(navigation.description), "Messaging access needed") != NULL);
+    snapshot("reply-access-needed");
+    press_encoder(encoder);
+    assert(navigation.view == DIAL_NAV_MESSAGING);
+    dial_messaging_snapshot_t access = {.state = DIAL_MESSAGING_READY, .revision = 100};
+    dial_navigation_messaging_update(&navigation, &access);
+    touch(68, 44, true); touch(68, 44, false);
+    assert(navigation.view == DIAL_NAV_REPLY_PICKER && reply_begins == 0);
+    snapshot("reply-presets");
+    encoder_diff = 1; lv_indev_read(encoder); advance(40);
+    press_encoder(encoder);
+    assert(reply_begins == 1 && reply_requested_preview == 51 && reply_sends == 0);
+    assert(navigation.view == DIAL_NAV_REPLY_REVIEW);
+    assert(strcmp(lv_label_get_text(navigation.heading), "Preparing") == 0);
+    snapshot("reply-preparing");
+    reply.state = DIAL_REPLY_REVIEW;
+    strcpy(reply.detail, "Review before sending.");
+    reply.can_send = true;
+    ++reply.revision;
+    dial_navigation_reply_update(&navigation, &reply);
+    const char *review = lv_label_get_text(navigation.preview_text);
+    assert(strstr(review, "Beta\nA careful next step") == review);
+    const char *message = strstr(review, reply.text);
+    const char *status = strstr(review, reply.detail);
+    const char *identity = strstr(review, "Agent: beta");
+    assert(message != NULL && status != NULL && identity != NULL);
+    assert(message < status && status < identity);
+    check_reader_limits(encoder, "reply-review-bottom");
+    snapshot("reply-review");
+    press_encoder(encoder);
+    assert(navigation.view == DIAL_NAV_REPLY_ACTIONS && reply_sends == 0);
+    assert(strcmp(lv_label_get_text(navigation.names[0]), "Send") == 0);
+    snapshot("reply-actions");
+    touch(120, 82, true);
+    ++reply.revision; // A changed owner revision consumes the held Send.
+    dial_navigation_reply_update(&navigation, &reply);
+    touch(120, 82, false);
+    assert(reply_sends == 0);
+    encoder_state = LV_INDEV_STATE_PRESSED; lv_indev_read(encoder); advance(40);
+    ++reply.revision;
+    dial_navigation_reply_update(&navigation, &reply);
+    encoder_state = LV_INDEV_STATE_RELEASED; lv_indev_read(encoder); advance(40);
+    assert(reply_sends == 0);
+    access.state = DIAL_MESSAGING_OFF; ++access.revision;
+    touch(120, 82, true);
+    dial_navigation_messaging_update(&navigation, &access);
+    touch(120, 82, false);
+    assert(reply_sends == 0 && strcmp(lv_label_get_text(navigation.names[0]), "Messaging") == 0);
+    access.state = DIAL_MESSAGING_READY; ++access.revision;
+    dial_navigation_messaging_update(&navigation, &access);
+    unsigned sent_revision = reply.revision;
+    press_encoder(encoder);
+    assert(reply_sends == 1 && reply_requested_revision == sent_revision);
+    assert(strcmp(lv_label_get_text(navigation.heading), "Sending") == 0);
+    snapshot("reply-sending");
+    touch(68, 44, true); touch(68, 44, false);
+    assert(navigation.view == DIAL_NAV_PREVIEW && reply.state == DIAL_REPLY_SENDING);
+    ++conversations.preview_revision;
+    dial_navigation_conversations_update(&navigation, &conversations);
+    press_encoder(encoder);
+    assert(navigation.view == DIAL_NAV_REPLY_REVIEW && reply_begins == 1);
+    reply.state = DIAL_REPLY_ACCEPTED; ++reply.revision; reply.can_read = true;
+    strcpy(reply.detail, "Accepted. Waiting for the agent.");
+    dial_navigation_reply_update(&navigation, &reply);
+    snapshot("reply-accepted");
+    press_encoder(encoder);
+    assert(strcmp(lv_label_get_text(navigation.names[0]), "Read reply") == 0 && navigation.count == 2);
+    reply.state = DIAL_REPLY_UNKNOWN; ++reply.revision;
+    strcpy(reply.detail, "Outcome unknown. Check the conversation before retrying.");
+    dial_navigation_reply_update(&navigation, &reply);
+    touch(68, 44, true); touch(68, 44, false);
+    assert(strstr(lv_label_get_text(navigation.preview_text), "Check this conversation before trying again.") != NULL);
+    snapshot("reply-unknown");
+    reply.state = DIAL_REPLY_SENT; ++reply.revision;
+    strcpy(reply.detail, "Sent. Check the conversation; agent work may continue.");
+    dial_navigation_reply_update(&navigation, &reply);
+    assert(strcmp(lv_label_get_text(navigation.heading), "Sent") == 0);
+    assert(strstr(lv_label_get_text(navigation.preview_text), "agent work may continue.") != NULL);
+    snapshot("reply-sent");
+    reply.state = DIAL_REPLY_FAILED; ++reply.revision;
+    strcpy(reply.detail, "The Gateway rejected this message.");
+    dial_navigation_reply_update(&navigation, &reply);
+    assert(strcmp(lv_label_get_text(navigation.heading), "Reply failed") == 0);
+    assert(strstr(lv_label_get_text(navigation.preview_text), reply.detail) != NULL);
+    snapshot("reply-failed");
+    press_encoder(encoder);
+    assert(strcmp(lv_label_get_text(navigation.names[1]), "New reply") == 0);
+    press_encoder(encoder);
+    assert(reply_reads == 1 && navigation.view == DIAL_NAV_PREVIEW);
+    press_encoder(encoder);
+    assert(navigation.view == DIAL_NAV_REPLY_PICKER && reply_begins == 1); // Refreshed preview is a new context.
+    reply_rejected = true;
+    press_encoder(encoder);
+    assert(reply_begins == 2 && reply_sends == 1);
+    assert(strcmp(lv_label_get_text(navigation.hint), "Back to retry") == 0);
+    reply_rejected = false;
+    encoder_diff = 2; lv_indev_read(encoder); advance(40);
+    press_encoder(encoder);
+    assert(reply_begins == 3 && strstr(reply.text, "explain") != NULL);
+    reply.state = DIAL_REPLY_REVIEW; reply.can_send = true; ++reply.revision;
+    strcpy(reply.agent.name, "A thoughtful research assistant with a long display name");
+    strcpy(reply.agent.id, "research-and-planning-assistant-with-a-long-agent-identifier");
+    strcpy(reply.title, "Reviewing the next engineering step and the practical tradeoffs in a long conversation");
+    strcpy(reply.detail, "Review before sending.");
+    dial_navigation_reply_update(&navigation, &reply);
+    assert(strstr(lv_label_get_text(navigation.preview_text), reply.agent.name) != NULL);
+    assert(strstr(lv_label_get_text(navigation.preview_text), reply.agent.id) != NULL);
+    assert(strstr(lv_label_get_text(navigation.preview_text), reply.title) != NULL);
+    assert(strstr(lv_label_get_text(navigation.preview_text), reply.text) != NULL);
+    check_reader_limits(encoder, "reply-long-review-bottom");
+    unsigned closes = reply_closes;
+    touch(68, 44, true); touch(68, 44, false);
+    assert(reply_closes == closes + 1 && reply.state == DIAL_REPLY_IDLE && navigation.view == DIAL_NAV_REPLY_PICKER);
+    assert(reply_sends == 1 && confirmations == confirms);
+    for (unsigned child = 0; child < lv_obj_get_child_count(navigation.root); ++child)
+        check_home_bounds(lv_obj_get_child(navigation.root, child));
+    puts("Quick replies: empty preview, permission return, exact review, fenced Send, retained outcome and refreshed reader passed");
 }
 
 int main(int argc, char **argv)
@@ -1068,6 +1252,7 @@ int main(int argc, char **argv)
     assert(!navigating && confirmations == before_settings);
     puts("local display and connection input, bounds, failures, offline focus and return: passed");
     check_messaging(encoder);
+    check_replies(encoder);
 
     /* Read the latest request through real menu/encoder/touch input. Browsing
      * and result updates never confirm the numeric control. */

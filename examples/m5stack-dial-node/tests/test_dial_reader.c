@@ -13,6 +13,11 @@ struct esp_openclaw_node { uint32_t id; const char *uri; };
 static struct esp_openclaw_node node = {0, "ws://gateway-a.example"};
 static struct esp_openclaw_node client = {0, "ws://gateway-a.example"};
 static esp_openclaw_node_event_cb_t event_cb;
+static esp_openclaw_node_gateway_event_cb_t gateway_event_cb;
+static esp_openclaw_node_gateway_request_cb_t chat_response;
+static void *chat_context;
+static unsigned random_sequence;
+void esp_fill_random(void *buffer, size_t length) { memset(buffer, ++random_sequence, length); }
 static void (*worker)(void *);
 static jmp_buf idle;
 static int waits, locked, creates, connects, disconnects, destroys, scopes, delays;
@@ -47,14 +52,17 @@ esp_err_t esp_timer_stop(esp_timer_handle_t handle) {
 esp_err_t esp_openclaw_node_gateway_request_on_connection(esp_openclaw_node_handle_t handle,
     uint32_t connection, const char *method, const char *params,
     esp_openclaw_node_gateway_request_cb_t callback, void *context) {
-    assert(!locked && !in_callback && handle == &client && connection == client.id);
+    bool chat = strcmp(method, "chat.history") == 0 || strcmp(method, "chat.send") == 0;
+    assert((chat || !locked) && !in_callback && handle == &client && connection == client.id);
     assert(strlen(method) < sizeof(last_method) && strlen(params) < sizeof(last_params));
     strcpy(last_method, method);
     strcpy(last_params, params);
     assert(strcmp(method, "agents.list") != 0 || strcmp(params, "{}") == 0);
     ++queries;
     if (query_result == ESP_OK) {
-        if (strcmp(method, "node.list") == 0) {
+        if (chat) {
+            assert(chat_response == NULL); chat_response = callback; chat_context = context;
+        } else if (strcmp(method, "node.list") == 0) {
             assert(devices_response == NULL && strcmp(params, "{}") == 0);
             devices_response = callback; devices_context = context;
         } else if (strncmp(method, "device.scopes.", 14) == 0) {
@@ -64,12 +72,17 @@ esp_err_t esp_openclaw_node_gateway_request_on_connection(esp_openclaw_node_hand
     return query_result;
 }
 
-SemaphoreHandle_t xSemaphoreCreateMutex(void) { return &locked; }
-void xSemaphoreTake(SemaphoreHandle_t sem, uint32_t ticks) {
-    assert(sem == &locked && ticks == portMAX_DELAY && !locked && !in_callback); locked = 1;
+SemaphoreHandle_t xSemaphoreCreateMutex(void) {
+    static bool reader_created;
+    if (!reader_created) { reader_created = true; return &locked; }
+    return calloc(1, sizeof(int));
 }
-void xSemaphoreGive(SemaphoreHandle_t sem) { assert(sem == &locked && locked); locked = 0; }
-void vSemaphoreDelete(SemaphoreHandle_t sem) { assert(sem == &locked && !locked); }
+void xSemaphoreTake(SemaphoreHandle_t sem, uint32_t ticks) {
+    assert(sem != NULL && ticks == portMAX_DELAY && !*(int *)sem && !in_callback);
+    *(int *)sem = 1;
+}
+void xSemaphoreGive(SemaphoreHandle_t sem) { assert(sem != NULL && *(int *)sem); *(int *)sem = 0; }
+void vSemaphoreDelete(SemaphoreHandle_t sem) { assert(sem != NULL && !*(int *)sem); if (sem != &locked) free(sem); }
 int xTaskCreate(void (*fn)(void *), const char *name, uint32_t stack, void *arg, int priority, TaskHandle_t *out) {
     (void)name; (void)arg; (void)priority; assert(stack >= 4096);
     worker = fn; *out = &worker; return pdPASS;
@@ -93,7 +106,7 @@ esp_err_t esp_openclaw_node_create(const esp_openclaw_node_config_t *config, esp
     assert(!locked && strcmp(config->role, "operator") == 0 && config->event_cb != NULL);
     ++creates;
     if (create_result != ESP_OK) { esp_err_t err = create_result; create_result = ESP_OK; return err; }
-    event_cb = config->event_cb; *out = &client; return ESP_OK;
+    event_cb = config->event_cb; gateway_event_cb = config->gateway_event_cb; *out = &client; return ESP_OK;
 }
 esp_err_t esp_openclaw_node_register_scope(esp_openclaw_node_handle_t handle, const char *scope) {
     assert(handle == &client && client.id == 0);
@@ -174,6 +187,43 @@ static void request_messaging(void) {
     assert(strcmp(snapshot.request_id, "approval-one") == 0);
     assert(strcmp(last_method, "device.scopes.waitUpgrade") == 0);
     assert(strcmp(last_params, "{\"requestId\":\"approval-one\"}") == 0);
+}
+static void chat_reply(const char *json) {
+    assert(chat_response != NULL);
+    esp_openclaw_node_gateway_result_t result = {.ok = json != NULL, .payload_json = json};
+    esp_openclaw_node_gateway_request_cb_t callback = chat_response;
+    void *context = chat_context;
+    chat_response = NULL; chat_context = NULL;
+    callback(&client, &result, context);
+}
+static dial_reply_snapshot_t reply_state(dial_reply_state_t expected) {
+    dial_reply_snapshot_t reply;
+    dial_reader_reply_copy(&reply);
+    assert(reply.state == expected);
+    return reply;
+}
+static unsigned reply_preview(void) {
+    assert(dial_reader_agents_refresh(0) == ESP_OK); step();
+    respond("{\"agents\":[{\"id\":\"kitsune\",\"identity\":{\"name\":\"Kitsune\",\"emoji\":\"🦊\"}}]}"); step();
+    dial_agents_snapshot_t agents; dial_reader_agents_copy(&agents);
+    assert(dial_reader_conversations_open("kitsune", agents.revision) == ESP_OK); step();
+    respond("{\"sessions\":[{\"key\":\"agent:kitsune:main\",\"label\":\"Weekend plans\"}]}"); step();
+    dial_conversations_snapshot_t *view = malloc(sizeof(*view)); assert(view != NULL);
+    dial_reader_conversations_copy(view);
+    assert(dial_reader_preview_open(0, view->revision) == ESP_OK); step();
+    respond("{\"previews\":[{\"key\":\"agent:kitsune:main\",\"status\":\"empty\",\"items\":[]}]}"); step();
+    dial_reader_conversations_copy(view);
+    unsigned revision = view->preview_revision;
+    free(view); return revision;
+}
+static dial_reply_snapshot_t prepare_reply(unsigned revision) {
+    assert(dial_reader_reply_begin(DIAL_REPLY_CONTINUE, revision) == ESP_OK); step();
+    reply_state(DIAL_REPLY_PREPARING);
+    assert(strcmp(last_method, "chat.history") == 0);
+    chat_reply("{\"sessionId\":\"session-one\",\"sessionInfo\":{\"key\":\"agent:kitsune:main\",\"agentId\":\"kitsune\",\"sessionId\":\"session-one\",\"activeLeafEntryId\":\"leaf-one\"}}"); step();
+    dial_reply_snapshot_t reply = reply_state(DIAL_REPLY_REVIEW);
+    assert(reply.can_send && reply.can_read && strcmp(reply.text, "Please continue.") == 0);
+    return reply;
 }
 static void node_connected(uint32_t id) {
     node.id = id; locked = 1; in_callback = true;
@@ -591,6 +641,92 @@ int main(void) {
     messaging(DIAL_MESSAGING_REJECTED); assert(disconnects == before + 1);
     respond(NULL); disconnected(ESP_OPENCLAW_NODE_DISCONNECTED_REASON_REQUESTED); step();
     connected(98); step(); status("ready", true);
+    // A reply needs current write authority and an exact, still-visible preview.
+    unsigned preview = reply_preview();
+    assert(dial_reader_reply_begin(DIAL_REPLY_CONTINUE, preview) == ESP_ERR_INVALID_STATE);
+    request_messaging(); approve_response(approved); step();
+    disconnected(ESP_OPENCLAW_NODE_DISCONNECTED_REASON_REQUESTED); step();
+    connected(99); step(); respond("{\"agents\":[]}"); step();
+    preview = reply_preview();
+    assert(dial_reader_reply_begin(DIAL_REPLY_CONTINUE, preview - 1) == ESP_ERR_INVALID_STATE);
+    assert(dial_reader_reply_begin(DIAL_REPLY_PRESET_COUNT, preview) == ESP_ERR_INVALID_ARG);
+
+    // Closing a draft releases only its view; a late accepted history reply is safe.
+    assert(dial_reader_reply_begin(DIAL_REPLY_CONTINUE, preview) == ESP_OK); step();
+    dial_reply_snapshot_t reply = reply_state(DIAL_REPLY_PREPARING);
+    dial_reader_reply_close(reply.revision); reply_state(DIAL_REPLY_IDLE);
+    chat_reply(NULL); step(); reply_state(DIAL_REPLY_IDLE);
+
+    reply = prepare_reply(preview);
+    assert(strcmp(reply.agent.name, "Kitsune") == 0 && strcmp(reply.title, "Weekend plans") == 0);
+    assert(dial_reader_reply_send(reply.revision - 1) == ESP_ERR_INVALID_STATE);
+    // A refreshed/changed preview revokes the reviewed draft before worker polling.
+    assert(dial_reader_reply_read(reply.revision) == ESP_OK);
+    assert(dial_reader_reply_send(reply.revision) == ESP_ERR_INVALID_STATE); step();
+    reply_state(DIAL_REPLY_FAILED);
+    respond("{\"previews\":[{\"key\":\"agent:kitsune:main\",\"status\":\"empty\",\"items\":[]}]}"); step();
+    preview = reply_preview(); reply = prepare_reply(preview);
+    query_result = ESP_ERR_NO_MEM;
+    assert(dial_reader_reply_send(reply.revision) == ESP_OK); step();
+    query_result = ESP_OK; reply = reply_state(DIAL_REPLY_REVIEW); assert(reply.can_send);
+    step(); reply = reply_state(DIAL_REPLY_REVIEW);
+    assert(strcmp(reply.detail, "Could not queue. Try Send again.") == 0);
+    assert(dial_reader_reply_send(reply.revision) == ESP_OK);
+    assert(dial_reader_reply_send(reply.revision) == ESP_ERR_INVALID_STATE);
+    reply = reply_state(DIAL_REPLY_SENDING);
+    dial_reader_reply_close(reply.revision); step(); // Back before worker admission retains Send.
+    reply = reply_state(DIAL_REPLY_SENDING);
+    assert(strcmp(last_method, "chat.send") == 0);
+    params = cJSON_Parse(last_params); assert(params != NULL);
+    assert(strcmp(cJSON_GetObjectItem(params, "agentId")->valuestring, "kitsune") == 0);
+    assert(strcmp(cJSON_GetObjectItem(params, "sessionKey")->valuestring, "agent:kitsune:main") == 0);
+    assert(strcmp(cJSON_GetObjectItem(params, "sessionId")->valuestring, "session-one") == 0);
+    assert(strcmp(cJSON_GetObjectItem(params, "expectedLeafEntryId")->valuestring, "leaf-one") == 0);
+    assert(strcmp(cJSON_GetObjectItem(params, "message")->valuestring, "Please continue.") == 0);
+    char run[33]; strcpy(run, cJSON_GetObjectItem(params, "idempotencyKey")->valuestring);
+    cJSON_Delete(params);
+    assert(dial_reader_reply_begin(DIAL_REPLY_SUMMARIZE, preview) == ESP_ERR_INVALID_STATE);
+    char event[400]; snprintf(event, sizeof(event), "{\"runId\":\"%s\",\"status\":\"started\"}", run);
+    chat_reply(event); step(); reply = reply_state(DIAL_REPLY_ACCEPTED);
+    // Reading is independent; a stalled read must not sever a running reply.
+    assert(dial_reader_reply_read(reply.revision) == ESP_OK); step();
+    before = disconnects; now += 15000000; step(); assert(disconnects == before);
+    reply_state(DIAL_REPLY_ACCEPTED);
+    snprintf(event, sizeof(event), "{\"runId\":\"%s\",\"sessionKey\":\"agent:kitsune:main\",\"agentId\":\"kitsune\",\"seq\":1,\"state\":\"final\"}", run);
+    gateway_event_cb(&client, "chat", event, NULL); step();
+    reply = reply_state(DIAL_REPLY_SENT); assert(disconnects == before + 1);
+    respond(NULL); disconnected(ESP_OPENCLAW_NODE_DISCONNECTED_REASON_REQUESTED); step();
+    reply_state(DIAL_REPLY_SENT); connected(100); step();
+
+    // An admitted send with no conclusive response must never become retryable.
+    preview = reply_preview(); reply = prepare_reply(preview);
+    assert(dial_reader_reply_send(reply.revision) == ESP_OK); step();
+    before = queries;
+    disconnected(ESP_OPENCLAW_NODE_DISCONNECTED_REASON_CONNECTION_LOST); step();
+    reply = reply_state(DIAL_REPLY_UNKNOWN); assert(!reply.can_send && !reply.can_read);
+    dial_reader_reply_close(reply.revision); reply_state(DIAL_REPLY_UNKNOWN);
+    chat_reply(NULL); step(); assert(queries == before); // No automatic replay.
+    connected(101); step(); respond("{\"agents\":[]}"); step();
+    reply = reply_state(DIAL_REPLY_UNKNOWN);
+    assert(dial_reader_reply_read(reply.revision) == ESP_ERR_INVALID_STATE);
+    preview = reply_preview(); reply = prepare_reply(preview);
+    assert(dial_reader_reply_send(reply.revision) == ESP_OK); step();
+    params = cJSON_Parse(last_params); assert(params != NULL);
+    strcpy(run, cJSON_GetObjectItem(params, "idempotencyKey")->valuestring); cJSON_Delete(params);
+    snprintf(event, sizeof(event), "{\"runId\":\"%s\",\"status\":\"ok\"}", run);
+    chat_reply(event); step(); reply = reply_state(DIAL_REPLY_SENT);
+    assert(reply.can_read && !reply.can_send);
+    assert(dial_reader_reply_read(reply.revision) == ESP_OK); step();
+    assert(strcmp(last_method, "sessions.preview") == 0);
+    respond("{\"previews\":[{\"key\":\"agent:kitsune:main\",\"status\":\"ok\",\"items\":[{\"role\":\"assistant\",\"text\":\"Next step\"}]}]}"); step();
+    reply = reply_state(DIAL_REPLY_SENT); assert(reply.preview_revision == preview);
+
+    // A primary replacement between Send and worker admission cannot send on the old target.
+    preview = reply_preview(); reply = prepare_reply(preview);
+    assert(dial_reader_reply_send(reply.revision) == ESP_OK);
+    before = queries; node_connected(23); step();
+    reply = reply_state(DIAL_REPLY_FAILED); assert(queries == before && chat_response == NULL);
+    dial_reader_reply_close(reply.revision); step(); reply_state(DIAL_REPLY_IDLE);
     puts("Dial reader: role, handoff, loss, auth, origin and stale-connection cases passed");
     return 0;
 }

@@ -132,6 +132,8 @@ static void close_devices(void)
 static void show_view(dial_view_t view)
 {
     if (view != VIEW_NAVIGATION) {
+        if (ui.navigation.reply.state != DIAL_REPLY_IDLE)
+            dial_reader_reply_close(ui.navigation.reply.revision);
         close_devices();
         /* The reader retains the bounded selection until refresh or disconnect. */
         free(ui.conversations);
@@ -198,6 +200,27 @@ static void navigation_event(dial_navigation_event_t event, size_t offset, void 
     else if (event == DIAL_NAV_CONTROL) show_view(VIEW_CONTROL);
     else if (event == DIAL_NAV_BRIGHTNESS) set_brightness((int)offset);
     else if (event == DIAL_NAV_DEVICES_REFRESH) update_devices(true);
+    else if (event == DIAL_NAV_REPLY_BEGIN || event == DIAL_NAV_REPLY_SEND ||
+             event == DIAL_NAV_REPLY_CLOSE || event == DIAL_NAV_REPLY_READ) {
+        esp_err_t err = ESP_OK;
+        if (event == DIAL_NAV_REPLY_BEGIN)
+            err = dial_reader_reply_begin((dial_reply_preset_t)offset, ui.navigation.reply_preview_revision);
+        else if (event == DIAL_NAV_REPLY_SEND) err = dial_reader_reply_send((unsigned)offset);
+        else if (event == DIAL_NAV_REPLY_CLOSE) dial_reader_reply_close((unsigned)offset);
+        else {
+            err = dial_reader_reply_read((unsigned)offset);
+            if (err == ESP_OK) {
+                dial_reader_agents_copy(ui.agents);
+                dial_reader_conversations_copy(ui.conversations);
+                if (!dial_navigation_show_reader(&ui.navigation, ui.agents, ui.conversations, true))
+                    err = ESP_ERR_INVALID_STATE;
+            }
+        }
+        dial_reply_snapshot_t reply;
+        dial_reader_reply_copy(&reply);
+        dial_navigation_reply_update(&ui.navigation, &reply);
+        dial_navigation_reply_result(&ui.navigation, err == ESP_OK);
+    }
     else if (event == DIAL_NAV_MESSAGING_REQUEST || event == DIAL_NAV_MESSAGING_CANCEL) {
         esp_err_t err = event == DIAL_NAV_MESSAGING_REQUEST
             ? dial_reader_messaging_request((unsigned)offset) : dial_reader_messaging_cancel((unsigned)offset);
@@ -262,6 +285,9 @@ static void open_navigation(bool agents)
     dial_messaging_snapshot_t messaging;
     dial_reader_messaging_copy(&messaging);
     dial_navigation_messaging_update(&ui.navigation, &messaging);
+    dial_reply_snapshot_t reply;
+    dial_reader_reply_copy(&reply);
+    dial_navigation_reply_update(&ui.navigation, &reply);
     show_view(VIEW_NAVIGATION);
     dial_navigation_open(&ui.navigation, agents);
 }
@@ -450,6 +476,9 @@ static void refresh_ui(lv_timer_t *timer)
         dial_messaging_snapshot_t messaging;
         dial_reader_messaging_copy(&messaging);
         dial_navigation_messaging_update(&ui.navigation, &messaging);
+        dial_reply_snapshot_t reply;
+        dial_reader_reply_copy(&reply);
+        dial_navigation_reply_update(&ui.navigation, &reply);
         if (dial_navigation_has_devices(&ui.navigation) && ui.devices != NULL) update_devices(false);
         dial_navigation_activity_update(&ui.navigation, &latest);
         dial_reader_agents_copy(ui.agents);
@@ -556,6 +585,9 @@ static cJSON *status_payload(void)
             ui.navigation.view == DIAL_NAV_PREVIEW ? "preview" : ui.navigation.view == DIAL_NAV_SETTINGS ? "settings" :
             ui.navigation.view == DIAL_NAV_DISPLAY ? "display" : ui.navigation.view == DIAL_NAV_CONNECTION ? "connection" :
             ui.navigation.view == DIAL_NAV_MESSAGING ? "messaging" :
+            ui.navigation.view == DIAL_NAV_REPLY_PICKER ? "reply-presets" :
+            ui.navigation.view == DIAL_NAV_REPLY_REVIEW ? "reply-review" :
+            ui.navigation.view == DIAL_NAV_REPLY_ACTIONS ? "reply-actions" :
             ui.navigation.view == DIAL_NAV_ACTIVITY ? "activity" : ui.navigation.view == DIAL_NAV_DEVICES ? "devices" :
             ui.navigation.view == DIAL_NAV_DEVICE_DETAIL ? "device" : ui.navigation.view == DIAL_NAV_LOCAL_DEVICE ? "this-device" : "agent");
     }

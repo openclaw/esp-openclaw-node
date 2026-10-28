@@ -327,24 +327,47 @@ refresh <offset>` requests another page using the returned `nextOffset`.
 `conversations preview <index>` requests up to four messages for that exact
 returned row. `conversations close` clears the browser state.
 
-This uses the existing independent `operator.read` client. It neither changes
-the session assigned by `dial.configure` nor sends a message. Opening requires
+These USB commands use the existing independent `operator.read` client. They
+neither change the session assigned by `dial.configure` nor send a message. Opening requires
 a current agent-directory row; reconnects, a new roster, and leaving the
 browser invalidate old replies. Missing previews remain distinct from empty
 transcripts. Pages and previews share a single bounded request slot and its
 15-second response deadline.
 Open **Agents**, choose an agent, then press **Conversations**. Turn the dial to
 choose a row and press to read its preview. In the preview, turning scrolls;
-pressing or tapping Back returns to the selected row. Back from the list returns
+tapping Back returns to the selected row. Pressing the encoder or tapping
+**Reply** opens quick replies for a loaded or empty conversation. Back from the list returns
 to that agent. Holding still returns Home. A drag scrolls without selecting.
 Loading, empty, missing, offline and failed reads replace the previous content.
 
 For a remotely selected USB browser context, `display.menu` also accepts
 `{"page":"conversations"}` and `{"page":"preview"}`. These show the current
 validated selection; they do not choose a new agent or conversation. A preview
-is read-only and limited to the Gateway's returned messages, not a full chat
-history or a reply composer.
+is limited to the Gateway's returned messages, not a full chat history. The USB
+commands remain read-only.
 
 Conversation previews, Activity details, and remote-device details stop at both
 ends when scrolling with the encoder, including rapid multi-detent turns.
 Reaching an edge does not wrap, change pages, or submit the configured control.
+
+### Reviewed quick replies
+
+From a conversation preview, choose **Reply**, then **Continue**, **Summarize**,
+or **Explain more**. Missing messaging access opens a route to **Settings →
+Messaging**; Back returns to the reply flow after approval. Choosing a preset
+only prepares a draft. Review the complete agent identity, conversation title,
+and exact message by turning or scrolling, then open **Actions → Send** to
+submit it explicitly. **Presets** chooses different wording; Back from the review before Send
+discards the unsent draft.
+
+Sending waits for the Gateway; Accepted waits for the agent. Sent confirms the
+reply was admitted, not that agent work finished. **Read reply** refreshes the
+same conversation when it remains accessible. An unknown outcome asks you to
+check that conversation before trying again. Back or Home after Send hides the
+status without aborting the submitted turn; Reply reopens an active status,
+even if the visible preview has changed. A new reply is available after the
+previous turn reaches an outcome.
+
+Quick replies use the separately approved messaging connection. They do not
+change the numeric control's configured action or owner, and require no
+microphone. A changed permission, target, or reply state cancels a held press.

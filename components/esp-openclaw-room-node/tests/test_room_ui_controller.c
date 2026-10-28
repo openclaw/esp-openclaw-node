@@ -214,6 +214,16 @@ static bool visible_text(const char *text)
     lv_obj_t *label = find_text(lv_screen_active(), text);
     return label && lv_obj_is_visible(label);
 }
+static lv_obj_t *find_text_prefix(lv_obj_t *parent, const char *prefix)
+{
+    if (lv_obj_check_type(parent, &lv_label_class) &&
+        strncmp(lv_label_get_text(parent), prefix, strlen(prefix)) == 0) return parent;
+    for (unsigned i = 0; i < lv_obj_get_child_count(parent); ++i) {
+        lv_obj_t *found = find_text_prefix(lv_obj_get_child(parent, i), prefix);
+        if (found) return found;
+    }
+    return NULL;
+}
 static lv_obj_t *find_visible_text(lv_obj_t *parent, const char *text)
 {
     if (!lv_obj_is_visible(parent)) return NULL;
@@ -2683,6 +2693,84 @@ static void check_watch_reading_size(const char *path)
         assert(name_area.y1 >= row_area.y1 && name_area.y2 < id_area.y1 && id_area.y2 <= row_area.y2);
         assert(lv_obj_get_height(row) == (density == OPENCLAW_DENSITY_COMPACT ? 60 : 76));
     }
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), "Reading preview")));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LIST "  Conversations")));
+    room_conversations_snapshot_t *chats = calloc(1, sizeof(*chats));
+    assert(chats != NULL);
+    chats->agent = reading_roster.page.agents[0];
+    chats->revision = 951;
+    chats->state = ROOM_AGENTS_READY;
+    chats->page.count = ESP_OPENCLAW_DIRECTORY_PAGE_SIZE;
+    for (size_t i = 0; i < chats->page.count; ++i) {
+        snprintf(chats->page.sessions[i].title, sizeof(chats->page.sessions[i].title),
+            "Conversation %zu: a longer title for the reading-size preview", i + 1);
+        snprintf(chats->page.sessions[i].last_message, sizeof(chats->page.sessions[i].last_message),
+            "%zu: A longer message preview for this conversation", i + 1);
+    }
+    room_ui_store_conversations(chats, conversation_generation);
+    int standard_title_height = 0, standard_summary_height = 0;
+    const int reading_sizes[] = {OPENCLAW_READING_STANDARD, OPENCLAW_READING_LARGE, OPENCLAW_READING_STANDARD};
+    for (unsigned reading = 0; reading < sizeof(reading_sizes) / sizeof(reading_sizes[0]); ++reading) {
+        openclaw_reading_set_size(reading_sizes[reading]);
+        for (int density = OPENCLAW_DENSITY_COMPACT; density <= OPENCLAW_DENSITY_COMFORTABLE; ++density) {
+            openclaw_density_set(density);
+            for (int active = 0; active <= 1; ++active) {
+                unsigned generation = conversation_generation;
+                room_ui_facts_t facts = {.wifi = ROOM_UI_WIFI_CONNECTED,
+                    .gateway = ROOM_UI_GATEWAY_CONNECTED, .talk = active ? ROOM_UI_TALK_ACTIVE : ROOM_UI_TALK_READY};
+                room_ui_store_facts(&facts); room_ui_refresh();
+                lv_obj_t *title = find_text_prefix(lv_layer_top(), "Conversation 1:");
+                lv_obj_t *row = lv_obj_get_parent(title), *list = lv_obj_get_parent(row);
+                lv_obj_scroll_to_y(list, 0, LV_ANIM_OFF); lv_obj_update_layout(list);
+                if (path && reading < 2) {
+                    char output[1024]; snprintf(output, sizeof(output), "%s-reading-chats-%u-%d-%d.ppm", path, reading, density, active);
+                    write_frame(output);
+                }
+                for (size_t i = 0; i < chats->page.count; ++i) {
+                    char title_prefix[32], summary_prefix[16];
+                    snprintf(title_prefix, sizeof(title_prefix), "Conversation %zu:", i + 1);
+                    snprintf(summary_prefix, sizeof(summary_prefix), "%zu:", i + 1);
+                    lv_obj_t *name = find_text_prefix(list, title_prefix);
+                    lv_obj_t *summary = find_text_prefix(list, summary_prefix);
+                    assert(name && summary);
+                    lv_area_t name_area, summary_area, row_area;
+                    lv_obj_get_coords(name, &name_area); lv_obj_get_coords(summary, &summary_area);
+                    lv_obj_get_coords(lv_obj_get_parent(name), &row_area);
+                    assert(lv_obj_get_style_text_font(name, 0) == openclaw_reading_font());
+                    assert(lv_obj_get_style_text_font(summary, 0) == openclaw_reading_font());
+                    assert(name_area.y1 >= row_area.y1 && name_area.y2 < summary_area.y1 && summary_area.y2 <= row_area.y2);
+                    assert(name_area.x1 >= row_area.x1 && name_area.x2 <= row_area.x2);
+                    if (reading == 0) {
+                        standard_title_height = lv_area_get_height(&name_area);
+                        standard_summary_height = lv_area_get_height(&summary_area);
+                    } else if (reading_sizes[reading] == OPENCLAW_READING_LARGE) {
+                        assert(lv_area_get_height(&name_area) > standard_title_height);
+                        assert(lv_area_get_height(&summary_area) > standard_summary_height);
+                    } else {
+                        assert(lv_area_get_height(&name_area) == standard_title_height);
+                        assert(lv_area_get_height(&summary_area) == standard_summary_height);
+                    }
+                }
+                char last_prefix[32]; snprintf(last_prefix, sizeof(last_prefix), "Conversation %zu:", chats->page.count);
+                lv_obj_t *last = lv_obj_get_parent(find_text_prefix(list, last_prefix));
+                lv_obj_scroll_to_view(last, LV_ANIM_OFF); lv_obj_update_layout(list);
+                lv_area_t last_area, list_area;
+                lv_obj_get_coords(last, &last_area); lv_obj_get_coords(list, &list_area);
+                assert(lv_obj_get_scroll_y(list) > 0 && last_area.y1 >= list_area.y1 && last_area.y2 <= list_area.y2);
+                assert(list_area.y2 < (active ? 370 : 432));
+                assert(conversation_generation == generation && talk_starts == starts && voice_sends == sends);
+                click_talk(last);
+                assert(conversation_action == ROOM_CONVERSATIONS_READ && conversation_value == chats->page.count - 1);
+                assert(find_visible_fragment(lv_layer_top(), last_prefix));
+                click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " Chats")));
+            }
+        }
+    }
+    free(chats);
+    room_ui_facts_t ready = {.wifi = ROOM_UI_WIFI_CONNECTED,
+        .gateway = ROOM_UI_GATEWAY_CONNECTED, .talk = ROOM_UI_TALK_READY};
+    room_ui_store_facts(&ready);
+    openclaw_reading_set_size(OPENCLAW_READING_LARGE);
     openclaw_density_set(OPENCLAW_DENSITY_COMPACT);
     assert(room_ui_watch_menu("menu") == ESP_OK);
     lv_obj_update_layout(menu_text);

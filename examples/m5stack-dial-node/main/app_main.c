@@ -636,6 +636,7 @@ static cJSON *status_payload(void)
             ui.navigation.view == DIAL_NAV_PREVIEW ? "preview" : ui.navigation.view == DIAL_NAV_SETTINGS ? "settings" :
             ui.navigation.view == DIAL_NAV_DISPLAY ? "display" : ui.navigation.view == DIAL_NAV_CONNECTION ? "connection" :
             ui.navigation.view == DIAL_NAV_MESSAGING ? "messaging" :
+            ui.navigation.view == DIAL_NAV_HELP ? "help" : ui.navigation.view == DIAL_NAV_HELP_TOPIC ? "help-topic" :
             ui.navigation.view == DIAL_NAV_REPLY_PICKER ? "reply-presets" :
             ui.navigation.view == DIAL_NAV_REPLY_REVIEW ? "reply-review" :
             ui.navigation.view == DIAL_NAV_REPLY_ACTIONS ? "reply-actions" :
@@ -718,9 +719,9 @@ static esp_err_t handle_command(esp_openclaw_node_handle_t client, void *context
             (cJSON_HasObjectItem(params, "page") && !text_field(params, "page", 13, &page)) ||
             (strcmp(page, "menu") != 0 && strcmp(page, "agents") != 0 &&
              strcmp(page, "conversations") != 0 && strcmp(page, "preview") != 0 &&
-             strcmp(page, "settings") != 0 && strcmp(page, "display") != 0 && strcmp(page, "connection") != 0 && strcmp(page, "messaging") != 0 &&
+             strcmp(page, "settings") != 0 && strcmp(page, "display") != 0 && strcmp(page, "connection") != 0 && strcmp(page, "messaging") != 0 && strcmp(page, "help") != 0 &&
              strcmp(page, "activity") != 0 && strcmp(page, "devices") != 0)) {
-            err = invalid(error, "page must be menu, agents, conversations, preview, devices, activity, settings, display, connection or messaging");
+            err = invalid(error, "page must be menu, agents, conversations, preview, devices, activity, settings, display, connection, messaging or help");
         } else if (strcmp(page, "conversations") == 0 || strcmp(page, "preview") == 0) {
             if (ui.conversations == NULL) ui.conversations = calloc(1, sizeof(*ui.conversations));
             if (ui.agents == NULL) ui.agents = calloc(1, sizeof(*ui.agents));
@@ -738,12 +739,13 @@ static esp_err_t handle_command(esp_openclaw_node_handle_t client, void *context
         } else if (strcmp(page, "activity") == 0) {
             open_navigation(false);
             if (ui.view == VIEW_NAVIGATION) dial_navigation_open_activity(&ui.navigation);
-        } else if (strcmp(page, "settings") == 0 || strcmp(page, "display") == 0 || strcmp(page, "connection") == 0 || strcmp(page, "messaging") == 0) {
+        } else if (strcmp(page, "settings") == 0 || strcmp(page, "display") == 0 || strcmp(page, "connection") == 0 || strcmp(page, "messaging") == 0 || strcmp(page, "help") == 0) {
             open_navigation(false);
             if (ui.view == VIEW_NAVIGATION)
                 dial_navigation_open_settings(&ui.navigation, strcmp(page, "display") == 0 ? DIAL_NAV_DISPLAY :
                     strcmp(page, "connection") == 0 ? DIAL_NAV_CONNECTION :
-                    strcmp(page, "messaging") == 0 ? DIAL_NAV_MESSAGING : DIAL_NAV_SETTINGS);
+                    strcmp(page, "messaging") == 0 ? DIAL_NAV_MESSAGING :
+                    strcmp(page, "help") == 0 ? DIAL_NAV_HELP : DIAL_NAV_SETTINGS);
         } else open_navigation(strcmp(page, "agents") == 0);
     } else if (strcmp(command, "display.show") == 0) {
         const char *heading, *text;

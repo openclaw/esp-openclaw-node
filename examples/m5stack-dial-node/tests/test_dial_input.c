@@ -834,6 +834,76 @@ static void check_creation(lv_indev_t *encoder)
     puts("New conversation: empty list, reviewed creation, permission recovery, stale presses, outcomes and safe retry passed");
 }
 
+static void check_help(lv_indev_t *encoder)
+{
+    unsigned commands = confirmations, requests = refreshes + device_refreshes + messaging_requests;
+    unsigned sends = reply_sends + creation_submits;
+    navigating = true;
+    lv_obj_set_hidden(home.root, true);
+    lv_obj_set_hidden(input.arc, true);
+    dial_input_set_control(&input, false);
+    dial_navigation_open_settings(&navigation, DIAL_NAV_SETTINGS);
+    encoder_diff = 3; lv_indev_read(encoder); advance(40);
+    press_encoder(encoder);
+    assert(strcmp(lv_label_get_text(navigation.heading), "Help") == 0);
+    snapshot("help");
+    const char *content[] = {"Turn", "Conversations", "gateway setup-code", "Wi-Fi and Gateway"};
+    for (unsigned i = 0; i < 4; ++i) {
+        press_encoder(encoder);
+        assert(strstr(lv_label_get_text(navigation.preview_text), content[i]) != NULL);
+        assert(lv_obj_is_visible(navigation.preview_body));
+        check_home_bounds(navigation.preview_body);
+        char name[24]; snprintf(name, sizeof(name), "help-%u", i); snapshot(name);
+        check_reader_limits(encoder, "help-reader-bottom");
+        press_encoder(encoder);
+        assert(strcmp(lv_label_get_text(navigation.heading), "Help") == 0 && navigation.focus == i);
+        encoder_diff = 1; lv_indev_read(encoder); advance(40);
+    }
+    assert(strcmp(lv_label_get_text(navigation.names[navigation.focus - navigation.first]), "Back") == 0);
+    press_encoder(encoder);
+    assert(navigation.view == DIAL_NAV_SETTINGS && navigation.focus == 3);
+    dial_navigation_open_local_device(&navigation);
+    encoder_diff = 3; lv_indev_read(encoder); advance(40); press_encoder(encoder);
+    assert(strcmp(lv_label_get_text(navigation.heading), "Help") == 0);
+    encoder_diff = 4; lv_indev_read(encoder); advance(40); press_encoder(encoder);
+    assert(navigation.view == DIAL_NAV_LOCAL_DEVICE && navigation.focus == 3);
+
+    openclaw_reading_set_size(OPENCLAW_READING_LARGE);
+    openclaw_density_set(OPENCLAW_DENSITY_COMFORTABLE);
+    esp_openclaw_node_wifi_status_t offline = {0};
+    dial_navigation_set_connection(&navigation, &offline, false);
+    dial_navigation_open_settings(&navigation, DIAL_NAV_SETTINGS);
+    encoder_diff = 3; lv_indev_read(encoder); advance(40); press_encoder(encoder);
+    for (unsigned i = 0; i < 2; ++i) {
+        assert(lv_obj_get_height(navigation.rows[i]) == 60);
+        check_home_bounds(navigation.rows[i]);
+    }
+    touch(120, 88, true); touch(120, 88, false);
+    assert(strstr(lv_label_get_text(navigation.preview_text), "Turn") != NULL);
+    assert(lv_obj_get_style_text_font(navigation.preview_text, 0) == &lv_font_montserrat_20);
+    encoder_diff = 3; lv_indev_read(encoder); advance(40);
+    int32_t scroll = lv_obj_get_scroll_y(navigation.preview_body);
+    assert(scroll > 0);
+    dial_navigation_set_connection(&navigation, &offline, false);
+    assert(lv_obj_get_scroll_y(navigation.preview_body) == scroll);
+    snapshot("help-large-offline");
+    check_reader_limits(encoder, "help-large-bottom");
+    touch(68, 48, true); touch(68, 48, false);
+    assert(strcmp(lv_label_get_text(navigation.heading), "Help") == 0);
+    encoder_state = LV_INDEV_STATE_PRESSED; lv_indev_read(encoder); advance(40);
+    dial_navigation_open_settings(&navigation, DIAL_NAV_SETTINGS);
+    encoder_state = LV_INDEV_STATE_RELEASED; lv_indev_read(encoder); advance(40);
+    assert(navigation.view == DIAL_NAV_SETTINGS);
+    openclaw_reading_set_size(OPENCLAW_READING_STANDARD);
+    openclaw_density_set(OPENCLAW_DENSITY_COMPACT);
+    assert(confirmations == commands && refreshes + device_refreshes + messaging_requests == requests);
+    assert(reply_sends + creation_submits == sends);
+    navigating = false;
+    lv_obj_set_hidden(navigation.root, true);
+    lv_obj_set_hidden(home.root, false);
+    puts("Dial Help: topic selection, reading bounds, encoder/touch Back, offline text and no action submission passed");
+}
+
 int main(int argc, char **argv)
 {
     check_avatar_identity();
@@ -1848,6 +1918,7 @@ int main(int argc, char **argv)
     touch(60, 62, true); touch(60, 62, false);
     assert(home_agents == 2 && !input.control && confirmations == home_confirmations);
     puts("Home targets: decorative center, distinct actions, gesture fences and Connection Back passed");
+    check_help(encoder);
     assert(reader_boundary_failures == 0);
     lv_deinit();
 }

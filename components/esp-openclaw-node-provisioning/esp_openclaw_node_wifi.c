@@ -25,6 +25,10 @@ static esp_openclaw_node_wifi_status_t s_status;
 static bool s_started;
 static bool s_should_reconnect;
 static bool s_operation_in_progress;
+static esp_openclaw_node_wifi_setup_lease_t s_setup_lease;
+static esp_openclaw_node_wifi_setup_lease_t s_last_setup_lease;
+static unsigned s_reconnect_calls;
+static bool s_setup_retry_pending;
 
 #define WIFI_CONNECTED_BIT BIT0
 
@@ -125,7 +129,7 @@ static esp_err_t begin_operation(void)
 {
     if (!s_started || s_wifi_lock == NULL) return ESP_ERR_INVALID_STATE;
     xSemaphoreTake(s_wifi_lock, portMAX_DELAY);
-    bool busy = s_operation_in_progress;
+    bool busy = s_operation_in_progress || s_setup_lease != 0;
     if (!busy) s_operation_in_progress = true;
     xSemaphoreGive(s_wifi_lock);
     return busy ? ESP_ERR_WIFI_STATE : ESP_OK;
@@ -138,6 +142,67 @@ static void end_operation(void)
     xSemaphoreGive(s_wifi_lock);
 }
 
+/* Reserve before dropping the lock so setup cannot take ownership between the
+ * reconnect decision and its driver call. This does not drain an async join. */
+static bool reserve_reconnect_locked(void)
+{
+    if (!s_status.has_saved_network || !s_should_reconnect) return false;
+    if (s_setup_lease != 0) {
+        s_setup_retry_pending = true;
+        return false;
+    }
+    ++s_reconnect_calls;
+    return true;
+}
+
+static esp_err_t run_reserved_reconnect(void)
+{
+    esp_err_t err = esp_wifi_connect();
+    xSemaphoreTake(s_wifi_lock, portMAX_DELAY);
+    --s_reconnect_calls;
+    xSemaphoreGive(s_wifi_lock);
+    return err;
+}
+
+esp_err_t esp_openclaw_node_wifi_setup_acquire(esp_openclaw_node_wifi_setup_lease_t *lease)
+{
+    if (lease == NULL) return ESP_ERR_INVALID_ARG;
+    if (!s_started || s_wifi_lock == NULL) return ESP_ERR_INVALID_STATE;
+    xSemaphoreTake(s_wifi_lock, portMAX_DELAY);
+    esp_err_t err = ESP_OK;
+    if (s_setup_lease != 0 || s_operation_in_progress || s_reconnect_calls != 0) {
+        err = ESP_ERR_WIFI_STATE;
+    } else if (s_last_setup_lease == UINT64_MAX) {
+        err = ESP_ERR_INVALID_STATE;
+    } else {
+        s_setup_lease = ++s_last_setup_lease;
+        s_setup_retry_pending = false;
+        *lease = s_setup_lease;
+    }
+    xSemaphoreGive(s_wifi_lock);
+    return err;
+}
+
+esp_err_t esp_openclaw_node_wifi_setup_release(
+    esp_openclaw_node_wifi_setup_lease_t lease, esp_err_t *reconnect_result)
+{
+    if (lease == 0 || reconnect_result == NULL) return ESP_ERR_INVALID_ARG;
+    if (!s_started || s_wifi_lock == NULL) return ESP_ERR_INVALID_STATE;
+    xSemaphoreTake(s_wifi_lock, portMAX_DELAY);
+    if (lease != s_setup_lease || s_operation_in_progress) {
+        esp_err_t err = lease != s_setup_lease ? ESP_ERR_INVALID_STATE : ESP_ERR_WIFI_STATE;
+        xSemaphoreGive(s_wifi_lock);
+        return err;
+    }
+    bool retry = s_setup_retry_pending && !s_status.connected;
+    s_setup_lease = 0;
+    s_setup_retry_pending = false;
+    retry = retry && reserve_reconnect_locked();
+    xSemaphoreGive(s_wifi_lock);
+    *reconnect_result = retry ? run_reserved_reconnect() : ESP_OK;
+    return ESP_OK;
+}
+
 static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
 {
     (void)arg;
@@ -147,13 +212,13 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
         case WIFI_EVENT_STA_START:
             if (s_wifi_lock != NULL) {
                 xSemaphoreTake(s_wifi_lock, portMAX_DELAY);
-                bool should_connect = s_status.has_saved_network && s_should_reconnect;
+                bool should_connect = reserve_reconnect_locked();
                 char ssid[sizeof(s_status.ssid)] = {0};
                 strncpy(ssid, s_status.ssid, sizeof(ssid) - 1U);
                 xSemaphoreGive(s_wifi_lock);
                 if (should_connect) {
                     ESP_LOGI(TAG, "connecting to SSID %s", ssid);
-                    if (esp_wifi_connect() != ESP_OK) {
+                    if (run_reserved_reconnect() != ESP_OK) {
                         ESP_LOGW(TAG, "initial wifi connect failed");
                     }
                 } else {
@@ -172,12 +237,12 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
                 xSemaphoreTake(s_wifi_lock, portMAX_DELAY);
                 clear_ip_fields_locked();
                 s_status.last_disconnect_reason = (uint8_t)event->reason;
-                should_retry = s_status.has_saved_network && s_should_reconnect;
+                should_retry = reserve_reconnect_locked();
                 xSemaphoreGive(s_wifi_lock);
             }
             if (should_retry) {
                 ESP_LOGW(TAG, "wifi disconnected, reason=%u; reconnecting", (unsigned)event->reason);
-                esp_err_t err = esp_wifi_connect();
+                esp_err_t err = run_reserved_reconnect();
                 if (err != ESP_OK && err != ESP_ERR_WIFI_CONN) {
                     ESP_LOGW(TAG, "wifi reconnect failed: %s", esp_err_to_name(err));
                 }
@@ -374,7 +439,9 @@ esp_err_t esp_openclaw_node_wifi_disconnect(void)
     return err;
 }
 
-esp_err_t esp_openclaw_node_wifi_scan(wifi_ap_record_t *records, uint16_t *count, uint16_t *total)
+static esp_err_t scan(
+    esp_openclaw_node_wifi_setup_lease_t lease,
+    wifi_ap_record_t *records, uint16_t *count, uint16_t *total)
 {
     if (records == NULL || count == NULL || total == NULL ||
         *count == 0 || *count > ESP_OPENCLAW_NODE_WIFI_SCAN_LIMIT) {
@@ -388,6 +455,10 @@ esp_err_t esp_openclaw_node_wifi_scan(wifi_ap_record_t *records, uint16_t *count
     }
 
     xSemaphoreTake(s_wifi_lock, portMAX_DELAY);
+    if (lease != s_setup_lease) {
+        xSemaphoreGive(s_wifi_lock);
+        return lease == 0 ? ESP_ERR_WIFI_STATE : ESP_ERR_INVALID_STATE;
+    }
     // Provisioning scans must not compete with a live connection or its retries.
     bool busy = s_status.connected || s_should_reconnect || s_operation_in_progress;
     if (!busy) s_operation_in_progress = true;
@@ -413,6 +484,19 @@ esp_err_t esp_openclaw_node_wifi_scan(wifi_ap_record_t *records, uint16_t *count
 
     end_operation();
     return err;
+}
+
+esp_err_t esp_openclaw_node_wifi_scan(wifi_ap_record_t *records, uint16_t *count, uint16_t *total)
+{
+    return scan(0, records, count, total);
+}
+
+esp_err_t esp_openclaw_node_wifi_setup_scan(
+    esp_openclaw_node_wifi_setup_lease_t lease,
+    wifi_ap_record_t *records, uint16_t *count, uint16_t *total)
+{
+    if (lease == 0) return ESP_ERR_INVALID_ARG;
+    return scan(lease, records, count, total);
 }
 
 bool esp_openclaw_node_wifi_wait_for_connection(TickType_t timeout_ticks)

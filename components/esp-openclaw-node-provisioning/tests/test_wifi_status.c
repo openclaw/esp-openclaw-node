@@ -18,6 +18,9 @@ static unsigned ap_reads, failures;
 static unsigned driver_mutations, connects;
 static bool probe_scan, inject_disconnect;
 static esp_err_t config_result = ESP_OK, scan_result = ESP_OK;
+static esp_err_t connect_result = ESP_OK;
+static bool probe_reconnect_unlock;
+static esp_openclaw_node_wifi_setup_lease_t scan_lease;
 
 static void check(bool condition, const char *message);
 
@@ -32,7 +35,16 @@ SemaphoreHandle_t xSemaphoreCreateMutex(void)
 int xSemaphoreTake(SemaphoreHandle_t lock, TickType_t timeout)
 { assert(lock && !*(bool *)lock); (void)timeout; *(bool *)lock = true; return 1; }
 int xSemaphoreGive(SemaphoreHandle_t lock)
-{ assert(lock && *(bool *)lock); *(bool *)lock = false; return 1; }
+{
+    assert(lock && *(bool *)lock); *(bool *)lock = false;
+    if (probe_reconnect_unlock) {
+        probe_reconnect_unlock = false;
+        esp_openclaw_node_wifi_setup_lease_t lease = 0;
+        check(esp_openclaw_node_wifi_setup_acquire(&lease) == ESP_ERR_WIFI_STATE && lease == 0,
+              "setup cannot enter between reconnect decision and driver call");
+    }
+    return 1;
+}
 esp_err_t esp_event_handler_register(esp_event_base_t base, int32_t id, esp_event_handler_t handler, void *context)
 {
     if (base == IP_EVENT) { assert(id == IP_EVENT_STA_GOT_IP); ip_handler = handler; ip_context = context; }
@@ -59,7 +71,7 @@ esp_err_t esp_wifi_start(void) { ++driver_mutations; return ESP_OK; }
 esp_err_t esp_wifi_stop(void) { ++driver_mutations; return ESP_OK; }
 esp_err_t esp_wifi_restore(void) { ++driver_mutations; return ESP_OK; }
 esp_err_t esp_wifi_set_ps(int mode) { (void)mode; ++driver_mutations; return ESP_OK; }
-esp_err_t esp_wifi_connect(void) { ++driver_mutations; ++connects; return ESP_OK; }
+esp_err_t esp_wifi_connect(void) { ++driver_mutations; ++connects; return connect_result; }
 esp_err_t esp_wifi_disconnect(void) { ++driver_mutations; return ESP_OK; }
 esp_err_t esp_wifi_sta_get_ap_info(wifi_ap_record_t *record) { ++ap_reads; *record = ap; return ap_result; }
 esp_err_t esp_wifi_scan_start(const wifi_scan_config_t *config, bool block)
@@ -76,6 +88,18 @@ esp_err_t esp_wifi_scan_start(const wifi_scan_config_t *config, bool block)
         check(esp_openclaw_node_wifi_disconnect() == ESP_ERR_WIFI_STATE,
               "disconnecting is rejected during a scan");
         check(driver_mutations == before, "rejected operations do not reach the driver");
+        esp_openclaw_node_wifi_setup_lease_t lease = 0;
+        check(esp_openclaw_node_wifi_setup_acquire(&lease) == ESP_ERR_WIFI_STATE,
+              "setup cannot replace an active scan");
+    }
+    if (scan_lease != 0) {
+        esp_err_t resumed = ESP_FAIL;
+        check(esp_openclaw_node_wifi_setup_release(scan_lease, &resumed) == ESP_ERR_WIFI_STATE && resumed == ESP_FAIL,
+              "setup cannot release ownership during its blocking scan");
+        wifi_ap_record_t records[1];
+        uint16_t count = 1, total = 0;
+        check(esp_openclaw_node_wifi_setup_scan(scan_lease, records, &count, &total) == ESP_ERR_WIFI_STATE,
+              "a second leased scan cannot overlap");
     }
     return scan_result;
 }
@@ -151,6 +175,79 @@ static void check_mutation_ownership(void)
     check(esp_openclaw_node_wifi_connect() == ESP_OK, "failed scan releases ownership");
 }
 
+static void check_setup_ownership(void)
+{
+    esp_openclaw_node_wifi_setup_lease_t lease = 0, other = 0;
+    esp_err_t resumed = ESP_FAIL;
+    wifi_ap_record_t records[1];
+    uint16_t count = 1, total = 0;
+    ip_event_got_ip_t ip = {.ip_info.ip.addr = 0x010200c0};
+    wifi_event_sta_disconnected_t disconnected = {.reason = 8};
+    ip_handler(ip_context, IP_EVENT, IP_EVENT_STA_GOT_IP, &ip);
+    unsigned before = driver_mutations;
+    check(esp_openclaw_node_wifi_setup_acquire(NULL) == ESP_ERR_INVALID_ARG, "lease output is required");
+    check(esp_openclaw_node_wifi_setup_acquire(&lease) == ESP_OK && lease != 0, "setup obtains a lease");
+    check(driver_mutations == before && esp_openclaw_node_wifi_is_connected(), "acquire preserves the live link");
+    check(esp_openclaw_node_wifi_setup_acquire(&other) == ESP_ERR_WIFI_STATE && other == 0, "second owner cannot displace setup");
+    check(esp_openclaw_node_wifi_set_credentials("Other network", NULL) == ESP_ERR_WIFI_STATE, "setup excludes credential writes");
+    check(esp_openclaw_node_wifi_clear_credentials() == ESP_ERR_WIFI_STATE, "setup excludes credential clearing");
+    check(esp_openclaw_node_wifi_connect() == ESP_ERR_WIFI_STATE, "setup excludes explicit connect");
+    check(esp_openclaw_node_wifi_disconnect() == ESP_ERR_WIFI_STATE, "setup excludes explicit disconnect");
+    check(esp_openclaw_node_wifi_scan(records, &count, &total) == ESP_ERR_WIFI_STATE, "setup excludes ordinary scan");
+    count = 1;
+    check(esp_openclaw_node_wifi_setup_scan(lease, records, &count, &total) == ESP_ERR_WIFI_STATE, "leased scan preserves connected network");
+    check(driver_mutations == before, "competing requests never reach driver");
+    check(esp_openclaw_node_wifi_setup_release(lease, NULL) == ESP_ERR_INVALID_ARG, "release requires result output");
+    check(esp_openclaw_node_wifi_setup_release(lease + 1, &resumed) == ESP_ERR_INVALID_STATE && resumed == ESP_FAIL,
+          "unowned release preserves lease and output");
+
+    unsigned retry_before = connects;
+    wifi_handler(wifi_context, WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, &disconnected);
+    wifi_handler(wifi_context, WIFI_EVENT, WIFI_EVENT_STA_START, NULL);
+    check(connects == retry_before, "lease defers start and disconnect reconnect requests");
+    check(esp_openclaw_node_wifi_setup_release(lease, &resumed) == ESP_OK && resumed == ESP_OK,
+          "release reports successful reconnect dispatch");
+    check(connects == retry_before + 1, "release coalesces deferred reconnects");
+    check(esp_openclaw_node_wifi_setup_acquire(&other) == ESP_OK && other != lease, "next owner gets fresh lease");
+    count = 1;
+    check(esp_openclaw_node_wifi_setup_scan(lease, records, &count, &total) == ESP_ERR_INVALID_STATE, "old lease cannot scan");
+    check(esp_openclaw_node_wifi_setup_release(lease, &resumed) == ESP_ERR_INVALID_STATE, "old lease cannot release new owner");
+    wifi_handler(wifi_context, WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, &disconnected);
+    ip_handler(ip_context, IP_EVENT, IP_EVENT_STA_GOT_IP, &ip);
+    retry_before = connects;
+    check(esp_openclaw_node_wifi_setup_release(other, &resumed) == ESP_OK && connects == retry_before,
+          "late connected state makes deferred retry unnecessary");
+
+    check(esp_openclaw_node_wifi_setup_acquire(&lease) == ESP_OK, "setup can reopen");
+    wifi_handler(wifi_context, WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, &disconnected);
+    connect_result = ESP_FAIL;
+    check(esp_openclaw_node_wifi_setup_release(lease, &resumed) == ESP_OK && resumed == ESP_FAIL,
+          "reconnect dispatch failure is separate from successful release");
+    connect_result = ESP_OK;
+    probe_reconnect_unlock = true;
+    wifi_handler(wifi_context, WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, &disconnected);
+    probe_reconnect_unlock = true;
+    wifi_handler(wifi_context, WIFI_EVENT, WIFI_EVENT_STA_START, NULL);
+
+    check(esp_openclaw_node_wifi_disconnect() == ESP_OK, "explicit disconnect still works after release");
+    check(esp_openclaw_node_wifi_setup_acquire(&lease) == ESP_OK, "disconnected setup obtains lease");
+    probe_scan = true;
+    scan_lease = lease;
+    scan_result = ESP_FAIL;
+    count = 1;
+    check(esp_openclaw_node_wifi_setup_scan(lease, records, &count, &total) == ESP_FAIL, "leased scan reports driver failure");
+    scan_result = ESP_OK;
+    count = 1;
+    check(esp_openclaw_node_wifi_setup_scan(lease, records, &count, &total) == ESP_OK, "failed scan frees operation but retains lease");
+    scan_lease = 0;
+    probe_scan = false;
+    retry_before = connects;
+    wifi_handler(wifi_context, WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, &disconnected);
+    check(esp_openclaw_node_wifi_setup_release(lease, &resumed) == ESP_OK && resumed == ESP_OK && connects == retry_before,
+          "release preserves explicit disconnect policy");
+    check(esp_openclaw_node_wifi_connect() == ESP_OK, "ordinary operations resume after release");
+}
+
 int main(void)
 {
     assert(esp_openclaw_node_register_device_commands(NULL, NULL) == ESP_OK);
@@ -193,6 +290,7 @@ int main(void)
     check(!cJSON_HasObjectItem(result, "rssi") && ap_reads == before, "disconnect does not publish or request AP observations");
     cJSON_Delete(result);
     check_mutation_ownership();
+    check_setup_ownership();
     printf("Wi-Fi status: %u failed checks\n", failures);
     return failures ? 1 : 0;
 }

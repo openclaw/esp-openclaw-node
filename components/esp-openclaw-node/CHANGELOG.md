@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add exclusive Wi-Fi setup admission with fenced scan access, deferred automatic reconnects, and rejection of competing console mutations. This preserves the current link; asynchronous setup joins and BLE integration remain separate work.
+
 - Add a shared setup-session API for Watch and Dial integrations, with local confirmation, live peer checks, bounded operation receipts, and cancellation draining. BLE/mobile adapters and device setup screens remain separate work.
 
 - Serialize explicit Wi-Fi credential, connect, disconnect, and scan operations so concurrent commands cannot change station configuration during an active scan.

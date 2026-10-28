@@ -90,6 +90,7 @@ def main():
             str(repo / "components/esp-openclaw-chat/src/esp_openclaw_chat.c"),
             str(tests.parent / "room_agent_directory.c"),
             str(tests.parent / "room_voice_draft.c"),
+            str(tests.parent / "room_messaging.c"),
             str(repo / "components/esp-openclaw-directory/esp_openclaw_devices.c"),
             str(repo / "components/esp-openclaw-directory/esp_openclaw_directory.c"),
             *link, "-o", str(binary),

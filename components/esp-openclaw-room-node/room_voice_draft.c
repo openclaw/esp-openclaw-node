@@ -39,6 +39,11 @@ bool room_voice_draft_busy(void)
     return recording_owned || transcription != NULL;
 }
 
+bool room_voice_draft_connection_busy(void)
+{
+    return room_voice_draft_busy() || chat_polling || view.state == ROOM_VOICE_DRAFT;
+}
+
 void room_voice_draft_event(esp_openclaw_node_handle_t source, const char *event,
                            const char *payload, uint64_t revision, uint64_t owner)
 {

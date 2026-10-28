@@ -84,3 +84,5 @@ esp_err_t room_agent_directory_resolve_locked(unsigned revision, const char *id,
     room_agent_target_t *target);
 /* The existing room supervisor calls this after urgent Talk work. */
 void room_agent_directory_poll(bool defer_request);
+/* The caller holds the room lock; includes uncertain submitted writes. */
+bool room_conversations_creation_busy_locked(void);

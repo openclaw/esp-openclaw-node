@@ -60,6 +60,8 @@ bool room_voice_draft_needs_poll(void);
 void room_voice_draft_event(esp_openclaw_node_handle_t source, const char *event,
                            const char *payload, uint64_t revision, uint64_t owner);
 bool room_voice_draft_busy(void);
+/* Reconnecting would discard an editable draft or interrupt a submitted chat. */
+bool room_voice_draft_connection_busy(void);
 /* The supervisor owns capture, transcription, explicit Send and cleanup.
  * Transcription alone never submits chat. Dismissing a sent view never aborts. */
 bool room_voice_draft_poll(const room_voice_context_t *context, room_voice_snapshot_t *result);

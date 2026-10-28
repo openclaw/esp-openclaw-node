@@ -1,4 +1,5 @@
 #include "room_agent_directory.h"
+#include "room_messaging.h"
 
 #include <stdatomic.h>
 #include <stdlib.h>
@@ -308,11 +309,13 @@ static bool creation_target(void)
 
 static bool creation_enabled(void)
 {
-#if CONFIG_OPENCLAW_ROOM_VOICE_ACTIONS
-    return true;
-#else
-    return false;
-#endif
+    return room_messaging_ready_locked();
+}
+
+bool room_conversations_creation_busy_locked(void)
+{
+    return directory.creation_pending || directory.creation.state == ROOM_CREATION_CREATING ||
+        (directory.inflight != NULL && directory.inflight->kind == CREATE);
 }
 
 static void copy_creation(room_creation_snapshot_t *snapshot)

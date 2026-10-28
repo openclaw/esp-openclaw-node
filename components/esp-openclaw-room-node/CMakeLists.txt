@@ -20,6 +20,7 @@ idf_component_register(
         "room_file_validation.c"
         "room_files.c"
         "room_media.c"
+        "room_messaging.c"
         "room_pcm_gain.c"
         "room_recording.c"
         "room_ui_controller.c"

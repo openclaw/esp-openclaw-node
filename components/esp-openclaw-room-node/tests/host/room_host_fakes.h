@@ -24,7 +24,8 @@ typedef struct {
     esp_err_t selection_result;
     unsigned speech_requests;
     char speech_params[1536];
-    unsigned scope_requests, token_connects;
+    unsigned scope_requests, token_connects, operator_disconnects;
+    esp_err_t token_connect_result;
     unsigned agent_requests, conversation_requests, session_creations, device_requests;
     bool devices_wanted;
     unsigned devices_generation;

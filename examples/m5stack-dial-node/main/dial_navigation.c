@@ -775,9 +775,12 @@ static void render_devices(dial_navigation_t *nav)
 
 static void render(dial_navigation_t *nav)
 {
+    lv_label_set_long_mode(nav->heading, nav->view == DIAL_NAV_PREVIEW
+        ? LV_LABEL_LONG_SCROLL_CIRCULAR : LV_LABEL_LONG_DOT);
     lv_obj_set_y(nav->description, 80);
     lv_obj_set_style_text_font(nav->preview_text, openclaw_reading_font(), 0);
     for (unsigned i = 0; i < 3; ++i) {
+        lv_label_set_long_mode(nav->names[i], LV_LABEL_LONG_DOT);
         lv_obj_set_style_text_font(nav->names[i], &lv_font_montserrat_14, 0);
         lv_obj_set_height(nav->names[i], 20);
     }
@@ -960,6 +963,8 @@ static void render(dial_navigation_t *nav)
         const char *name, *icon;
         if (detail) { name = "Conversations"; icon = LV_SYMBOL_LIST; }
         else item(nav, index, &name, &icon);
+        if (sessions && index == nav->focus && index < agent_count(nav))
+            lv_label_set_long_mode(nav->names[i], LV_LABEL_LONG_SCROLL_CIRCULAR);
         lv_label_set_text(nav->names[i], name);
         if (!detail && !message) list_row(nav, i, name);
         if (reading) {

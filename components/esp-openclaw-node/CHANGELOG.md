@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Allow an idle client to remove a locally advertised scope before reconnecting, without changing stored Gateway grants or credentials.
+
 - Count discarded AFE input frames as errors and expose capture-read and fetch timing in room/watch audio diagnostics.
 - Give the watch's capture-copy pipeline equal priority with audio decoding while preserving its core and stack.
 

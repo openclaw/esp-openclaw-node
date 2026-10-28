@@ -1924,9 +1924,13 @@ TEST_CASE("voice bootstrap persists roles and correlates gateway traffic", "[esp
     TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_create(&config, &node));
     TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_register_scope(node, "operator.read"));
     TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_register_scope(node, "operator.talk"));
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_register_scope(node, "operator.write"));
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_unregister_scope(node, "operator.write"));
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_unregister_scope(node, "operator.write"));
 
     reset_event_recorder();
     TEST_ASSERT_EQUAL(ESP_OK, request_connect_no_auth(node, "ws://gateway.example/ws"));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, esp_openclaw_node_unregister_scope(node, "operator.read"));
     TEST_ASSERT_TRUE(wait_for_int_value(&s_transport_state.start_calls, 1, pdMS_TO_TICKS(1000)));
     emit_ws_event(WEBSOCKET_EVENT_CONNECTED, NULL, ESP_OK);
     emit_ws_event(
@@ -1936,6 +1940,7 @@ TEST_CASE("voice bootstrap persists roles and correlates gateway traffic", "[esp
     TEST_ASSERT_TRUE(wait_for_int_value(&s_transport_state.send_text_calls, 1, pdMS_TO_TICKS(1000)));
     TEST_ASSERT_NOT_NULL(strstr(s_transport_state.last_sent_text, "\"operator.read\""));
     TEST_ASSERT_NOT_NULL(strstr(s_transport_state.last_sent_text, "\"operator.talk\""));
+    TEST_ASSERT_NULL(strstr(s_transport_state.last_sent_text, "\"operator.write\""));
 
     char *connect_id = extract_first_json_id(s_transport_state.last_sent_text);
     char connect_response[768] = {0};

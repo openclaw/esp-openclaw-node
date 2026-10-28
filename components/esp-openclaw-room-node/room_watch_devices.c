@@ -1,3 +1,4 @@
+#include "openclaw_density.h"
 #include "room_watch_devices.h"
 
 #include <stdint.h>
@@ -6,7 +7,7 @@
 
 #define PAGE_SIZE 3
 
-static lv_obj_t *root, *back_text, *heading, *local, *message, *counter;
+static lv_obj_t *list, *root, *back_text, *heading, *local, *message, *counter;
 static lv_obj_t *refresh, *previous, *next, *rows[PAGE_SIZE], *names[PAGE_SIZE], *states[PAGE_SIZE];
 static lv_obj_t *detail_name, *detail_model, *detail_connection, *detail_pairing;
 static const esp_openclaw_devices_snapshot_t *devices;
@@ -59,8 +60,15 @@ void room_watch_devices_create(lv_obj_t *parent, lv_event_cb_t handler)
 #endif
     local = button(26, 116, 316, 52, ROOM_DEVICE_LOCAL, handler);
     label(local, LV_SYMBOL_HOME "  This Watch", 18, 18, 280);
+    list = lv_obj_create(root);
+    lv_obj_remove_style_all(list);
+    lv_obj_set_pos(list, 26, 176);
+    lv_obj_set_size(list, 316, 140);
+    lv_obj_set_scroll_dir(list, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_AUTO);
     for (unsigned i = 0; i < PAGE_SIZE; ++i) {
         rows[i] = button(26, 176 + (int)i * 48, 316, 44, (int)i, handler);
+        lv_obj_set_parent(rows[i], list);
         names[i] = label(rows[i], "", 14, 14, 250);
         states[i] = label(rows[i], "", 274, 14, 24);
     }
@@ -103,6 +111,18 @@ void room_watch_devices_render(const esp_openclaw_devices_snapshot_t *snapshot, 
     for (size_t i = 0; ready && selected_id[0] != '\0' && i < devices->count; ++i)
         if (strcmp(devices->devices[i].id, selected_id) == 0) selected = &devices->devices[i];
     bool detail = selected != NULL;
+    int row_height = openclaw_density_row_height(false);
+    lv_obj_set_height(local, row_height);
+    lv_obj_set_y(lv_obj_get_child(local, 0), (row_height - 16) / 2);
+    lv_obj_set_hidden(list, detail || !ready);
+    lv_obj_set_y(list, 116 + row_height + 8);
+    lv_obj_set_height(list, 316 - (116 + row_height + 8));
+    for (unsigned i = 0; i < PAGE_SIZE; ++i) {
+        lv_obj_set_pos(rows[i], 0, (int)i * (row_height + openclaw_density_row_gap()));
+        lv_obj_set_height(rows[i], row_height);
+        lv_obj_set_y(names[i], (row_height - 16) / 2);
+        lv_obj_set_y(states[i], (row_height - 16) / 2);
+    }
     if (!detail) selected_id[0] = '\0';
     if (!ready || offset >= devices->count) offset = 0;
     bool loading = devices != NULL && devices->state == ESP_OPENCLAW_DEVICES_LOADING;
@@ -155,6 +175,10 @@ void room_watch_devices_render(const esp_openclaw_devices_snapshot_t *snapshot, 
             default: break;
         }
         lv_label_set_text_static(message, text);
+    }
+    if (!lv_obj_is_hidden(list)) {
+        lv_obj_update_layout(list);
+        lv_obj_readjust_scroll(list, LV_ANIM_OFF);
     }
 }
 

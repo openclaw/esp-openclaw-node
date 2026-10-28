@@ -39,6 +39,12 @@ menus and status icons keep their existing size. **This Watch → Display**
 opens the same controls. USB `menu brightness` and `menu reading` open the
 corresponding subpages.
 
+**Display → List spacing** switches between Compact and Comfortable. It changes
+row height and spacing in menus, agent and conversation pickers, and device lists;
+font size stays separate. Longer lists scroll within their content area, keeping
+Back and the Talk control available. Compact is the default. The choice is local
+to this Watch and lasts until restart; USB `menu density` opens the same control.
+
 On the 1.8-inch Watch, **Menu → Agents** opens the agent directory.
 Swipe the list to browse up to eight agents per page; use the arrows for more
 pages, and tap a row to inspect its name and exact ID. Initials replace emoji

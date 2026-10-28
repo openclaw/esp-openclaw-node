@@ -1,5 +1,6 @@
 #include "room_watch_navigation.h"
 #include "openclaw_reading.h"
+#include "openclaw_density.h"
 #include "openclaw_connection_details.h"
 
 #include <string.h>
@@ -7,7 +8,7 @@
 #include <stdint.h>
 
 static lv_obj_t *root, *heading, *back_label, *rows[5], *values[5], *empty;
-static lv_obj_t *connection_body, *connection_text;
+static lv_obj_t *connection_body, *connection_text, *connection_status[2], *menu_list;
 static lv_timer_t *connection_timer;
 static bool display_awake, connection_active;
 
@@ -71,12 +72,20 @@ void room_watch_navigation_create(lv_obj_t *parent, lv_event_cb_t handler)
 #if LV_FONT_MONTSERRAT_28
     lv_obj_set_style_text_font(heading, &lv_font_montserrat_28, 0);
 #endif
+    menu_list = lv_obj_create(root);
+    lv_obj_remove_style_all(menu_list);
+    lv_obj_set_pos(menu_list, 26, 116);
+    lv_obj_set_size(menu_list, 316, 248);
+    lv_obj_set_scroll_dir(menu_list, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(menu_list, LV_SCROLLBAR_MODE_AUTO);
+    for (unsigned i = 0; i < 2; ++i)
+        connection_status[i] = label(root, "", 26, 112 + (int)i * 24, 316);
     const room_watch_page_t pages[] = {ROOM_WATCH_AGENTS, ROOM_WATCH_CONVERSATIONS,
         ROOM_WATCH_CANVAS, ROOM_WATCH_DEVICES, ROOM_WATCH_SETTINGS};
     for (unsigned i = 0; i < 5; ++i) {
-        rows[i] = lv_obj_create(root);
+        rows[i] = lv_obj_create(menu_list);
         lv_obj_remove_style_all(rows[i]);
-        lv_obj_set_pos(rows[i], 26, 116 + (int)i * 48);
+        lv_obj_set_pos(rows[i], 0, (int)i * 48);
         lv_obj_set_size(rows[i], 316, 44);
         lv_obj_set_style_bg_color(rows[i], lv_color_hex(0x302535), 0);
         lv_obj_set_style_bg_opa(rows[i], LV_OPA_COVER, 0);
@@ -139,14 +148,19 @@ void room_watch_navigation_render(room_watch_page_t page, const room_ui_facts_t 
         (unsigned)facts->talk < sizeof(talk) / sizeof(*talk) ? talk[facts->talk] : "Unknown",
     };
     const char *names[] = {"Gateway", "Talk"};
+    lv_obj_set_hidden(menu_list, canvas || resuming || connection);
+    for (unsigned i = 0; i < 2; ++i) {
+        lv_obj_set_hidden(connection_status[i], !connection);
+        if (connection) lv_label_set_text_fmt(connection_status[i], "%s: %s", names[i], states[i]);
+    }
+    int row_height = openclaw_density_row_height(false);
     for (unsigned i = 0; i < 5; ++i) {
-        lv_obj_set_hidden(rows[i], canvas || resuming || (connection && i >= 2));
-        lv_obj_set_clickable(rows[i], !connection);
-        lv_obj_set_y(rows[i], (connection ? 112 : 116) + (int)i * (connection ? 24 : 48));
-        lv_obj_set_height(rows[i], connection ? 22 : 44);
-        lv_obj_set_style_bg_opa(rows[i], connection ? LV_OPA_TRANSP : LV_OPA_COVER, 0);
-        lv_obj_set_pos(values[i], connection ? 0 : 18, connection ? 0 : 14);
-        if (connection && i < 2) lv_label_set_text_fmt(values[i], "%s: %s", names[i], states[i]);
-        else lv_label_set_text_static(values[i], menu[i]);
+        lv_obj_set_y(rows[i], (int)i * (row_height + openclaw_density_row_gap()));
+        lv_obj_set_height(rows[i], row_height);
+        lv_obj_set_y(values[i], (row_height - 16) / 2);
+    }
+    if (!lv_obj_is_hidden(menu_list)) {
+        lv_obj_update_layout(menu_list);
+        lv_obj_readjust_scroll(menu_list, LV_ANIM_OFF);
     }
 }

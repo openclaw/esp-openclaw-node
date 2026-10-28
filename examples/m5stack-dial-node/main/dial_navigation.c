@@ -2,6 +2,7 @@
 #include "esp_openclaw_avatar.h"
 #include "openclaw_connection_details.h"
 #include "openclaw_reading.h"
+#include "openclaw_density.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -76,6 +77,23 @@ static lv_obj_t *text(lv_obj_t *parent, const char *value, int x, int y, int wid
     return label;
 }
 
+static unsigned list_visible(void)
+{
+    return openclaw_density() == OPENCLAW_DENSITY_COMPACT ? 3 : 2;
+}
+
+static void list_row(dial_navigation_t *nav, unsigned row)
+{
+    int height = openclaw_density_row_height(false);
+    bool compact = openclaw_density() == OPENCLAW_DENSITY_COMPACT;
+    lv_obj_set_pos(nav->rows[row], 38, (compact ? 58 : 66) + (int)row * (compact ? 46 : 68));
+    lv_obj_set_size(nav->rows[row], 164, height);
+    lv_obj_set_pos(nav->icons[row], 12, (height - 16) / 2);
+    lv_obj_set_pos(nav->names[row], 40, (height - 16) / 2);
+    lv_obj_set_width(nav->names[row], 112);
+    lv_obj_set_y(nav->avatars[row], (height - 24) / 2);
+}
+
 static void changed(dial_navigation_t *nav)
 {
     nav->handler(DIAL_NAV_CHANGED, 0, nav->context);
@@ -139,8 +157,8 @@ static void back(dial_navigation_t *nav)
             changed(nav);
             return;
         }
-        if (nav->view == DIAL_NAV_BACKLIGHT || nav->view == DIAL_NAV_READING) {
-            nav->focus = nav->view == DIAL_NAV_READING ? 1 : 0;
+        if (nav->view == DIAL_NAV_BACKLIGHT || nav->view == DIAL_NAV_READING || nav->view == DIAL_NAV_DENSITY) {
+            nav->focus = nav->view == DIAL_NAV_DENSITY ? 2 : nav->view == DIAL_NAV_READING ? 1 : 0;
             nav->view = DIAL_NAV_DISPLAY;
             changed(nav);
             return;
@@ -347,12 +365,18 @@ static void item(dial_navigation_t *nav, unsigned index, const char **name, cons
         *icon = icons[index];
         return;
     }
-    if (nav->view == DIAL_NAV_DISPLAY || nav->view == DIAL_NAV_READING) {
-        bool reading = nav->view == DIAL_NAV_READING;
-        const char *names[] = {reading ? "Standard" : "Brightness", reading ? "Larger" : "Reading text", "Back"};
+    if (nav->view == DIAL_NAV_DISPLAY) {
+        const char *names[] = {"Brightness", "Reading text", "List spacing", "Back"};
         *name = names[index];
-        *icon = index == 2 ? LV_SYMBOL_LEFT : reading ?
-            (index == (unsigned)openclaw_reading_size() ? LV_SYMBOL_OK : "") : LV_SYMBOL_IMAGE;
+        *icon = index == 3 ? LV_SYMBOL_LEFT : index == 0 ? LV_SYMBOL_IMAGE : LV_SYMBOL_LIST;
+        return;
+    }
+    if (nav->view == DIAL_NAV_READING || nav->view == DIAL_NAV_DENSITY) {
+        bool reading = nav->view == DIAL_NAV_READING;
+        const char *names[] = {reading ? "Standard" : "Compact", reading ? "Larger" : "Comfortable", "Back"};
+        *name = names[index];
+        unsigned selected = reading ? (unsigned)openclaw_reading_size() : (unsigned)openclaw_density();
+        *icon = index == 2 ? LV_SYMBOL_LEFT : index == selected ? LV_SYMBOL_OK : "";
         return;
     }
     if (nav->view == DIAL_NAV_SETTINGS) {
@@ -498,7 +522,8 @@ static void reply_button(dial_navigation_t *nav, unsigned row, const char *name,
     lv_obj_set_width(nav->names[row], bottom ? 88 : 112);
     lv_label_set_text_static(nav->names[row], name);
     lv_label_set_text_static(nav->icons[row], icon);
-    bool focus = bottom || nav->focus == row;
+    if (!bottom) list_row(nav, row);
+    bool focus = bottom || nav->focus == nav->first + row;
     lv_obj_set_style_bg_color(nav->rows[row], lv_color_hex(focus ? 0xf4efee : 0x302535), 0);
     lv_color_t color = lv_color_hex(focus ? 0x302131 : 0xf4efee);
     lv_obj_set_style_text_color(nav->names[row], color, 0);
@@ -602,11 +627,14 @@ static void render_reply(dial_navigation_t *nav)
     reply_action_t actions[3];
     nav->count = nav->view == DIAL_NAV_REPLY_PICKER ? DIAL_REPLY_PRESET_COUNT : reply_actions(nav, actions);
     if (nav->focus >= nav->count) nav->focus = 0;
-    for (unsigned i = 0; i < nav->count; ++i) {
-        const char *name = nav->view == DIAL_NAV_REPLY_PICKER ? presets[i] : names[actions[i]];
-        if (nav->view == DIAL_NAV_REPLY_ACTIONS && actions[i] == REPLY_PRESETS && nav->reply.state >= DIAL_REPLY_SENT)
+    unsigned visible = list_visible();
+    nav->first = nav->focus / visible * visible;
+    for (unsigned i = 0; i < visible && nav->first + i < nav->count; ++i) {
+        unsigned index = nav->first + i;
+        const char *name = nav->view == DIAL_NAV_REPLY_PICKER ? presets[index] : names[actions[index]];
+        if (nav->view == DIAL_NAV_REPLY_ACTIONS && actions[index] == REPLY_PRESETS && nav->reply.state >= DIAL_REPLY_SENT)
             name = "New reply";
-        reply_button(nav, i, name, nav->view == DIAL_NAV_REPLY_PICKER ? LV_SYMBOL_RIGHT : icons[actions[i]], false);
+        reply_button(nav, i, name, nav->view == DIAL_NAV_REPLY_PICKER ? LV_SYMBOL_RIGHT : icons[actions[index]], false);
     }
 }
 
@@ -627,7 +655,8 @@ static void render_devices(dial_navigation_t *nav)
     unsigned count = device_count(nav);
     nav->count = local ? 3 : count + 3;
     if (nav->focus >= nav->count) nav->focus = 0;
-    nav->first = nav->focus / 3 * 3;
+    unsigned visible = list_visible();
+    nav->first = nav->focus / visible * visible;
     lv_obj_set_hidden(nav->description, true);
     lv_obj_set_hidden(nav->identity, true);
     lv_obj_set_hidden(nav->preview_body, !detail);
@@ -661,13 +690,9 @@ static void render_devices(dial_navigation_t *nav)
     }
     for (unsigned i = 0; i < 3; ++i) {
         unsigned index = nav->first + i;
-        lv_obj_set_hidden(nav->rows[i], detail || index >= nav->count);
-        if (detail || index >= nav->count) continue;
-        lv_obj_set_pos(nav->rows[i], 38, 64 + (int)i * 44);
-        lv_obj_set_size(nav->rows[i], 164, 36);
-        lv_obj_set_pos(nav->icons[i], 12, 9);
-        lv_obj_set_pos(nav->names[i], 40, 9);
-        lv_obj_set_width(nav->names[i], 112);
+        lv_obj_set_hidden(nav->rows[i], detail || i >= visible || index >= nav->count);
+        if (detail || i >= visible || index >= nav->count) continue;
+        list_row(nav, i);
         const char *name, *icon;
         if (local) {
             const char *names[] = {"Control", "Display", "Connection"};
@@ -783,14 +808,14 @@ static void render(dial_navigation_t *nav)
     bool preview = nav->view == DIAL_NAV_PREVIEW;
     bool message = (nav->view == DIAL_NAV_AGENTS || sessions) && agent_count(nav) == 0;
     nav->count = detail || preview ? 1 : nav->view == DIAL_NAV_MENU ? 5 : nav->view == DIAL_NAV_SETTINGS ? 4 :
-        (nav->view == DIAL_NAV_DISPLAY || nav->view == DIAL_NAV_READING) ? 3 : agent_count(nav) + creation_entry(nav) + has_next(nav) + has_previous(nav) + 2;
+        nav->view == DIAL_NAV_DISPLAY ? 4 : (nav->view == DIAL_NAV_READING || nav->view == DIAL_NAV_DENSITY) ? 3 : agent_count(nav) + creation_entry(nav) + has_next(nav) + has_previous(nav) + 2;
     if (!detail && !preview && nav->focus >= nav->count) nav->focus = 0;
-    unsigned visible = message ? 2 : 3;
+    unsigned visible = message ? 2 : list_visible();
     nav->first = nav->focus / visible * visible;
     if ((nav->view == DIAL_NAV_MENU || nav->view == DIAL_NAV_SETTINGS) && nav->first + visible > nav->count)
         nav->first = nav->count - visible;
     lv_label_set_text_static(nav->heading, preview ? "Preview" : sessions ? "Chats" : nav->view == DIAL_NAV_MENU ? "Menu" : nav->view == DIAL_NAV_SETTINGS ? "Settings" :
-        nav->view == DIAL_NAV_DISPLAY ? "Display" : nav->view == DIAL_NAV_READING ? "Reading" : "Agents");
+        nav->view == DIAL_NAV_DISPLAY ? "Display" : nav->view == DIAL_NAV_READING ? "Reading" : nav->view == DIAL_NAV_DENSITY ? "Spacing" : "Agents");
     if (sessions && nav->conversations != NULL && nav->conversations->agent.name[0] != '\0')
         lv_label_set_text(nav->heading, nav->conversations->agent.name);
     else if (preview && nav->conversations != NULL && nav->conversations->selected < nav->conversations->page.count)
@@ -806,7 +831,7 @@ static void render(dial_navigation_t *nav)
     lv_label_set_text_static(nav->hint, preview ? readable ? "Turn to read" : "Press: back" : detail ? "Press: open" : sessions ? "Chats / turn" : "Turn + press");
     if (nav->view == DIAL_NAV_MENU)
         lv_label_set_text_fmt(nav->hint, "Turn  %u / %u", nav->focus + 1, nav->count);
-    if (nav->view == DIAL_NAV_READING) lv_label_set_text_static(nav->hint, "Until restart");
+    if (nav->view == DIAL_NAV_READING || nav->view == DIAL_NAV_DENSITY) lv_label_set_text_static(nav->hint, "Until restart");
     if (preview) {
         const dial_conversations_snapshot_t *view = nav->conversations;
         const char *roles[] = {"You", "Assistant", "Tool", "System", "Other"};
@@ -849,7 +874,7 @@ static void render(dial_navigation_t *nav)
     }
     for (unsigned i = 0; i < 3; ++i) {
         unsigned index = nav->first + i;
-        bool hidden = preview || (detail ? i != 0 : index >= nav->count || (message && i == 2));
+        bool hidden = preview || (detail ? i != 0 : index >= nav->count || i >= visible);
         lv_obj_set_hidden(nav->rows[i], hidden);
         if (hidden) continue;
         bool reading = nav->view == DIAL_NAV_READING;
@@ -864,10 +889,11 @@ static void render(dial_navigation_t *nav)
         if (detail) { name = "Conversations"; icon = LV_SYMBOL_LIST; }
         else item(nav, index, &name, &icon);
         lv_label_set_text(nav->names[i], name);
+        if (!detail && !message) list_row(nav, i);
         if (reading) {
             lv_obj_set_style_text_font(nav->names[i], openclaw_reading_font(), 0);
             lv_obj_set_height(nav->names[i], LV_SIZE_CONTENT);
-            lv_obj_set_y(nav->names[i], (44 - openclaw_reading_font()->line_height) / 2);
+            lv_obj_set_y(nav->names[i], (openclaw_density_row_height(false) - openclaw_reading_font()->line_height) / 2);
             lv_obj_set_width(nav->names[i], 100);
         }
         if (nav->view == DIAL_NAV_AGENTS && index < agent_count(nav)) {
@@ -1095,9 +1121,10 @@ void dial_navigation_activate(dial_navigation_t *nav)
         return;
     }
     if (nav->view == DIAL_NAV_DISPLAY) {
-        if (nav->focus < 2) {
-            nav->view = nav->focus == 0 ? DIAL_NAV_BACKLIGHT : DIAL_NAV_READING;
-            nav->focus = nav->view == DIAL_NAV_READING ? (unsigned)openclaw_reading_size() : 0;
+        if (nav->focus < 3) {
+            nav->view = nav->focus == 0 ? DIAL_NAV_BACKLIGHT : nav->focus == 1 ? DIAL_NAV_READING : DIAL_NAV_DENSITY;
+            nav->focus = nav->view == DIAL_NAV_DENSITY ? (unsigned)openclaw_density() :
+                nav->view == DIAL_NAV_READING ? (unsigned)openclaw_reading_size() : 0;
             changed(nav);
         } else back(nav);
         return;
@@ -1105,6 +1132,13 @@ void dial_navigation_activate(dial_navigation_t *nav)
     if (nav->view == DIAL_NAV_READING) {
         if (nav->focus < 2) {
             openclaw_reading_set_size((openclaw_reading_size_t)nav->focus);
+            changed(nav);
+        } else back(nav);
+        return;
+    }
+    if (nav->view == DIAL_NAV_DENSITY) {
+        if (nav->focus < 2) {
+            openclaw_density_set((openclaw_density_t)nav->focus);
             changed(nav);
         } else back(nav);
         return;

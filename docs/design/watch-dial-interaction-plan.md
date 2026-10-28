@@ -481,6 +481,10 @@ qualify it physically before enabling handwriting by default.
 
 ## Mobile pairing: QR discovery and Bluetooth setup
 
+The [mobile setup implementation contract](mobile-provisioning-contract.md)
+defines transport ownership, local confirmation, recovery, and the narrow PR
+sequence. It remains a proposal until implemented and qualified on real devices.
+
 **Make OpenClaw mobile the primary setup surface.** On the phone, open Devices →
 Add device and scan the code displayed by the watch or Dial. QR identifies the
 physical device and bootstraps a protected Bluetooth LE provisioning session.

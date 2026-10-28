@@ -54,12 +54,13 @@ are not connected to this control yet. Leaving Home, opening Canvas or
 Device status, or changing the selected agent/operator session discards it.
 Recording and drafts keep the screen awake and share the audio gate with Talk.
 
-For a live conversation, open **Menu** and use **Start Talk**. It names the next
-recipient independently of the conversation being browsed. During connection
-and conversation it becomes **Stop Talk**, including on Home. Start is disabled
-while Talk is unavailable or stopping, and a changed recipient must be
-repainted before a new press is accepted. The compact control over Canvas omits
-the recipient line. Diagnostics hides the Talk control until closed.
+For a live conversation, open **Menu → Live call** and use **Start call**. It
+names the next recipient independently of the conversation being browsed.
+During connection and conversation, Home and other pages offer **Return to
+call**; only the Live call page offers **End call**. Returning and pressing Back
+leave the call running. Start is disabled while Talk is unavailable or stopping,
+and a changed recipient must be repainted before a new press is accepted.
+Diagnostics hides the Talk control until closed.
 
 The watch Home shares the Dial's compact Wi-Fi, OpenClaw link, and battery
 strip above the lobster, with a bounded headline and a separate bottom action.
@@ -79,10 +80,10 @@ Agents shows local fox and lobster artwork for configured 🦊 and 🦞 identiti
 with an ASCII symbol or name initials for other identities. The same avatar
 appears in the list and detail view; it does not change agent routing.
 
-The **Menu** button opens Agents, Conversations, Canvas, Devices, and Settings. Connection in Settings
+The **Menu** button opens Agents, Conversations, Live call, Canvas, Devices, and Settings. Connection in Settings
 shows live Wi-Fi, Gateway, and Talk states. Canvas shows the retained card or
 an empty-state explanation. Home returns to the latest conversation state;
-Start/Stop Talk remains available on menu pages. Device status opens the
+Active calls remain reachable from menu pages. Device status opens the
 existing diagnostics overlay from Settings. The first touch on a dark screen only wakes it.
 
 Conversations returns to the last reader and its scroll position while the

@@ -108,6 +108,9 @@ With a retained reader selection, Home shows the agent name: press or tap
 **Continue** to return to its preview, or **Conversations** to return
 to its list. With no selection, **Choose agent** opens Agents. Offline,
 **Connection** opens the network summary; Back returns directly Home.
+The Home header uses the same configured fox or lobster avatar as the agent
+browser. Other identities use one initial in this compact header. Clearing
+the reader selection restores the generic Agents icon.
 
 Tap the agent name (or **Agents**) to open the agent browser, or the menu icon
 to open all sections. The face and background do not activate anything. The

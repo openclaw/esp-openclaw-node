@@ -29,5 +29,5 @@ typedef struct {
 typedef struct {
     bool available, preview;
     unsigned directory_revision, conversation_revision, preview_revision;
-    char agent_name[65];
+    esp_openclaw_agent_t agent;
 } dial_home_context_t;

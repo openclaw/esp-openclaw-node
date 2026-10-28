@@ -133,11 +133,31 @@ boot-unique lease excludes ordinary mutations and scans; automatic reconnect
 requests wait until release. Status remains readable and the existing link is
 preserved. A blocking scan must return before release. The release return value
 describes ownership, while its output reports any immediate reconnect error.
-This is not phone authentication or asynchronous radio/event draining: an
-earlier accepted join can still finish. No leased credential writes or
-disconnects are exposed yet. The future asynchronous adapter must establish
-correlated terminal outcomes and cancellation draining before using this lease
-for `wifi.apply` or completing a setup-session operation.
+Acquisition alone does not authenticate a phone or drain an earlier join.
+
+Native-radio adapters can use `setup_join_begin`, `setup_join_poll`,
+`setup_join_cancel`, and `setup_join_retry_drain` under that lease. One serialized
+owner task polls the attempt outside the default event loop and supplies a live
+authorization callback. Before applying credentials, the owner stops and
+deinitializes the radio, then crosses two event-loop barriers: an older Wi-Fi
+handler can itself enqueue an IP event behind the first barrier. Success needs
+the new attempt's association and IP on the station netif. Disconnect is latched;
+a later IP event cannot turn that failed attempt into success.
+
+Cancellation and the 30-second join deadline retain ownership until the same
+radio/event drain completes. A failed stop, deinit, barrier, or restart reports
+`RECOVERY_REQUIRED`; polling alone does not retry it or release ownership. An
+explicit drain retry uses a fresh generation. Cancellation before work starts
+preserves the current link. After work starts, saved credentials remain, while
+automatic reconnect stays disabled after failure or cancellation; an explicit
+Connect action can resume it. A successful attempt hands its link back to the
+ordinary Wi-Fi owner.
+
+Remote-radio backends return `ESP_ERR_NOT_SUPPORTED` before mutation. The Tab5's
+host event queue does not prove its coprocessor has drained. This native API is
+host-tested, not yet physically qualified or connected to BLE/mobile setup.
+`wifi.apply` and setup-session completion must use its terminal result rather
+than treating admission, a saved configuration, or `RECOVERY_REQUIRED` as success.
 
 Scanning a connected station requires an explicit, confirmed network-repair
 transition; do not silently disconnect it just because the phone opens a list.

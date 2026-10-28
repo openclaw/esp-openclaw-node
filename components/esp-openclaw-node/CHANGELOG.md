@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add native-radio Wi-Fi setup attempts with correlated outcomes, authority checks, cancellation draining, and explicit recovery after drain failures. Remote-radio backends remain unsupported by this API.
+
 - Keep Wi-Fi status and connection waiters disconnected after Disconnect or Forget, even when an older IP notification arrives afterward.
 
 - Add exclusive Wi-Fi setup admission with fenced scan access, deferred automatic reconnects, and rejection of competing console mutations. This preserves the current link; asynchronous setup joins and BLE integration remain separate work.

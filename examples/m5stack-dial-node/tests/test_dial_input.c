@@ -18,6 +18,8 @@ static dial_navigation_t navigation;
 static dial_agents_snapshot_t roster;
 static bool navigating;
 static unsigned refreshes, previous, next, opens, reads;
+static unsigned device_refreshes;
+static esp_openclaw_devices_snapshot_t devices;
 static dial_conversations_snapshot_t conversations;
 static const char *snapshot_prefix;
 static uint16_t frame[240 * 240];
@@ -95,6 +97,7 @@ static void navigation_event(dial_navigation_event_t kind, size_t offset, void *
         if (!dial_navigation_show_reader(&navigation, &roster, &conversations, false))
             dial_navigation_open(&navigation, true);
     }
+    else if (kind == DIAL_NAV_DEVICES_REFRESH) ++device_refreshes;
     else if (kind == DIAL_NAV_REFRESH || kind == DIAL_NAV_SESSIONS_REFRESH) { ++refreshes; requested_offset = offset; }
     else if (kind == DIAL_NAV_HOME || kind == DIAL_NAV_CONTROL) {
         navigating = false;
@@ -655,7 +658,7 @@ int main(int argc, char **argv)
         lv_indev_read(encoder); advance(40);
     }
     snapshot("menu-settings");
-    assert(strcmp(lv_label_get_text(navigation.names[0]), "Controls") == 0);
+    assert(strcmp(lv_label_get_text(navigation.names[0]), "Devices") == 0);
     assert(strcmp(lv_label_get_text(navigation.names[1]), "Activity") == 0);
     assert(strcmp(lv_label_get_text(navigation.names[2]), "Settings") == 0);
     touch(120, 168, true); touch(120, 168, false);
@@ -863,6 +866,80 @@ int main(int argc, char **argv)
     assert(dial_action_connect(&action_state, 0, NULL));
     assert(dial_action_configure(&action_state, false));
     puts("Activity outcomes, scrolling, retained values, stale holds and safe return: passed");
+
+    navigating = true;
+    lv_obj_set_hidden(home.root, true);
+    dial_navigation_open(&navigation, false);
+    for (unsigned i = 0; i < 2; ++i) {
+        encoder_diff = 1; lv_indev_read(encoder); advance(40);
+    }
+    touch(120, 168, true); touch(120, 168, false);
+    assert(navigation.view == DIAL_NAV_DEVICES && device_refreshes == 1);
+    devices.state = ESP_OPENCLAW_DEVICES_READY;
+    devices.revision = 1;
+    devices.count = 5;
+    for (unsigned i = 0; i < devices.count; ++i) {
+        snprintf(devices.devices[i].name, sizeof(devices.devices[i].name), "Studio device %u", i + 1);
+        strcpy(devices.devices[i].model, "A long device model that remains readable while turning the dial");
+    }
+    devices.devices[0].connected_known = devices.devices[0].connected = true;
+    devices.devices[3].paired_known = devices.devices[3].connected_known = true;
+    dial_navigation_devices_update(&navigation, &devices);
+    assert(strcmp(lv_label_get_text(navigation.names[0]), "This Dial") == 0);
+    assert(strcmp(lv_label_get_text(navigation.icons[1]), LV_SYMBOL_OK) == 0);
+    assert(strcmp(lv_label_get_text(navigation.icons[2]), "?") == 0);
+    snapshot("devices");
+    touch(120, 126, true); touch(120, 126, false);
+    assert(navigation.view == DIAL_NAV_DEVICE_DETAIL);
+    assert(strstr(lv_label_get_text(navigation.preview_text), "Studio device 1") != NULL);
+    assert(strstr(lv_label_get_text(navigation.preview_text), "Connection: Online") != NULL);
+    assert(strstr(lv_label_get_text(navigation.preview_text), "Pairing: Unknown") != NULL);
+    snapshot("device-detail");
+    lv_obj_update_layout(screen);
+    for (unsigned i = 0; i < lv_obj_get_child_count(navigation.root); ++i)
+        check_home_bounds(lv_obj_get_child(navigation.root, i));
+    touch(68, 44, true); touch(68, 44, false);
+    assert(navigation.view == DIAL_NAV_DEVICES && navigation.focus == 1);
+    for (unsigned i = 0; i < 3; ++i) { encoder_diff = 1; lv_indev_read(encoder); advance(40); }
+    assert(navigation.focus == 4 && navigation.first == 3 && device_refreshes == 1);
+    touch(120, 126, true); touch(120, 126, false);
+    assert(navigation.view == DIAL_NAV_DEVICE_DETAIL);
+    assert(strstr(lv_label_get_text(navigation.preview_text), "Connection: Offline") != NULL);
+    assert(strstr(lv_label_get_text(navigation.preview_text), "Pairing: Not paired") != NULL);
+    touch(68, 44, true); touch(68, 44, false);
+    assert(navigation.focus == 4 && navigation.first == 3);
+    for (unsigned i = 0; i < 2; ++i) { encoder_diff = 1; lv_indev_read(encoder); advance(40); }
+    touch(120, 82, true); touch(120, 82, false);
+    assert(device_refreshes == 2);
+    ++devices.revision;
+    dial_navigation_devices_update(&navigation, &devices);
+    touch(120, 126, true);
+    ++devices.revision;
+    strcpy(devices.devices[0].name, "Replacement row");
+    dial_navigation_devices_update(&navigation, &devices);
+    touch(120, 126, false);
+    assert(navigation.view == DIAL_NAV_DEVICES);
+    devices.state = ESP_OPENCLAW_DEVICES_OFFLINE; ++devices.revision;
+    dial_navigation_devices_update(&navigation, &devices);
+    assert(navigation.count == 3 && strcmp(lv_label_get_text(navigation.hint), "Offline / local") == 0);
+    snapshot("devices-offline");
+    touch(120, 82, true); touch(120, 82, false);
+    assert(navigation.view == DIAL_NAV_LOCAL_DEVICE);
+    snapshot("this-dial");
+    touch(120, 126, true); touch(120, 126, false);
+    assert(navigation.view == DIAL_NAV_DISPLAY);
+    touch(68, 44, true); touch(68, 44, false);
+    assert(navigation.view == DIAL_NAV_LOCAL_DEVICE && navigation.focus == 1);
+    touch(120, 168, true); touch(120, 168, false);
+    assert(navigation.view == DIAL_NAV_CONNECTION);
+    touch(68, 44, true); touch(68, 44, false);
+    assert(navigation.view == DIAL_NAV_LOCAL_DEVICE && navigation.focus == 2);
+    touch(68, 44, true); touch(68, 44, false);
+    assert(navigation.view == DIAL_NAV_DEVICES && device_refreshes == 3);
+    touch(68, 44, true); touch(68, 44, false);
+    assert(navigation.view == DIAL_NAV_MENU && navigation.focus == 2);
+    assert(confirmations == before_settings);
+    puts("Device inventory: paging, details, stale input, offline controls and Back passed");
 
     lv_deinit();
 }

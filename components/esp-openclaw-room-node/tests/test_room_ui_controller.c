@@ -223,6 +223,16 @@ static lv_obj_t *find_visible_text(lv_obj_t *parent, const char *text)
     }
     return NULL;
 }
+static lv_obj_t *find_visible_fragment(lv_obj_t *parent, const char *text)
+{
+    if (!lv_obj_is_visible(parent)) return NULL;
+    if (lv_obj_check_type(parent, &lv_label_class) && strstr(lv_label_get_text(parent), text)) return parent;
+    for (unsigned i = 0; i < lv_obj_get_child_count(parent); ++i) {
+        lv_obj_t *found = find_visible_fragment(lv_obj_get_child(parent, i), text);
+        if (found) return found;
+    }
+    return NULL;
+}
 static bool visible_watch_text(const char *text)
 {
     lv_obj_update_layout(lv_layer_top());
@@ -631,6 +641,7 @@ static void check_watch_status(const char *path)
 
 static void check_watch_navigation(void)
 {
+    wifi_status = (esp_openclaw_node_wifi_status_t){.connected = true, .has_saved_network = true, .ssid = "Studio Wi-Fi"};
     room_ui_facts_t facts = {.wifi = ROOM_UI_WIFI_CONNECTED,
         .gateway = ROOM_UI_GATEWAY_CONNECTED, .talk = ROOM_UI_TALK_READY};
     room_ui_store_facts(&facts);
@@ -648,7 +659,7 @@ static void check_watch_navigation(void)
     click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_SETTINGS "  Settings")));
     lv_obj_t *connection = lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_WIFI "  Connection"));
     click_talk(connection);
-    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Wi-Fi: Connected")));
+    assert(find_visible_fragment(lv_layer_top(), "Wi-Fi connected"));
     facts.talk = ROOM_UI_TALK_ACTIVE;
     room_ui_store_facts(&facts);
     room_ui_set(ROOM_UI_SPEAKING, NULL);
@@ -684,7 +695,7 @@ static void check_watch_navigation(void)
     assert(room_ui_watch_menu("invalid") == ESP_ERR_INVALID_ARG);
     assert(lv_obj_is_visible(find_text(lv_layer_top(), "Ready when you are")));
     assert(room_ui_watch_menu("connection") == ESP_OK);
-    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Wi-Fi: Connected")));
+    assert(find_visible_fragment(lv_layer_top(), "Wi-Fi connected"));
     assert(room_ui_watch_menu("home") == ESP_OK);
     assert(brightness > 0); // Returning Home is a user action, not an idle timeout.
     room_ui_refresh(); // A directory/owner update can repaint immediately afterward.
@@ -727,6 +738,96 @@ static uint32_t avatar_hash(int x, int y, int size)
             for (int channel = 0; channel < 3; ++channel)
                 hash = (hash ^ frame[(row * width + col) * 4 + channel]) * 16777619u;
     return hash;
+}
+
+static void check_watch_connection(const char *path)
+{
+    room_ui_facts_t facts = {.wifi = ROOM_UI_WIFI_CONNECTED,
+        .gateway = ROOM_UI_GATEWAY_CONNECTED, .talk = ROOM_UI_TALK_READY};
+    wifi_status = (esp_openclaw_node_wifi_status_t){.connected = true, .has_saved_network = true,
+        .ap_info_valid = true, .ssid = "Studio Wi-Fi", .ip = "192.0.2.20", .rssi = -65, .channel = 6};
+    room_ui_store_facts(&facts);
+    assert(room_ui_watch_menu("connection") == ESP_OK);
+    lv_obj_t *details = find_visible_fragment(lv_layer_top(), "Network\nStudio Wi-Fi");
+    assert(details && strstr(lv_label_get_text(details), "-65 dBm / ch 6"));
+    assert(strstr(lv_label_get_text(details), "IP address\n192.0.2.20"));
+    assert(visible_watch_text("Gateway: Connected") && visible_watch_text("Talk: Ready"));
+    lv_area_t area;
+    lv_obj_get_coords(lv_obj_get_parent(details), &area);
+    assert(area.x1 >= 26 && area.x2 < 342 && area.y1 >= 160 && area.y2 < 376);
+    unsigned reads = wifi_reads;
+    for (unsigned i = 0; i < 10; ++i) room_ui_refresh();
+    assert(wifi_reads == reads);
+    wifi_status.rssi = -51;
+    status_tick();
+    assert(wifi_reads > reads && strstr(lv_label_get_text(details), "-51 dBm"));
+    char output[1024];
+    if (path) { snprintf(output, sizeof(output), "%s-connection-online.ppm", path); write_frame(output); }
+    wifi_status.ap_info_valid = false;
+    status_tick();
+    assert(strstr(lv_label_get_text(details), "Signal\nUnavailable"));
+    assert(!strstr(lv_label_get_text(details), "dBm"));
+    wifi_status.connected = false;
+    wifi_status.last_disconnect_reason = 201;
+    status_tick();
+    assert(strstr(lv_label_get_text(details), "Wi-Fi offline"));
+    assert(strstr(lv_label_get_text(details), "Disconnect code: 201"));
+    assert(!strstr(lv_label_get_text(details), "192.0.2.20"));
+    if (path) { snprintf(output, sizeof(output), "%s-connection-offline.ppm", path); write_frame(output); }
+    lv_obj_update_layout(lv_layer_top());
+    touch_state = LV_INDEV_STATE_RELEASED; lv_indev_read(touchscreen);
+    touch_point = (lv_point_t){180, 330}; touch_state = LV_INDEV_STATE_PRESSED;
+    lv_indev_read(touchscreen); lv_tick_inc(40);
+    touch_point.y = 180; lv_indev_read(touchscreen); lv_tick_inc(40);
+    lv_obj_t *scrolled = lv_indev_get_scroll_obj(touchscreen);
+    touch_state = LV_INDEV_STATE_RELEASED; lv_indev_read(touchscreen);
+    // This bounded readout fits the Watch. A swipe must not activate a
+    // control or move a different page, even when there is no overflow.
+    assert(scrolled == NULL || scrolled == lv_obj_get_parent(details));
+    for (unsigned i = 0; i < 30; ++i) { lv_tick_inc(20); lv_timer_handler(); }
+    assert(visible_watch_text("Connection") && visible_watch_text("Gateway: Connected"));
+    int32_t position = lv_obj_get_scroll_y(lv_obj_get_parent(details));
+    status_tick();
+    assert(lv_obj_get_scroll_y(lv_obj_get_parent(details)) == position);
+    facts.gateway = ROOM_UI_GATEWAY_OFFLINE;
+    room_ui_store_facts(&facts);
+    reads = wifi_reads;
+    room_ui_refresh();
+    assert(wifi_reads == reads && visible_watch_text("Gateway: Offline"));
+    assert(room_ui_apply_display_brightness(0) == ESP_OK);
+    reads = wifi_reads;
+    status_tick();
+    assert(wifi_reads == reads);
+    fail_brightness = true;
+    assert(room_ui_apply_display_brightness(60) == ESP_ERR_TIMEOUT);
+    status_tick();
+    assert(wifi_reads == reads);
+    fail_brightness = false;
+    assert(room_ui_apply_display_brightness(60) == ESP_OK && wifi_reads > reads);
+    assert(room_ui_watch_menu("settings") == ESP_OK);
+    reads = wifi_reads;
+    status_tick();
+    assert(wifi_reads == reads);
+    wifi_status.has_saved_network = false;
+    assert(room_ui_watch_menu("connection") == ESP_OK);
+    details = find_visible_fragment(lv_layer_top(), "Wi-Fi not set up");
+    assert(details && strstr(lv_label_get_text(details), "Phone pairing is not available yet"));
+    assert(lv_obj_get_scroll_y(lv_obj_get_parent(details)) == 0);
+    if (path) { snprintf(output, sizeof(output), "%s-connection-setup.ppm", path); write_frame(output); }
+    lv_obj_t *back = lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " Settings"));
+    // Make the poll due before pressing so its refresh happens during a
+    // short tap, rather than changing the gesture into a long press.
+    now_us += 1000000;
+    lv_tick_inc(1000);
+    touch_talk(back, true);
+    wifi_status.has_saved_network = true;
+    lv_timer_handler();
+    touch_talk(back, false);
+    assert(visible_watch_text("Settings"));
+    assert(room_ui_watch_menu("home") == ESP_OK);
+    wifi_status = (esp_openclaw_node_wifi_status_t){.connected = true};
+    expire_watch_hint();
+    puts("watch Connection: sampled facts, unknown readings, swipe safety, setup, sleep and hidden-page polling passed");
 }
 
 static void check_watch_agents(const char *path)
@@ -1356,6 +1457,7 @@ static void check_watch_devices(const char *path)
 
 static void check_watch_display_settings(const char *path)
 {
+    wifi_status = (esp_openclaw_node_wifi_status_t){.connected = true, .has_saved_network = true, .ssid = "Studio Wi-Fi"};
     room_ui_facts_t facts = {.wifi = ROOM_UI_WIFI_CONNECTED,
         .gateway = ROOM_UI_GATEWAY_CONNECTED, .talk = ROOM_UI_TALK_ACTIVE};
     unsigned starts = talk_starts, stops = talk_stops, selections = agent_selections;
@@ -1386,7 +1488,7 @@ static void check_watch_display_settings(const char *path)
         write_frame(output);
     }
     click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_WIFI "  Connection")));
-    assert(visible_watch_text("Wi-Fi: Connected"));
+    assert(find_visible_fragment(lv_layer_top(), "Wi-Fi connected"));
     click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " This Watch")));
     assert(visible_watch_text("This Watch"));
     click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_SETTINGS "  Device status")));
@@ -1464,6 +1566,7 @@ static void check_watch_display_settings(const char *path)
     assert(brightness == 65);
     assert(!visible_watch_text("Couldn't change. Try again."));
     assert(room_ui_watch_brightness(0) == ESP_ERR_INVALID_ARG && brightness == 65);
+    wifi_status.connected = false;
     facts.wifi = ROOM_UI_WIFI_OFFLINE;
     facts.gateway = ROOM_UI_GATEWAY_OFFLINE;
     room_ui_store_facts(&facts);
@@ -1475,7 +1578,7 @@ static void check_watch_display_settings(const char *path)
     assert(visible_watch_text("65%"));
     click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " This Watch")));
     click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_WIFI "  Connection")));
-    assert(visible_watch_text("Wi-Fi: Offline"));
+    assert(find_visible_fragment(lv_layer_top(), "Wi-Fi offline"));
     click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " This Watch")));
     lv_obj_t *display_button = lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_IMAGE "  Display"));
     touch_talk(display_button, true);
@@ -1646,6 +1749,7 @@ int main(int argc, char **argv)
         check_watch_home(argc == 3 ? argv[2] : NULL);
         check_watch_status(argc == 3 ? argv[2] : NULL);
         check_watch_navigation();
+        check_watch_connection(argc == 3 ? argv[2] : NULL);
         check_watch_agents(argc == 3 ? argv[2] : NULL);
         check_watch_conversations(argc == 3 ? argv[2] : NULL);
         check_watch_home_gesture();

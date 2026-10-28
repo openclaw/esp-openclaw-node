@@ -29,8 +29,8 @@ media state; unavailable and stopping states disable the control. On Watch,
 browsing menus, settings, agents, conversations, or Canvas during an active call
 shows **Return to call** instead of Stop. That action returns to the call on Home
 without ending it; **Stop Talk** on that view ends it deliberately. Diagnostics
-hide the control. On boards
-that sleep the display, the first touch on a dark Talk control only wakes the
+hide the control. Idle Watch menus, readers, and Canvas hide the Talk control
+and use its space for content. On boards that sleep the display, the first touch on a dark Talk control only wakes the
 display; tap the visible control again to start or stop Talk. If the
 button's action changes during a press, release and press again; a held Start
 press cannot become Stop when wake word or a remote command starts Talk.
@@ -51,8 +51,9 @@ to this Watch and lasts until restart; USB `menu density` opens the same control
 On the 1.8-inch Watch, **Menu → Agents** opens the agent directory.
 Swipe the list to browse up to eight agents per page; use the arrows for more
 pages, and tap a row to inspect its name and exact ID. Initials replace emoji
-that the embedded font cannot display. Back returns to the list or menu, and
-Start Talk remains available while idle; an active call offers **Return to call**.
+that the embedded font cannot display. Back returns to the list or menu.
+Idle pages use the full content area; return Home to start Talk. An active call
+offers **Return to call** without covering the page content.
 **Use for next Talk** chooses the
 agent without starting a call or changing an active conversation. The button
 confirms the choice after the room owner accepts it; Home shows the next

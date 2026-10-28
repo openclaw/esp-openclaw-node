@@ -168,11 +168,16 @@ static const char *failure_text(room_agents_state_t value)
     }
 }
 
-void room_watch_conversations_render(const room_conversations_snapshot_t *snapshot, bool hidden)
+void room_watch_conversations_render(const room_conversations_snapshot_t *snapshot, bool hidden, int content_bottom)
 {
     if (root == NULL) return;
     lv_obj_set_hidden(root, hidden);
     if (hidden) { current = NULL; return; }
+    lv_obj_set_height(list, content_bottom - 168);
+    lv_obj_set_y(previous, content_bottom - 44);
+    lv_obj_set_y(refresh, content_bottom - 44);
+    lv_obj_set_y(next, content_bottom - 44);
+    lv_obj_set_y(creation_button, content_bottom - 44);
     int row_height = openclaw_density_row_height(true);
     for (unsigned i = 0; i < ESP_OPENCLAW_DIRECTORY_PAGE_SIZE; ++i) {
         lv_obj_set_y(rows[i], (int)i * (row_height + 8));
@@ -232,7 +237,7 @@ void room_watch_conversations_render(const room_conversations_snapshot_t *snapsh
     lv_obj_set_hidden(new_chat, preview || creation ||
         (state != ROOM_AGENTS_READY && state != ROOM_AGENTS_EMPTY));
     lv_obj_set_hidden(creation_button, !creation);
-    lv_obj_set_height(body, creation ? 194 : 250);
+    lv_obj_set_height(body, content_bottom - (creation ? 168 : 112));
     if (creation) {
         const room_creation_snapshot_t *draft = &snapshot->creation;
         const char *caption = "Create empty conversation";
@@ -302,6 +307,10 @@ void room_watch_conversations_render(const room_conversations_snapshot_t *snapsh
     if (!lv_obj_is_hidden(list)) {
         lv_obj_update_layout(list);
         lv_obj_readjust_scroll(list, LV_ANIM_OFF);
+    }
+    if (!lv_obj_is_hidden(body)) {
+        lv_obj_update_layout(body);
+        lv_obj_readjust_scroll(body, LV_ANIM_OFF);
     }
 }
 

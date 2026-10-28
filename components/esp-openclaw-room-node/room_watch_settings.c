@@ -96,11 +96,12 @@ void room_watch_settings_create(lv_obj_t *parent, lv_event_cb_t handler, lv_even
     lv_obj_set_hidden(root, true);
 }
 
-void room_watch_settings_render(room_watch_page_t page, room_watch_page_t parent, int brightness, bool failed, bool camera_minimum, const room_messaging_snapshot_t *messaging, bool hidden)
+void room_watch_settings_render(room_watch_page_t page, room_watch_page_t parent, int brightness, bool failed, bool camera_minimum, const room_messaging_snapshot_t *messaging, bool hidden, int content_bottom)
 {
     if (root == NULL) return;
     lv_obj_set_hidden(root, hidden);
     if (hidden) return;
+    lv_obj_set_height(list, content_bottom - 120);
     bool display = page == ROOM_WATCH_DISPLAY;
     bool brightness_page = page == ROOM_WATCH_BRIGHTNESS;
     bool reading = page == ROOM_WATCH_READING;

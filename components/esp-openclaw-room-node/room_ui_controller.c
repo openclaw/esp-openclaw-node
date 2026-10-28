@@ -191,7 +191,7 @@ static void close_devices(void)
     pressed_device_action = -100;
     unsigned generation = ++device_generation;
     taskEXIT_CRITICAL(&state_mux);
-    room_watch_devices_render(NULL, true);
+    room_watch_devices_render(NULL, true, 432);
     free(current);
     free(painted);
     if (devices_action_handler != NULL) devices_action_handler(false, generation);
@@ -287,7 +287,7 @@ static void close_conversations(bool cancel)
     conversations_open = false;
     pressed_chat_action = -100;
     taskEXIT_CRITICAL(&state_mux);
-    room_watch_conversations_render(NULL, true);
+    room_watch_conversations_render(NULL, true, 432);
     free(current);
     free(painted);
     if (cancel && conversation_handler != NULL) conversation_handler(ROOM_CONVERSATIONS_CLOSE, "", 0, 0, conversation_generation);
@@ -1466,6 +1466,9 @@ static bool room_ui_render_locked(void)
     }
     bool canvas_active = room_canvas_is_active();
     bool navigation = watch_home_enabled && page != ROOM_WATCH_HOME && !canvas_active;
+    bool call_in_progress = facts.talk == ROOM_UI_TALK_CONNECTING || facts.talk == ROOM_UI_TALK_ACTIVE;
+    // Only an ongoing call reserves a footer while browsing Watch pages.
+    int content_bottom = call_in_progress ? 370 : 432;
     bool voice_home = watch_home_enabled && voice_action_handler != NULL &&
         facts.talk != ROOM_UI_TALK_CONNECTING && facts.talk != ROOM_UI_TALK_ACTIVE &&
         facts.talk != ROOM_UI_TALK_STOPPING;
@@ -1484,14 +1487,14 @@ static bool room_ui_render_locked(void)
         taskEXIT_CRITICAL(&state_mux);
         bool settings = page == ROOM_WATCH_SETTINGS || page == ROOM_WATCH_LOCAL_DEVICE || page == ROOM_WATCH_DISPLAY || page == ROOM_WATCH_BRIGHTNESS || page == ROOM_WATCH_READING || page == ROOM_WATCH_DENSITY || page == ROOM_WATCH_MESSAGING;
         room_watch_navigation_render(page, &facts, !navigation || overlay || page == ROOM_WATCH_AGENTS ||
-            page == ROOM_WATCH_DEVICES || settings, resume_failed, parent);
-        room_watch_devices_render(painted_devices, !navigation || overlay || page != ROOM_WATCH_DEVICES);
+            page == ROOM_WATCH_DEVICES || settings, resume_failed, parent, content_bottom);
+        room_watch_devices_render(painted_devices, !navigation || overlay || page != ROOM_WATCH_DEVICES, content_bottom);
         room_watch_settings_render(page, parent, brightness, brightness_failed, camera_minimum, &messaging,
-            !navigation || overlay || !settings);
+            !navigation || overlay || !settings, content_bottom);
         room_watch_agents_render(&painted_agents, !navigation || overlay || page != ROOM_WATCH_AGENTS || chats,
-            target.selected ? target.id : "", target.expired, selecting, selection_error);
+            target.selected ? target.id : "", target.expired, selecting, selection_error, content_bottom);
         room_watch_conversations_render(painted_conversations,
-            !navigation || overlay || page != ROOM_WATCH_AGENTS || !chats);
+            !navigation || overlay || page != ROOM_WATCH_AGENTS || !chats, content_bottom);
     }
     if (talk_pill != NULL) {
         if (watch_home_enabled) {
@@ -1530,7 +1533,12 @@ static bool room_ui_render_locked(void)
         painted_target_revision = target.revision;
         taskEXIT_CRITICAL(&state_mux);
         lv_obj_set_state(talk_pill, LV_STATE_DISABLED, !start && !stop);
-        bool hidden = overlay || (voice_home && !canvas_active && !navigation);
+        bool browsing_idle = watch_home_enabled && (navigation || canvas_active) && !call_in_progress;
+        bool hidden = overlay || (voice_home && !canvas_active && !navigation) || browsing_idle;
+        if (browsing_idle) {
+            painted_talk_action = TALK_CONTROL_NONE;
+            pressed_talk_action = TALK_CONTROL_NONE;
+        }
         lv_obj_set_flag(talk_pill, LV_OBJ_FLAG_HIDDEN, hidden);
         if (!hidden) lv_obj_move_foreground(talk_pill);
     }
@@ -1833,8 +1841,8 @@ void room_ui_set_diagnostics_open(bool open)
             room_watch_home_render(NULL, NULL, ROOM_UI_IDLE, "", NULL, NULL, false, false, true);
         }
         if (watch_home_enabled) {
-            room_watch_navigation_render(ROOM_WATCH_HOME, NULL, true, false, ROOM_WATCH_HOME);
-            room_watch_settings_render(ROOM_WATCH_HOME, ROOM_WATCH_HOME, 0, false, false, NULL, true);
+            room_watch_navigation_render(ROOM_WATCH_HOME, NULL, true, false, ROOM_WATCH_HOME, 432);
+            room_watch_settings_render(ROOM_WATCH_HOME, ROOM_WATCH_HOME, 0, false, false, NULL, true, 432);
         }
         if (home != NULL) lv_obj_add_flag(home, LV_OBJ_FLAG_HIDDEN);
         if (talk_pill != NULL) lv_obj_add_flag(talk_pill, LV_OBJ_FLAG_HIDDEN);

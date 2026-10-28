@@ -28,6 +28,11 @@ display unavailable RSSI as `unknown`.
 
 ## Shared setup session owner
 
+`esp_openclaw_setup_frame.h` provides the allocation-free
+[setup frame codec](../../docs/design/mobile-setup-frames.md). It validates the
+shared byte envelope and bounded fragment sizes; it does not authenticate a
+peer, reassemble a transfer, or expose a BLE endpoint.
+
 `esp_openclaw_setup_session.h` provides transport-independent setup admission
 for Watch and Dial. It is a library foundation; no example exposes BLE setup
 or a new pairing screen yet. Wi-Fi/node lifecycle integration and the encrypted

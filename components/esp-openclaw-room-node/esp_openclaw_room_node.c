@@ -602,6 +602,13 @@ static void refresh_voice(void)
     };
     context.available = context.valid && media_ready && talk_call == NULL;
     strlcpy(context.recipient, talk_target.selected ? talk_target.name : "Default agent", sizeof(context.recipient));
+    if (talk_target.selected && !talk_target.expired) {
+        strlcpy(context.agent_id, talk_target.id, sizeof(context.agent_id));
+        strlcpy(context.session_key, talk_target.session_key, sizeof(context.session_key));
+    }
+#if CONFIG_OPENCLAW_ROOM_VOICE_ACTIONS
+    context.send_enabled = true;
+#endif
     static room_voice_snapshot_t snapshot;
     bool changed = room_voice_draft_poll(&context, &snapshot);
     xSemaphoreGive(state_lock);

@@ -7,8 +7,8 @@
 
 static lv_obj_t *root, *title_label, *detail_label;
 static lv_obj_t *continue_card, *reader_label;
-static lv_obj_t *voice_button, *voice_label, *discard_button;
-static lv_obj_t *review_panel, *review_heading, *review_recipient, *review_body, *review_text;
+static lv_obj_t *voice_button, *voice_label, *discard_button, *send_button, *send_label;
+static lv_obj_t *review_panel, *review_heading, *review_recipient, *review_notice, *review_body, *review_text;
 static uint32_t review_generation;
 static room_voice_state_t review_state;
 static openclaw_status_bar_t status_bar;
@@ -80,7 +80,7 @@ static lv_obj_t *action(lv_obj_t *parent, const char *text, lv_event_cb_t handle
 }
 
 void room_watch_home_create(lv_obj_t *parent, lv_event_cb_t menu_handler, lv_event_cb_t continue_handler,
-                            lv_event_cb_t voice_handler, lv_event_cb_t discard_handler)
+                            lv_event_cb_t voice_handler, lv_event_cb_t discard_handler, lv_event_cb_t send_handler)
 {
     root = lv_obj_create(parent);
     lv_obj_remove_style_all(root);
@@ -148,6 +148,9 @@ void room_watch_home_create(lv_obj_t *parent, lv_event_cb_t menu_handler, lv_eve
     lv_obj_set_style_text_font(review_heading, &lv_font_montserrat_20, 0);
 #endif
     review_recipient = label(review_panel, "", 8, 40, 316, 0xb8b0bd);
+    review_notice = label(review_panel, "", 8, 64, 316, 0xb8b0bd);
+    lv_label_set_long_mode(review_notice, LV_LABEL_LONG_WRAP);
+    lv_obj_set_height(review_notice, 40);
     review_body = lv_obj_create(review_panel);
     lv_obj_remove_style_all(review_body);
     lv_obj_set_pos(review_body, 8, 72);
@@ -169,6 +172,12 @@ void room_watch_home_create(lv_obj_t *parent, lv_event_cb_t menu_handler, lv_eve
     lv_obj_center(lv_obj_get_child(discard_button, 0));
     lv_obj_set_hidden(voice_button, true);
     lv_obj_set_hidden(discard_button, true);
+    send_button = action(root, "Send", send_handler, &send_label);
+    lv_obj_set_pos(send_button, 138, 376);
+    lv_obj_set_size(send_button, 204, 52);
+    lv_label_set_text_static(send_label, LV_SYMBOL_UP "  Send");
+    lv_obj_center(send_label);
+    lv_obj_set_hidden(send_button, true);
 }
 
 bool room_watch_home_review_visible(void)
@@ -196,14 +205,20 @@ bool room_watch_home_render(const room_ui_facts_t *facts, const room_ui_talk_tar
     bool canceling = voice != NULL && voice->state == ROOM_VOICE_CANCELING;
     bool transcribing = voice != NULL && (voice->state == ROOM_VOICE_TRANSCRIBING || canceling);
     bool transcription_failed = voice != NULL && voice->state == ROOM_VOICE_TRANSCRIPTION_ERROR;
-    bool review = (draft || transcribing || transcription_failed) && !holding;
+    bool submitted = voice != NULL && voice->state >= ROOM_VOICE_SENDING;
+    bool sending = voice != NULL && voice->state == ROOM_VOICE_SENDING;
+    bool review = (draft || transcribing || transcription_failed || submitted) && !holding;
     bool retry = voice != NULL && (voice->state == ROOM_VOICE_ERROR || transcription_failed);
     bool split = (draft || transcription_failed) && !holding;
     lv_obj_set_hidden(review_panel, !review);
-    lv_obj_set_hidden(voice_button, voice == NULL || (transcribing && !holding));
+    lv_obj_set_hidden(voice_button, voice == NULL || ((transcribing || draft || submitted) && !holding));
+    lv_obj_set_hidden(send_button, !(draft || submitted) || holding);
+    lv_label_set_text_static(send_label, sending ? "Sending..." : submitted ? "Conversations" : LV_SYMBOL_UP "  Send");
+    lv_obj_center(send_label);
+    lv_obj_set_state(send_button, LV_STATE_DISABLED, sending || (draft && !voice->can_send));
     lv_obj_set_hidden(discard_button, !review);
     lv_obj_set_size(discard_button, transcribing ? 316 : 104, 52);
-    lv_label_set_text_static(lv_obj_get_child(discard_button, 0), canceling ? "Canceling..." : transcribing ? "Cancel" : "Discard");
+    lv_label_set_text_static(lv_obj_get_child(discard_button, 0), canceling ? "Canceling..." : transcribing ? "Cancel" : submitted ? "Done" : "Discard");
     lv_obj_center(lv_obj_get_child(discard_button, 0));
     lv_obj_set_state(discard_button, LV_STATE_DISABLED, canceling);
     lv_obj_set_pos(voice_button, split ? 138 : 26, 376);
@@ -225,11 +240,19 @@ bool room_watch_home_render(const room_ui_facts_t *facts, const room_ui_talk_tar
     if (review) {
         lv_obj_set_hidden(title_label, true);
         lv_obj_set_hidden(detail_label, true);
-        lv_label_set_text_static(review_heading, canceling ? "Canceling" : transcribing ? "Transcribing" : transcription_failed ? "Couldn't transcribe" : "Text draft");
+        lv_label_set_text_static(review_heading, sending ? "Sending" : submitted ?
+            voice->state == ROOM_VOICE_ACCEPTED ? "Accepted" : voice->state == ROOM_VOICE_SENT ? "Sent" :
+            voice->state == ROOM_VOICE_SEND_UNKNOWN ? "Check delivery" : "Turn stopped" :
+            canceling ? "Canceling" : transcribing ? "Transcribing" : transcription_failed ? "Couldn't transcribe" : "Text draft");
         char recipient[96];
-        snprintf(recipient, sizeof(recipient), "%s / Not sent", voice->recipient);
+        snprintf(recipient, sizeof(recipient), "%s%s", voice->recipient, submitted ? "" : " / Not sent");
+        bool instruction = draft && voice->detail[0] != '\0';
+        lv_obj_set_hidden(review_notice, !instruction);
+        if (instruction) lv_label_set_text(review_notice, voice->detail);
+        lv_obj_set_y(review_body, instruction ? 112 : 72);
+        lv_obj_set_height(review_body, instruction ? 176 : 216);
         lv_label_set_text(review_recipient, recipient);
-        const char *text = draft ? voice->text : transcription_failed ? voice->detail : canceling ? "Discarding this recording." :
+        const char *text = draft ? voice->text : submitted || transcription_failed ? voice->detail : canceling ? "Discarding this recording." :
             "Turning your recording into text.\n\nNothing is sent to your agent. Review the text when it is ready.";
         bool changed = review_generation != voice->generation || review_state != voice->state ||
             strcmp(lv_label_get_text(review_text), text) != 0;

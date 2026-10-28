@@ -6,6 +6,7 @@ set(EXTRA_COMPONENT_DIRS
     "../../components/esp-openclaw-ui"
     "../../components/esp-openclaw-node-provisioning"
     "../../components/esp-openclaw-talk"
+    "../../components/esp-openclaw-chat"
     "../../components/esp-openclaw-room-node")
 set(COMPONENTS main)
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)

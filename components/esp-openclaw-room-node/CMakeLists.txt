@@ -41,6 +41,8 @@ idf_component_register(
         esp-openclaw-ui
         esp-openclaw-node-provisioning
         esp-openclaw-talk
+        esp-openclaw-chat
+        esp_hw_support
         esp_app_format
         esp_event
         esp_http_client

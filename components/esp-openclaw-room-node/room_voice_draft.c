@@ -1,8 +1,10 @@
 #include "room_voice_draft.h"
 
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
 
+#include "esp_random.h"
 #include "freertos/FreeRTOS.h"
 #include "room_media.h"
 #include "room_recording.h"
@@ -26,6 +28,11 @@ static esp_openclaw_transcription_handle_t transcription;
 static bool draining;
 /* Keep the bounded provider text off the supervisor's small task stack. */
 static esp_openclaw_transcription_snapshot_t transcript;
+static esp_openclaw_chat_handle_t chat;
+static esp_openclaw_chat_snapshot_t chat_state;
+static bool sent;
+static bool chat_polling;
+static bool queue_failed;
 
 bool room_voice_draft_busy(void)
 {
@@ -35,6 +42,7 @@ bool room_voice_draft_busy(void)
 void room_voice_draft_event(esp_openclaw_node_handle_t source, const char *event,
                            const char *payload, uint64_t revision, uint64_t owner)
 {
+    if (chat != NULL) esp_openclaw_chat_event(chat, source, event, payload);
     if (transcription != NULL && !draining && !discarding &&
         revision == view.recipient_revision && owner == view.owner_incarnation) {
         esp_openclaw_transcription_event(transcription, source, event, payload);
@@ -53,7 +61,11 @@ void room_voice_draft_request(room_voice_action_t action, uint32_t generation, u
         intent.end = ROOM_VOICE_BEGIN;
         intent.pending = true;
     } else if (action != ROOM_VOICE_BEGIN && generation == intent.generation &&
-               intent.end != ROOM_VOICE_CANCEL) {
+               intent.end != ROOM_VOICE_CANCEL && (intent.end != ROOM_VOICE_HIDE || action == ROOM_VOICE_CANCEL)) {
+        if (action == ROOM_VOICE_SEND) {
+            intent.recipient_revision = revision;
+            intent.owner_incarnation = owner;
+        }
         intent.end = action;
         intent.pending = true;
     }
@@ -76,6 +88,10 @@ static void set_error(const char *message)
 
 static void discard(const char *error)
 {
+    if (chat != NULL) esp_openclaw_chat_destroy(chat);
+    chat = NULL;
+    chat_polling = sent = queue_failed = false;
+    view.can_send = false;
     free(audio);
     audio = NULL;
     audio_bytes = audio_offset = 0;
@@ -87,6 +103,69 @@ static void discard(const char *error)
         view.state = ROOM_VOICE_CANCELING;
         draining = true;
         esp_openclaw_transcription_cancel(transcription);
+    }
+}
+
+static void poll_chat(void)
+{
+    if (chat == NULL) return;
+    esp_openclaw_chat_poll(chat);
+    esp_openclaw_chat_copy(chat, &chat_state);
+    view.can_send = !sent && chat_state.state == ESP_OPENCLAW_CHAT_READY;
+    chat_polling = chat_state.state == ESP_OPENCLAW_CHAT_PREPARING ||
+        chat_state.state == ESP_OPENCLAW_CHAT_SENDING || chat_state.state == ESP_OPENCLAW_CHAT_RUNNING;
+    if (!sent) {
+        if (view.state != ROOM_VOICE_DRAFT) return;
+        if (chat_state.state == ESP_OPENCLAW_CHAT_FAILED)
+            strlcpy(view.detail, "Open the conversation and record again.", sizeof(view.detail));
+        else if (view.can_send) {
+            strlcpy(view.detail, queue_failed ? "Could not queue the message. Try Send again." : "", sizeof(view.detail));
+        } else strlcpy(view.detail, "Preparing conversation...", sizeof(view.detail));
+        return;
+    }
+    view.state = ROOM_VOICE_SENDING;
+    const char *detail = "Waiting for the Gateway to accept this message.";
+    switch (chat_state.state) {
+        case ESP_OPENCLAW_CHAT_RUNNING:
+            view.state = ROOM_VOICE_ACCEPTED;
+            detail = "Message accepted. Open Conversations for the reply.";
+            break;
+        case ESP_OPENCLAW_CHAT_COMPLETE:
+            view.state = ROOM_VOICE_SENT;
+            detail = "This turn finished. Open Conversations to read it.";
+            break;
+        case ESP_OPENCLAW_CHAT_HANDED_OFF:
+            view.state = ROOM_VOICE_SENT;
+            detail = "Message accepted. Work continues in the conversation.";
+            break;
+        case ESP_OPENCLAW_CHAT_OUTCOME_UNKNOWN:
+            view.state = ROOM_VOICE_SEND_UNKNOWN;
+            detail = "Check the conversation before sending again.";
+            break;
+        case ESP_OPENCLAW_CHAT_FAILED:
+        case ESP_OPENCLAW_CHAT_ABORTED:
+            view.state = ROOM_VOICE_SEND_FAILED;
+            detail = "The turn stopped. Check the conversation for details.";
+            break;
+        default: break;
+    }
+    strlcpy(view.detail, detail, sizeof(view.detail));
+}
+
+static void send_draft(void)
+{
+    if (chat == NULL || !view.can_send || view.state != ROOM_VOICE_DRAFT || sent) return;
+    uint8_t bytes[16];
+    char id[33];
+    esp_fill_random(bytes, sizeof(bytes));
+    for (size_t i = 0; i < sizeof(bytes); ++i) snprintf(id + i * 2, 3, "%02x", bytes[i]);
+    if (esp_openclaw_chat_send(chat, view.text, id) == ESP_OK) {
+        sent = true;
+        view.can_send = false;
+        poll_chat();
+    } else {
+        queue_failed = true;
+        strlcpy(view.detail, "Could not queue the message. Try Send again.", sizeof(view.detail));
     }
 }
 
@@ -168,7 +247,7 @@ bool room_voice_draft_poll(const room_voice_context_t *context, room_voice_snaps
     intent.begin = false;
     portEXIT_CRITICAL(&intent_mux);
 
-    if (!discarding && (room_voice_draft_busy() || view.state == ROOM_VOICE_DRAFT) &&
+    if (!sent && !discarding && (room_voice_draft_busy() || view.state == ROOM_VOICE_DRAFT) &&
         (!context->valid || view.recipient_revision != context->recipient_revision ||
          view.owner_incarnation != context->owner_incarnation)) {
         discard("Destination changed. Record again.");
@@ -179,7 +258,7 @@ bool room_voice_draft_poll(const room_voice_context_t *context, room_voice_snaps
             .recipient_revision = revision, .owner_incarnation = owner};
         strlcpy(view.recipient, context->recipient, sizeof(view.recipient));
         if (transcription != NULL) view.state = ROOM_VOICE_CANCELING;
-        if (end == ROOM_VOICE_CANCEL) {
+        if (end == ROOM_VOICE_CANCEL || end == ROOM_VOICE_HIDE) {
             /* A covered or canceled gesture never opens the microphone. */
         } else if (end == ROOM_VOICE_FINISH) {
             discard_error = "Released before recording started. Try again.";
@@ -192,10 +271,21 @@ bool room_voice_draft_poll(const room_voice_context_t *context, room_voice_snaps
             recording_owned = true;
             discarding = false;
             view.state = ROOM_VOICE_STARTING;
+            strlcpy(view.agent_id, context->agent_id, sizeof(view.agent_id));
+            if (context->send_enabled && context->session_key[0] != '\0' && context->agent_id[0] != '\0' &&
+                esp_openclaw_chat_prepare(context->operator_node, context->session_key,
+                    context->agent_id, &chat) == ESP_OK) {
+                chat_polling = true;
+                strlcpy(view.detail, "Preparing conversation...", sizeof(view.detail));
+            } else strlcpy(view.detail, context->agent_id[0] == '\0' ? "Choose an agent before recording to send."
+                : !context->send_enabled ? "Enable voice actions in firmware to send."
+                : "Open the conversation and record again.", sizeof(view.detail));
         }
     } else if (pending && generation == view.generation) {
-        if (end == ROOM_VOICE_CANCEL) discard(NULL);
+        if (end == ROOM_VOICE_CANCEL || (end == ROOM_VOICE_HIDE && !sent)) discard(NULL);
         else if (end == ROOM_VOICE_FINISH && recording_owned && !discarding) room_recording_stop();
+        else if (end == ROOM_VOICE_SEND && revision == view.recipient_revision &&
+                 owner == view.owner_incarnation && context->valid) send_draft();
     }
     if (recording_owned) {
         /* Completion publishes terminal state before clearing active. Read
@@ -235,22 +325,23 @@ bool room_voice_draft_poll(const room_voice_context_t *context, room_voice_snaps
         }
     }
     poll_transcription();
+    poll_chat();
     if (discarding && !room_voice_draft_busy()) {
         view.duration_ms = 0;
         view.detail[0] = '\0';
         if (discard_error != NULL) set_error(discard_error);
         else view.state = context->available ? ROOM_VOICE_READY : ROOM_VOICE_UNAVAILABLE;
         discarding = false;
-    } else if (!room_voice_draft_busy() && view.state != ROOM_VOICE_ERROR &&
+    } else if (!sent && !room_voice_draft_busy() && view.state != ROOM_VOICE_ERROR &&
                view.state != ROOM_VOICE_TRANSCRIPTION_ERROR && view.state != ROOM_VOICE_DRAFT) {
         view.state = context->available ? ROOM_VOICE_READY : ROOM_VOICE_UNAVAILABLE;
     }
-    if (!room_voice_draft_busy() && view.state != ROOM_VOICE_DRAFT) {
+    if (!sent && !room_voice_draft_busy() && view.state != ROOM_VOICE_DRAFT) {
         view.recipient_revision = context->recipient_revision;
         view.owner_incarnation = context->owner_incarnation;
     }
     portENTER_CRITICAL(&intent_mux);
-    polling = room_voice_draft_busy();
+    polling = room_voice_draft_busy() || chat_polling;
     portEXIT_CRITICAL(&intent_mux);
     bool changed = memcmp(&view, &published, sizeof(view)) != 0;
     published = view;

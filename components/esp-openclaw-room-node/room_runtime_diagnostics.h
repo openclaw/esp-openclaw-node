@@ -32,6 +32,7 @@ typedef struct {
     bool input_gain_configured;
     float configured_input_gain_db;
     bool wifi_connected;
+    bool wifi_ap_info_valid;
     char wifi_ssid[33];
     int8_t wifi_rssi;
     char wifi_ip[16];

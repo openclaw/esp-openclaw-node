@@ -330,6 +330,10 @@ static void update_slow_text(
 
     room_runtime_diagnostics_snapshot_t runtime = {0};
     room_runtime_get_diagnostics(&runtime);
+    char wifi_rssi[16] = "unknown";
+    if (runtime.wifi_ap_info_valid) {
+        snprintf(wifi_rssi, sizeof(wifi_rssi), "%d dBm", runtime.wifi_rssi);
+    }
     char configured_input_gain[48];
     if (runtime.input_gain_configured) {
         snprintf(
@@ -354,7 +358,7 @@ static void update_slow_text(
         "System\n"
         "%s (%s)   %ux%u\n"
         "AFE layout: %s   configured volume: %u%%   %s\n"
-        "Wi-Fi: %s   SSID: %s   RSSI: %d dBm   IP: %s\n"
+        "Wi-Fi: %s   SSID: %s   RSSI: %s   IP: %s\n"
         "Internal heap free/largest: %" PRIu32 "/%" PRIu32 " B   PSRAM free: %" PRIu32 " B\n"
         "Uptime: %" PRIu64 " s",
         runtime.node_ready ? "ready" : "not ready",
@@ -382,7 +386,7 @@ static void update_slow_text(
         configured_input_gain,
         runtime.wifi_connected ? "connected" : "disconnected",
         runtime.wifi_ssid[0] != '\0' ? runtime.wifi_ssid : "none",
-        runtime.wifi_rssi,
+        wifi_rssi,
         runtime.wifi_ip[0] != '\0' ? runtime.wifi_ip : "none",
         runtime.internal_heap_free,
         runtime.internal_heap_largest,

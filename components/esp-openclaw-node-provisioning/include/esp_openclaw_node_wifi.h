@@ -19,13 +19,14 @@
 typedef struct {
     bool has_saved_network; /**< Whether station credentials are currently stored in NVS. */
     bool connected; /**< Whether the station currently has a live connection and IP. */
+    bool ap_info_valid; /**< Whether RSSI, channel, and auth mode were read successfully. */
     char ssid[33]; /**< Saved station SSID, when configured. */
     char ip[16]; /**< Current IPv4 address in dotted-quad form when connected. */
     char netmask[16]; /**< Current IPv4 netmask in dotted-quad form when connected. */
     char gateway[16]; /**< Current IPv4 gateway in dotted-quad form when connected. */
-    int8_t rssi; /**< Current RSSI from `esp_wifi_sta_get_ap_info()` when connected. */
-    uint8_t channel; /**< Current primary Wi-Fi channel when connected. */
-    uint8_t authmode; /**< Current AP auth mode reported by ESP-IDF when connected. */
+    int8_t rssi; /**< Current RSSI when ap_info_valid is true. */
+    uint8_t channel; /**< Current primary Wi-Fi channel when ap_info_valid is true. */
+    uint8_t authmode; /**< Current ESP-IDF AP auth mode when ap_info_valid is true. */
     uint8_t last_disconnect_reason; /**< Last ESP-IDF disconnect reason code, or `0` when clear. */
 } esp_openclaw_node_wifi_status_t;
 

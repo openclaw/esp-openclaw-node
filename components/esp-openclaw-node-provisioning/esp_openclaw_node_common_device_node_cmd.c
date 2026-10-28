@@ -59,9 +59,15 @@ static void add_wifi_status_fields(cJSON *object)
         cJSON_AddStringToObject(object, "gateway", wifi.gateway);
     }
     if (wifi.connected) {
-        cJSON_AddNumberToObject(object, "rssi", wifi.rssi);
-        cJSON_AddNumberToObject(object, "channel", wifi.channel);
-        cJSON_AddStringToObject(object, "authMode", wifi_auth_mode_name(wifi.authmode));
+        if (wifi.ap_info_valid) {
+            cJSON_AddNumberToObject(object, "rssi", wifi.rssi);
+            cJSON_AddNumberToObject(object, "channel", wifi.channel);
+        } else {
+            cJSON_AddNullToObject(object, "rssi");
+            cJSON_AddNullToObject(object, "channel");
+        }
+        cJSON_AddStringToObject(object, "authMode",
+            wifi.ap_info_valid ? wifi_auth_mode_name(wifi.authmode) : "unknown");
     }
     if (wifi.last_disconnect_reason != 0) {
         cJSON_AddNumberToObject(object, "lastDisconnectReason", wifi.last_disconnect_reason);

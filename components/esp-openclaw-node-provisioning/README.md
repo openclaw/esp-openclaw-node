@@ -12,3 +12,10 @@ It leaves credentials unchanged and refuses to scan while connected or
 reconnecting. Run `wifi disconnect` first if needed, then `wifi connect` to
 resume using saved credentials. Hidden networks are omitted; enter their SSID
 directly with `wifi set`.
+
+`wifi.status` reports connection state independently from access-point readings.
+While connected, `rssi` and `channel` are `null` and `authMode` is `"unknown"`
+if the driver cannot read the current access point. They are omitted while
+disconnected. C consumers must check `ap_info_valid` before using RSSI, channel,
+or auth mode; zero is not an unavailable-reading sentinel. Room diagnostics
+display unavailable RSSI as `unknown`.

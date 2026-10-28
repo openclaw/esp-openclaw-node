@@ -24,9 +24,8 @@ void dial_home_create(dial_home_t *home, lv_obj_t *parent)
     lv_obj_set_size(home->root, 240, 240);
     lv_obj_set_clickable(home->root, false);
     lv_obj_set_scrollable(home->root, false);
-    home->wifi = label(home->root, LV_SYMBOL_WIFI, 76, 20, 20);
-    home->link = label(home->root, "Starting", 98, 20, 66);
-    lv_obj_set_style_text_color(home->link, lv_color_hex(0xb8b0bd), 0);
+    openclaw_status_bar_create(&home->status, home->root);
+    lv_obj_set_pos(home->status.root, 73, 20);
     home->title = label(home->root, "OpenClaw", 50, 44, 140);
     lv_obj_set_style_text_font(home->title, &lv_font_montserrat_16, 0);
     lv_obj_t *frame = lv_obj_create(home->root);
@@ -91,11 +90,11 @@ void dial_home_animate(dial_home_t *home, const char *mood, uint32_t now)
     if (strcmp(lv_label_get_text(home->mouth), mouth) != 0) lv_label_set_text_static(home->mouth, mouth);
 }
 
-void dial_home_render(dial_home_t *home, bool wifi, bool connected, bool assigned,
+void dial_home_render(dial_home_t *home, const openclaw_status_facts_t *status, bool assigned,
                       const char *activity, const dial_home_context_t *context)
 {
-    lv_obj_set_style_text_color(home->wifi, lv_color_hex(wifi ? 0xbfe5d9 : 0x746e7c), 0);
-    lv_label_set_text_static(home->link, connected ? "Online" : "Offline");
+    openclaw_status_bar_set(&home->status, status);
+    bool connected = status->gateway_connected;
     home->destination = !connected ? DIAL_HOME_MENU : !context->available ? DIAL_HOME_AGENTS
         : context->preview ? DIAL_HOME_PREVIEW : DIAL_HOME_READER;
     const char *action = home->destination == DIAL_HOME_MENU ? "Open menu"

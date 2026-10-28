@@ -225,6 +225,12 @@ change the result of a newer one.
 
 ## Commands
 
+Home's compact status strip shows measured Wi-Fi signal separately from the
+OpenClaw link. A crossed icon is disconnected; neutral Wi-Fi arcs with a lit
+dot mean connected with unavailable signal data. The battery outline and dash
+mean unknown, not empty. Signal is refreshed once per second while Home is
+visible. Settings → Connection keeps the text description of each connection.
+
 | Command | Parameters | Result |
 | --- | --- | --- |
 | `device.info`, `device.status`, `wifi.status` | `{}` | Shared device/network status |

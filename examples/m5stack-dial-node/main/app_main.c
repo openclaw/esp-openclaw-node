@@ -445,7 +445,13 @@ static void refresh_ui(lv_timer_t *timer)
             dial_input_set_control(&ui.input, false);
         ui.home_context = context;
         ui.home_online = online;
-        dial_home_render(&ui.home, esp_openclaw_node_wifi_is_connected(), online, assigned, activity, &context);
+        esp_openclaw_node_wifi_status_t wifi = {0};
+        esp_openclaw_node_wifi_get_status(&wifi);
+        const openclaw_status_facts_t status = {
+            .wifi_connected = wifi.connected, .signal_known = wifi.ap_info_valid,
+            .rssi = wifi.rssi, .gateway_connected = online,
+        };
+        dial_home_render(&ui.home, &status, assigned, activity, &context);
         status_at = now;
         status_sampled = true;
         ui.home_dirty = false;

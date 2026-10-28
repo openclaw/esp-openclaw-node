@@ -173,6 +173,57 @@ static void snapshot(const char *name)
     assert(fclose(file) == 0);
 }
 
+static unsigned active_pixels(int x1, int x2)
+{
+    unsigned count = 0;
+    const unsigned active = (0xbf >> 3) << 11 | (0xe5 >> 2) << 5 | (0xd9 >> 3);
+    for (int y = 20; y < 42; ++y)
+        for (int x = x1; x < x2; ++x)
+            if (frame[y * 240 + x] == active) ++count;
+    return count;
+}
+
+static unsigned paint_status(openclaw_status_facts_t facts, const char *name)
+{
+    openclaw_status_bar_set(&home.status, &facts);
+    lv_obj_invalidate(lv_screen_active());
+    lv_refr_now(NULL);
+    snapshot(name);
+    return active_pixels(73, 100);
+}
+
+static void check_status_bar(void)
+{
+    openclaw_status_facts_t status = {0};
+    assert(paint_status(status, "status-offline") == 0);
+    uint16_t battery[22 * 26];
+    for (int y = 0; y < 22; ++y)
+        memcpy(&battery[y * 26], &frame[(20 + y) * 240 + 141], 26 * sizeof(uint16_t));
+    status.wifi_connected = true;
+    unsigned unknown = paint_status(status, "status-unknown");
+    assert(unknown > 0);
+    status.signal_known = true;
+    status.rssi = -76;
+    unsigned weak = paint_status(status, "status-weak");
+    status.rssi = -75;
+    unsigned medium = paint_status(status, "status-medium");
+    status.rssi = -61;
+    assert(paint_status(status, "status-medium-edge") == medium);
+    status.rssi = -60;
+    unsigned strong = paint_status(status, "status-strong");
+    assert(strong > medium && medium > weak && weak > unknown);
+    assert(active_pixels(109, 132) == 0);
+    status.gateway_connected = true;
+    status.rssi = 0;
+    assert(paint_status(status, "status-online") == strong);
+    assert(active_pixels(109, 132) > 0);
+    for (int y = 0; y < 22; ++y)
+        assert(memcmp(&battery[y * 26], &frame[(20 + y) * 240 + 141], 26 * sizeof(uint16_t)) == 0);
+    status.signal_known = false;
+    assert(paint_status(status, "status-unavailable-again") == unknown);
+    puts("Status strip: measured bands, unavailable signal, independent link, unknown battery passed");
+}
+
 static uint32_t avatar_hash(int x, int y, int size)
 {
     lv_refr_now(NULL);
@@ -224,6 +275,7 @@ int main(int argc, char **argv)
     lv_obj_set_scrollable(screen, false);
     lv_obj_set_clickable(screen, true);
     dial_home_create(&home, screen);
+    check_status_bar();
     const char *moods[] = {"neutral", "happy", "excited", "thinking", "sleepy", "sad"};
     const uint32_t phases[] = {0, 200, 1900, 3700};
     for (unsigned mood = 0; mood < sizeof(moods) / sizeof(moods[0]); ++mood) {
@@ -243,31 +295,32 @@ int main(int argc, char **argv)
     assert(lv_obj_is_visible(home.eyes[0]) && lv_obj_is_visible(home.eyes[1]) && lv_obj_is_visible(home.mouth));
     dial_home_animate(&home, "neutral", 200);
     dial_home_context_t home_context = {0};
-    dial_home_render(&home, true, true, true, NULL, &home_context);
+    const openclaw_status_facts_t online_status = {.wifi_connected = true, .gateway_connected = true};
+    const openclaw_status_facts_t gateway_offline = {.wifi_connected = true};
+    dial_home_render(&home, &online_status, true, NULL, &home_context);
     lv_obj_update_layout(screen);
     for (unsigned i = 0; i < lv_obj_get_child_count(home.root); ++i)
         check_home_bounds(lv_obj_get_child(home.root, i));
     assert(strcmp(lv_label_get_text(home.action), "Choose agent") == 0);
-    dial_home_render(&home, true, false, false, NULL, &home_context);
-    assert(strcmp(lv_label_get_text(home.link), "Offline") == 0);
+    dial_home_render(&home, &gateway_offline, false, NULL, &home_context);
     assert(strcmp(lv_label_get_text(home.headline), "Gateway offline") == 0);
-    dial_home_render(&home, true, true, false, NULL, &home_context);
+    dial_home_render(&home, &online_status, false, NULL, &home_context);
     assert(strcmp(lv_label_get_text(home.headline), "Ready when you are") == 0);
     assert(strcmp(lv_label_get_text(home.action), "Choose agent") == 0);
     char activity[] = "Action failed";
-    dial_home_render(&home, true, true, true, activity, &home_context);
+    dial_home_render(&home, &online_status, true, activity, &home_context);
     memset(activity, 'x', strlen(activity));
     assert(strcmp(lv_label_get_text(home.headline), "Action failed") == 0);
     lv_obj_update_layout(screen);
     check_home_bounds(home.headline);
     home_context = (dial_home_context_t){.available = true};
     strcpy(home_context.agent_name, "A very long assistant name that needs truncation");
-    dial_home_render(&home, true, true, false, NULL, &home_context);
+    dial_home_render(&home, &online_status, false, NULL, &home_context);
     assert(home.destination == DIAL_HOME_READER);
     assert(strcmp(lv_label_get_text(home.title), home_context.agent_name) == 0);
     assert(strcmp(lv_label_get_text(home.action), "Conversations") == 0);
     home_context.preview = true;
-    dial_home_render(&home, true, true, false, NULL, &home_context);
+    dial_home_render(&home, &online_status, false, NULL, &home_context);
     assert(home.destination == DIAL_HOME_PREVIEW);
     assert(strcmp(lv_label_get_text(home.action), "Continue") == 0);
     lv_point_t action_size;
@@ -276,11 +329,11 @@ int main(int argc, char **argv)
     assert(action_size.x <= lv_obj_get_width(home.action));
     assert(action_size.y <= lv_obj_get_height(home.action));
     snapshot("home-continue");
-    dial_home_render(&home, true, false, false, NULL, &home_context);
+    dial_home_render(&home, &gateway_offline, false, NULL, &home_context);
     assert(home.destination == DIAL_HOME_MENU);
     assert(strcmp(lv_label_get_text(home.action), "Open menu") == 0);
     home_context = (dial_home_context_t){0};
-    dial_home_render(&home, true, true, false, NULL, &home_context);
+    dial_home_render(&home, &online_status, false, NULL, &home_context);
     assert(home.destination == DIAL_HOME_AGENTS);
     snapshot("home-choose");
     lv_obj_update_layout(screen);

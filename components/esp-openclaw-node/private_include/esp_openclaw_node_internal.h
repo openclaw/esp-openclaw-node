@@ -99,6 +99,7 @@ typedef struct {
     esp_openclaw_node_gateway_request_cb_t request_cb;
     void *request_ctx;
     esp_openclaw_node_connect_request_source_t connect_source;
+    esp_openclaw_node_connect_attempt_id_t connect_attempt_id;
 } esp_openclaw_node_work_message_t;
 
 typedef struct {
@@ -169,6 +170,9 @@ struct esp_openclaw_node {
     esp_openclaw_node_connect_lease_t connect_lease;
     uint64_t connect_lease_generation;
     bool connect_request_pending;
+    esp_openclaw_node_connect_attempt_id_t next_connect_attempt_id;
+    esp_openclaw_node_connect_attempt_id_t active_connect_attempt_id;
+    esp_openclaw_node_connect_attempt_t connect_attempt;
     esp_websocket_client_handle_t ws;
     esp_openclaw_node_transport_event_ctx_t *transport_ctx;
     uint32_t next_transport_id;
@@ -351,7 +355,10 @@ esp_err_t esp_openclaw_node_submit_connect_request(
     esp_openclaw_node_handle_t node,
     esp_openclaw_node_connect_request_source_t *connect_source,
     esp_openclaw_node_connect_lease_t lease,
-    uint64_t generation);
+    uint64_t generation,
+    esp_openclaw_node_connect_attempt_id_t *out_attempt);
+void esp_openclaw_node_note_connect_credentials_saved_locked(
+    esp_openclaw_node_handle_t node);
 bool esp_openclaw_node_connect_lease_matches_locked(
     esp_openclaw_node_handle_t node,
     esp_openclaw_node_connect_lease_t lease,

@@ -605,6 +605,7 @@ esp_err_t esp_openclaw_node_connect_lease_acquire(
         return ESP_ERR_INVALID_STATE;
     }
     node->connect_lease = ++node->connect_lease_generation;
+    node->connect_attempt = (esp_openclaw_node_connect_attempt_t){0};
     *out_lease = node->connect_lease;
     esp_openclaw_node_unlock_state(node);
     return ESP_OK;
@@ -627,10 +628,42 @@ esp_err_t esp_openclaw_node_connect_lease_release(
     return ESP_OK;
 }
 
+void esp_openclaw_node_note_connect_credentials_saved_locked(esp_openclaw_node_handle_t node)
+{
+    if (node->active_connect_attempt_id != 0 &&
+        node->connect_attempt.id == node->active_connect_attempt_id &&
+        node->connect_attempt.state == ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_CONNECTING) {
+        node->connect_attempt.credentials_saved = true;
+    }
+}
+
+esp_err_t esp_openclaw_node_connect_snapshot(
+    esp_openclaw_node_handle_t node,
+    esp_openclaw_node_connect_lease_t lease,
+    esp_openclaw_node_connect_attempt_id_t attempt,
+    esp_openclaw_node_connect_attempt_t *out_status)
+{
+    if (node == NULL || lease == 0 || attempt == 0 || out_status == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    esp_openclaw_node_lock_state(node);
+    esp_err_t err = ESP_OK;
+    if (!esp_openclaw_node_connect_lease_matches_locked(node, lease, node->connect_lease_generation)) {
+        err = ESP_ERR_INVALID_STATE;
+    } else if (node->connect_attempt.id != attempt) {
+        err = ESP_ERR_NOT_FOUND;
+    } else {
+        *out_status = node->connect_attempt;
+    }
+    esp_openclaw_node_unlock_state(node);
+    return err;
+}
+
 static esp_err_t request_connect(
     esp_openclaw_node_handle_t node,
     esp_openclaw_node_connect_lease_t lease,
-    const esp_openclaw_node_connect_request_t *request)
+    const esp_openclaw_node_connect_request_t *request,
+    esp_openclaw_node_connect_attempt_id_t *out_attempt)
 {
     if (node == NULL || request == NULL) {
         return ESP_ERR_INVALID_ARG;
@@ -695,7 +728,7 @@ static esp_err_t request_connect(
         return err;
     }
 
-    err = esp_openclaw_node_submit_connect_request(node, &connect_source, lease, generation);
+    err = esp_openclaw_node_submit_connect_request(node, &connect_source, lease, generation, out_attempt);
     if (err != ESP_OK) {
         esp_openclaw_node_clear_connect_source_struct(&connect_source);
         return err;
@@ -707,7 +740,7 @@ esp_err_t esp_openclaw_node_request_connect(
     esp_openclaw_node_handle_t node,
     const esp_openclaw_node_connect_request_t *request)
 {
-    return request_connect(node, 0, request);
+    return request_connect(node, 0, request, NULL);
 }
 
 esp_err_t esp_openclaw_node_request_connect_with_lease(
@@ -718,7 +751,23 @@ esp_err_t esp_openclaw_node_request_connect_with_lease(
     if (lease == 0) {
         return ESP_ERR_INVALID_ARG;
     }
-    return request_connect(node, lease, request);
+    return request_connect(node, lease, request, NULL);
+}
+
+esp_err_t esp_openclaw_node_connect_begin(
+    esp_openclaw_node_handle_t node,
+    esp_openclaw_node_connect_lease_t lease,
+    const esp_openclaw_node_connect_request_t *request,
+    esp_openclaw_node_connect_attempt_id_t *out_attempt)
+{
+    if (out_attempt == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *out_attempt = 0;
+    if (lease == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return request_connect(node, lease, request, out_attempt);
 }
 
 esp_err_t esp_openclaw_node_request_disconnect(esp_openclaw_node_handle_t node)

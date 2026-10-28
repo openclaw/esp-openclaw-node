@@ -116,6 +116,7 @@ successful `hello-ok`
 - `esp_openclaw_node_request_disconnect()`
 - `esp_openclaw_node_connect_lease_acquire()` / `esp_openclaw_node_connect_lease_release()`
 - `esp_openclaw_node_request_connect_with_lease()` / `esp_openclaw_node_request_disconnect_with_lease()`
+- `esp_openclaw_node_connect_begin()` / `esp_openclaw_node_connect_snapshot()`
 - `esp_openclaw_node_gateway_request()`
 - `esp_openclaw_node_gateway_request_on_connection()`
 
@@ -146,6 +147,21 @@ admission, not result correlation or local confirmation, and do not change the
 existing events. The disconnect API still cannot cancel a connect request before
 the component task dequeues it. A setup adapter must not treat an unrelated
 terminal event from the replaced connection as its own result.
+
+For a correlated setup outcome, call `esp_openclaw_node_connect_begin()` with
+that lease and retain the returned attempt ID. `esp_openclaw_node_connect_snapshot()`
+reports queued, connecting, succeeded, or failed for that exact ID. An old
+connection's failure, disconnect, or late handshake cannot complete its queued
+replacement. Success records the connection ID after the handshake and session
+store finish; it remains a successful attempt even if that link later drops.
+
+Only the latest tracked request is retained per node and it is cleared when a
+new lease is acquired. A newer tracked request makes an older ID return
+`ESP_ERR_NOT_FOUND`; rejected admission preserves the previous record. `credentials_saved` records a successful current-role or
+handoff token store and remains true if a later stage fails. False does not
+prove that a failed storage write had no effect. The snapshot contains no
+credentials, Gateway messages, or unbounded strings. Release still requires
+settled control, and a failed result does not itself end the setup lease.
 
 ### Inspection
 

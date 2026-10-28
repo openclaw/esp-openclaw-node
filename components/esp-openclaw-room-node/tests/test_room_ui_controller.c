@@ -724,7 +724,9 @@ static void check_watch_navigation(const char *path)
     assert(brightness == 40); // A call ending must not cancel the Home wake period.
     room_ui_set(ROOM_UI_SPEAKING, NULL);
     click_talk(watch_menu_button);
-    click_talk(lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_SETTINGS "  Settings")));
+    lv_obj_t *settings_entry = lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_SETTINGS "  Settings"));
+    lv_obj_scroll_to_view(settings_entry, LV_ANIM_OFF);
+    click_talk(settings_entry);
     click_talk(lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_SETTINGS "  Device status")));
     assert(room_diagnostics_is_open());
     room_diagnostics_close();
@@ -771,6 +773,72 @@ static void check_watch_navigation(const char *path)
     assert(!canvas_active);
     room_ui_set(ROOM_UI_IDLE, NULL);
     puts("watch menu, live connection, Talk and empty Canvas: passed");
+}
+
+static void voice_action(room_voice_action_t action, uint32_t generation, uint64_t revision, uint64_t owner);
+
+static void check_watch_live_call(const char *path)
+{
+    room_ui_facts_t facts = {.wifi = ROOM_UI_WIFI_CONNECTED,
+        .gateway = ROOM_UI_GATEWAY_CONNECTED, .talk = ROOM_UI_TALK_READY};
+    room_ui_store_facts(&facts);
+    room_ui_set(ROOM_UI_IDLE, NULL);
+    room_ui_set_voice_action_handler(voice_action);
+    unsigned starts = talk_starts, stops = talk_stops;
+    assert(room_ui_watch_menu("call") == ESP_OK);
+    assert(visible_watch_text("Live call") && visible_watch_text("Start call"));
+    assert(!room_face_is_visible());
+    lv_obj_t *start = lv_obj_get_parent(find_visible_text(lv_layer_top(), "Start call"));
+    lv_obj_t *back = lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " Menu"));
+    assert(start && back);
+    assert(room_ui_apply_display_brightness(0) == ESP_OK);
+    click_talk(start);
+    assert(brightness > 0 && talk_starts == starts && talk_stops == stops);
+    touch_talk(start, true);
+    assert(room_ui_watch_menu("menu") == ESP_OK);
+    touch_talk(start, false);
+    assert(talk_starts == starts);
+    lv_obj_t *entry = lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_CALL "  Live call"));
+    click_talk(entry);
+    assert(visible_watch_text("Live call") && talk_starts == starts);
+    if (path) { char output[1024]; snprintf(output, sizeof(output), "%s-live-call-ready.ppm", path); write_frame(output); }
+    click_talk(start);
+    assert(talk_starts == starts + 1);
+    facts.talk = ROOM_UI_TALK_ACTIVE;
+    room_ui_store_facts(&facts); room_ui_set(ROOM_UI_SPEAKING, NULL);
+    assert(visible_watch_text("End call") && !visible_watch_text("Return to call"));
+    assert(visible_watch_text("Your call is active.\n\nYou can browse without ending it."));
+    if (path) { char output[1024]; snprintf(output, sizeof(output), "%s-live-call-active.ppm", path); write_frame(output); }
+    click_talk(back);
+    assert(visible_watch_text("Menu") && visible_watch_text("Return to call") && talk_stops == stops);
+    click_talk(entry);
+    lv_obj_t *stop = lv_obj_get_parent(find_visible_text(lv_layer_top(), "End call"));
+    click_talk(stop);
+    assert(talk_stops == stops + 1);
+    facts.gateway = ROOM_UI_GATEWAY_OFFLINE; facts.talk = ROOM_UI_TALK_WAITING;
+    room_ui_store_facts(&facts); room_ui_set(ROOM_UI_IDLE, NULL);
+    assert(visible_watch_text("Talk unavailable"));
+    assert(visible_watch_text("Connect to your Gateway.\n\nOpen Settings > Connection to check setup."));
+    click_talk(stop);
+    assert(talk_starts == starts + 1 && talk_stops == stops + 1);
+    if (path) { char output[1024]; snprintf(output, sizeof(output), "%s-live-call-offline.ppm", path); write_frame(output); }
+    openclaw_reading_set_size(OPENCLAW_READING_LARGE);
+    facts.talk = ROOM_UI_TALK_UNAVAILABLE;
+    room_ui_store_facts(&facts); room_ui_refresh();
+    lv_obj_t *copy = find_visible_text(lv_layer_top(),
+        "Live audio is unavailable.\n\nOpen device diagnostics to check the microphone and speaker.");
+    assert(copy != NULL);
+    lv_obj_update_layout(copy);
+    lv_point_t text_size;
+    lv_text_get_size(&text_size, lv_label_get_text(copy), lv_obj_get_style_text_font(copy, 0),
+        0, 0, lv_obj_get_width(copy), LV_TEXT_FLAG_NONE);
+    assert(text_size.y <= lv_obj_get_height(copy));
+    openclaw_reading_set_size(OPENCLAW_READING_STANDARD);
+    room_ui_set_voice_action_handler(NULL);
+    facts.gateway = ROOM_UI_GATEWAY_CONNECTED; facts.talk = ROOM_UI_TALK_READY;
+    room_ui_store_facts(&facts);
+    assert(room_ui_watch_menu("home") == ESP_OK);
+    puts("watch Live call: deliberate start, wake-only, stale press, browse, explicit stop and offline recovery passed");
 }
 
 static void check_watch_content_space(const char *path)
@@ -2626,6 +2694,7 @@ int main(int argc, char **argv)
         check_watch_status(argc == 3 ? argv[2] : NULL);
         check_watch_navigation(argc == 3 ? argv[2] : NULL);
         check_watch_content_space(argc == 3 ? argv[2] : NULL);
+        check_watch_live_call(argc == 3 ? argv[2] : NULL);
         check_watch_call_return();
         check_watch_connection(argc == 3 ? argv[2] : NULL);
         check_watch_agents(argc == 3 ? argv[2] : NULL);

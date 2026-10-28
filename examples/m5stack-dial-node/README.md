@@ -210,7 +210,9 @@ restart, or `conversations close` clears the selection and requires choosing
 an agent again. The selection lasts only for the current reader connection.
 
 Devices opens a bounded, read-only inventory from the current Gateway. **This
-Dial** stays available offline and opens Control, Display, and Connection.
+Dial** stays available offline and opens Control, Display, Connection, and Help.
+Turn to **Back** and press, or tap the back arrow, to return to Devices with
+This Dial selected.
 Display and Connection return to This Dial when opened there, or to Settings
 when opened from Settings. Remote rows show their reported connection state;
 open one to read its full name, model, connection, and pairing state. Missing

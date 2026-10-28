@@ -113,6 +113,11 @@ Reject oversize, malformed, unknown-operation, and unsupported-version input
 before allocation or mutation. Confirm these proposed bounds against real
 setup-code fixtures; do not silently truncate valid credentials or identities.
 
+The shared [frame codec](mobile-setup-frames.md) defines the binary fragment
+envelope within the pinned BLE attribute limits. Transfer reassembly and the
+application-operation schema remain separate work; an 8 KiB logical request
+must never be sent as one characteristic value.
+
 Every mutating request has an operation ID and expected setup generation. Once
 accepted, a repeated ID returns that operation's status; it cannot run again or
 change its payload. Retain at most 32 mutating-operation receipts per setup

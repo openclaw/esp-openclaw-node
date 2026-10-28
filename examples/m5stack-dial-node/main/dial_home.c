@@ -1,6 +1,9 @@
 #include "dial_home.h"
+#include "esp_openclaw_avatar.h"
 
 #include <string.h>
+
+static lv_image_dsc_t avatar_sources[3];
 
 static lv_obj_t *label(lv_obj_t *parent, const char *text, int x, int y, int width)
 {
@@ -34,6 +37,14 @@ static lv_obj_t *button(lv_obj_t *parent, int x, int y, int width, int height, u
 
 void dial_home_create(dial_home_t *home, lv_obj_t *parent)
 {
+    for (int kind = ESP_OPENCLAW_AVATAR_FOX; kind <= ESP_OPENCLAW_AVATAR_LOBSTER; ++kind)
+        avatar_sources[kind] = (lv_image_dsc_t){
+            .header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_ARGB8888,
+                .w = ESP_OPENCLAW_AVATAR_SIZE, .h = ESP_OPENCLAW_AVATAR_SIZE,
+                .stride = ESP_OPENCLAW_AVATAR_SIZE * 4},
+            .data_size = ESP_OPENCLAW_AVATAR_SIZE * ESP_OPENCLAW_AVATAR_SIZE * 4,
+            .data = esp_openclaw_avatar_pixels(kind),
+        };
     home->root = lv_obj_create(parent);
     lv_obj_remove_style_all(home->root);
     lv_obj_set_size(home->root, 240, 240);
@@ -42,7 +53,17 @@ void dial_home_create(dial_home_t *home, lv_obj_t *parent)
     openclaw_status_bar_create(&home->status, home->root);
     lv_obj_set_pos(home->status.root, 73, 20);
     home->agent_button = button(home->root, 42, 40, 110, 44, 0x302535);
-    home->title = label(home->agent_button, "Agents", 6, 12, 84);
+    home->agent_avatar = lv_image_create(home->agent_button);
+    lv_obj_set_pos(home->agent_avatar, 8, 12);
+    lv_obj_set_size(home->agent_avatar, 20, 20);
+    lv_image_set_inner_align(home->agent_avatar, LV_IMAGE_ALIGN_CONTAIN);
+    lv_image_set_antialias(home->agent_avatar, true);
+    lv_obj_set_clickable(home->agent_avatar, false);
+    lv_obj_set_scrollable(home->agent_avatar, false);
+    lv_obj_set_hidden(home->agent_avatar, true);
+    home->agent_initial = label(home->agent_button, LV_SYMBOL_DIRECTORY, 8, 12, 20);
+    home->title = label(home->agent_button, "Agents", 30, 12, 61);
+    lv_obj_set_style_text_align(home->title, LV_TEXT_ALIGN_LEFT, 0);
     label(home->agent_button, LV_SYMBOL_DOWN, 92, 12, 12);
     home->menu_button = button(home->root, 158, 42, 40, 40, 0x302535);
     lv_obj_set_ext_click_area(home->menu_button, 2);
@@ -113,7 +134,16 @@ void dial_home_render(dial_home_t *home, const openclaw_status_facts_t *status, 
         : home->destination == DIAL_HOME_AGENTS ? "Choose agent"
         : home->destination == DIAL_HOME_PREVIEW ? "Continue" : "Conversations";
     lv_label_set_text_static(home->action, action);
-    const char *title = context->available ? context->agent_name : "Agents";
+    esp_openclaw_avatar_t avatar = esp_openclaw_agent_avatar(&context->agent);
+    bool picture = context->available && avatar.kind != ESP_OPENCLAW_AVATAR_TEXT;
+    lv_obj_set_hidden(home->agent_avatar, !picture);
+    lv_obj_set_hidden(home->agent_initial, picture);
+    if (picture) lv_image_set_src(home->agent_avatar, &avatar_sources[avatar.kind]);
+    else if (context->available) {
+        const char initial[] = {avatar.text[0], '\0'};
+        lv_label_set_text(home->agent_initial, initial);
+    } else lv_label_set_text_static(home->agent_initial, LV_SYMBOL_DIRECTORY);
+    const char *title = context->available ? context->agent.name : "Agents";
     if (strcmp(lv_label_get_text(home->title), title) != 0)
         lv_label_set_text(home->title, title);
     const char *headline = activity != NULL ? activity : !connected ? "Gateway offline"

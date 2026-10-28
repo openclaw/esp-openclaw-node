@@ -365,11 +365,11 @@ int main(void) {
     respond("{\"agents\":[]}"); step(); agent_status(DIAL_AGENTS_EMPTY, 0);
     /* Browse agent B without changing any node/control session state. */
     assert(dial_reader_agents_refresh(0) == ESP_OK); step();
-    respond("{\"agents\":[{\"id\":\"alpha\"},{\"id\":\"beta\"}]}"); step();
+    respond("{\"agents\":[{\"id\":\"alpha\"},{\"id\":\"beta\",\"identity\":{\"emoji\":\"🦊\"}}]}"); step();
     dial_reader_agents_copy(&snapshot);
     dial_home_context_t home;
     dial_reader_home_copy(&home);
-    assert(!home.available && home.agent_name[0] == '\0');
+    assert(!home.available && home.agent.name[0] == '\0');
     assert(dial_reader_conversations_open("beta", snapshot.revision - 1) == ESP_ERR_INVALID_STATE);
     assert(dial_reader_conversations_open("missing", snapshot.revision) == ESP_ERR_INVALID_STATE);
     assert(dial_reader_conversations_open("beta", snapshot.revision) == ESP_OK); step();
@@ -386,7 +386,8 @@ int main(void) {
     assert(view->state == DIAL_AGENTS_READY && view->page.count == 2);
     assert(strcmp(view->agent.id, "beta") == 0 && view->page.next_offset == 2);
     dial_reader_home_copy(&home);
-    assert(home.available && !home.preview && strcmp(home.agent_name, "beta") == 0);
+    assert(home.available && !home.preview && strcmp(home.agent.name, "beta") == 0);
+    assert(strcmp(home.agent.id, "beta") == 0 && strcmp(home.agent.emoji, "🦊") == 0);
     assert(home.directory_revision == snapshot.revision && home.conversation_revision == view->revision);
     unsigned revision = view->revision;
     assert(dial_reader_preview_open(2, revision) == ESP_ERR_INVALID_STATE);
@@ -424,8 +425,9 @@ int main(void) {
     assert(dial_reader_preview_open(0, view->revision) == ESP_OK); step();
     dial_reader_conversations_close();
     dial_reader_home_copy(&home);
-    assert(!home.available && home.agent_name[0] == '\0');
+    assert(!home.available && home.agent.name[0] == '\0');
     respond("{\"previews\":[{\"key\":\"agent:alpha:main\",\"status\":\"empty\",\"items\":[]}]}"); step();
+    assert(home.agent.id[0] == '\0' && home.agent.emoji[0] == '\0');
     dial_reader_conversations_copy(view);
     assert(view->state == DIAL_AGENTS_IDLE && view->preview.count == 0);
     before = queries; step(); assert(queries == before);
@@ -433,7 +435,7 @@ int main(void) {
     assert(dial_reader_conversations_open("beta", snapshot.revision) == ESP_OK); step();
     node.id = 0; dial_reader_node_event(ESP_OPENCLAW_NODE_EVENT_DISCONNECTED);
     dial_reader_home_copy(&home);
-    assert(!home.available && home.agent_name[0] == '\0');
+    assert(!home.available && home.agent.name[0] == '\0');
     dial_reader_conversations_copy(view);
     assert(view->state == DIAL_AGENTS_OFFLINE && view->page.count == 0);
     respond("{\"sessions\":[{\"key\":\"agent:beta:stale\"}]}"); step();

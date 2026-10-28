@@ -1346,7 +1346,7 @@ void dial_reader_home_copy(dial_home_context_t *context)
             context->preview_revision = view->preview_revision;
             context->preview = view->state == DIAL_AGENTS_READY && view->selected < view->page.count &&
                 view->preview_state != DIAL_AGENTS_IDLE;
-            memcpy(context->agent_name, view->agent.name, sizeof(context->agent_name));
+            context->agent = view->agent;
             break;
         }
     }

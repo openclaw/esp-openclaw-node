@@ -244,7 +244,9 @@ static void open_navigation(bool agents)
     }
     dial_reader_agents_copy(ui.agents);
     dial_navigation_update(&ui.navigation, ui.agents);
-    dial_navigation_set_connection(&ui.navigation, esp_openclaw_node_wifi_is_connected(), atomic_load(&connected));
+    esp_openclaw_node_wifi_status_t wifi;
+    esp_openclaw_node_wifi_get_status(&wifi);
+    dial_navigation_set_connection(&ui.navigation, &wifi, atomic_load(&connected));
     xSemaphoreTake(action_lock, portMAX_DELAY);
     dial_activity_t latest = action_state.activity;
     xSemaphoreGive(action_lock);
@@ -422,10 +424,20 @@ static void refresh_ui(lv_timer_t *timer)
     const char *activity = ui.submitted.request_id[0] != '\0' &&
         ui.submitted.token.connection_id == action_state.connection_id ? dial_activity_title(latest.stage) : NULL;
     xSemaphoreGive(action_lock);
+    static uint32_t connection_sample_at;
+    static bool connection_sampled;
+    bool connection_visible = ui.view == VIEW_NAVIGATION && ui.navigation.view == DIAL_NAV_CONNECTION;
+    if (!connection_visible) connection_sampled = false;
+    if (connection_visible && (!connection_sampled || lv_tick_get() - connection_sample_at >= 1000)) {
+        esp_openclaw_node_wifi_status_t wifi;
+        esp_openclaw_node_wifi_get_status(&wifi);
+        dial_navigation_set_connection(&ui.navigation, &wifi, online);
+        connection_sample_at = lv_tick_get();
+        connection_sampled = true;
+    }
     if (ui.view == VIEW_NAVIGATION) {
         if (dial_navigation_has_devices(&ui.navigation) && ui.devices != NULL) update_devices(false);
         dial_navigation_activity_update(&ui.navigation, &latest);
-        dial_navigation_set_connection(&ui.navigation, esp_openclaw_node_wifi_is_connected(), online);
         dial_reader_agents_copy(ui.agents);
         dial_navigation_update(&ui.navigation, ui.agents);
         if (ui.conversations != NULL) {

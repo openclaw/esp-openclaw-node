@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "openclaw_status_bar.c"
+    SRCS "openclaw_status_bar.c" "openclaw_connection_details.c"
     INCLUDE_DIRS "include"
-    REQUIRES lvgl__lvgl
+    REQUIRES lvgl__lvgl esp-openclaw-node-provisioning
 )

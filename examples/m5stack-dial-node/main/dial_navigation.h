@@ -44,6 +44,7 @@ void dial_navigation_update(dial_navigation_t *nav, const dial_agents_snapshot_t
 void dial_navigation_conversations_update(dial_navigation_t *nav, const dial_conversations_snapshot_t *snapshot);
 bool dial_navigation_has_devices(const dial_navigation_t *nav);
 void dial_navigation_open_devices(dial_navigation_t *nav);
+void dial_navigation_open_local_device(dial_navigation_t *nav);
 void dial_navigation_devices_update(dial_navigation_t *nav, const esp_openclaw_devices_snapshot_t *snapshot);
 bool dial_navigation_show_reader(dial_navigation_t *nav, const dial_agents_snapshot_t *agents,
                                  const dial_conversations_snapshot_t *view, bool preview);

@@ -9,12 +9,13 @@ typedef enum {
     DIAL_INPUT_CONFIRM,
     DIAL_INPUT_PREVIOUS,
     DIAL_INPUT_NEXT,
+    DIAL_INPUT_BACK,
 } dial_input_event_t;
 
 typedef void (*dial_input_handler_t)(dial_input_event_t event, int value, bool pointer, void *context);
 
 typedef struct {
-    lv_obj_t *screen, *arc;
+    lv_obj_t *screen, *arc, *back;
     lv_indev_t *encoder;
     lv_group_t *group;
     dial_input_handler_t handler;

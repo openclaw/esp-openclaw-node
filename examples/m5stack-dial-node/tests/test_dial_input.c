@@ -60,6 +60,13 @@ static void event(dial_input_event_t kind, int value, bool pointer, void *contex
     (void)context;
     if (kind == DIAL_INPUT_PREVIOUS) ++previous;
     if (kind == DIAL_INPUT_NEXT) ++next;
+    if (kind == DIAL_INPUT_BACK) {
+        navigating = true;
+        lv_obj_set_hidden(input.arc, true);
+        dial_input_set_control(&input, false);
+        dial_navigation_open_local_device(&navigation);
+        return;
+    }
     if (navigating && kind != DIAL_INPUT_HOME) {
         if (kind == DIAL_INPUT_PREVIOUS) dial_navigation_move(&navigation, -1);
         else if (kind == DIAL_INPUT_NEXT) dial_navigation_move(&navigation, 1);
@@ -940,6 +947,31 @@ int main(int argc, char **argv)
     assert(navigation.view == DIAL_NAV_MENU && navigation.focus == 2);
     assert(confirmations == before_settings);
     puts("Device inventory: paging, details, stale input, offline controls and Back passed");
+
+    dial_navigation_open_local_device(&navigation);
+    touch(120, 82, true); touch(120, 82, false);
+    assert(input.control && !navigating);
+    assert(!lv_obj_is_hidden(input.back));
+    lv_obj_update_layout(screen);
+    check_home_bounds(input.back);
+    snapshot("control-back");
+    touch(68, 44, true); touch(68, 44, false);
+    assert(navigating && !input.control && lv_obj_is_hidden(input.back));
+    assert(navigation.view == DIAL_NAV_LOCAL_DEVICE && navigation.focus == 0);
+    assert(confirmations == before_settings);
+    touch(120, 82, true); touch(120, 82, false);
+    assert(input.control);
+    touch(68, 44, true); touch(100, 44, true); touch(100, 44, false);
+    assert(input.control && !navigating && confirmations == before_settings);
+    touch(68, 44, true);
+    dial_input_set_control(&input, true);
+    touch(68, 44, false);
+    assert(input.control && !navigating && confirmations == before_settings);
+    unsigned before_back_home = homes;
+    touch(68, 44, true); advance(1000); touch(68, 44, false);
+    assert(!input.control && !navigating && homes == before_back_home + 1);
+    assert(confirmations == before_settings);
+    puts("Control Back: tap, drag, replaced press and hold preserve confirmation semantics");
 
     lv_deinit();
 }

@@ -45,7 +45,8 @@ static void object_event(lv_event_t *event)
         }
     } else if (code == LV_EVENT_SHORT_CLICKED) {
         if (!pointer || !input->pointer_moved) {
-            emit(input, input->control ? DIAL_INPUT_CONFIRM : DIAL_INPUT_OPEN, pointer);
+            emit(input, lv_event_get_target(event) == input->back ? DIAL_INPUT_BACK :
+                input->control ? DIAL_INPUT_CONFIRM : DIAL_INPUT_OPEN, pointer);
         }
     } else if (code == LV_EVENT_RELEASED && input->control) {
         // LVGL's arc exits encoder editing on release; this is always a dial.
@@ -75,6 +76,21 @@ void dial_input_init(dial_input_t *input, lv_indev_t *encoder, lv_obj_t *screen,
     lv_indev_add_event_cb(encoder, encoder_long_press, LV_EVENT_LONG_PRESSED, input);
     lv_obj_add_event_cb(screen, object_event, LV_EVENT_ALL, input);
     lv_obj_add_event_cb(arc, object_event, LV_EVENT_ALL, input);
+    input->back = lv_button_create(screen);
+    lv_obj_remove_style_all(input->back);
+    lv_obj_set_pos(input->back, 54, 30);
+    lv_obj_set_size(input->back, 28, 28);
+    lv_obj_set_ext_click_area(input->back, 8);
+    lv_obj_set_scrollable(input->back, false);
+    lv_obj_set_style_radius(input->back, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(input->back, lv_color_hex(0x302535), 0);
+    lv_obj_set_style_bg_opa(input->back, LV_OPA_COVER, 0);
+    lv_obj_t *icon = lv_label_create(input->back);
+    lv_label_set_text_static(icon, LV_SYMBOL_LEFT);
+    lv_obj_set_style_text_color(icon, lv_color_hex(0xf4efee), 0);
+    lv_obj_set_style_text_font(icon, &lv_font_montserrat_14, 0);
+    lv_obj_center(icon);
+    lv_obj_add_event_cb(input->back, object_event, LV_EVENT_ALL, input);
     dial_input_set_control(input, false);
 }
 
@@ -90,6 +106,7 @@ void dial_input_set_control(dial_input_t *input, bool control)
         }
     }
     input->control = control;
+    lv_obj_set_hidden(input->back, !control);
     lv_group_focus_obj(control ? input->arc : input->screen);
     lv_group_set_editing(input->group, true);
 }

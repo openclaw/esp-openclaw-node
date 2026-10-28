@@ -76,6 +76,48 @@ esp_err_t esp_openclaw_node_wifi_disconnect(void);
  */
 esp_err_t esp_openclaw_node_wifi_scan(wifi_ap_record_t *records, uint16_t *count, uint16_t *total);
 
+/** Opaque, nonzero admission lease, unique within this boot. Not authentication. */
+typedef uint64_t esp_openclaw_node_wifi_setup_lease_t;
+
+/**
+ * @brief Reserve Wi-Fi command admission for an authorized setup owner.
+ *
+ * Rejects competing explicit operations and automatic reconnect driver calls.
+ * While held, ordinary mutations/scans return ESP_ERR_WIFI_STATE and automatic
+ * reconnect requests are deferred. Status reads remain available. Acquisition
+ * preserves credentials, reconnect policy, and the live link; it does not stop
+ * or drain a previously accepted asynchronous join or queued driver events.
+ * The caller must separately enforce live peer/local confirmation authority.
+ * On failure, @p lease is unchanged.
+ */
+esp_err_t esp_openclaw_node_wifi_setup_acquire(esp_openclaw_node_wifi_setup_lease_t *lease);
+
+/**
+ * @brief Release matching ownership after its blocking scan has returned.
+ *
+ * A stale lease returns ESP_ERR_INVALID_STATE; an active scan returns
+ * ESP_ERR_WIFI_STATE. Neither releases ownership nor changes @p reconnect_result.
+ * Success releases ownership and replays at most one deferred reconnect when
+ * still desired and disconnected. The return value describes lease release;
+ * @p reconnect_result separately receives the immediate driver result (ESP_OK
+ * if no retry was needed). It does not report asynchronous connection success.
+ * Both the lease and @p reconnect_result must be nonzero/non-NULL respectively.
+ */
+esp_err_t esp_openclaw_node_wifi_setup_release(
+    esp_openclaw_node_wifi_setup_lease_t lease, esp_err_t *reconnect_result);
+
+/**
+ * @brief Run the same bounded blocking scan under matching setup ownership.
+ *
+ * Uses the ordinary scan's buffers, limits, and connection restrictions. It
+ * never disconnects a live link or cancels a join to make scanning possible.
+ * Zero leases are invalid arguments; stale leases return ESP_ERR_INVALID_STATE.
+ * Release is rejected until the blocking operation returns, including failure.
+ */
+esp_err_t esp_openclaw_node_wifi_setup_scan(
+    esp_openclaw_node_wifi_setup_lease_t lease,
+    wifi_ap_record_t *records, uint16_t *count, uint16_t *total);
+
 /**
  * @brief Wait for the station to connect.
  *

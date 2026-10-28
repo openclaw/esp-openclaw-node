@@ -126,6 +126,19 @@ The Wi-Fi owner must provide an exclusive setup lease that suppresses its
 ordinary reconnect loop and rejects conflicting console writes. Release the
 lease only after in-flight work has stopped. Adapt its existing scan, apply,
 status and reconnect paths rather than duplicating `esp_wifi_*` mutations in BLE.
+
+The current Wi-Fi API implements admission ownership through
+`esp_openclaw_node_wifi_setup_acquire`, `setup_scan`, and `setup_release`. A
+boot-unique lease excludes ordinary mutations and scans; automatic reconnect
+requests wait until release. Status remains readable and the existing link is
+preserved. A blocking scan must return before release. The release return value
+describes ownership, while its output reports any immediate reconnect error.
+This is not phone authentication or asynchronous radio/event draining: an
+earlier accepted join can still finish. No leased credential writes or
+disconnects are exposed yet. The future asynchronous adapter must establish
+correlated terminal outcomes and cancellation draining before using this lease
+for `wifi.apply` or completing a setup-session operation.
+
 Scanning a connected station requires an explicit, confirmed network-repair
 transition; do not silently disconnect it just because the phone opens a list.
 Preserve exact SSID bytes supported by the existing API; display names and

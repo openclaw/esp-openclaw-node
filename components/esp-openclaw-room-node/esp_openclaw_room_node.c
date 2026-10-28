@@ -43,7 +43,7 @@
 #include "room_ui_controller.h"
 #include "room_board.h"
 #include "room_agent_directory.h"
-#include "room_device_directory.h"
+#include "esp_openclaw_devices.h"
 #include "esp_openclaw_room_node.h"
 
 static const char *TAG = "openclaw_room";
@@ -311,7 +311,7 @@ static esp_err_t create_connection_timers(void)
     ESP_RETURN_ON_ERROR(esp_timer_create(&args, &node_reconnect_timer), TAG, "node retry timer");
     esp_err_t err = room_agent_directory_init(state_lock, wake_talk_teardown);
     if (err != ESP_OK) ESP_LOGW(TAG, "agent directory unavailable: %s", esp_err_to_name(err));
-    err = room_device_directory_init(state_lock, wake_talk_teardown);
+    err = esp_openclaw_devices_init(state_lock, wake_talk_teardown);
     if (err != ESP_OK) ESP_LOGW(TAG, "device directory unavailable: %s", esp_err_to_name(err));
     return ESP_OK;
 }
@@ -384,14 +384,14 @@ static void refresh_devices(void)
 {
     uint64_t request = atomic_exchange(&local_devices_request, UINT64_MAX);
     if (request == UINT64_MAX) return;
-    room_device_directory_cancel();
+    esp_openclaw_devices_cancel();
     published_device_generation = (unsigned)(request >> 1);
-    if (request & 1u) (void)room_device_directory_refresh();
+    if (request & 1u) (void)esp_openclaw_devices_refresh();
 }
 
 static void publish_devices(void)
 {
-    static room_devices_snapshot_t *snapshot;
+    static esp_openclaw_devices_snapshot_t *snapshot;
     if (!room_ui_wants_devices()) {
         free(snapshot);
         snapshot = NULL;
@@ -399,7 +399,7 @@ static void publish_devices(void)
     }
     if (snapshot == NULL) snapshot = malloc(sizeof(*snapshot));
     if (snapshot == NULL) { room_ui_devices_failed(published_device_generation); return; }
-    room_device_directory_copy(snapshot);
+    esp_openclaw_devices_copy(snapshot);
     room_ui_store_devices(snapshot, published_device_generation);
 }
 
@@ -683,7 +683,7 @@ static void talk_teardown_task(void *arg)
             refresh_devices();
             apply_local_conversation();
             room_agent_directory_poll(defer_directory);
-            room_device_directory_poll(defer_directory);
+            esp_openclaw_devices_poll(defer_directory);
             static room_agents_snapshot_t agents;
             room_agent_directory_copy(&agents);
             room_ui_store_agents(&agents);
@@ -1003,7 +1003,7 @@ static void operator_event(
     bool ready = current && operator_ready;
     if (current) {
         room_agent_directory_set_owner_locked(client, operator_incarnation, connection, connected);
-        room_device_directory_set_owner_locked(client, operator_incarnation, connection, connected);
+        esp_openclaw_devices_set_owner_locked(client, operator_incarnation, connection, connected);
         operator_ui_pending = true;
         wake_talk_teardown();
     }
@@ -1233,7 +1233,7 @@ static void node_event(
                 operator_ready = false;
                 invalidate_talk_target_locked();
                 room_agent_directory_set_owner_locked(existing_operator, operator_incarnation, 0, false);
-                room_device_directory_set_owner_locked(existing_operator, operator_incarnation, 0, false);
+                esp_openclaw_devices_set_owner_locked(existing_operator, operator_incarnation, 0, false);
                 request_talk_stop_locked(talk_generation, NULL);
                 xSemaphoreGive(state_lock);
                 esp_err_t disconnect_err =
@@ -1750,22 +1750,22 @@ static int diagnostics_console_command(int argc, char **argv)
 static int devices_console_command(int argc, char **argv)
 {
     if (argc == 2 && strcmp(argv[1], "refresh") == 0)
-        return room_device_directory_refresh() == ESP_OK ? 0 : 1;
+        return esp_openclaw_devices_refresh() == ESP_OK ? 0 : 1;
     if (argc == 2 && strcmp(argv[1], "close") == 0) {
-        room_device_directory_cancel();
+        esp_openclaw_devices_cancel();
         return 0;
     }
     if (argc != 1) { printf("usage: devices [refresh|close]\n"); return 1; }
-    room_devices_snapshot_t *snapshot = malloc(sizeof(*snapshot));
+    esp_openclaw_devices_snapshot_t *snapshot = malloc(sizeof(*snapshot));
     if (snapshot == NULL) return 1;
-    room_device_directory_copy(snapshot);
+    esp_openclaw_devices_copy(snapshot);
     cJSON *root = cJSON_CreateObject();
     cJSON *nodes = root != NULL ? cJSON_AddArrayToObject(root, "nodes") : NULL;
     static const char *states[] = {"idle", "offline", "loading", "ready", "empty", "error", "too-large", "timeout"};
     bool ok = nodes != NULL && cJSON_AddStringToObject(root, "state", states[snapshot->state]) != NULL &&
         cJSON_AddNumberToObject(root, "revision", snapshot->revision) != NULL;
     for (size_t i = 0; ok && i < snapshot->count; ++i) {
-        const room_device_t *device = &snapshot->devices[i];
+        const esp_openclaw_device_t *device = &snapshot->devices[i];
         cJSON *row = cJSON_CreateObject();
         ok = row != NULL && cJSON_AddItemToArray(nodes, row);
         if (!ok) { cJSON_Delete(row); break; }

@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include "esp_err.h"
 #include "room_agent_directory.h"
-#include "room_device_directory.h"
+#include "esp_openclaw_devices.h"
 
 typedef enum {
     ROOM_UI_IDLE = 0,
@@ -72,7 +72,7 @@ void room_ui_store_agents(const room_agents_snapshot_t *snapshot);
 /** Device interest is queued without taking the room owner lock. */
 void room_ui_set_devices_action_handler(void (*handler)(bool open, unsigned generation));
 bool room_ui_wants_devices(void);
-void room_ui_store_devices(const room_devices_snapshot_t *snapshot, unsigned generation);
+void room_ui_store_devices(const esp_openclaw_devices_snapshot_t *snapshot, unsigned generation);
 void room_ui_devices_failed(unsigned generation);
 /** Selection intent is copied by the owner; this callback must not wait for it.
  * An empty ID explicitly restores Gateway-default routing for the next call. */

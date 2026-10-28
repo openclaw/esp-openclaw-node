@@ -9,7 +9,7 @@
 static lv_obj_t *root, *back_text, *heading, *local, *message, *counter;
 static lv_obj_t *refresh, *previous, *next, *rows[PAGE_SIZE], *names[PAGE_SIZE], *states[PAGE_SIZE];
 static lv_obj_t *detail_name, *detail_model, *detail_connection, *detail_pairing;
-static const room_devices_snapshot_t *devices;
+static const esp_openclaw_devices_snapshot_t *devices;
 static char selected_id[129];
 static size_t offset;
 
@@ -92,20 +92,20 @@ void room_watch_devices_reset(void)
     devices = NULL;
 }
 
-void room_watch_devices_render(const room_devices_snapshot_t *snapshot, bool hidden)
+void room_watch_devices_render(const esp_openclaw_devices_snapshot_t *snapshot, bool hidden)
 {
     if (root == NULL) return;
     devices = hidden ? NULL : snapshot;
     lv_obj_set_hidden(root, hidden);
     if (hidden) return;
-    bool ready = devices != NULL && devices->state == ROOM_DEVICES_READY && devices->count > 0;
-    const room_device_t *selected = NULL;
+    bool ready = devices != NULL && devices->state == ESP_OPENCLAW_DEVICES_READY && devices->count > 0;
+    const esp_openclaw_device_t *selected = NULL;
     for (size_t i = 0; ready && selected_id[0] != '\0' && i < devices->count; ++i)
         if (strcmp(devices->devices[i].id, selected_id) == 0) selected = &devices->devices[i];
     bool detail = selected != NULL;
     if (!detail) selected_id[0] = '\0';
     if (!ready || offset >= devices->count) offset = 0;
-    bool loading = devices != NULL && devices->state == ROOM_DEVICES_LOADING;
+    bool loading = devices != NULL && devices->state == ESP_OPENCLAW_DEVICES_LOADING;
     lv_label_set_text_static(back_text, detail ? LV_SYMBOL_LEFT " Devices" : LV_SYMBOL_LEFT " Menu");
     lv_label_set_text_static(heading, detail ? "Device" : "Devices");
     lv_obj_set_hidden(local, detail);
@@ -125,7 +125,7 @@ void room_watch_devices_render(const room_devices_snapshot_t *snapshot, bool hid
         bool visible = !detail && ready && offset + i < devices->count;
         lv_obj_set_hidden(rows[i], !visible);
         if (visible) {
-            const room_device_t *device = &devices->devices[offset + i];
+            const esp_openclaw_device_t *device = &devices->devices[offset + i];
             lv_label_set_text(names[i], device->name);
             lv_label_set_text_static(states[i], !device->connected_known ? "?" :
                 device->connected ? LV_SYMBOL_OK : LV_SYMBOL_MINUS);
@@ -146,12 +146,12 @@ void room_watch_devices_render(const room_devices_snapshot_t *snapshot, bool hid
     } else {
         const char *text = "Devices unavailable.\nTap Refresh to try again.";
         if (devices != NULL) switch (devices->state) {
-            case ROOM_DEVICES_IDLE: text = "Devices paused.\nTap Refresh to load."; break;
-            case ROOM_DEVICES_OFFLINE: text = "Gateway offline.\nThis Watch still works."; break;
-            case ROOM_DEVICES_LOADING: text = "Finding your devices..."; break;
-            case ROOM_DEVICES_EMPTY: text = "No Gateway devices yet.\nPair a device to see it here."; break;
-            case ROOM_DEVICES_TOO_LARGE: text = "Too many devices for this view.\nOpen the mobile app."; break;
-            case ROOM_DEVICES_TIMEOUT: text = "Gateway did not reply.\nTap Refresh to try again."; break;
+            case ESP_OPENCLAW_DEVICES_IDLE: text = "Devices paused.\nTap Refresh to load."; break;
+            case ESP_OPENCLAW_DEVICES_OFFLINE: text = "Gateway offline.\nThis Watch still works."; break;
+            case ESP_OPENCLAW_DEVICES_LOADING: text = "Finding your devices..."; break;
+            case ESP_OPENCLAW_DEVICES_EMPTY: text = "No Gateway devices yet.\nPair a device to see it here."; break;
+            case ESP_OPENCLAW_DEVICES_TOO_LARGE: text = "Too many devices for this view.\nOpen the mobile app."; break;
+            case ESP_OPENCLAW_DEVICES_TIMEOUT: text = "Gateway did not reply.\nTap Refresh to try again."; break;
             default: break;
         }
         lv_label_set_text_static(message, text);
@@ -165,10 +165,10 @@ room_device_action_t room_watch_devices_activate(int action)
         selected_id[0] = '\0';
     } else if (action == ROOM_DEVICE_LOCAL && selected_id[0] == '\0') return ROOM_DEVICE_OPEN_LOCAL;
     else if (action == ROOM_DEVICE_REFRESH && selected_id[0] == '\0' &&
-        (devices == NULL || devices->state != ROOM_DEVICES_LOADING)) {
+        (devices == NULL || devices->state != ESP_OPENCLAW_DEVICES_LOADING)) {
         room_watch_devices_reset();
         return ROOM_DEVICE_RELOAD;
-    } else if (devices != NULL && devices->state == ROOM_DEVICES_READY) {
+    } else if (devices != NULL && devices->state == ESP_OPENCLAW_DEVICES_READY) {
         if (action == ROOM_DEVICE_PREVIOUS && offset >= PAGE_SIZE) offset -= PAGE_SIZE;
         else if (action == ROOM_DEVICE_NEXT && offset + PAGE_SIZE < devices->count) offset += PAGE_SIZE;
         else if (action >= 0 && action < PAGE_SIZE && offset + (size_t)action < devices->count)

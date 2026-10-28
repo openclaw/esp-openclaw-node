@@ -1175,7 +1175,7 @@ static void check_watch_devices(const char *path)
     unsigned requests = device_requests;
     click_talk(refresh);
     assert(device_requests == requests);
-    room_devices_snapshot_t view = {.state = ROOM_DEVICES_READY, .revision = 1, .count = 4};
+    esp_openclaw_devices_snapshot_t view = {.state = ESP_OPENCLAW_DEVICES_READY, .revision = 1, .count = 4};
     const char *names[] = {"Studio Dial", "Kitchen speaker", "Desk display", "Pocket node"};
     for (size_t i = 0; i < view.count; ++i) {
         snprintf(view.devices[i].id, sizeof(view.devices[i].id), "node-%u", (unsigned)i);
@@ -1228,19 +1228,19 @@ static void check_watch_devices(const char *path)
     assert(visible_watch_text("Devices") && !visible_watch_text("Model: M5Stack Dial"));
     touch_talk(row, true);
     deny_display = true;
-    view.state = ROOM_DEVICES_OFFLINE;
+    view.state = ESP_OPENCLAW_DEVICES_OFFLINE;
     ++view.revision;
     room_ui_store_devices(&view, device_generation);
     touch_talk(row, false);
     deny_display = false;
     room_ui_refresh();
     assert(visible_watch_text("Gateway offline.\nThis Watch still works."));
-    const struct { room_devices_state_t state; const char *text; } failures[] = {
-        {ROOM_DEVICES_EMPTY, "No Gateway devices yet.\nPair a device to see it here."},
-        {ROOM_DEVICES_TIMEOUT, "Gateway did not reply.\nTap Refresh to try again."},
-        {ROOM_DEVICES_TOO_LARGE, "Too many devices for this view.\nOpen the mobile app."},
-        {ROOM_DEVICES_ERROR, "Devices unavailable.\nTap Refresh to try again."},
-        {ROOM_DEVICES_IDLE, "Devices paused.\nTap Refresh to load."},
+    const struct { esp_openclaw_devices_state_t state; const char *text; } failures[] = {
+        {ESP_OPENCLAW_DEVICES_EMPTY, "No Gateway devices yet.\nPair a device to see it here."},
+        {ESP_OPENCLAW_DEVICES_TIMEOUT, "Gateway did not reply.\nTap Refresh to try again."},
+        {ESP_OPENCLAW_DEVICES_TOO_LARGE, "Too many devices for this view.\nOpen the mobile app."},
+        {ESP_OPENCLAW_DEVICES_ERROR, "Devices unavailable.\nTap Refresh to try again."},
+        {ESP_OPENCLAW_DEVICES_IDLE, "Devices paused.\nTap Refresh to load."},
     };
     for (size_t i = 0; i < sizeof(failures) / sizeof(*failures); ++i) {
         view.state = failures[i].state;
@@ -1251,13 +1251,13 @@ static void check_watch_devices(const char *path)
     unsigned old_generation = device_generation;
     click_talk(refresh);
     assert(device_open && device_generation != old_generation && visible_watch_text("Finding your devices..."));
-    view.state = ROOM_DEVICES_READY;
+    view.state = ESP_OPENCLAW_DEVICES_READY;
     ++view.revision;
     room_ui_store_devices(&view, old_generation);
     assert(visible_watch_text("Finding your devices...") && !visible_watch_text("Replacement"));
     room_ui_store_devices(&view, device_generation);
     assert(visible_watch_text("Replacement"));
-    view.state = ROOM_DEVICES_OFFLINE;
+    view.state = ESP_OPENCLAW_DEVICES_OFFLINE;
     ++view.revision;
     room_ui_store_devices(&view, device_generation);
     click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_HOME "  This Watch")));

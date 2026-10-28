@@ -27,7 +27,7 @@ typedef struct {
     unsigned agent_requests, conversation_requests, device_requests;
     bool devices_wanted;
     unsigned devices_generation;
-    room_devices_state_t devices_state;
+    esp_openclaw_devices_state_t devices_state;
     bool fail_device_submit;
     bool resume_wanted, resume_fallback, expire_queue_wait;
     unsigned resume_generation, resume_attempts, queue_wait;

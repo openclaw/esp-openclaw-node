@@ -102,11 +102,11 @@ static int pressed_agent_action = -100;
 static unsigned pressed_agent_revision;
 static room_agents_state_t pressed_agent_state;
 static void (*devices_action_handler)(bool open, unsigned generation);
-static room_devices_snapshot_t *current_devices, *painted_devices;
+static esp_openclaw_devices_snapshot_t *current_devices, *painted_devices;
 static unsigned device_generation;
 static int pressed_device_action = -100;
 static unsigned pressed_device_revision;
-static room_devices_state_t pressed_device_state;
+static esp_openclaw_devices_state_t pressed_device_state;
 
 void room_ui_set_devices_action_handler(void (*handler)(bool open, unsigned generation))
 {
@@ -121,7 +121,7 @@ bool room_ui_wants_devices(void)
     return wanted;
 }
 
-void room_ui_store_devices(const room_devices_snapshot_t *snapshot, unsigned generation)
+void room_ui_store_devices(const esp_openclaw_devices_snapshot_t *snapshot, unsigned generation)
 {
     taskENTER_CRITICAL(&state_mux);
     bool changed = current_devices != NULL && generation == device_generation &&
@@ -138,7 +138,7 @@ void room_ui_devices_failed(unsigned generation)
 {
     taskENTER_CRITICAL(&state_mux);
     if (current_devices != NULL && generation == device_generation) {
-        current_devices->state = ROOM_DEVICES_ERROR;
+        current_devices->state = ESP_OPENCLAW_DEVICES_ERROR;
         pressed_device_action = -100;
     }
     taskEXIT_CRITICAL(&state_mux);
@@ -149,7 +149,7 @@ void room_ui_devices_failed(unsigned generation)
 static void close_devices(void)
 {
     taskENTER_CRITICAL(&state_mux);
-    room_devices_snapshot_t *current = current_devices, *painted = painted_devices;
+    esp_openclaw_devices_snapshot_t *current = current_devices, *painted = painted_devices;
     current_devices = painted_devices = NULL;
     pressed_device_action = -100;
     unsigned generation = ++device_generation;
@@ -163,10 +163,10 @@ static void close_devices(void)
 static void open_devices(void)
 {
     close_devices();
-    room_devices_snapshot_t *current = calloc(1, sizeof(*current));
-    room_devices_snapshot_t *painted = calloc(1, sizeof(*painted));
+    esp_openclaw_devices_snapshot_t *current = calloc(1, sizeof(*current));
+    esp_openclaw_devices_snapshot_t *painted = calloc(1, sizeof(*painted));
     if (current == NULL || painted == NULL) { free(current); free(painted); current = painted = NULL; }
-    if (current != NULL) { current->revision = UINT32_MAX; current->state = ROOM_DEVICES_LOADING; }
+    if (current != NULL) { current->revision = UINT32_MAX; current->state = ESP_OPENCLAW_DEVICES_LOADING; }
     taskENTER_CRITICAL(&state_mux);
     current_devices = current;
     painted_devices = painted;
@@ -659,7 +659,7 @@ static void watch_devices_clicked(lv_event_t *event)
         current = current && current_devices->revision == painted_devices->revision &&
             current_devices->state == painted_devices->state;
     unsigned revision = current_devices != NULL ? current_devices->revision : 0;
-    room_devices_state_t state = current_devices != NULL ? current_devices->state : ROOM_DEVICES_ERROR;
+    esp_openclaw_devices_state_t state = current_devices != NULL ? current_devices->state : ESP_OPENCLAW_DEVICES_ERROR;
     bool activate = false;
     if (code == LV_EVENT_PRESSED) {
         pressed_device_action = current && !wake ? action : -100;

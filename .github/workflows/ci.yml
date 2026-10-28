@@ -78,6 +78,7 @@ jobs:
             components/esp-openclaw-node-provisioning/tests/test_setup_session.c \
             -o /tmp/setup_session_test
           /tmp/setup_session_test
+          python3 components/esp-openclaw-node/tests/run_connect_lease_host_tests.py
           python3 -m unittest discover -s scripts/tests -p test_saved_session_reconnect.py -v
 
       - name: Host room audio tests

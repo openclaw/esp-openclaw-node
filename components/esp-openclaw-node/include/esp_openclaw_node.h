@@ -32,6 +32,9 @@ extern "C" {
 /** @brief Opaque handle for an OpenClaw Node instance. */
 typedef struct esp_openclaw_node *esp_openclaw_node_handle_t;
 
+/** @brief Per-node connection-control lease; zero is never a valid lease. */
+typedef uint64_t esp_openclaw_node_connect_lease_t;
+
 /** @brief Generic Gateway event delivered after the authenticated session is ready. */
 typedef void (*esp_openclaw_node_gateway_event_cb_t)(
     esp_openclaw_node_handle_t node,
@@ -364,6 +367,36 @@ esp_err_t esp_openclaw_node_register_command_v2(
 /* Async Request APIs */
 
 /**
+ * @brief Reserve connection control for a locally authorized setup session.
+ *
+ * Acquisition leaves the current connection unchanged. It requires an idle or
+ * ready client with no queued control request and no existing lease. Until
+ * release, ordinary connect/disconnect calls (including saved reconnect) return
+ * ESP_ERR_INVALID_STATE. Only calls carrying this lease may change connection
+ * control. Leases are local ownership IDs, not authentication credentials.
+ *
+ * Returns ESP_ERR_INVALID_ARG for NULL arguments, or ESP_ERR_INVALID_STATE when
+ * busy, destroying, or the per-node ID space is exhausted. Clears *out_lease on
+ * failure. The handle must remain alive throughout the lease.
+ */
+esp_err_t esp_openclaw_node_connect_lease_acquire(
+    esp_openclaw_node_handle_t node,
+    esp_openclaw_node_connect_lease_t *out_lease);
+
+/**
+ * @brief Release the matching lease without changing the current connection.
+ *
+ * Release requires idle/ready state and no queued control request. It returns
+ * ESP_ERR_INVALID_STATE for stale leases or pending connection work, and
+ * ESP_ERR_INVALID_ARG for NULL node or zero lease. After ESP_OK, the application
+ * must wake any automatic reconnect owner it suppressed during setup; rejected
+ * requests have no terminal event. Destroy does not require lease release.
+ */
+esp_err_t esp_openclaw_node_connect_lease_release(
+    esp_openclaw_node_handle_t node,
+    esp_openclaw_node_connect_lease_t lease);
+
+/**
  * @brief Request one connect attempt using an explicit caller-chosen source.
  *
  * The request source remains explicit at the API boundary:
@@ -404,6 +437,15 @@ esp_err_t esp_openclaw_node_request_connect(
     esp_openclaw_node_handle_t node,
     const esp_openclaw_node_connect_request_t *request);
 
+/** @brief Submit a connect request under the matching nonzero control lease.
+ * Uses the same admission and terminal-event rules as request_connect().
+ * A stale lease returns ESP_ERR_INVALID_STATE, including after release.
+ */
+esp_err_t esp_openclaw_node_request_connect_with_lease(
+    esp_openclaw_node_handle_t node,
+    esp_openclaw_node_connect_lease_t lease,
+    const esp_openclaw_node_connect_request_t *request);
+
 /**
  * @brief Request disconnect of the active session or cancel a connect attempt.
  *
@@ -423,6 +465,13 @@ esp_err_t esp_openclaw_node_request_connect(
  *      - `ESP_FAIL` on an unexpected local submission failure
  */
 esp_err_t esp_openclaw_node_request_disconnect(esp_openclaw_node_handle_t node);
+
+/** @brief Request disconnect/cancel under the matching nonzero control lease.
+ * Like request_disconnect(), this cannot cancel a still-queued control request.
+ */
+esp_err_t esp_openclaw_node_request_disconnect_with_lease(
+    esp_openclaw_node_handle_t node,
+    esp_openclaw_node_connect_lease_t lease);
 
 /**
  * @brief Send one asynchronous RPC over a ready Gateway session.

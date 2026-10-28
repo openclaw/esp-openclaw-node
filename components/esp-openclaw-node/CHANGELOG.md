@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add an opt-in connection-control lease for setup owners, excluding competing console and saved-session requests without disconnecting the current Gateway. Revalidate ownership after credential loading and keep replacement work reserved through old-session callbacks.
+
 - Bind confirmed setup sessions to native Wi-Fi attempts, retaining ownership between operations and until cancellation drains, with correlated failure and recovery receipts.
 
 - Add native-radio Wi-Fi setup attempts with correlated outcomes, authority checks, cancellation draining, and explicit recovery after drain failures. Remote-radio backends remain unsupported by this API.

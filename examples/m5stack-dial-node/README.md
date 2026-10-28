@@ -101,13 +101,17 @@ not guarantee access to a later conversation or device action.
 ## Controls
 
 The screen is upright with the USB connector on the right. The home screen
-shows a compact connection strip, a blinking face, and one action. Wi-Fi and
+shows a compact connection strip, a blinking face, and one primary action. Wi-Fi and
 Gateway status are separate; no battery level is invented. Home shows whether
 an agent action is assigned and retains a short status for the latest action.
 With a retained reader selection, Home shows the agent name: press or tap
 **Continue** to return to its preview, or **Conversations** to return
 to its list. With no selection, **Choose agent** opens Agents. Offline,
-**Open menu** keeps local settings and controls reachable.
+**Connection** opens the network summary; Back returns directly Home.
+
+Tap the agent name (or **Agents**) to open the agent browser, or the menu icon
+to open all sections. The face and background do not activate anything. The
+primary action has its own touch target; pressing the encoder activates it too.
 
 Turning on Home always opens the menu, which contains Agents, Conversations,
 Devices, Activity, and Settings. Turn to move the highlight and press to open; touch
@@ -146,7 +150,8 @@ last disconnect reason code and USB recovery guidance. An unavailable AP
 observation is shown as unavailable; disconnected pages hide old IP/signal data.
 The page refreshes once per second without resetting the reading position.
 Press the encoder or back arrow to return to Settings (or This Dial when opened
-there). Opening the page starts at the top. The USB command
+there), or Home when opened from Home's offline action. Opening the page starts
+at the top. The USB command
 `local display.menu "{\"page\":\"connection\"}"` opens the same page.
 Display-state responses include `wifiConnected` alongside the existing Gateway
 `connected` flag. Phone pairing remains planned work; this page does not offer a

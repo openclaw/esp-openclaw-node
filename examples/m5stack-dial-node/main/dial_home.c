@@ -17,6 +17,21 @@ static lv_obj_t *label(lv_obj_t *parent, const char *text, int x, int y, int wid
     return object;
 }
 
+static lv_obj_t *button(lv_obj_t *parent, int x, int y, int width, int height, uint32_t color)
+{
+    lv_obj_t *object = lv_obj_create(parent);
+    lv_obj_remove_style_all(object);
+    lv_obj_set_pos(object, x, y);
+    lv_obj_set_size(object, width, height);
+    lv_obj_set_style_radius(object, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_color(object, lv_color_hex(color), 0);
+    lv_obj_set_style_bg_color(object, lv_color_hex(0x63546b), LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(object, LV_OPA_COVER, 0);
+    lv_obj_set_clickable(object, true);
+    lv_obj_set_scrollable(object, false);
+    return object;
+}
+
 void dial_home_create(dial_home_t *home, lv_obj_t *parent)
 {
     home->root = lv_obj_create(parent);
@@ -26,12 +41,16 @@ void dial_home_create(dial_home_t *home, lv_obj_t *parent)
     lv_obj_set_scrollable(home->root, false);
     openclaw_status_bar_create(&home->status, home->root);
     lv_obj_set_pos(home->status.root, 73, 20);
-    home->title = label(home->root, "OpenClaw", 50, 44, 140);
-    lv_obj_set_style_text_font(home->title, &lv_font_montserrat_16, 0);
+    home->agent_button = button(home->root, 42, 40, 110, 44, 0x302535);
+    home->title = label(home->agent_button, "Agents", 6, 12, 84);
+    label(home->agent_button, LV_SYMBOL_DOWN, 92, 12, 12);
+    home->menu_button = button(home->root, 158, 42, 40, 40, 0x302535);
+    lv_obj_set_ext_click_area(home->menu_button, 2);
+    lv_obj_center(label(home->menu_button, LV_SYMBOL_BARS, 0, 0, 28));
     lv_obj_t *frame = lv_obj_create(home->root);
     lv_obj_remove_style_all(frame);
-    lv_obj_set_pos(frame, 78, 68);
-    lv_obj_set_size(frame, 84, 84);
+    lv_obj_set_pos(frame, 85, 86);
+    lv_obj_set_size(frame, 70, 70);
     lv_obj_set_style_radius(frame, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(frame, lv_color_hex(0x332336), 0);
     lv_obj_set_style_bg_opa(frame, LV_OPA_COVER, 0);
@@ -39,18 +58,11 @@ void dial_home_create(dial_home_t *home, lv_obj_t *parent)
     lv_obj_set_style_border_color(frame, lv_color_hex(0x5a3946), 0);
     lv_obj_set_clickable(frame, false);
     lv_obj_set_scrollable(frame, false);
-    home->headline = label(home->root, "Starting up", 32, 158, 176);
+    home->headline = label(home->root, "Starting up", 32, 159, 176);
     lv_obj_set_style_text_font(home->headline, &lv_font_montserrat_16, 0);
-    lv_obj_t *pill = lv_obj_create(home->root);
-    lv_obj_remove_style_all(pill);
-    lv_obj_set_pos(pill, 58, 185);
-    lv_obj_set_size(pill, 124, 28);
-    lv_obj_set_style_radius(pill, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(pill, lv_color_hex(0xf4efee), 0);
-    lv_obj_set_style_bg_opa(pill, LV_OPA_COVER, 0);
-    lv_obj_set_clickable(pill, false);
-    lv_obj_set_scrollable(pill, false);
-    home->action = label(pill, "Open menu", 0, 0, 124);
+    home->primary_button = button(home->root, 64, 187, 112, 28, 0xf4efee);
+    lv_obj_set_ext_click_area(home->primary_button, 8);
+    home->action = label(home->primary_button, "Connection", 0, 0, 108);
     lv_obj_set_style_text_color(home->action, lv_color_hex(0x302131), 0);
     lv_obj_center(home->action);
     for (int i = 0; i < 2; ++i) {
@@ -95,13 +107,13 @@ void dial_home_render(dial_home_t *home, const openclaw_status_facts_t *status, 
 {
     openclaw_status_bar_set(&home->status, status);
     bool connected = status->gateway_connected;
-    home->destination = !connected ? DIAL_HOME_MENU : !context->available ? DIAL_HOME_AGENTS
+    home->destination = !connected ? DIAL_HOME_CONNECTION : !context->available ? DIAL_HOME_AGENTS
         : context->preview ? DIAL_HOME_PREVIEW : DIAL_HOME_READER;
-    const char *action = home->destination == DIAL_HOME_MENU ? "Open menu"
+    const char *action = home->destination == DIAL_HOME_CONNECTION ? "Connection"
         : home->destination == DIAL_HOME_AGENTS ? "Choose agent"
         : home->destination == DIAL_HOME_PREVIEW ? "Continue" : "Conversations";
     lv_label_set_text_static(home->action, action);
-    const char *title = context->available ? context->agent_name : "OpenClaw";
+    const char *title = context->available ? context->agent_name : "Agents";
     if (strcmp(lv_label_get_text(home->title), title) != 0)
         lv_label_set_text(home->title, title);
     const char *headline = activity != NULL ? activity : !connected ? "Gateway offline"

@@ -16,6 +16,7 @@ static int encoder_diff;
 static lv_point_t pointer_point;
 static lv_indev_t *pointer;
 static unsigned confirmations, homes, changes;
+static unsigned home_menus, home_agents, home_opens;
 static dial_navigation_t navigation;
 static dial_agents_snapshot_t roster;
 static bool navigating;
@@ -70,6 +71,9 @@ static void event(dial_input_event_t kind, int value, bool pointer, void *contex
     (void)value;
     (void)pointer;
     (void)context;
+    if (kind == DIAL_INPUT_HOME_MENU) { ++home_menus; return; }
+    if (kind == DIAL_INPUT_HOME_AGENTS) { ++home_agents; return; }
+    if (!navigating && !input.control && kind == DIAL_INPUT_OPEN) ++home_opens;
     if (kind == DIAL_INPUT_PREVIOUS) ++previous;
     if (kind == DIAL_INPUT_NEXT) ++next;
     if (kind == DIAL_INPUT_BACK) {
@@ -901,8 +905,9 @@ int main(int argc, char **argv)
     assert(action_size.y <= lv_obj_get_height(home.action));
     snapshot("home-continue");
     dial_home_render(&home, &gateway_offline, false, NULL, &home_context);
-    assert(home.destination == DIAL_HOME_MENU);
-    assert(strcmp(lv_label_get_text(home.action), "Open menu") == 0);
+    assert(home.destination == DIAL_HOME_CONNECTION);
+    assert(strcmp(lv_label_get_text(home.action), "Connection") == 0);
+    snapshot("home-offline");
     home_context = (dial_home_context_t){0};
     dial_home_render(&home, &online_status, false, NULL, &home_context);
     assert(home.destination == DIAL_HOME_AGENTS);
@@ -922,6 +927,7 @@ int main(int argc, char **argv)
     lv_indev_set_type(pointer, LV_INDEV_TYPE_POINTER);
     lv_indev_set_read_cb(pointer, pointer_read);
     dial_input_init(&input, encoder, screen, arc, event, NULL);
+    dial_input_bind_home(&input, home.menu_button, home.agent_button, home.primary_button);
     advance(40);
 
     // Turning must still adjust the value after confirming once.
@@ -1016,8 +1022,8 @@ int main(int argc, char **argv)
     dial_input_set_control(&input, false);
     touch(120, 120, false);
     assert(!input.control && confirmations == 3);
-    touch(120, 120, true);
-    touch(120, 120, false);
+    touch(120, 201, true);
+    touch(120, 201, false);
     assert(input.control && confirmations == 3);
     touch(120, 120, true);
     control();
@@ -1746,6 +1752,65 @@ int main(int argc, char **argv)
     assert(openclaw_density() == OPENCLAW_DENSITY_COMPACT);
     assert(confirmations == density_confirmations && openclaw_reading_size() == OPENCLAW_READING_STANDARD);
     puts("Dial list spacing: two-row paging, Back focus, circular bounds and no control submission passed");
+    navigating = false;
+    lv_obj_set_hidden(navigation.root, true);
+    lv_obj_set_hidden(input.arc, true);
+    lv_obj_set_hidden(home.root, false);
+    dial_input_set_control(&input, false);
+    touch(120, 120, true); touch(120, 120, false);
+    assert(!input.control); // The Home mascot is decorative, not an action.
+    unsigned home_confirmations = confirmations;
+    unsigned original_home_opens = home_opens;
+    touch(178, 62, true); touch(178, 62, false);
+    touch(90, 62, true); touch(90, 62, false);
+    assert(home_menus == 1 && home_agents == 1 && home_opens == original_home_opens);
+    touch(178, 62, true); touch(150, 96, true); touch(150, 96, false);
+    touch(90, 62, true); touch(90, 100, true); touch(90, 100, false);
+    assert(home_menus == 1 && home_agents == 1);
+    touch(178, 62, true);
+    dial_input_set_control(&input, false);
+    touch(178, 62, false);
+    touch(120, 201, true);
+    dial_input_set_control(&input, false);
+    touch(120, 201, false);
+    assert(home_menus == 1 && home_opens == original_home_opens && !input.control);
+    touch(120, 201, true); touch(120, 201, false);
+    assert(home_opens == original_home_opens + 1 && input.control && confirmations == home_confirmations);
+    // Hidden Home controls cannot dispatch a queued click over another view.
+    lv_obj_send_event(home.menu_button, LV_EVENT_SHORT_CLICKED, NULL);
+    assert(home_menus == 1);
+    lv_obj_set_hidden(input.arc, true);
+    lv_obj_set_hidden(home.root, false);
+    dial_input_set_control(&input, false);
+    press_encoder(encoder);
+    assert(home_opens == original_home_opens + 2 && input.control && confirmations == home_confirmations);
+    lv_obj_set_hidden(input.arc, true);
+    lv_obj_set_hidden(home.root, false);
+    dial_input_set_control(&input, false);
+    unsigned home_returns = homes;
+    touch(178, 62, true); advance(1000); touch(178, 62, false);
+    assert(homes == home_returns + 1 && home_menus == 1 && !input.control);
+    navigating = true;
+    lv_obj_set_hidden(home.root, true);
+    dial_navigation_open_home_connection(&navigation);
+    advance(40);
+    snapshot("home-connection");
+    assert(navigation.view == DIAL_NAV_CONNECTION);
+    touch(68, 44, true); touch(68, 44, false);
+    assert(!navigating && lv_obj_is_visible(home.root));
+    assert(confirmations == home_confirmations);
+    const lv_point_t home_targets[] = {{178, 62}, {90, 62}, {120, 201}};
+    for (unsigned i = 0; i < sizeof(home_targets) / sizeof(home_targets[0]); ++i) {
+        touch(home_targets[i].x, home_targets[i].y, true);
+        control();
+        touch(home_targets[i].x, home_targets[i].y, false);
+        assert(confirmations == home_confirmations);
+        lv_obj_set_hidden(input.arc, true);
+        lv_obj_set_hidden(home.root, false);
+        dial_input_set_control(&input, false);
+    }
+    assert(home_menus == 1 && home_agents == 1 && home_opens == original_home_opens + 2);
+    puts("Home targets: decorative center, distinct actions, gesture fences and Connection Back passed");
     assert(reader_boundary_failures == 0);
     lv_deinit();
 }

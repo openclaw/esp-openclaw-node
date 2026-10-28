@@ -108,6 +108,11 @@ static void changed(dial_navigation_t *nav)
 
 static void back(dial_navigation_t *nav)
 {
+    if (nav->view == DIAL_NAV_CONNECTION && nav->connection_home) {
+        nav->connection_home = false;
+        nav->handler(DIAL_NAV_HOME, 0, nav->context);
+        return;
+    }
     if (nav->view == DIAL_NAV_MENU) nav->handler(DIAL_NAV_HOME, 0, nav->context);
     else {
         if (nav->view == DIAL_NAV_CREATION) {
@@ -1226,6 +1231,7 @@ void dial_navigation_activate(dial_navigation_t *nav)
 void dial_navigation_open_settings(dial_navigation_t *nav, dial_navigation_view_t page)
 {
     if (page != DIAL_NAV_SETTINGS && page != DIAL_NAV_DISPLAY && page != DIAL_NAV_CONNECTION && page != DIAL_NAV_MESSAGING) return;
+    nav->connection_home = false;
     nav->settings_parent = reply_page(nav->view) || nav->view == DIAL_NAV_CREATION ? nav->view :
         nav->view == DIAL_NAV_LOCAL_DEVICE ? DIAL_NAV_LOCAL_DEVICE : DIAL_NAV_SETTINGS;
     nav->view = page;
@@ -1233,6 +1239,12 @@ void dial_navigation_open_settings(dial_navigation_t *nav, dial_navigation_view_
     lv_obj_set_hidden(nav->root, false);
     changed(nav);
     if (page == DIAL_NAV_CONNECTION) lv_obj_scroll_to_y(nav->preview_body, 0, LV_ANIM_OFF);
+}
+
+void dial_navigation_open_home_connection(dial_navigation_t *nav)
+{
+    dial_navigation_open_settings(nav, DIAL_NAV_CONNECTION);
+    nav->connection_home = true;
 }
 
 void dial_navigation_set_brightness(dial_navigation_t *nav, int percent, bool failed)

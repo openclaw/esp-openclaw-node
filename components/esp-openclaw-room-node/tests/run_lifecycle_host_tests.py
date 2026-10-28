@@ -93,6 +93,7 @@ def main():
             str(tests.parent / "room_messaging.c"),
             str(repo / "components/esp-openclaw-directory/esp_openclaw_devices.c"),
             str(repo / "components/esp-openclaw-directory/esp_openclaw_directory.c"),
+            str(repo / "components/esp-openclaw-directory/esp_openclaw_avatar.c"),
             *link, "-o", str(binary),
         ]
         failed = 0

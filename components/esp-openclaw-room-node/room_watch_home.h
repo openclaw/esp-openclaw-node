@@ -4,7 +4,7 @@
 #include "room_ui_controller.h"
 
 /* All calls are owned by the room UI's display lock. */
-void room_watch_home_create(lv_obj_t *parent, lv_event_cb_t menu_handler, lv_event_cb_t continue_handler,
+void room_watch_home_create(lv_obj_t *parent, lv_event_cb_t menu_handler, lv_event_cb_t agent_handler, lv_event_cb_t continue_handler,
                             lv_event_cb_t voice_handler, lv_event_cb_t discard_handler, lv_event_cb_t send_handler);
 /* The controller calls this only after an accepted display brightness write. */
 void room_watch_home_set_awake(bool awake);

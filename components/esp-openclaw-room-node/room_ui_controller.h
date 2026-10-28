@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include "esp_err.h"
 #include "room_agent_directory.h"
+#include "esp_openclaw_avatar.h"
 #include "esp_openclaw_devices.h"
 #include "room_voice_draft.h"
 #include "room_messaging.h"
@@ -55,6 +56,7 @@ typedef struct {
     bool selected, expired;
     uint64_t revision;
     char id[65], name[65];
+    esp_openclaw_avatar_t avatar;
 } room_ui_talk_target_t;
 
 typedef struct {

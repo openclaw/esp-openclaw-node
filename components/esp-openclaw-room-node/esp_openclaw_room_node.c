@@ -90,6 +90,7 @@ static unsigned published_device_generation;
 static struct {
     bool selected, expired;
     char id[65], name[65], session_key[200];
+    esp_openclaw_avatar_t avatar;
 } talk_target;
 /* State-lock owned: selection and invalidation revoke queued Start intents. */
 static uint64_t talk_target_revision;
@@ -157,7 +158,7 @@ static void refresh_home_facts(void)
     /* Store while the owner is locked, but never wait for LVGL under that lock. */
     room_ui_store_facts(&facts);
     room_ui_talk_target_t target = {.selected = talk_target.selected, .expired = talk_target.expired,
-        .revision = talk_target_revision};
+        .revision = talk_target_revision, .avatar = talk_target.avatar};
     memcpy(target.id, talk_target.id, sizeof(target.id));
     memcpy(target.name, talk_target.name, sizeof(target.name));
     room_ui_store_talk_target(&target);
@@ -430,6 +431,7 @@ static esp_err_t select_talk_agent(const char *id, unsigned revision)
         ++talk_target_revision;
         memcpy(talk_target.id, target.agent.id, sizeof(talk_target.id));
         memcpy(talk_target.name, target.agent.name, sizeof(talk_target.name));
+        talk_target.avatar = esp_openclaw_agent_avatar(&target.agent);
         memcpy(talk_target.session_key, key, strlen(key) + 1);
         talk_target.selected = true;
         talk_target.expired = false;

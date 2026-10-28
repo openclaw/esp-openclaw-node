@@ -153,6 +153,9 @@ static void show_view(dial_view_t view)
     for (int i = 0; i < 2; ++i) lv_obj_set_flag(ui.eyes[i], LV_OBJ_FLAG_HIDDEN, view != VIEW_FACE);
     lv_obj_set_flag(ui.mouth, LV_OBJ_FLAG_HIDDEN, view != VIEW_FACE);
     lv_label_set_text(ui.title, view == VIEW_MESSAGE ? ui.heading : view == VIEW_CONTROL ? ui.label : "OpenClaw");
+    lv_obj_set_width(ui.title, view == VIEW_CONTROL ? 108 : 158);
+    lv_label_set_long_mode(ui.title, view == VIEW_CONTROL ? LV_LABEL_LONG_DOT : LV_LABEL_LONG_WRAP);
+    lv_obj_align(ui.title, LV_ALIGN_CENTER, view == VIEW_CONTROL ? 22 : 0, -66);
     dial_input_set_control(&ui.input, view == VIEW_CONTROL);
 }
 
@@ -371,6 +374,9 @@ static void input_event(dial_input_event_t event, int value, bool pointer, void 
         }
     } else if (event == DIAL_INPUT_HOME) {
         show_view(VIEW_FACE);
+    } else if (event == DIAL_INPUT_BACK) {
+        open_navigation(false);
+        if (ui.view == VIEW_NAVIGATION) dial_navigation_open_local_device(&ui.navigation);
     } else if (ui.view == VIEW_NAVIGATION) {
         if (event == DIAL_INPUT_PREVIOUS) dial_navigation_move(&ui.navigation, -1);
         else if (event == DIAL_INPUT_NEXT) dial_navigation_move(&ui.navigation, 1);

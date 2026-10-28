@@ -637,6 +637,14 @@ void dial_navigation_open_devices(dial_navigation_t *nav)
     nav->handler(DIAL_NAV_DEVICES_REFRESH, 0, nav->context);
 }
 
+void dial_navigation_open_local_device(dial_navigation_t *nav)
+{
+    nav->view = DIAL_NAV_LOCAL_DEVICE;
+    nav->focus = 0;
+    lv_obj_set_hidden(nav->root, false);
+    changed(nav);
+}
+
 bool dial_navigation_show_reader(dial_navigation_t *nav, const dial_agents_snapshot_t *agents,
                                  const dial_conversations_snapshot_t *view, bool preview)
 {
@@ -688,7 +696,7 @@ void dial_navigation_activate(dial_navigation_t *nav)
         return;
     }
     if (nav->view == DIAL_NAV_DEVICES) {
-        if (nav->focus == 0) { nav->view = DIAL_NAV_LOCAL_DEVICE; changed(nav); }
+        if (nav->focus == 0) dial_navigation_open_local_device(nav);
         else if (nav->focus <= device_count(nav)) {
             nav->device_focus = nav->focus;
             nav->view = DIAL_NAV_DEVICE_DETAIL;

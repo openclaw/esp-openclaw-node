@@ -162,6 +162,7 @@ Devices → This Dial → Control opens the existing numeric dial. Turn or drag 
 value; press the encoder or tap the center to confirm. Dragging never confirms
 an action or triggers Home. Turning continues to adjust after confirmation.
 Hold the encoder or a stationary touch to return Home from the control.
+Tap the back arrow to return to This Dial without confirming the value.
 If a command changes the view or reconfigures the control during a held press,
 release and press again to interact with the new view or confirm the new value.
 

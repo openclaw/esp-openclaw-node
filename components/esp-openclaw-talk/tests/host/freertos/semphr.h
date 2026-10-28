@@ -26,6 +26,12 @@ static inline BaseType_t xSemaphoreGive(SemaphoreHandle_t sem)
     assert(pthread_mutex_unlock(&sem->mutex) == 0);
     return pdTRUE;
 }
+static inline SemaphoreHandle_t xSemaphoreCreateMutex(void)
+{
+    SemaphoreHandle_t sem = xSemaphoreCreateBinary();
+    if (sem != NULL) sem->available = true;
+    return sem;
+}
 static inline BaseType_t xSemaphoreTake(SemaphoreHandle_t sem, TickType_t wait)
 {
     assert(pthread_mutex_lock(&sem->mutex) == 0);

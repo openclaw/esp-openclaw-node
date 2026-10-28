@@ -16,6 +16,7 @@ def main():
     parser.add_argument("--cjson-dir", type=Path, default=repo / "components/esp-openclaw-node/test_apps/esp_openclaw_node_unity_tests/managed_components/espressif__cjson/cJSON")
     parser.add_argument("--webrtc-dir", type=Path, default=repo / "third_party/esp-webrtc-solution", help="Read-only pinned SDK checkout (also supports unpopulated worktree submodules)")
     parser.add_argument("--filter", default="")
+    parser.add_argument("--transcription", action="store_true", help="Run the transcription-only RPC lifecycle suite")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--sanitize", action="store_true")
     mode.add_argument("--analyze", action="store_true", help="Analyze the real Talk test/production translation unit with Clang")
@@ -26,6 +27,7 @@ def main():
     for source in [unity / "unity.c", cjson / "cJSON.c"]:
         if not source.is_file():
             parser.error(f"Missing {source}; provide an installed ESP-IDF and configured test-app cJSON sources")
+    source = tests / ("test_transcription.c" if args.transcription else "test_esp_openclaw_talk.c")
     includes = [
         tests / "host", tests.parent / "include", unity, cjson,
         repo / "components/esp-openclaw-node/include",
@@ -41,10 +43,10 @@ def main():
             command += ["-I", str(include)]
         command += ["-include", str(tests / "host/talk_host_runner.h")]
         if args.analyze:
-            command += ["--analyze", "-Xanalyzer", "-analyzer-output=text", str(tests / "test_esp_openclaw_talk.c")]
+            command += ["--analyze", "-Xanalyzer", "-analyzer-output=text", str(source)]
             return subprocess.run(command, cwd=directory).returncode
         command += [
-            str(tests / "test_esp_openclaw_talk.c"),
+            str(source),
             str(tests / "host/talk_host_runner.c"),
             str(unity / "unity.c"), str(cjson / "cJSON.c"),
             "-lm", "-o", str(binary),

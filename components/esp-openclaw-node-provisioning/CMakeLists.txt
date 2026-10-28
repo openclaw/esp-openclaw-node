@@ -6,6 +6,7 @@ idf_component_register(
         "esp_openclaw_node_example_repl_cmd.c"
         "esp_openclaw_node_example_saved_session_reconnect.c"
         "esp_openclaw_node_wifi.c"
+        "esp_openclaw_setup_session.c"
     INCLUDE_DIRS "include"
     REQUIRES
         esp-openclaw-node

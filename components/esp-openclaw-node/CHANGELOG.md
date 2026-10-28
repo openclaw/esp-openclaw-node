@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add a shared setup-session API for Watch and Dial integrations, with local confirmation, live peer checks, bounded operation receipts, and cancellation draining. BLE/mobile adapters and device setup screens remain separate work.
+
 - Allow an idle client to remove a locally advertised scope before reconnecting, without changing stored Gateway grants or credentials.
 
 - Count discarded AFE input frames as errors and expose capture-read and fetch timing in room/watch audio diagnostics.

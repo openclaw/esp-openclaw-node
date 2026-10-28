@@ -19,3 +19,49 @@ if the driver cannot read the current access point. They are omitted while
 disconnected. C consumers must check `ap_info_valid` before using RSSI, channel,
 or auth mode; zero is not an unavailable-reading sentinel. Room diagnostics
 display unavailable RSSI as `unknown`.
+
+## Shared setup session owner
+
+`esp_openclaw_setup_session.h` provides transport-independent setup admission
+for Watch and Dial. It is a library foundation; no example exposes BLE setup
+or a new pairing screen yet. Wi-Fi/node lifecycle integration and the encrypted
+transport follow the [mobile setup contract](../../docs/design/mobile-provisioning-contract.md).
+
+Initialize one session per boot. Serialize its API, UI events, transport events,
+and side effects on one owner task. `open` creates a new generation with a
+two-minute lifetime. `attach` binds one currently authenticated encrypted peer;
+a second peer cannot replace it. Display that peer's comparison before sending
+`input_released`, then call `confirm` only for a new local physical press. These
+two calls are local-only, never endpoint operations.
+
+`submit` admits one Wi-Fi or Gateway mutation at a time and dispatches immediately.
+The dispatcher must validate the operation payload and connection prerequisites
+through their canonical owners. It copies any payload needed by asynchronous
+work; the session holds no credential strings. After every queue or wait, call
+`authorize_operation` on the owner task immediately before applying a side effect.
+It checks the current authenticated peer and deadline, not just the token. The
+live-peer callback must track transport revocation independently of queued UI
+notifications. Neither a stored peer ID nor a previously valid handle suffices.
+
+An accepted operation gets a receipt before dispatch. Acceptance does not imply
+connection or persistence, and the returned receipt is the admission snapshot;
+use `get_receipt` for later results, including synchronous dispatch failure.
+Repeated IDs return the original receipt without redispatch or payload replacement.
+Reusing an ID with a different operation is invalid. Keep IDs nonzero and unique
+within a generation. At 32 receipts, close and reopen setup; nothing is evicted.
+
+Local `close`, matching peer loss (`detach`), or expiry revokes admission immediately.
+Old-generation or other-peer disconnect events cannot close the current session.
+Pending work enters
+`CLOSING` and receives one cancel callback. That callback requests cancellation
+and draining, not rollback. Report `complete` only when no late side effects remain;
+until then, reopening is refused. A stale generation cannot complete a newer
+attempt. Use `UNKNOWN` when work is drained but its external outcome is unresolved.
+Do not infer whether credentials remain saved from a canceled receipt; consult
+the Wi-Fi/node owner. Poll regularly for expiry, and use `snapshot` only for local
+UI metadata. Receipt details must be numeric public error codes, never secrets.
+
+Clock and live-peer callbacks must not reenter the owner. Dispatch and cancel may
+synchronously call `complete` (for queue rejection or completed draining), but
+must not otherwise reenter. Keep the session and callback context alive until all
+accepted operations have drained. Do not reinitialize it to escape `CLOSING`.

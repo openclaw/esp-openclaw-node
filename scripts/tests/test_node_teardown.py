@@ -23,6 +23,10 @@ class NodeTeardownTests(unittest.TestCase):
         start = source.index('\n', source.index('#include "esp_timer.h"'))
         end = source.index("\nvoid esp_openclaw_node_fail_if_connect_timed_out(")
         (directory / "completion_under_test.inc").write_text(source[start:end])
+        control = (ROOT / "components/esp-openclaw-node/src/esp_openclaw_node.c").read_text()
+        start = control.index("bool esp_openclaw_node_connect_cancel_pending_locked(")
+        end = control.index("esp_err_t esp_openclaw_node_connect_cancel(", start)
+        (directory / "cancel_predicates.inc").write_text(control[start:end])
         cls.binary = directory / "node-teardown"
         subprocess.run([
             os.environ.get("CC", "cc"), "-std=c11", "-Wall", "-Wextra", "-Werror",

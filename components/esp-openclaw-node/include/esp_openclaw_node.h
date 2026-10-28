@@ -92,6 +92,7 @@ typedef struct {
     esp_openclaw_node_connect_failure_reason_t failure_reason; /**< Valid when failed. */
     esp_err_t local_err; /**< Valid when failed. */
     bool credentials_saved; /**< This attempt successfully stored a role token. */
+    bool cancel_requested; /**< Intent only; wait for a terminal state before releasing ownership. */
 } esp_openclaw_node_connect_attempt_t;
 
 /** @brief Payload for @ref ESP_OPENCLAW_NODE_EVENT_CONNECT_FAILED. */
@@ -490,14 +491,35 @@ esp_err_t esp_openclaw_node_connect_begin(
  * loss within the same lease. credentials_saved remains
  * true after a successful role-token store, even if a later store fails; it
  * does not claim that failed writes were rolled back. No strings or tokens are
- * retained in this snapshot. Cancellation follows the existing disconnect API;
- * queued cancellation is not provided by this API.
+ * retained in this snapshot. A cancellation request remains nonterminal until
+ * the worker has discarded queued credentials or drained the active transport.
  */
 esp_err_t esp_openclaw_node_connect_snapshot(
     esp_openclaw_node_handle_t node,
     esp_openclaw_node_connect_lease_t lease,
     esp_openclaw_node_connect_attempt_id_t attempt,
     esp_openclaw_node_connect_attempt_t *out_status);
+
+/**
+ * @brief Request cancellation of an exact queued or connecting attempt.
+ *
+ * Requires the matching live lease. The request is sticky and independent of
+ * work-queue capacity; repeated cancellation before completion returns ESP_OK.
+ * The worker checks it between work items (at most its idle poll interval),
+ * after transport startup, and before credential writes. A blocked startup or
+ * cleanup must return before cancellation becomes terminal. Until then, the
+ * snapshot has cancel_requested set and new control requests are rejected.
+ *
+ * Cancellation before processing the request preserves the previous connection.
+ * Once replacement has started, it cannot restore that connection or roll back
+ * earlier credential writes. A completed cancellation reports FAILED/CANCELED.
+ * Returns ESP_ERR_NOT_FOUND for an old ID, ESP_ERR_INVALID_STATE for a completed
+ * attempt or stale lease, and ESP_ERR_INVALID_ARG for NULL node or zero IDs.
+ */
+esp_err_t esp_openclaw_node_connect_cancel(
+    esp_openclaw_node_handle_t node,
+    esp_openclaw_node_connect_lease_t lease,
+    esp_openclaw_node_connect_attempt_id_t attempt);
 
 /**
  * @brief Request disconnect of the active session or cancel a connect attempt.

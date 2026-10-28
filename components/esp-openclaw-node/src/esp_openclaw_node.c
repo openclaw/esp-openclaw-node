@@ -628,6 +628,44 @@ esp_err_t esp_openclaw_node_connect_lease_release(
     return ESP_OK;
 }
 
+bool esp_openclaw_node_connect_cancel_pending_locked(esp_openclaw_node_handle_t node)
+{
+    return node->connect_attempt.cancel_requested &&
+        (node->connect_attempt.state == ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_QUEUED ||
+         node->connect_attempt.state == ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_CONNECTING);
+}
+
+bool esp_openclaw_node_active_connect_cancelled_locked(esp_openclaw_node_handle_t node)
+{
+    return node->active_connect_attempt_id != 0 &&
+        node->connect_attempt.id == node->active_connect_attempt_id &&
+        esp_openclaw_node_connect_cancel_pending_locked(node);
+}
+
+esp_err_t esp_openclaw_node_connect_cancel(
+    esp_openclaw_node_handle_t node,
+    esp_openclaw_node_connect_lease_t lease,
+    esp_openclaw_node_connect_attempt_id_t attempt)
+{
+    if (node == NULL || lease == 0 || attempt == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    esp_openclaw_node_lock_state(node);
+    esp_err_t err = ESP_OK;
+    if (!esp_openclaw_node_connect_lease_matches_locked(node, lease, node->connect_lease_generation)) {
+        err = ESP_ERR_INVALID_STATE;
+    } else if (node->connect_attempt.id != attempt) {
+        err = ESP_ERR_NOT_FOUND;
+    } else if (node->connect_attempt.state != ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_QUEUED &&
+               node->connect_attempt.state != ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_CONNECTING) {
+        err = ESP_ERR_INVALID_STATE;
+    } else {
+        node->connect_attempt.cancel_requested = true;
+    }
+    esp_openclaw_node_unlock_state(node);
+    return err;
+}
+
 void esp_openclaw_node_note_connect_credentials_saved_locked(esp_openclaw_node_handle_t node)
 {
     if (node->active_connect_attempt_id != 0 &&
@@ -672,6 +710,7 @@ static esp_err_t request_connect(
     esp_openclaw_node_lock_state(node);
     uint64_t generation = node->connect_lease_generation;
     bool admitted = !node->connect_request_pending &&
+        !esp_openclaw_node_connect_cancel_pending_locked(node) &&
         esp_openclaw_node_connect_lease_matches_locked(node, lease, generation);
     esp_openclaw_node_unlock_state(node);
     if (!admitted) {
@@ -694,7 +733,7 @@ static esp_err_t request_connect(
             esp_openclaw_node_lock_state(node);
             /* NVS loading can overlap lease acquisition. Recheck before
              * publishing the loaded credentials into this handle's cache. */
-            if (node->connect_request_pending ||
+            if (node->connect_request_pending || esp_openclaw_node_connect_cancel_pending_locked(node) ||
                 !esp_openclaw_node_connect_lease_matches_locked(node, lease, generation)) {
                 esp_openclaw_node_unlock_state(node);
                 esp_openclaw_node_persisted_session_free(&fresh);

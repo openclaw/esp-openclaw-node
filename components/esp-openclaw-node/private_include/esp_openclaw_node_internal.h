@@ -359,6 +359,9 @@ esp_err_t esp_openclaw_node_submit_connect_request(
     esp_openclaw_node_connect_attempt_id_t *out_attempt);
 void esp_openclaw_node_note_connect_credentials_saved_locked(
     esp_openclaw_node_handle_t node);
+bool esp_openclaw_node_connect_cancel_pending_locked(esp_openclaw_node_handle_t node);
+bool esp_openclaw_node_active_connect_cancelled_locked(esp_openclaw_node_handle_t node);
+bool esp_openclaw_node_cancel_active_connect_if_requested(esp_openclaw_node_handle_t node);
 bool esp_openclaw_node_connect_lease_matches_locked(
     esp_openclaw_node_handle_t node,
     esp_openclaw_node_connect_lease_t lease,

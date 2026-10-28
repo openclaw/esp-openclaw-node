@@ -21,7 +21,7 @@ enum { ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_NONE,
        ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_NO_AUTH };
 enum { ESP_OPENCLAW_NODE_WORK_MSG_REQUEST_CONNECT, ESP_OPENCLAW_NODE_WORK_MSG_REQUEST_DISCONNECT };
 typedef struct { int kind; char *gateway_uri, *secret; } esp_openclaw_node_connect_request_source_t;
-typedef struct { char *gateway_uri; bool present; } esp_openclaw_node_persisted_session_t;
+typedef struct { char *gateway_uri; bool present; unsigned version; char *device_token; } esp_openclaw_node_persisted_session_t;
 typedef struct {
     int type;
     esp_openclaw_node_connect_attempt_id_t connect_attempt_id;
@@ -38,6 +38,7 @@ struct esp_openclaw_node {
     esp_openclaw_node_connect_attempt_t connect_attempt;
     char pending_connect_id[32];
     char *plugin_surface_urls_json;
+    const char *transport_gateway_uri;
     esp_openclaw_node_persisted_session_t persisted_session;
     esp_openclaw_node_connect_request_source_t active_connect_source;
     int64_t connect_started_ms;
@@ -45,10 +46,11 @@ struct esp_openclaw_node {
     uint32_t active_transport_id;
 };
 static bool locked, queued, queue_full;
-static unsigned load_count, start_count;
+static unsigned load_count, start_count, store_count, cleared_sources;
 static esp_openclaw_node_work_message_t queue_message;
 static esp_openclaw_node_handle_t current;
 static void (*during_load)(void), (*during_build)(void), (*terminal_callback)(void);
+static void (*during_start)(void), (*during_cleanup)(void);
 static esp_openclaw_node_connect_lease_t acquired;
 
 static void esp_openclaw_node_lock_state(esp_openclaw_node_handle_t node)
@@ -71,7 +73,7 @@ bool esp_openclaw_node_has_saved_session(esp_openclaw_node_handle_t node)
     return present;
 }
 static void esp_openclaw_node_persisted_session_free(esp_openclaw_node_persisted_session_t *session)
-{ free(session->gateway_uri); memset(session, 0, sizeof(*session)); }
+{ free(session->gateway_uri); free(session->device_token); memset(session, 0, sizeof(*session)); }
 static bool esp_openclaw_node_persisted_session_is_present(const esp_openclaw_node_persisted_session_t *session)
 { return session->present; }
 static esp_err_t esp_openclaw_node_persisted_session_load(const char *role, esp_openclaw_node_persisted_session_t *out)
@@ -82,7 +84,7 @@ static esp_err_t esp_openclaw_node_persisted_session_load(const char *role, esp_
     return ESP_OK;
 }
 static void esp_openclaw_node_clear_connect_source_struct(esp_openclaw_node_connect_request_source_t *source)
-{ free(source->gateway_uri); free(source->secret); memset(source, 0, sizeof(*source)); }
+{ if (source->kind) ++cleared_sources; free(source->gateway_uri); free(source->secret); memset(source, 0, sizeof(*source)); }
 static void esp_openclaw_node_move_connect_source_struct(esp_openclaw_node_connect_request_source_t *out,
                                                        esp_openclaw_node_connect_request_source_t *in)
 { esp_openclaw_node_clear_connect_source_struct(out); *out = *in; memset(in, 0, sizeof(*in)); }
@@ -114,9 +116,9 @@ static esp_err_t esp_openclaw_node_enqueue_work_message(esp_openclaw_node_handle
 }
 static int64_t esp_timer_get_time(void) { return 1000; }
 static esp_err_t esp_openclaw_node_start_transport_for_active_source(esp_openclaw_node_handle_t node)
-{ assert(!locked); ++start_count; node->ws = node; node->active_transport_id = start_count; return ESP_OK; }
+{ assert(!locked); ++start_count; node->ws = node; node->active_transport_id = start_count; if (during_start) during_start(); return ESP_OK; }
 static void esp_openclaw_node_cleanup_transport_instance(esp_openclaw_node_handle_t node, bool stop)
-{ (void)stop; assert(!locked); node->ws = NULL; node->active_transport_id = 0; }
+{ (void)stop; assert(!locked); if (during_cleanup) during_cleanup(); node->ws = NULL; node->active_transport_id = 0; }
 static void esp_openclaw_node_fail_pending_requests(esp_openclaw_node_handle_t node, const char *code, const char *message)
 { (void)node; (void)code; (void)message; }
 static void esp_openclaw_node_emit_connect_failed(esp_openclaw_node_handle_t node,
@@ -129,11 +131,13 @@ static void esp_openclaw_node_clear_session_wait_state_locked(esp_openclaw_node_
 { assert(locked); node->pending_connect_id[0] = '\0'; }
 static const char *connect_diagnostic_role(esp_openclaw_node_handle_t node)
 { (void)node; return "test"; }
+static const char *esp_openclaw_node_trimmed_or_null(const char *text) { return text; }
+static char *esp_openclaw_node_duplicate_string(const char *text) { return strdup(text); }
 static esp_err_t store_result;
 static esp_err_t esp_openclaw_node_persisted_session_store(const char *role,
     esp_openclaw_node_persisted_session_t *session, const esp_openclaw_node_persisted_session_t *update)
 {
-    (void)role; assert(locked);
+    (void)role; assert(locked); ++store_count;
     if (store_result != ESP_OK) return store_result;
     esp_openclaw_node_persisted_session_free(session);
     session->gateway_uri = strdup(update->gateway_uri); session->present = update->present;
@@ -151,6 +155,7 @@ static esp_err_t esp_openclaw_node_submit_disconnect_request(esp_openclaw_node_h
 #include "completion.inc"
 #include "admission.inc"
 #include "finalize.inc"
+#include "handoff.inc"
 
 static const esp_openclaw_node_connect_request_t explicit_request = {
     .source = ESP_OPENCLAW_NODE_CONNECT_SOURCE_NO_AUTH, .gateway_uri = "wss://gateway.example",
@@ -161,9 +166,11 @@ static const esp_openclaw_node_connect_request_t saved_request = {
 static void initialize(esp_openclaw_node_handle_t node, int state)
 {
     memset(node, 0, sizeof(*node)); current = node; node->state = state;
-    node->persisted_session = (esp_openclaw_node_persisted_session_t){strdup("wss://old.example"), true};
-    queued = queue_full = false; load_count = start_count = 0;
-    during_load = during_build = terminal_callback = NULL; acquired = 0; store_result = ESP_OK;
+    node->persisted_session = (esp_openclaw_node_persisted_session_t){.gateway_uri = strdup("wss://old.example"), .present = true};
+    node->transport_gateway_uri = "wss://transport.example";
+    queued = queue_full = false; load_count = start_count = store_count = cleared_sources = 0;
+    during_load = during_build = terminal_callback = during_start = during_cleanup = NULL;
+    acquired = 0; store_result = ESP_OK;
 }
 static void cleanup(esp_openclaw_node_handle_t node)
 {
@@ -295,13 +302,13 @@ static esp_openclaw_node_connect_attempt_t snapshot(esp_openclaw_node_handle_t n
 }
 static void inspect_new_request_from_old_callback(void)
 {
-    assert(snapshot(current, expected_pending).state == ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_QUEUED);
+    assert(snapshot(current, expected_pending).state == ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_CONNECTING);
     assert(esp_openclaw_node_connect_lease_release(current, acquired) == ESP_ERR_INVALID_STATE);
 }
 static connect_response_finalize_result_t finalize(esp_openclaw_node_handle_t node)
 {
     strcpy(node->pending_connect_id, "connect-fixture");
-    const esp_openclaw_node_persisted_session_t update = {"wss://paired.example", true};
+    const esp_openclaw_node_persisted_session_t update = {.gateway_uri = "wss://paired.example", .present = true};
     return finalize_connect_response_success(node, &update, NULL);
 }
 static void test_tracked_results(void)
@@ -394,10 +401,126 @@ static void test_saved_effect_survives_failure(void)
     assert(result.local_err == ESP_FAIL && result.failure_reason == ESP_OPENCLAW_NODE_CONNECT_FAILURE_SESSION_FINALIZATION_FAILED);
     cleanup(&node);
 }
+static void cancel_current(void)
+{
+    assert(esp_openclaw_node_connect_cancel(current, acquired, expected_pending) == ESP_OK);
+}
+static void cancel_from_old_terminal(void)
+{
+    terminal_callback = NULL;
+    cancel_current();
+}
+static void inspect_pending_cancellation(void)
+{
+    esp_openclaw_node_connect_attempt_t result = snapshot(current, expected_pending);
+    assert(result.state == ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_CONNECTING && result.cancel_requested);
+    assert(esp_openclaw_node_connect_lease_release(current, acquired) == ESP_ERR_INVALID_STATE);
+    esp_openclaw_node_connect_attempt_id_t next;
+    assert(esp_openclaw_node_connect_begin(current, acquired, &explicit_request, &next) == ESP_ERR_INVALID_STATE);
+    assert(esp_openclaw_node_request_disconnect_with_lease(current, acquired) == ESP_ERR_INVALID_STATE);
+    cancel_current();
+}
+static void expect_cancelled(esp_openclaw_node_handle_t node, bool saved)
+{
+    esp_openclaw_node_connect_attempt_t result = snapshot(node, expected_pending);
+    assert(result.state == ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_FAILED && result.cancel_requested);
+    assert(result.failure_reason == ESP_OPENCLAW_NODE_CONNECT_FAILURE_CANCELED && result.local_err == ESP_OK);
+    assert(result.credentials_saved == saved);
+}
+static void begin_cancellable(esp_openclaw_node_handle_t node)
+{
+    take_lease();
+    assert(esp_openclaw_node_connect_begin(node, acquired, &explicit_request, &expected_pending) == ESP_OK);
+}
+static void test_queued_cancel_preserves_connection(void)
+{
+    struct esp_openclaw_node node;
+    initialize(&node, ESP_OPENCLAW_NODE_INTERNAL_READY);
+    node.ws = &node; node.active_transport_id = 55;
+    begin_cancellable(&node);
+    assert(esp_openclaw_node_connect_cancel(&node, acquired, 0) == ESP_ERR_INVALID_ARG);
+    assert(esp_openclaw_node_connect_cancel(&node, acquired, expected_pending + 1) == ESP_ERR_NOT_FOUND);
+    assert(esp_openclaw_node_connect_cancel(&node, acquired + 1, expected_pending) == ESP_ERR_INVALID_STATE);
+    queue_full = true; cancel_current(); cancel_current();
+    assert(snapshot(&node, expected_pending).state == ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_QUEUED);
+    assert(esp_openclaw_node_connect_lease_release(&node, acquired) == ESP_ERR_INVALID_STATE);
+    unsigned before = cleared_sources;
+    dispatch(&node);
+    expect_cancelled(&node, false);
+    assert(cleared_sources == before + 1 && start_count == 0);
+    assert(node.ws == &node && node.active_transport_id == 55 && node.state == ESP_OPENCLAW_NODE_INTERNAL_READY);
+    assert(esp_openclaw_node_connect_cancel(&node, acquired, expected_pending) == ESP_ERR_INVALID_STATE);
+    assert(esp_openclaw_node_connect_lease_release(&node, acquired) == ESP_OK);
+    cleanup(&node);
+}
+static void test_cancel_during_start_and_cleanup(void)
+{
+    struct esp_openclaw_node node;
+    initialize(&node, ESP_OPENCLAW_NODE_INTERNAL_IDLE); begin_cancellable(&node);
+    during_start = cancel_current; during_cleanup = inspect_pending_cancellation;
+    queue_full = true;
+    dispatch(&node);
+    expect_cancelled(&node, false);
+    assert(start_count == 1 && node.ws == NULL && node.state == ESP_OPENCLAW_NODE_INTERNAL_IDLE);
+    during_start = during_cleanup = NULL;
+    assert(esp_openclaw_node_connect_lease_release(&node, acquired) == ESP_OK);
+    cleanup(&node);
+
+    initialize(&node, ESP_OPENCLAW_NODE_INTERNAL_IDLE); begin_cancellable(&node); dispatch(&node);
+    during_cleanup = cancel_current;
+    esp_openclaw_node_complete_connect_failed(&node, ESP_OPENCLAW_NODE_CONNECT_FAILURE_CONNECTION_LOST, ESP_FAIL, NULL, true);
+    expect_cancelled(&node, false);
+    during_cleanup = NULL; cleanup(&node);
+}
+static void test_cancel_during_replacement(void)
+{
+    struct esp_openclaw_node node;
+    initialize(&node, ESP_OPENCLAW_NODE_INTERNAL_READY);
+    node.ws = &node; node.active_transport_id = 55;
+    begin_cancellable(&node);
+    terminal_callback = cancel_from_old_terminal;
+    dispatch(&node); terminal_callback = NULL;
+    expect_cancelled(&node, false);
+    assert(start_count == 0 && node.ws == NULL && node.state == ESP_OPENCLAW_NODE_INTERNAL_IDLE);
+    cleanup(&node);
+}
+static void test_cancel_fences_token_writes(void)
+{
+    struct esp_openclaw_node node;
+    initialize(&node, ESP_OPENCLAW_NODE_INTERNAL_IDLE); begin_cancellable(&node); dispatch(&node);
+    cancel_current();
+    assert(finalize(&node).outcome == CONNECT_RESPONSE_OUTCOME_IGNORE && store_count == 0);
+    assert(esp_openclaw_node_cancel_active_connect_if_requested(&node));
+    expect_cancelled(&node, false); cleanup(&node);
+
+    initialize(&node, ESP_OPENCLAW_NODE_INTERNAL_IDLE); begin_cancellable(&node); dispatch(&node);
+    strcpy(node.pending_connect_id, "connect-fixture");
+    during_load = cancel_current;
+    assert(persist_handoff_device_token(&node, "operator", "synthetic-token") == ESP_ERR_INVALID_STATE);
+    assert(store_count == 0);
+    assert(esp_openclaw_node_cancel_active_connect_if_requested(&node));
+    expect_cancelled(&node, false); cleanup(&node);
+
+    initialize(&node, ESP_OPENCLAW_NODE_INTERNAL_IDLE); begin_cancellable(&node); dispatch(&node);
+    strcpy(node.pending_connect_id, "connect-fixture");
+    assert(persist_handoff_device_token(&node, "operator", "synthetic-token") == ESP_OK && store_count == 1);
+    cancel_current();
+    assert(finalize(&node).outcome == CONNECT_RESPONSE_OUTCOME_IGNORE && store_count == 1);
+    assert(esp_openclaw_node_cancel_active_connect_if_requested(&node));
+    expect_cancelled(&node, true); cleanup(&node);
+
+    initialize(&node, ESP_OPENCLAW_NODE_INTERNAL_IDLE); begin_cancellable(&node); dispatch(&node);
+    assert(finalize(&node).outcome == CONNECT_RESPONSE_OUTCOME_CONNECTED);
+    assert(esp_openclaw_node_connect_cancel(&node, acquired, expected_pending) == ESP_ERR_INVALID_STATE);
+    assert(node.ws != NULL && !snapshot(&node, expected_pending).cancel_requested);
+    cleanup(&node);
+}
 int main(void)
 {
     test_lease_lifetime(); test_owned_queue_and_replacement();
     test_unleased_replacement_reserves_control(); test_preparation_races();
     test_tracked_results(); test_old_success_does_not_complete_replacement(); test_saved_effect_survives_failure();
-    puts("connection lease, admission and results: passed"); return 0;
+    test_queued_cancel_preserves_connection(); test_cancel_during_start_and_cleanup();
+    test_cancel_during_replacement(); test_cancel_fences_token_writes();
+    puts("connection lease, results and cancellation: passed"); return 0;
 }

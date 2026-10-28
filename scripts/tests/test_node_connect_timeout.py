@@ -21,8 +21,8 @@ class NodeConnectTimeoutTests(unittest.TestCase):
         selections = (
             ("esp_openclaw_node.c", "void esp_openclaw_node_clear_session_wait_state_locked(", "void esp_openclaw_node_set_pending_control_locked("),
             ("esp_openclaw_node_transport.c", "esp_err_t esp_openclaw_node_start_transport_for_active_source(", "void esp_openclaw_node_send_challenge_kick_ping("),
-            ("esp_openclaw_node_runtime.c", "void esp_openclaw_node_fail_if_connect_timed_out(", "esp_err_t esp_openclaw_node_enqueue_work_message("),
-            ("esp_openclaw_node_runtime.c", "static void handle_request_connect(", "static void handle_request_disconnect("),
+            ("esp_openclaw_node_runtime.c", "bool esp_openclaw_node_cancel_active_connect_if_requested(", "esp_err_t esp_openclaw_node_enqueue_work_message("),
+            ("esp_openclaw_node_runtime.c", "static bool cancel_connect_request_before_start(", "static void handle_request_disconnect("),
             ("esp_openclaw_node_runtime.c", "void esp_openclaw_node_task(", "static void rollback_pending_control_locked("),
         )
         for index, (filename, start, end) in enumerate(selections):
@@ -30,6 +30,10 @@ class NodeConnectTimeoutTests(unittest.TestCase):
             (directory / f"production_{index}.inc").write_text(
                 source[source.index(start):source.index(end)]
             )
+        control = (sources / "esp_openclaw_node.c").read_text()
+        start = control.index("bool esp_openclaw_node_connect_cancel_pending_locked(")
+        end = control.index("esp_err_t esp_openclaw_node_connect_cancel(", start)
+        (directory / "cancel_predicates.inc").write_text(control[start:end])
         constants = (source_root / "components/esp-openclaw-node/private_include/esp_openclaw_node_internal.h").read_text()
         (directory / "timeout_constant.inc").write_text(next(
             line for line in constants.splitlines()

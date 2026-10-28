@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include "esp_openclaw_node.h"
+#include "esp_openclaw_setup_gateway.h"
+#include "esp_openclaw_node_wifi.h"
 
 /* Only platform boundaries are replaced: API admission, NVS revalidation,
  * queue rollback, and the connect/disconnect worker handlers are production. */
@@ -97,7 +99,10 @@ static esp_err_t esp_openclaw_node_build_connect_source_from_request(const esp_o
     assert(!locked);
     out->kind = in->source == ESP_OPENCLAW_NODE_CONNECT_SOURCE_SAVED_SESSION
         ? ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_SAVED_SESSION : ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_NO_AUTH;
-    if (in->gateway_uri) out->gateway_uri = strdup(in->gateway_uri);
+    /* Setup-code decoding is outside this lifecycle fixture. */
+    if (in->source == ESP_OPENCLAW_NODE_CONNECT_SOURCE_SETUP_CODE)
+        out->gateway_uri = strdup("wss://setup.example");
+    else if (in->gateway_uri) out->gateway_uri = strdup(in->gateway_uri);
     if (during_build) during_build();
     return ESP_OK;
 }
@@ -650,6 +655,147 @@ static void test_send_authority(void)
     expect_cancelled(&node, false); cleanup(&node);
 }
 
+static bool setup_wifi_ready, setup_peer_live;
+static uint64_t setup_time_ms;
+void esp_openclaw_node_wifi_get_status(esp_openclaw_node_wifi_status_t *status)
+{ status->connected = setup_wifi_ready; }
+static uint64_t setup_now(void *context) { (void)context; return setup_time_ms; }
+static bool setup_peer(uint64_t peer, void *context)
+{ (void)context; return peer == 7 && setup_peer_live; }
+static void setup_cancel(esp_openclaw_setup_token_t token, void *context)
+{ esp_openclaw_setup_gateway_cancel(context, token); }
+static uint64_t setup_confirm(esp_openclaw_setup_session_t *session,
+                              esp_openclaw_setup_gateway_t *binding,
+                              esp_openclaw_node_handle_t node)
+{
+    setup_time_ms = 100; setup_peer_live = setup_wifi_ready = true;
+    esp_openclaw_setup_callbacks_t callbacks = {
+        .now_ms = setup_now, .peer_is_current_authenticated = setup_peer,
+        .cancel = setup_cancel, .context = binding,
+    };
+    assert(esp_openclaw_setup_init(session, &callbacks));
+    assert(esp_openclaw_setup_gateway_init(binding, session, node));
+    uint64_t generation;
+    assert(esp_openclaw_setup_open(session, &generation) == ESP_OPENCLAW_SETUP_OK);
+    assert(esp_openclaw_setup_gateway_activate(binding, generation) == ESP_ERR_INVALID_STATE);
+    assert(esp_openclaw_setup_attach(session, generation, 7) == ESP_OPENCLAW_SETUP_OK);
+    assert(esp_openclaw_setup_input_released(session, generation) == ESP_OPENCLAW_SETUP_OK);
+    assert(esp_openclaw_setup_confirm(session, generation) == ESP_OPENCLAW_SETUP_OK);
+    assert(esp_openclaw_setup_gateway_activate(binding, generation) == ESP_OK);
+    return generation;
+}
+static void setup_expire(void) { setup_time_ms += ESP_OPENCLAW_SETUP_TIMEOUT_MS; }
+static void setup_revoke_peer(void) { setup_peer_live = false; }
+static void test_gateway_setup_success_and_receipts(void)
+{
+    struct esp_openclaw_node node;
+    esp_openclaw_setup_session_t session;
+    esp_openclaw_setup_gateway_t binding;
+    esp_openclaw_setup_receipt_t receipt;
+    initialize(&node, ESP_OPENCLAW_NODE_INTERNAL_IDLE);
+    uint64_t gen = setup_confirm(&session, &binding, &node);
+    assert(esp_openclaw_setup_gateway_submit(&binding, gen, 8, 1, "synthetic-code", &receipt) == ESP_OPENCLAW_SETUP_UNAUTHORIZED);
+    assert(esp_openclaw_setup_gateway_submit(&binding, gen, 7, 1, "synthetic-code", &receipt) == ESP_OPENCLAW_SETUP_ACCEPTED);
+    uint64_t attempt = binding.attempt.id;
+    assert(receipt.outcome == ESP_OPENCLAW_SETUP_PENDING && receipt.operation == ESP_OPENCLAW_SETUP_GATEWAY_APPLY && queued);
+    assert(esp_openclaw_setup_gateway_submit(&binding, gen, 7, 1, "changed-code", &receipt) == ESP_OPENCLAW_SETUP_DUPLICATE);
+    assert(binding.attempt.id == attempt);
+    dispatch(&node); assert(finalize(&node).outcome == CONNECT_RESPONSE_OUTCOME_CONNECTED);
+    bool released = true;
+    assert(esp_openclaw_setup_gateway_poll(&binding, &released) == ESP_OK && !released);
+    assert(esp_openclaw_setup_get_receipt(&session, gen, 7, 1, &receipt) == ESP_OPENCLAW_SETUP_OK);
+    assert(receipt.outcome == ESP_OPENCLAW_SETUP_SUCCEEDED && receipt.detail == ESP_OK);
+    assert(esp_openclaw_setup_gateway_submit(&binding, gen, 7, 1, "changed-code", &receipt) == ESP_OPENCLAW_SETUP_DUPLICATE);
+    assert(!binding.active && !queued);
+    esp_openclaw_setup_close(&session);
+    assert(esp_openclaw_setup_gateway_poll(&binding, &released) == ESP_OK && released);
+    esp_openclaw_setup_gateway_snapshot_t snapshot = esp_openclaw_setup_gateway_snapshot(&binding);
+    assert(!snapshot.lease_held && !snapshot.operation_pending && snapshot.attempt.credentials_saved);
+    assert(esp_openclaw_setup_gateway_poll(&binding, &released) == ESP_OK && !released);
+    cleanup(&node);
+}
+static void test_gateway_setup_cancel_drain(void)
+{
+    struct esp_openclaw_node node;
+    esp_openclaw_setup_session_t session;
+    esp_openclaw_setup_gateway_t binding;
+    esp_openclaw_setup_receipt_t receipt;
+    initialize(&node, ESP_OPENCLAW_NODE_INTERNAL_READY); node.ws = &node; node.active_transport_id = 55;
+    uint64_t gen = setup_confirm(&session, &binding, &node);
+    assert(esp_openclaw_setup_gateway_submit(&binding, gen, 7, 1, "synthetic-code", &receipt) == ESP_OPENCLAW_SETUP_ACCEPTED);
+    esp_openclaw_setup_gateway_cancel(&binding, (esp_openclaw_setup_token_t){gen + 1, 1});
+    assert(!node.connect_attempt.cancel_requested);
+    queue_full = true;
+    esp_openclaw_setup_close(&session);
+    assert(node.connect_attempt.cancel_requested && session.phase == ESP_OPENCLAW_SETUP_CLOSING);
+    bool released;
+    assert(esp_openclaw_setup_gateway_poll(&binding, &released) == ESP_OK && !released && binding.active);
+    uint64_t next;
+    assert(esp_openclaw_setup_open(&session, &next) == ESP_OPENCLAW_SETUP_OCCUPIED);
+    dispatch(&node);
+    assert(esp_openclaw_setup_gateway_poll(&binding, &released) == ESP_OK && released);
+    assert(session.phase == ESP_OPENCLAW_SETUP_CLOSED && node.ws == &node && start_count == 0);
+    assert(binding.attempt.failure_reason == ESP_OPENCLAW_NODE_CONNECT_FAILURE_CANCELED);
+    cleanup(&node);
+}
+static void test_gateway_setup_authority_and_failures(void)
+{
+    struct esp_openclaw_node node;
+    esp_openclaw_setup_session_t session;
+    esp_openclaw_setup_gateway_t binding;
+    esp_openclaw_setup_receipt_t receipt;
+    bool released;
+    initialize(&node, ESP_OPENCLAW_NODE_INTERNAL_IDLE);
+    uint64_t gen = setup_confirm(&session, &binding, &node);
+    setup_wifi_ready = false;
+    assert(esp_openclaw_setup_gateway_submit(&binding, gen, 7, 1, "synthetic-code", &receipt) == ESP_OPENCLAW_SETUP_ACCEPTED);
+    assert(receipt.outcome == ESP_OPENCLAW_SETUP_FAILED && receipt.detail == ESP_ERR_INVALID_STATE && !queued);
+    setup_wifi_ready = true;
+    assert(esp_openclaw_setup_gateway_submit(&binding, gen, 7, 1, "synthetic-code", &receipt) == ESP_OPENCLAW_SETUP_DUPLICATE);
+    assert(receipt.outcome == ESP_OPENCLAW_SETUP_FAILED && !queued);
+    assert(esp_openclaw_setup_gateway_submit(&binding, gen, 7, 2, "synthetic-code", &receipt) == ESP_OPENCLAW_SETUP_ACCEPTED);
+    dispatch(&node); strcpy(node.pending_connect_id, "connect-fixture");
+    assert(persist_handoff_device_token(&node, "operator", "synthetic-token") == ESP_OK);
+    during_load = setup_expire;
+    assert(persist_handoff_device_token(&node, "operator", "synthetic-token") == ESP_ERR_INVALID_STATE);
+    assert(esp_openclaw_node_cancel_active_connect_if_requested(&node));
+    assert(esp_openclaw_setup_gateway_poll(&binding, &released) == ESP_OK && released);
+    assert(session.phase == ESP_OPENCLAW_SETUP_CLOSED && binding.attempt.credentials_saved && store_count == 1);
+    cleanup(&node);
+
+    initialize(&node, ESP_OPENCLAW_NODE_INTERNAL_IDLE); gen = setup_confirm(&session, &binding, &node);
+    assert(esp_openclaw_setup_gateway_submit(&binding, gen, 7, 1, "synthetic-code", &receipt) == ESP_OPENCLAW_SETUP_ACCEPTED);
+    during_start = setup_revoke_peer; dispatch(&node);
+    assert(esp_openclaw_setup_gateway_poll(&binding, &released) == ESP_OK && released);
+    assert(binding.attempt.failure_reason == ESP_OPENCLAW_NODE_CONNECT_FAILURE_CANCELED && node.ws == NULL);
+    cleanup(&node);
+}
+
+static void test_gateway_setup_cancel_and_success_race(void)
+{
+    struct esp_openclaw_node node;
+    esp_openclaw_setup_session_t session;
+    esp_openclaw_setup_gateway_t binding;
+    esp_openclaw_setup_receipt_t receipt;
+    bool released;
+    initialize(&node, ESP_OPENCLAW_NODE_INTERNAL_IDLE);
+    uint64_t gen = setup_confirm(&session, &binding, &node);
+    assert(esp_openclaw_setup_gateway_submit(&binding, gen, 7, 1, "synthetic-code", &receipt) == ESP_OPENCLAW_SETUP_ACCEPTED);
+    esp_openclaw_setup_gateway_cancel(&binding, binding.token);
+    dispatch(&node);
+    assert(esp_openclaw_setup_gateway_poll(&binding, &released) == ESP_OK && !released);
+    assert(esp_openclaw_setup_get_receipt(&session, gen, 7, 1, &receipt) == ESP_OPENCLAW_SETUP_OK);
+    assert(receipt.outcome == ESP_OPENCLAW_SETUP_FAILED && receipt.detail == ESP_OPENCLAW_SETUP_GATEWAY_CANCELLED);
+    assert(esp_openclaw_setup_gateway_submit(&binding, gen, 7, 2, "synthetic-code", &receipt) == ESP_OPENCLAW_SETUP_ACCEPTED);
+    dispatch(&node); assert(finalize(&node).outcome == CONNECT_RESPONSE_OUTCOME_CONNECTED);
+    esp_openclaw_setup_close(&session);
+    assert(binding.cancel_error == ESP_ERR_INVALID_STATE);
+    assert(esp_openclaw_setup_gateway_poll(&binding, &released) == ESP_OK && released);
+    assert(session.phase == ESP_OPENCLAW_SETUP_CLOSED && binding.attempt.state == ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_SUCCEEDED);
+    assert(binding.attempt.credentials_saved && node.ws != NULL);
+    cleanup(&node);
+}
+
 int main(void)
 {
     test_lease_lifetime(); test_owned_queue_and_replacement();
@@ -658,5 +804,6 @@ int main(void)
     test_queued_cancel_preserves_connection(); test_cancel_during_start_and_cleanup();
     test_cancel_during_replacement(); test_cancel_fences_token_writes();
     test_live_authority(); test_authorized_admission(); test_send_authority();
-    puts("connection lease, results, cancellation and live authority: passed"); return 0;
+    test_gateway_setup_success_and_receipts(); test_gateway_setup_cancel_drain(); test_gateway_setup_authority_and_failures(); test_gateway_setup_cancel_and_success_race();
+    puts("connection lease, results, cancellation, live authority and setup binding: passed"); return 0;
 }

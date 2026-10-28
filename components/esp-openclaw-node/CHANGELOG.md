@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Bind confirmed Gateway setup operations to native connection ownership, live authority, exact outcomes, cancellation draining, and explicit reconnect handback.
+
 - Recheck live setup authority on tracked Gateway requests before connection and credential side effects.
 
 - Cancel exact queued or active Gateway setup attempts independently of queue capacity. Keep cancellation pending until credentials or transport drain, and fence later token writes while preserving earlier saved effects.

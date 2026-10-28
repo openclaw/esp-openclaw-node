@@ -62,7 +62,13 @@ esp_err_t esp_openclaw_node_wifi_clear_credentials(void);
 /** @brief Start or resume a Wi-Fi station connection attempt using saved credentials. */
 esp_err_t esp_openclaw_node_wifi_connect(void);
 
-/** @brief Disconnect the Wi-Fi station if it is currently connected. */
+/**
+ * @brief Disconnect the Wi-Fi station if it is currently connected.
+ *
+ * Clears connection status and its waiter signal together. Queued IP events
+ * cannot restore them until a saved-network connection is enabled again.
+ * This does not promise asynchronous driver/event draining.
+ */
 esp_err_t esp_openclaw_node_wifi_disconnect(void);
 
 /**

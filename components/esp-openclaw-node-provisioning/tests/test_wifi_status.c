@@ -20,6 +20,7 @@ static bool probe_scan, inject_disconnect;
 static esp_err_t config_result = ESP_OK, scan_result = ESP_OK;
 static esp_err_t connect_result = ESP_OK;
 static bool probe_reconnect_unlock;
+static bool disconnect_on_unlock;
 static esp_openclaw_node_wifi_setup_lease_t scan_lease;
 
 static void check(bool condition, const char *message);
@@ -42,6 +43,10 @@ int xSemaphoreGive(SemaphoreHandle_t lock)
         esp_openclaw_node_wifi_setup_lease_t lease = 0;
         check(esp_openclaw_node_wifi_setup_acquire(&lease) == ESP_ERR_WIFI_STATE && lease == 0,
               "setup cannot enter between reconnect decision and driver call");
+    }
+    if (disconnect_on_unlock) {
+        disconnect_on_unlock = false;
+        check(esp_openclaw_node_wifi_disconnect() == ESP_OK, "disconnect can follow an IP status publication");
     }
     return 1;
 }
@@ -248,6 +253,34 @@ static void check_setup_ownership(void)
     check(esp_openclaw_node_wifi_connect() == ESP_OK, "ordinary operations resume after release");
 }
 
+static void check_late_ip_after_disconnect(void)
+{
+    ip_event_got_ip_t ip = {.ip_info.ip.addr = 0x010200c0};
+    check(esp_openclaw_node_wifi_disconnect() == ESP_OK, "explicit disconnect accepted");
+    ip_handler(ip_context, IP_EVENT, IP_EVENT_STA_GOT_IP, &ip);
+    esp_openclaw_node_wifi_status_t wifi;
+    esp_openclaw_node_wifi_get_status(&wifi);
+    check(!wifi.connected && wifi.ip[0] == '\0', "queued IP cannot resurrect explicitly disconnected status");
+    check(!esp_openclaw_node_wifi_wait_for_connection(0), "queued IP cannot wake a connection waiter after disconnect");
+
+    check(esp_openclaw_node_wifi_connect() == ESP_OK, "explicit reconnect accepted");
+    ip_handler(ip_context, IP_EVENT, IP_EVENT_STA_GOT_IP, &ip);
+    check(esp_openclaw_node_wifi_is_connected() && esp_openclaw_node_wifi_wait_for_connection(0),
+          "newly desired connection can publish IP and wake waiters");
+
+    disconnect_on_unlock = true;
+    ip_handler(ip_context, IP_EVENT, IP_EVENT_STA_GOT_IP, &ip);
+    check(!esp_openclaw_node_wifi_is_connected() && !esp_openclaw_node_wifi_wait_for_connection(0),
+          "disconnect between status publication and waiter signaling cannot leave a stale connected bit");
+
+    check(esp_openclaw_node_wifi_clear_credentials() == ESP_OK, "credential clearing accepted");
+    ip_handler(ip_context, IP_EVENT, IP_EVENT_STA_GOT_IP, &ip);
+    esp_openclaw_node_wifi_get_status(&wifi);
+    check(!wifi.has_saved_network && !wifi.connected && wifi.ip[0] == '\0',
+          "queued IP cannot resurrect a forgotten network");
+    check(!esp_openclaw_node_wifi_wait_for_connection(0), "forgotten network cannot wake connection waiters");
+}
+
 int main(void)
 {
     assert(esp_openclaw_node_register_device_commands(NULL, NULL) == ESP_OK);
@@ -291,6 +324,7 @@ int main(void)
     cJSON_Delete(result);
     check_mutation_ownership();
     check_setup_ownership();
+    check_late_ip_after_disconnect();
     printf("Wi-Fi status: %u failed checks\n", failures);
     return failures ? 1 : 0;
 }

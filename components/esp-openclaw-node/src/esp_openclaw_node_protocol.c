@@ -632,6 +632,9 @@ static esp_err_t persist_handoff_device_tokens(
         if (err != ESP_OK) {
             return err;
         }
+        esp_openclaw_node_lock_state(node);
+        esp_openclaw_node_note_connect_credentials_saved_locked(node);
+        esp_openclaw_node_unlock_state(node);
     }
     if (!operator_entry_present) {
         ESP_LOGI(
@@ -675,6 +678,12 @@ static connect_response_finalize_result_t finalize_connect_response_success(
         free(node->plugin_surface_urls_json);
         node->plugin_surface_urls_json = plugin_surface_urls_json;
         node->state = ESP_OPENCLAW_NODE_INTERNAL_READY;
+        esp_openclaw_node_note_connect_credentials_saved_locked(node);
+        if (node->active_connect_attempt_id != 0 &&
+            node->connect_attempt.id == node->active_connect_attempt_id) {
+            node->connect_attempt.state = ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_SUCCEEDED;
+            node->connect_attempt.connection_id = node->active_transport_id;
+        }
         /* Do NOT clear pending_control here: this attempt's CONNECT
          * reservation was already consumed when the transport started, so
          * anything present now is a queued disconnect/preempt that must still

@@ -24,6 +24,7 @@ enum {
     ESP_OPENCLAW_NODE_CONNECT_FAILURE_TRANSPORT_START_FAILED,
     ESP_OPENCLAW_NODE_DISCONNECTED_REASON_REQUESTED,
     ESP_OPENCLAW_NODE_WORK_MSG_WS_FATAL,
+    ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_CONNECTING,
 };
 typedef int esp_openclaw_node_internal_state_t;
 typedef struct { int kind; const char *gateway_uri; } source_t;
@@ -45,6 +46,8 @@ typedef struct {
 } ops_t;
 struct node {
     int state;
+    uint64_t active_connect_attempt_id;
+    struct { uint64_t id; int state; } connect_attempt;
     int64_t connect_started_ms;
     source_t active_connect_source;
     struct { const char *gateway_uri; } persisted_session;
@@ -59,7 +62,7 @@ struct node {
     bool client_started, transport_connected, connect_request_pending;
     char pending_connect_id[32];
 };
-typedef struct { int type, local_err; uint32_t transport_id; source_t connect_source; } esp_openclaw_node_work_message_t;
+typedef struct { int type, local_err; uint32_t transport_id; uint64_t connect_attempt_id; source_t connect_source; } esp_openclaw_node_work_message_t;
 #include "timeout_constant.inc"
 #define ESP_OPENCLAW_NODE_TASK_POLL_TICKS 250
 #define ESP_OPENCLAW_NODE_WS_PING_INTERVAL_SEC 10

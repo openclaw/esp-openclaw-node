@@ -15,6 +15,7 @@ def main():
     control = (component / "src/esp_openclaw_node.c").read_text()
     runtime = (component / "src/esp_openclaw_node_runtime.c").read_text()
     source = (component / "src/esp_openclaw_node_connect_source.c").read_text()
+    protocol = (component / "src/esp_openclaw_node_protocol.c").read_text()
     with tempfile.TemporaryDirectory(prefix="connect-lease-test-") as directory:
         work = Path(directory)
         (work / "esp_err.h").write_text("""#pragma once
@@ -25,6 +26,12 @@ def main():
         (work / "control.inc").write_text(section(
             control, "bool esp_openclaw_node_connect_lease_matches_locked(",
             "static esp_err_t gateway_request("))
+        (work / "completion.inc").write_text(section(
+            runtime, "static bool teardown_in_progress(",
+            "void esp_openclaw_node_fail_if_connect_timed_out("))
+        (work / "finalize.inc").write_text(section(
+            protocol, "static connect_response_finalize_result_t finalize_connect_response_success(",
+            "static void complete_connect_response_outcome("))
         (work / "admission.inc").write_text("\n".join([
             section(source, "static esp_err_t validate_saved_session_connect_preflight_locked(",
                     "esp_err_t esp_openclaw_node_resolve_active_connect_material_locked("),

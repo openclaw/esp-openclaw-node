@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <pthread.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -13,8 +14,11 @@ typedef enum {
     ESP_OPENCLAW_NODE_INTERNAL_DESTROYING,
     ESP_OPENCLAW_NODE_INTERNAL_CLOSED,
 } esp_openclaw_node_internal_state_t;
+enum { ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_CONNECTING, ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_FAILED };
 typedef struct {
     esp_openclaw_node_internal_state_t state;
+    uint64_t active_connect_attempt_id;
+    struct { uint64_t id; int state, failure_reason; esp_err_t local_err; } connect_attempt;
     struct { const char *role; } config;
 } test_node_t;
 typedef test_node_t *esp_openclaw_node_handle_t;

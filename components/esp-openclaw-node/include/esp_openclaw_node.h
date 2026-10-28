@@ -74,6 +74,26 @@ typedef enum {
     ESP_OPENCLAW_NODE_CONNECT_FAILURE_CANCELED,                    /**< The attempt was canceled by a local disconnect or a superseding explicit connect request. */
 } esp_openclaw_node_connect_failure_reason_t;
 
+/** @brief Per-node identifier for one accepted tracked connect request. */
+typedef uint64_t esp_openclaw_node_connect_attempt_id_t;
+
+typedef enum {
+    ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_QUEUED = 0,
+    ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_CONNECTING,
+    ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_SUCCEEDED,
+    ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_FAILED,
+} esp_openclaw_node_connect_attempt_state_t;
+
+/** @brief Credential-free snapshot of the latest tracked connect request. */
+typedef struct {
+    esp_openclaw_node_connect_attempt_id_t id;
+    esp_openclaw_node_connect_attempt_state_t state;
+    uint32_t connection_id; /**< Nonzero only after this request succeeds. */
+    esp_openclaw_node_connect_failure_reason_t failure_reason; /**< Valid when failed. */
+    esp_err_t local_err; /**< Valid when failed. */
+    bool credentials_saved; /**< This attempt successfully stored a role token. */
+} esp_openclaw_node_connect_attempt_t;
+
 /** @brief Payload for @ref ESP_OPENCLAW_NODE_EVENT_CONNECT_FAILED. */
 typedef struct {
     esp_openclaw_node_connect_failure_reason_t reason; /**< High-level failure category. */
@@ -445,6 +465,39 @@ esp_err_t esp_openclaw_node_request_connect_with_lease(
     esp_openclaw_node_handle_t node,
     esp_openclaw_node_connect_lease_t lease,
     const esp_openclaw_node_connect_request_t *request);
+
+/**
+ * @brief Submit a tracked connect request under the matching control lease.
+ *
+ * Returns the accepted request ID in out_attempt; clears it on rejection.
+ * Admission and events match request_connect_with_lease(). A queued request is
+ * not yet connected. Use connect_snapshot() for its correlated outcome, not an
+ * untagged event from the replaced connection. No attempt ID is reused within
+ * a node lifetime; exhaustion returns ESP_ERR_INVALID_STATE.
+ */
+esp_err_t esp_openclaw_node_connect_begin(
+    esp_openclaw_node_handle_t node,
+    esp_openclaw_node_connect_lease_t lease,
+    const esp_openclaw_node_connect_request_t *request,
+    esp_openclaw_node_connect_attempt_id_t *out_attempt);
+
+/**
+ * @brief Copy the latest tracked result without polling or changing the link.
+ *
+ * Requires the matching live lease and a nonzero attempt ID. Returns
+ * ESP_ERR_NOT_FOUND when a newer tracked request has replaced this bounded
+ * record or a new lease has cleared it. Terminal results survive later link
+ * loss within the same lease. credentials_saved remains
+ * true after a successful role-token store, even if a later store fails; it
+ * does not claim that failed writes were rolled back. No strings or tokens are
+ * retained in this snapshot. Cancellation follows the existing disconnect API;
+ * queued cancellation is not provided by this API.
+ */
+esp_err_t esp_openclaw_node_connect_snapshot(
+    esp_openclaw_node_handle_t node,
+    esp_openclaw_node_connect_lease_t lease,
+    esp_openclaw_node_connect_attempt_id_t attempt,
+    esp_openclaw_node_connect_attempt_t *out_status);
 
 /**
  * @brief Request disconnect of the active session or cancel a connect attempt.

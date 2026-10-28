@@ -45,7 +45,7 @@ typedef int esp_err_t;
             offset = media.index(start)
             sections.append(media[offset:media.index(end, offset)])
         (root / "media_boundary.h").write_text("\n".join(sections))
-        command = ["clang", "-std=c11", "-D_POSIX_C_SOURCE=200809L", "-Wall", "-Wextra", "-Werror",
+        command = ["clang" if args.analyze else "cc", "-std=c11", "-D_POSIX_C_SOURCE=200809L", "-Wall", "-Wextra", "-Werror",
                    "-g", "-pthread", "-fsanitize=address,undefined", "-fno-sanitize-recover=all"]
         for include in [root, tests / "recording_host", component, effects, codec,
                         codec / "encoder", codec / "encoder/impl"]:

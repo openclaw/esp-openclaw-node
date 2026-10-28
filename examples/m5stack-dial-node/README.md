@@ -108,7 +108,7 @@ to its list. With no selection, **Choose agent** opens Agents. Offline,
 **Open menu** keeps local settings and controls reachable.
 
 Turning on Home always opens the menu, which contains Agents, Conversations,
-Controls, Activity, and Settings. Turn to move the highlight and press to open; touch
+Devices, Activity, and Settings. Turn to move the highlight and press to open; touch
 rows directly. Hold the encoder or a stationary touch to return Home. A reader
 refresh, replacement, or disconnect invalidates an in-progress Home press;
 continuing never submits a numeric control or changes its owning agent.
@@ -147,9 +147,21 @@ With no selection, Conversations opens Agents. Refreshing Agents, a reconnect,
 restart, or `conversations close` clears the selection and requires choosing
 an agent again. The selection lasts only for the current reader connection.
 
-Controls opens the existing numeric dial. Turn or drag its arc to change the
+Devices opens a bounded, read-only inventory from the current Gateway. **This
+Dial** stays available offline and opens Control, Display, and Connection.
+Display and Connection return to This Dial when opened there, or to Settings
+when opened from Settings. Remote rows show their reported connection state;
+open one to read its full name, model, connection, and pairing state. Missing
+metadata appears as Unknown. Turn to scroll details; press or tap Back to return
+to the same list position. Refresh requests a new inventory; turning through
+pages does not send another request. A replacement or disconnected inventory
+cancels a held selection before changing the rows. Returning from This Dial
+refreshes the inventory. This list does not pair devices or send remote commands.
+
+Devices → This Dial → Control opens the existing numeric dial. Turn or drag its arc to change the
 value; press the encoder or tap the center to confirm. Dragging never confirms
 an action or triggers Home. Turning continues to adjust after confirmation.
+Hold the encoder or a stationary touch to return Home from the control.
 If a command changes the view or reconfigures the control during a held press,
 release and press again to interact with the new view or confirm the new value.
 
@@ -216,7 +228,7 @@ change the result of a newer one.
 | --- | --- | --- |
 | `device.info`, `device.status`, `wifi.status` | `{}` | Shared device/network status |
 | `display.show` | `{"heading":"Hello","text":"A message"}` | Display state including `heading` and `text`; limits: 64/512 UTF-8 bytes |
-| `display.menu` | `{}` or `{"page":"settings"}` | Open `menu`, `agents`, `conversations`, `preview`, `activity`, `settings`, `display`, or `connection` |
+| `display.menu` | `{}` or `{"page":"devices"}` | Open `menu`, `agents`, `conversations`, `preview`, `devices`, `activity`, `settings`, `display`, or `connection` |
 | `display.clear` | `{}` | Return to the face |
 | `display.status`, `dial.status`, `input.status` | `{}` | View, value/range, input counts, brightness, connection, action state |
 | `display.brightness` | `{"percent":65}` | Set backlight, integer 0–100 |

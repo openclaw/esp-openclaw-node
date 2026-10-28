@@ -54,6 +54,20 @@ static void back(dial_navigation_t *nav)
 {
     if (nav->view == DIAL_NAV_MENU) nav->handler(DIAL_NAV_HOME, 0, nav->context);
     else {
+        if (nav->view == DIAL_NAV_DEVICE_DETAIL || nav->view == DIAL_NAV_LOCAL_DEVICE) {
+            bool local = nav->view == DIAL_NAV_LOCAL_DEVICE;
+            nav->view = DIAL_NAV_DEVICES;
+            nav->focus = local ? 0 : nav->device_focus;
+            changed(nav);
+            if (local) nav->handler(DIAL_NAV_DEVICES_REFRESH, 0, nav->context);
+            return;
+        }
+        if (nav->view == DIAL_NAV_DEVICES) {
+            nav->view = DIAL_NAV_MENU;
+            nav->focus = 2;
+            changed(nav);
+            return;
+        }
         if (nav->view == DIAL_NAV_ACTIVITY) {
             nav->view = DIAL_NAV_MENU;
             nav->focus = 3;
@@ -61,8 +75,9 @@ static void back(dial_navigation_t *nav)
             return;
         }
         if (nav->view == DIAL_NAV_DISPLAY || nav->view == DIAL_NAV_CONNECTION) {
-            nav->focus = nav->view == DIAL_NAV_CONNECTION ? 1 : 0;
-            nav->view = DIAL_NAV_SETTINGS;
+            bool local = nav->settings_parent == DIAL_NAV_LOCAL_DEVICE;
+            nav->focus = (nav->view == DIAL_NAV_CONNECTION ? 1 : 0) + (local ? 1 : 0);
+            nav->view = local ? DIAL_NAV_LOCAL_DEVICE : DIAL_NAV_SETTINGS;
             changed(nav);
             return;
         }
@@ -247,8 +262,8 @@ static void item(dial_navigation_t *nav, unsigned index, const char **name, cons
 {
     *icon = LV_SYMBOL_RIGHT;
     if (nav->view == DIAL_NAV_MENU) {
-        const char *names[] = {"Agents", "Conversations", "Controls", "Activity", "Settings"};
-        const char *icons[] = {LV_SYMBOL_DIRECTORY, LV_SYMBOL_LIST, LV_SYMBOL_SETTINGS, LV_SYMBOL_LIST, LV_SYMBOL_SETTINGS};
+        const char *names[] = {"Agents", "Conversations", "Devices", "Activity", "Settings"};
+        const char *icons[] = {LV_SYMBOL_DIRECTORY, LV_SYMBOL_LIST, LV_SYMBOL_HOME, LV_SYMBOL_LIST, LV_SYMBOL_SETTINGS};
         *name = names[index];
         *icon = icons[index];
         return;
@@ -309,6 +324,85 @@ static void render_display(dial_navigation_t *nav)
     }
 }
 
+bool dial_navigation_has_devices(const dial_navigation_t *nav)
+{
+    return nav->view == DIAL_NAV_DEVICES || nav->view == DIAL_NAV_DEVICE_DETAIL;
+}
+
+static unsigned device_count(const dial_navigation_t *nav)
+{
+    return nav->devices != NULL && nav->device_state == ESP_OPENCLAW_DEVICES_READY ? nav->devices->count : 0;
+}
+
+static void render_devices(dial_navigation_t *nav)
+{
+    bool detail = nav->view == DIAL_NAV_DEVICE_DETAIL;
+    bool local = nav->view == DIAL_NAV_LOCAL_DEVICE;
+    unsigned count = device_count(nav);
+    nav->count = local ? 3 : count + 3;
+    if (nav->focus >= nav->count) nav->focus = 0;
+    nav->first = nav->focus / 3 * 3;
+    lv_obj_set_hidden(nav->description, true);
+    lv_obj_set_hidden(nav->identity, true);
+    lv_obj_set_hidden(nav->preview_body, !detail);
+    lv_obj_set_pos(nav->preview_body, 44, 70);
+    lv_obj_set_height(nav->preview_body, 112);
+    lv_obj_set_hidden(nav->hint, false);
+    lv_label_set_text_static(nav->heading, local ? "This Dial" : "Devices");
+    const char *hint = "Turn + press";
+    if (!local) {
+        switch (nav->device_state) {
+        case ESP_OPENCLAW_DEVICES_IDLE: hint = "Open or refresh"; break;
+        case ESP_OPENCLAW_DEVICES_LOADING: hint = "Loading..."; break;
+        case ESP_OPENCLAW_DEVICES_OFFLINE: hint = "Offline / local"; break;
+        case ESP_OPENCLAW_DEVICES_EMPTY: hint = "No other devices"; break;
+        case ESP_OPENCLAW_DEVICES_READY: hint = "Read only"; break;
+        case ESP_OPENCLAW_DEVICES_TOO_LARGE: hint = "List too large"; break;
+        case ESP_OPENCLAW_DEVICES_TIMEOUT: hint = "Timed out"; break;
+        default: hint = "Try Refresh"; break;
+        }
+    }
+    lv_label_set_text_static(nav->hint, hint);
+    if (detail && nav->device_focus > 0 && nav->device_focus <= count) {
+        const esp_openclaw_device_t *device = &nav->devices->devices[nav->device_focus - 1];
+        lv_label_set_text(nav->heading, device->name);
+        lv_label_set_text_fmt(nav->preview_text, "%s\n\nModel\n%s\n\nConnection: %s\nPairing: %s",
+            device->name,
+            device->model[0] != '\0' ? device->model : "Unknown",
+            !device->connected_known ? "Unknown" : device->connected ? "Online" : "Offline",
+            !device->paired_known ? "Unknown" : device->paired ? "Paired" : "Not paired");
+        lv_label_set_text_static(nav->hint, "Read only");
+    }
+    for (unsigned i = 0; i < 3; ++i) {
+        unsigned index = nav->first + i;
+        lv_obj_set_hidden(nav->rows[i], detail || index >= nav->count);
+        if (detail || index >= nav->count) continue;
+        lv_obj_set_pos(nav->rows[i], 38, 64 + (int)i * 44);
+        lv_obj_set_size(nav->rows[i], 164, 36);
+        lv_obj_set_pos(nav->icons[i], 12, 9);
+        lv_obj_set_pos(nav->names[i], 40, 9);
+        lv_obj_set_width(nav->names[i], 112);
+        const char *name, *icon;
+        if (local) {
+            const char *names[] = {"Control", "Display", "Connection"};
+            const char *icons[] = {LV_SYMBOL_SETTINGS, LV_SYMBOL_IMAGE, LV_SYMBOL_WIFI};
+            name = names[index]; icon = icons[index];
+        } else if (index == 0) { name = "This Dial"; icon = LV_SYMBOL_HOME; }
+        else if (index <= count) {
+            const esp_openclaw_device_t *device = &nav->devices->devices[index - 1];
+            name = device->name;
+            icon = !device->connected_known ? "?" : device->connected ? LV_SYMBOL_OK : LV_SYMBOL_MINUS;
+        } else { name = index == count + 1 ? "Refresh" : "Back"; icon = index == count + 1 ? LV_SYMBOL_REFRESH : LV_SYMBOL_LEFT; }
+        lv_label_set_text(nav->names[i], name);
+        lv_label_set_text_static(nav->icons[i], icon);
+        bool selected = index == nav->focus;
+        lv_obj_set_style_bg_color(nav->rows[i], lv_color_hex(selected ? 0xf4efee : 0x302535), 0);
+        lv_color_t color = lv_color_hex(selected ? 0x302131 : 0xf4efee);
+        lv_obj_set_style_text_color(nav->names[i], color, 0);
+        lv_obj_set_style_text_color(nav->icons[i], color, 0);
+    }
+}
+
 static void render(dial_navigation_t *nav)
 {
     lv_obj_set_y(nav->description, 80);
@@ -319,6 +413,10 @@ static void render(dial_navigation_t *nav)
             lv_obj_set_hidden(nav->avatars[i], true);
             lv_obj_set_hidden(nav->icons[i], false);
         }
+    }
+    if (dial_navigation_has_devices(nav) || nav->view == DIAL_NAV_LOCAL_DEVICE) {
+        render_devices(nav);
+        return;
     }
     if (nav->view == DIAL_NAV_DISPLAY) {
         render_display(nav);
@@ -515,6 +613,30 @@ void dial_navigation_conversations_update(dial_navigation_t *nav, const dial_con
     }
 }
 
+void dial_navigation_devices_update(dial_navigation_t *nav, const esp_openclaw_devices_snapshot_t *snapshot)
+{
+    nav->devices = snapshot;
+    unsigned revision = snapshot != NULL ? snapshot->revision : 0;
+    esp_openclaw_devices_state_t state = snapshot != NULL ? snapshot->state : ESP_OPENCLAW_DEVICES_ERROR;
+    if (nav->device_revision == revision && nav->device_state == state) return;
+    nav->device_revision = revision;
+    nav->device_state = state;
+    if (dial_navigation_has_devices(nav)) {
+        nav->view = DIAL_NAV_DEVICES;
+        nav->focus = 0;
+        changed(nav);
+    }
+}
+
+void dial_navigation_open_devices(dial_navigation_t *nav)
+{
+    nav->view = DIAL_NAV_DEVICES;
+    nav->focus = 0;
+    lv_obj_set_hidden(nav->root, false);
+    changed(nav);
+    nav->handler(DIAL_NAV_DEVICES_REFRESH, 0, nav->context);
+}
+
 bool dial_navigation_show_reader(dial_navigation_t *nav, const dial_agents_snapshot_t *agents,
                                  const dial_conversations_snapshot_t *view, bool preview)
 {
@@ -547,7 +669,7 @@ void dial_navigation_move(dial_navigation_t *nav, int direction)
             nav->handler(DIAL_NAV_BRIGHTNESS, (size_t)percent, nav->context);
         return;
     }
-    if (nav->view == DIAL_NAV_PREVIEW || nav->view == DIAL_NAV_ACTIVITY) {
+    if (nav->view == DIAL_NAV_PREVIEW || nav->view == DIAL_NAV_ACTIVITY || nav->view == DIAL_NAV_DEVICE_DETAIL) {
         lv_obj_scroll_by(nav->preview_body, 0, direction > 0 ? -24 : 24, LV_ANIM_OFF);
         return;
     }
@@ -559,6 +681,23 @@ void dial_navigation_move(dial_navigation_t *nav, int direction)
 
 void dial_navigation_activate(dial_navigation_t *nav)
 {
+    if (nav->view == DIAL_NAV_DEVICE_DETAIL) { back(nav); return; }
+    if (nav->view == DIAL_NAV_LOCAL_DEVICE) {
+        if (nav->focus == 0) nav->handler(DIAL_NAV_CONTROL, 0, nav->context);
+        else dial_navigation_open_settings(nav, nav->focus == 1 ? DIAL_NAV_DISPLAY : DIAL_NAV_CONNECTION);
+        return;
+    }
+    if (nav->view == DIAL_NAV_DEVICES) {
+        if (nav->focus == 0) { nav->view = DIAL_NAV_LOCAL_DEVICE; changed(nav); }
+        else if (nav->focus <= device_count(nav)) {
+            nav->device_focus = nav->focus;
+            nav->view = DIAL_NAV_DEVICE_DETAIL;
+            lv_obj_scroll_to_y(nav->preview_body, 0, LV_ANIM_OFF);
+            changed(nav);
+        } else if (nav->focus == device_count(nav) + 1) nav->handler(DIAL_NAV_DEVICES_REFRESH, 0, nav->context);
+        else back(nav);
+        return;
+    }
     if (nav->view == DIAL_NAV_DISPLAY || nav->view == DIAL_NAV_CONNECTION) { back(nav); return; }
     if (nav->view == DIAL_NAV_SETTINGS) {
         if (nav->focus < 2) dial_navigation_open_settings(nav, nav->focus == 0 ? DIAL_NAV_DISPLAY : DIAL_NAV_CONNECTION);
@@ -576,7 +715,7 @@ void dial_navigation_activate(dial_navigation_t *nav)
     }
     if (nav->view == DIAL_NAV_MENU) {
         if (nav->focus == 1) nav->handler(DIAL_NAV_RESUME, 0, nav->context);
-        else if (nav->focus == 2) nav->handler(DIAL_NAV_CONTROL, 0, nav->context);
+        else if (nav->focus == 2) dial_navigation_open_devices(nav);
         else if (nav->focus == 3) dial_navigation_open_activity(nav);
         else if (nav->focus == 4) dial_navigation_open_settings(nav, DIAL_NAV_SETTINGS);
         else dial_navigation_open(nav, true);
@@ -617,6 +756,7 @@ void dial_navigation_activate(dial_navigation_t *nav)
 void dial_navigation_open_settings(dial_navigation_t *nav, dial_navigation_view_t page)
 {
     if (page != DIAL_NAV_SETTINGS && page != DIAL_NAV_DISPLAY && page != DIAL_NAV_CONNECTION) return;
+    nav->settings_parent = nav->view == DIAL_NAV_LOCAL_DEVICE ? DIAL_NAV_LOCAL_DEVICE : DIAL_NAV_SETTINGS;
     nav->view = page;
     nav->focus = 0;
     lv_obj_set_hidden(nav->root, false);

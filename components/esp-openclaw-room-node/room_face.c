@@ -729,9 +729,9 @@ esp_err_t room_face_create(lv_obj_t *parent)
     lv_obj_set_style_bg_color(face_root, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(face_root, LV_OPA_COVER, 0);
     if (lobster_enabled) {
-        /* Keep the mascot between the watch status and conversation controls. */
-        lv_obj_set_size(face_root, face_width, 268);
-        lv_obj_set_pos(face_root, 0, 44);
+        /* The framed mascot leaves a separate header and headline region. */
+        lv_obj_set_size(face_root, face_width, 196);
+        lv_obj_set_pos(face_root, 0, 100);
         lv_obj_add_flag(face_root, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
         lv_obj_set_style_bg_opa(face_root, LV_OPA_TRANSP, 0);
     }

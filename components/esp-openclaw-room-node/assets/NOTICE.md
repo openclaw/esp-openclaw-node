@@ -23,10 +23,13 @@ SHA-256:
 directory by `scripts/generate_watch_lobster.py` from the body, claw, and antenna
 geometry used by the mobile app. The renderer draws the eyes and mouth with
 LVGL and reuses the existing face lifecycle, moods, gestures, and speech level.
-Five cropped, straight-alpha BGRA images (255,152 bytes total) are embedded in
-flash; no image decoder or animation file is needed at runtime. The design
-canvas is 288 x 288 pixels. Generation uses Python's standard library with 4x
-supersampling, and requires no additional build dependency.
+Five cropped, straight-alpha BGRA images use a 144 x 144 pixel mascot canvas.
+A static 196 x 196 pixel image adds the 174 pixel circular frame, highlights,
+and ground shadow. All six images total 217,488 bytes of read-only flash data;
+no image decoder, runtime blur, or full-mascot scaling is needed. Generation
+uses Python's standard library with 4x supersampling and requires no additional
+build dependency. The frame stays still while the existing face lifecycle
+animates the mascot's parts.
 
 Source geometry and dark palette:
 

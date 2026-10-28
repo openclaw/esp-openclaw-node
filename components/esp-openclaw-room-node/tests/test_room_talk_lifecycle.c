@@ -865,7 +865,8 @@ static void sdk_log_policy_warn(void) { sdk_log_policy_level(ESP_LOG_WARN); }
 static void sdk_log_policy_error(void) { sdk_log_policy_level(ESP_LOG_ERROR); }
 
 static void check_console_header(room_media_tone_state_t state, room_media_tone_error_t error,
-    const char *state_name, const char *error_name, const char *expected_tone, bool competing)
+    const char *state_name, const char *error_name, const char *expected_tone, bool competing,
+    const char *expected_wifi)
 {
     host.console_snapshots = true;
     host.console_tone = (room_media_tone_snapshot_t){
@@ -898,9 +899,9 @@ static void check_console_header(room_media_tone_state_t state, room_media_tone_
         "%s"
         "audio mic=0@0us afe=0@0us rx=0@0us renderer accepted/errors=19/7\n"
         "AFE feed accepted/errors=13/3 ring_free=25%% read_interval_max_us=200000 fetch_max_us=12000\n"
-        "wifi=disconnected ssid=\"\" rssi=0 dBm heap=40000/16000 B psram=8000000 B\n"
+        "%s heap=40000/16000 B psram=8000000 B\n"
         "Talk VAD silence=%u ms player queues=%u/%u KiB\n",
-        expected_tone, competing ? competing_record : "",
+        expected_tone, competing ? competing_record : "", expected_wifi,
         ROOM_TALK_VAD_SILENCE_MS, ROOM_PLAYER_RAW_FIFO_KIB, ROOM_PLAYER_RENDER_FIFO_KIB);
     host_require(count > 0 && (size_t)count < sizeof(expected), "bounded expected console output");
     CHECK(length == (size_t)count && strcmp(actual, expected) == 0,
@@ -932,16 +933,31 @@ static void console_diagnostics_bytes(void)
     };
     for (size_t i = 0; i < sizeof(tones) / sizeof(*tones); ++i) {
         check_console_header(tones[i].state, tones[i].error,
-            tones[i].state_name, tones[i].error_name, tones[i].expected, false);
+            tones[i].state_name, tones[i].error_name, tones[i].expected, false,
+            "wifi=disconnected ssid=\"\" rssi=unknown");
     }
 }
 
 static void console_diagnostics_contention(void)
 {
     check_console_header(ROOM_MEDIA_TONE_IDLE, ROOM_MEDIA_TONE_ERROR_NONE,
-        "idle", "none", "idle", true);
+        "idle", "none", "idle", true, "wifi=disconnected ssid=\"\" rssi=unknown");
     check_console_header(ROOM_MEDIA_TONE_ERROR, ROOM_MEDIA_TONE_ERROR_TASK,
-        "error", "worker task", "error/worker task", true);
+        "error", "worker task", "error/worker task", true,
+        "wifi=disconnected ssid=\"\" rssi=unknown");
+}
+
+static void console_wifi_observations(void)
+{
+    host.wifi = (esp_openclaw_node_wifi_status_t){.connected = true, .rssi = -63};
+    check_console_header(ROOM_MEDIA_TONE_IDLE, ROOM_MEDIA_TONE_ERROR_NONE,
+        "idle", "none", "idle", false, "wifi=connected ssid=\"\" rssi=unknown");
+    host.wifi.ap_info_valid = true;
+    check_console_header(ROOM_MEDIA_TONE_IDLE, ROOM_MEDIA_TONE_ERROR_NONE,
+        "idle", "none", "idle", false, "wifi=connected ssid=\"\" rssi=-63 dBm");
+    host.wifi.rssi = 0;
+    check_console_header(ROOM_MEDIA_TONE_IDLE, ROOM_MEDIA_TONE_ERROR_NONE,
+        "idle", "none", "idle", false, "wifi=connected ssid=\"\" rssi=0 dBm");
 }
 
 static void operator_reconnect_without_task_memory(void)
@@ -1872,6 +1888,7 @@ static const struct { const char *name; void (*run)(void); } cases[] = {
     {"voice-actions-stale", voice_actions_stale},
     {"console-diagnostics-bytes", console_diagnostics_bytes},
     {"console-diagnostics-contention", console_diagnostics_contention},
+    {"console-wifi-observations", console_wifi_observations},
     {"sdk-log-policy-info", sdk_log_policy_info},
     {"sdk-log-policy-warn", sdk_log_policy_warn},
     {"sdk-log-policy-error", sdk_log_policy_error},

@@ -1688,6 +1688,10 @@ static int diagnostics_status_command(void)
     room_media_tone_snapshot_t tone = {0};
     room_media_get_tone_snapshot(&tone);
 
+    char wifi_rssi[16] = "unknown";
+    if (runtime.wifi_ap_info_valid) {
+        snprintf(wifi_rssi, sizeof(wifi_rssi), "%d dBm", runtime.wifi_rssi);
+    }
     printf("diagnostics=%s Talk=%s tone=%s%s%s (%u/%u/%u requested/queued/accepted)\n",
         runtime.diagnostics_open ? "open" : "closed",
         runtime.talk_phase,
@@ -1711,11 +1715,11 @@ static int diagnostics_status_command(void)
            " ring_free=%u%% read_interval_max_us=%" PRIu64 " fetch_max_us=%" PRIu64 "\n",
         audio.feed_successes, audio.feed_errors, audio.ringbuffer_free_percent,
         audio.max_read_interval_us, audio.max_fetch_duration_us);
-    printf("wifi=%s ssid=\"%.32s\" rssi=%d dBm heap=%" PRIu32 "/%" PRIu32
+    printf("wifi=%s ssid=\"%.32s\" rssi=%s heap=%" PRIu32 "/%" PRIu32
            " B psram=%" PRIu32 " B\n",
         runtime.wifi_connected ? "connected" : "disconnected",
         runtime.wifi_ssid,
-        runtime.wifi_rssi,
+        wifi_rssi,
         runtime.internal_heap_free,
         runtime.internal_heap_largest,
         runtime.psram_free);
@@ -2141,6 +2145,7 @@ void room_runtime_get_diagnostics(room_runtime_diagnostics_snapshot_t *snapshot)
     esp_openclaw_node_wifi_status_t wifi = {0};
     esp_openclaw_node_wifi_get_status(&wifi);
     snapshot->wifi_connected = wifi.connected;
+    snapshot->wifi_ap_info_valid = wifi.ap_info_valid;
     strlcpy(snapshot->wifi_ssid, wifi.ssid, sizeof(snapshot->wifi_ssid));
     snapshot->wifi_rssi = wifi.rssi;
     strlcpy(snapshot->wifi_ip, wifi.ip, sizeof(snapshot->wifi_ip));

@@ -31,6 +31,7 @@ static bool s_scan_in_progress;
 static void clear_ip_fields_locked(void)
 {
     s_status.connected = false;
+    s_status.ap_info_valid = false;
     s_status.ip[0] = '\0';
     s_status.netmask[0] = '\0';
     s_status.gateway[0] = '\0';
@@ -427,6 +428,7 @@ void esp_openclaw_node_wifi_get_status(esp_openclaw_node_wifi_status_t *status)
     if (status->connected) {
         wifi_ap_record_t ap_info = {0};
         if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+            status->ap_info_valid = true;
             status->rssi = ap_info.rssi;
             status->channel = ap_info.primary;
             status->authmode = (uint8_t)ap_info.authmode;

@@ -360,6 +360,82 @@ static uint32_t avatar_hash(int x, int y, int size)
     return hash;
 }
 
+static uint32_t title_pixels(lv_obj_t *label)
+{
+    lv_refr_now(NULL);
+    lv_area_t area;
+    lv_obj_get_coords(label, &area);
+    uint32_t hash = 2166136261u;
+    for (int y = area.y1; y <= area.y2; ++y)
+        for (int x = area.x1; x <= area.x2; ++x)
+            hash = (hash ^ frame[y * 240 + x]) * 16777619u;
+    return hash;
+}
+
+static void check_conversation_titles(void)
+{
+    unsigned before_reads = reads, before_sends = reply_sends;
+    char first[sizeof(conversations.page.sessions[0].title)];
+    char second[sizeof(conversations.page.sessions[1].title)];
+    strcpy(first, conversations.page.sessions[0].title);
+    strcpy(second, conversations.page.sessions[1].title);
+    strcpy(conversations.page.sessions[0].title, "Planning the next adventure - Japan");
+    strcpy(conversations.page.sessions[1].title, "Planning the next adventure - Norway");
+    for (int reading = OPENCLAW_READING_STANDARD; reading <= OPENCLAW_READING_LARGE; ++reading) {
+        openclaw_reading_set_size(reading);
+        for (int density = OPENCLAW_DENSITY_COMPACT; density <= OPENCLAW_DENSITY_COMFORTABLE; ++density) {
+            openclaw_density_set(density);
+            ++conversations.revision;
+            dial_navigation_conversations_update(&navigation, &conversations);
+            dial_navigation_move(&navigation, 1);
+            advance(40);
+            uint32_t focused = title_pixels(navigation.names[1]);
+            uint32_t other = title_pixels(navigation.names[0]);
+            char capture[64];
+            snprintf(capture, sizeof(capture), "long-title-%d-%d-before", reading, density);
+            snapshot(capture);
+            bool moved = false;
+            for (unsigned sample = 0; sample < 30; ++sample) {
+                advance(200);
+                if (title_pixels(navigation.names[1]) != focused) moved = true;
+                assert(title_pixels(navigation.names[0]) == other);
+            }
+            snprintf(capture, sizeof(capture), "long-title-%d-%d-focused", reading, density);
+            snapshot(capture);
+            assert(moved);
+            for (unsigned i = 0; i < 2; ++i) check_home_bounds(navigation.rows[i]);
+            unsigned requested = reads;
+            dial_navigation_activate(&navigation);
+            assert(reads == requested + 1 && requested_offset == 1);
+            conversations.selected = 1;
+            conversations.preview_state = DIAL_AGENTS_LOADING;
+            ++conversations.preview_revision;
+            dial_navigation_conversations_update(&navigation, &conversations);
+            advance(40);
+            uint32_t heading = title_pixels(navigation.heading);
+            moved = false;
+            for (unsigned sample = 0; sample < 30; ++sample) {
+                advance(200);
+                if (title_pixels(navigation.heading) != heading) moved = true;
+            }
+            snprintf(capture, sizeof(capture), "long-title-%d-%d-reader", reading, density);
+            snapshot(capture);
+            assert(moved && reads == requested + 1);
+            check_home_bounds(navigation.heading);
+            touch(68, 44, true); touch(68, 44, false);
+            assert(navigation.view == DIAL_NAV_SESSIONS && navigation.focus == 1);
+        }
+    }
+    assert(reads == before_reads + 4 && reply_sends == before_sends);
+    strcpy(conversations.page.sessions[0].title, first);
+    strcpy(conversations.page.sessions[1].title, second);
+    openclaw_reading_set_size(OPENCLAW_READING_STANDARD);
+    openclaw_density_set(OPENCLAW_DENSITY_COMPACT);
+    ++conversations.revision;
+    dial_navigation_conversations_update(&navigation, &conversations);
+    puts("conversation titles: focused overflow, static neighbors, reader identity and unchanged selection passed");
+}
+
 static void check_avatar_identity(void)
 {
     const struct { const char *emoji, *name, *id; esp_openclaw_avatar_kind_t kind; const char *text; } cases[] = {
@@ -1343,14 +1419,16 @@ int main(int argc, char **argv)
     dial_navigation_conversations_update(&navigation, &conversations);
     snapshot("list");
     assert(strncmp(lv_label_get_text(navigation.names[0]), "Planning", 8) == 0);
+    check_conversation_titles();
+    unsigned title_reads = reads;
     touch(120, 82, true);
     ++conversations.revision;
     dial_navigation_conversations_update(&navigation, &conversations);
     touch(120, 82, false);
-    assert(navigation.view == DIAL_NAV_SESSIONS && reads == 0);
+    assert(navigation.view == DIAL_NAV_SESSIONS && reads == title_reads);
     dial_navigation_move(&navigation, 1);
     dial_navigation_activate(&navigation);
-    assert(navigation.view == DIAL_NAV_PREVIEW && reads == 1 && requested_offset == 1);
+    assert(navigation.view == DIAL_NAV_PREVIEW && reads == title_reads + 1 && requested_offset == 1);
     conversations.selected = 1;
     conversations.preview_state = DIAL_AGENTS_LOADING;
     ++conversations.preview_revision;

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Reveal long conversation titles on the focused M5Dial row and reader heading, keeping neighboring rows still and selection unchanged.
+
 - Bind confirmed Gateway setup operations to native connection ownership, live authority, exact outcomes, cancellation draining, and explicit reconnect handback.
 
 - Recheck live setup authority on tracked Gateway requests before connection and credential side effects.

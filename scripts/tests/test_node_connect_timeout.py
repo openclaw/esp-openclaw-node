@@ -48,6 +48,15 @@ class NodeConnectTimeoutTests(unittest.TestCase):
             "-o", str(cls.binary),
         ], check=True, timeout=60)
 
+    def test_authority_revoked_during_transport_preparation(self):
+        for scenario in ("revoked-during-init", "destroy-during-init"):
+            with self.subTest(scenario=scenario):
+                result = subprocess.run(
+                    [str(self.binary), scenario],
+                    capture_output=True, text=True, timeout=10,
+                )
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_accepted_connect_deadline(self):
         for scenario in ("idle", "busy", "zero-clock", "ready", "destroying"):
             with self.subTest(scenario=scenario):

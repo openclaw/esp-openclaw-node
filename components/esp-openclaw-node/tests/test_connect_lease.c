@@ -36,6 +36,8 @@ struct esp_openclaw_node {
     bool connect_request_pending;
     esp_openclaw_node_connect_attempt_id_t next_connect_attempt_id, active_connect_attempt_id;
     esp_openclaw_node_connect_attempt_t connect_attempt;
+    esp_openclaw_node_connect_authorize_t connect_authorize;
+    void *connect_authorize_context;
     char pending_connect_id[32];
     char *plugin_surface_urls_json;
     const char *transport_gateway_uri;
@@ -44,6 +46,7 @@ struct esp_openclaw_node {
     int64_t connect_started_ms;
     void *ws;
     uint32_t active_transport_id;
+    const struct send_ops *websocket_client_ops;
 };
 static bool locked, queued, queue_full;
 static unsigned load_count, start_count, store_count, cleared_sources;
@@ -147,7 +150,8 @@ enum { CONNECT_RESPONSE_OUTCOME_IGNORE, CONNECT_RESPONSE_OUTCOME_CONNECTED, CONN
 typedef struct { int outcome; esp_err_t err; esp_openclaw_node_internal_state_t state; } connect_response_finalize_result_t;
 static esp_err_t esp_openclaw_node_submit_connect_request(esp_openclaw_node_handle_t node,
     esp_openclaw_node_connect_request_source_t *source, esp_openclaw_node_connect_lease_t lease,
-    uint64_t generation, esp_openclaw_node_connect_attempt_id_t *out_attempt);
+    uint64_t generation, esp_openclaw_node_connect_attempt_id_t *out_attempt,
+    esp_openclaw_node_connect_authorize_t authorize, void *context);
 static esp_err_t esp_openclaw_node_submit_disconnect_request(esp_openclaw_node_handle_t node,
     esp_openclaw_node_connect_lease_t lease);
 
@@ -156,6 +160,24 @@ static esp_err_t esp_openclaw_node_submit_disconnect_request(esp_openclaw_node_h
 #include "admission.inc"
 #include "finalize.inc"
 #include "handoff.inc"
+
+/* Serialization and transport are platform boundaries; the send gate is real. */
+typedef struct { unsigned unused; } cJSON;
+typedef struct { bool alloc_failed; size_t bytes; int requested, returned; } invoke_reply_diagnostic_t;
+enum { REPLY_SERIALIZE_BEGIN, REPLY_SERIALIZE_END, REPLY_SEND_BEGIN, REPLY_SEND_END };
+static void log_invoke_reply(invoke_reply_diagnostic_t *d, int stage, int64_t time)
+{ (void)d; (void)stage; (void)time; }
+static bool authority_live;
+static unsigned authority_checks, sends;
+static void (*during_serialize)(void);
+static char *cJSON_PrintUnformatted(cJSON *root)
+{ (void)root; if (during_serialize) during_serialize(); return strdup("{}"); }
+#define pdMS_TO_TICKS(ms) (ms)
+struct send_ops { int (*send_text)(void *, const char *, int, unsigned); };
+static int send_text(void *ws, const char *text, int length, unsigned timeout)
+{ (void)ws; (void)text; (void)timeout; ++sends; return length; }
+static const struct send_ops send_ops = {send_text};
+#include "send.inc"
 
 static const esp_openclaw_node_connect_request_t explicit_request = {
     .source = ESP_OPENCLAW_NODE_CONNECT_SOURCE_NO_AUTH, .gateway_uri = "wss://gateway.example",
@@ -515,6 +537,119 @@ static void test_cancel_fences_token_writes(void)
     assert(node.ws != NULL && !snapshot(&node, expected_pending).cancel_requested);
     cleanup(&node);
 }
+static bool authorize_connect(void *context)
+{
+    assert(locked && context == &authority_live);
+    ++authority_checks;
+    return authority_live;
+}
+static void revoke_authority(void) { authority_live = false; }
+static void destroy_during_serialize(void) { current->state = ESP_OPENCLAW_NODE_INTERNAL_DESTROYING; }
+static void revoke_from_old_terminal(void)
+{ terminal_callback = NULL; revoke_authority(); }
+static void begin_authorized(esp_openclaw_node_handle_t node)
+{
+    assert(esp_openclaw_node_connect_lease_acquire(node, &acquired) == ESP_OK);
+    authority_live = true; authority_checks = sends = 0; during_serialize = NULL;
+    assert(esp_openclaw_node_connect_begin_authorized(node, acquired, &explicit_request,
+        authorize_connect, &authority_live, &expected_pending) == ESP_OK);
+    assert(authority_checks == 0);
+}
+static void test_live_authority(void)
+{
+    struct esp_openclaw_node node;
+    initialize(&node, ESP_OPENCLAW_NODE_INTERNAL_READY);
+    node.ws = &node; node.active_transport_id = 55;
+    begin_authorized(&node); revoke_authority(); dispatch(&node);
+    expect_cancelled(&node, false);
+    assert(node.ws == &node && start_count == 0 && authority_checks == 1);
+    authority_live = true;
+    assert(!esp_openclaw_node_cancel_active_connect_if_requested(&node));
+    assert(authority_checks == 1); cleanup(&node);
+
+    initialize(&node, ESP_OPENCLAW_NODE_INTERNAL_IDLE); begin_authorized(&node);
+    during_start = revoke_authority; dispatch(&node);
+    expect_cancelled(&node, false); assert(node.ws == NULL); cleanup(&node);
+
+    initialize(&node, ESP_OPENCLAW_NODE_INTERNAL_READY); begin_authorized(&node);
+    terminal_callback = revoke_from_old_terminal; dispatch(&node);
+    expect_cancelled(&node, false); assert(start_count == 0); cleanup(&node);
+
+    initialize(&node, ESP_OPENCLAW_NODE_INTERNAL_IDLE); begin_authorized(&node); dispatch(&node);
+    strcpy(node.pending_connect_id, "connect-fixture"); during_load = revoke_authority;
+    assert(persist_handoff_device_token(&node, "operator", "synthetic-token") == ESP_ERR_INVALID_STATE);
+    assert(store_count == 0 && esp_openclaw_node_cancel_active_connect_if_requested(&node));
+    expect_cancelled(&node, false); cleanup(&node);
+
+    initialize(&node, ESP_OPENCLAW_NODE_INTERNAL_IDLE); begin_authorized(&node); dispatch(&node);
+    strcpy(node.pending_connect_id, "connect-fixture");
+    assert(persist_handoff_device_token(&node, "operator", "synthetic-token") == ESP_OK);
+    revoke_authority(); assert(finalize(&node).outcome == CONNECT_RESPONSE_OUTCOME_IGNORE);
+    assert(esp_openclaw_node_cancel_active_connect_if_requested(&node));
+    expect_cancelled(&node, true); assert(store_count == 1); cleanup(&node);
+
+    initialize(&node, ESP_OPENCLAW_NODE_INTERNAL_IDLE); begin_authorized(&node); dispatch(&node);
+    assert(finalize(&node).outcome == CONNECT_RESPONSE_OUTCOME_CONNECTED);
+    unsigned checks = authority_checks; revoke_authority();
+    assert(!esp_openclaw_node_cancel_active_connect_if_requested(&node));
+    assert(authority_checks == checks && node.ws != NULL);
+    assert(esp_openclaw_node_connect_lease_release(&node, acquired) == ESP_OK);
+    assert(node.connect_authorize == NULL && node.connect_authorize_context == NULL); cleanup(&node);
+}
+static void test_authorized_admission(void)
+{
+    struct esp_openclaw_node node;
+    initialize(&node, ESP_OPENCLAW_NODE_INTERNAL_IDLE);
+    assert(esp_openclaw_node_connect_lease_acquire(&node, &acquired) == ESP_OK);
+    expected_pending = 99;
+    assert(esp_openclaw_node_connect_begin_authorized(&node, acquired, &explicit_request,
+        NULL, NULL, &expected_pending) == ESP_ERR_INVALID_ARG && expected_pending == 0);
+    assert(esp_openclaw_node_connect_begin_authorized(&node, acquired, &explicit_request,
+        authorize_connect, &authority_live, NULL) == ESP_ERR_INVALID_ARG);
+    authority_live = true; authority_checks = 0;
+    assert(esp_openclaw_node_connect_begin_authorized(&node, acquired, &explicit_request,
+        authorize_connect, &authority_live, &expected_pending) == ESP_OK);
+    dispatch(&node);
+    esp_openclaw_node_connect_attempt_id_t active = expected_pending, rejected = 99;
+    assert(esp_openclaw_node_connect_begin(&node, acquired, &explicit_request, &rejected) == ESP_ERR_INVALID_STATE);
+    assert(rejected == 0 && node.connect_attempt.id == active && node.connect_authorize == authorize_connect);
+    assert(esp_openclaw_node_connect_begin_authorized(&node, acquired, &explicit_request,
+        authorize_connect, NULL, &rejected) == ESP_ERR_INVALID_STATE);
+    assert(rejected == 0 && node.connect_authorize_context == &authority_live);
+    assert(finalize(&node).outcome == CONNECT_RESPONSE_OUTCOME_CONNECTED);
+    esp_openclaw_node_connect_attempt_id_t completed = expected_pending;
+    queue_full = true;
+    assert(esp_openclaw_node_connect_begin(&node, acquired, &explicit_request, &expected_pending) == ESP_ERR_NO_MEM);
+    assert(expected_pending == 0 && node.connect_attempt.id == completed);
+    assert(node.connect_authorize == authorize_connect && node.connect_authorize_context == &authority_live);
+    queue_full = false;
+    assert(esp_openclaw_node_connect_begin(&node, acquired, &explicit_request, &expected_pending) == ESP_OK);
+    assert(node.connect_authorize == NULL && node.connect_authorize_context == NULL);
+    authority_live = false; dispatch(&node);
+    assert(finalize(&node).outcome == CONNECT_RESPONSE_OUTCOME_CONNECTED);
+    cleanup(&node);
+}
+static void test_send_authority(void)
+{
+    struct esp_openclaw_node node; cJSON root = {0};
+    initialize(&node, ESP_OPENCLAW_NODE_INTERNAL_IDLE); begin_authorized(&node); dispatch(&node);
+    node.websocket_client_ops = &send_ops;
+    unsigned checks = authority_checks;
+    during_serialize = destroy_during_serialize;
+    assert(!websocket_send_json(&node, &root, NULL, true) && sends == 0);
+    assert(authority_checks == checks);
+    node.state = ESP_OPENCLAW_NODE_INTERNAL_CONNECTING;
+    during_serialize = NULL;
+    assert(websocket_send_json(&node, &root, NULL, true) && sends == 1);
+    during_serialize = revoke_authority;
+    assert(!websocket_send_json(&node, &root, NULL, true) && sends == 1);
+    authority_live = true; during_serialize = NULL;
+    assert(!websocket_send_json(&node, &root, NULL, true) && sends == 1);
+    assert(websocket_send_json(&node, &root, NULL, false) && sends == 2);
+    assert(esp_openclaw_node_cancel_active_connect_if_requested(&node));
+    expect_cancelled(&node, false); cleanup(&node);
+}
+
 int main(void)
 {
     test_lease_lifetime(); test_owned_queue_and_replacement();
@@ -522,5 +657,6 @@ int main(void)
     test_tracked_results(); test_old_success_does_not_complete_replacement(); test_saved_effect_survives_failure();
     test_queued_cancel_preserves_connection(); test_cancel_during_start_and_cleanup();
     test_cancel_during_replacement(); test_cancel_fences_token_writes();
-    puts("connection lease, results and cancellation: passed"); return 0;
+    test_live_authority(); test_authorized_admission(); test_send_authority();
+    puts("connection lease, results, cancellation and live authority: passed"); return 0;
 }

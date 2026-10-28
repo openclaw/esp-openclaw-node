@@ -845,3 +845,25 @@ Run `python3 components/esp-openclaw-node/tests/run_connect_lease_host_tests.py`
 from the repository root for the sanitized host admission tests. They execute
 the production public API and queue/worker transitions against fake platform
 boundaries; on-device transport timing remains separate qualification.
+
+### Live authority for setup requests
+
+Use `esp_openclaw_node_connect_begin_authorized` when authority can expire or
+be revoked while a request is queued or connecting. The node worker calls the
+supplied authorizer before replacing the old link, starting the transport,
+sending the connect handshake, and writing role tokens. It rechecks after
+blocking preparation. Denial latches the existing cancellation path; restoring
+authority cannot revive the request. Earlier completed writes remain visible in
+`credentials_saved`. While the authorized request is pending, new connect
+requests are rejected; cancel or disconnect it and wait for completion first.
+
+The callback runs under the node state mutex. It must be bounded, thread-safe,
+and read current peer/deadline state without calling node or serialized
+UI/setup APIs. Keep its context alive until the matching request is terminal
+or the node is destroyed. The existing setup-session object is not thread-safe;
+do not call its APIs from this callback. Local setup exit must also call
+`connect_cancel` promptly. An already-started operation can finish before
+revocation is observed; cancellation does not undo a remote grant or saved token.
+
+This API is a lifecycle boundary for the forthcoming setup binding. No BLE
+endpoint or Watch/Dial setup screen invokes it yet.

@@ -2,6 +2,7 @@
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
+typedef uint64_t esp_openclaw_node_connect_attempt_id_t;
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -49,6 +50,8 @@ typedef struct {
 struct node {
     int state;
     uint64_t active_connect_attempt_id;
+    bool (*connect_authorize)(void *);
+    void *connect_authorize_context;
     struct { uint64_t id; int state, failure_reason; esp_err_t local_err; bool cancel_requested; } connect_attempt;
     int64_t connect_started_ms;
     source_t active_connect_source;
@@ -81,7 +84,10 @@ typedef struct { int type, local_err; uint32_t transport_id; uint64_t connect_at
 
 static int64_t now_ms, initial_ms;
 static int starts, stops, failures, receives, messages, expired_messages;
-static bool busy, ready, destroying;
+static bool busy, ready, destroying, revoke_during_init, destroy_during_init, authority_live;
+static esp_openclaw_node_handle_t initializing_node;
+static bool authorize_connect(void *context)
+{ assert(context == &authority_live); return authority_live; }
 static int fake_client;
 static void esp_openclaw_node_lock_state(esp_openclaw_node_handle_t node) { (void)node; }
 static void esp_openclaw_node_unlock_state(esp_openclaw_node_handle_t node) { (void)node; }
@@ -131,7 +137,10 @@ static bool esp_openclaw_node_state_is_connecting(int state)
 static void *client_init(const esp_websocket_client_config_t *config)
 { assert(strcmp(config->uri, "ws://synthetic.example/ws") == 0); return &fake_client; }
 static int register_events(void *ws, int event, handler_t callback, void *ctx)
-{ assert(ws == &fake_client && event == WEBSOCKET_EVENT_ANY && callback && ctx); return ESP_OK; }
+{ assert(ws == &fake_client && event == WEBSOCKET_EVENT_ANY && callback && ctx);
+    if (revoke_during_init) authority_live = false;
+    if (destroy_during_init) initializing_node->state = ESP_OPENCLAW_NODE_INTERNAL_DESTROYING;
+    return ESP_OK; }
 static int client_start(void *ws) { assert(ws == &fake_client); starts++; return ESP_OK; }
 static void esp_openclaw_node_clear_connect_source_struct(source_t *source) { memset(source, 0, sizeof(*source)); }
 static void esp_openclaw_node_emit_connect_failed(esp_openclaw_node_handle_t node, int reason, esp_err_t err, const char *detail)
@@ -189,6 +198,23 @@ int main(int argc, char **argv)
     now_ms = initial_ms = strcmp(argv[1], "zero-clock") == 0 ? 0 : 1000;
     const ops_t ops = {client_init, register_events, client_start};
     struct node node = {.state = ESP_OPENCLAW_NODE_INTERNAL_IDLE, .websocket_client_ops = &ops};
+    if (strcmp(argv[1], "revoked-during-init") == 0 || strcmp(argv[1], "destroy-during-init") == 0) {
+        node.state = ESP_OPENCLAW_NODE_INTERNAL_CONNECTING;
+        node.active_connect_attempt_id = node.connect_attempt.id = 1;
+        node.connect_attempt.state = ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_CONNECTING;
+        node.connect_authorize = authorize_connect;
+        node.connect_authorize_context = &authority_live;
+        node.active_connect_source = (source_t){ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_NO_AUTH,
+            "ws://synthetic.example/ws"};
+        initializing_node = &node;
+        authority_live = true;
+        destroy_during_init = strcmp(argv[1], "destroy-during-init") == 0;
+        revoke_during_init = !destroy_during_init;
+        assert(esp_openclaw_node_start_transport_for_active_source(&node) == ESP_ERR_INVALID_STATE);
+        assert(starts == 0 && node.ws == NULL && node.transport_ctx == NULL && node.transport_gateway_uri == NULL);
+        assert(node.connect_attempt.cancel_requested == !destroy_during_init);
+        return 0;
+    }
     esp_openclaw_node_task(&node);
     assert(starts == 1);
     assert(failures == (ready || destroying ? 0 : 1));

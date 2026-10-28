@@ -29,6 +29,8 @@ def main():
         (work / "completion.inc").write_text(section(
             runtime, "static bool teardown_in_progress(",
             "void esp_openclaw_node_fail_if_connect_timed_out("))
+        (work / "send.inc").write_text(section(
+            protocol, "static bool websocket_send_json(", "static void invoke_gateway_callback("))
         (work / "handoff.inc").write_text(section(
             protocol, "static esp_err_t persist_handoff_device_token(",
             "static esp_err_t persist_handoff_device_tokens("))

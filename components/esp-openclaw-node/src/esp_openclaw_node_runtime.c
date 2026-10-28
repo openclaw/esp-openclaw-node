@@ -194,7 +194,7 @@ static bool cancel_connect_request_before_start(
     esp_openclaw_node_lock_state(node);
     bool cancel = message->connect_attempt_id != 0 &&
         message->connect_attempt_id == node->connect_attempt.id &&
-        esp_openclaw_node_connect_cancel_pending_locked(node) &&
+        esp_openclaw_node_connect_attempt_cancelled_locked(node, message->connect_attempt_id) &&
         node->state != ESP_OPENCLAW_NODE_INTERNAL_DESTROYING &&
         node->state != ESP_OPENCLAW_NODE_INTERNAL_CLOSED;
     esp_openclaw_node_unlock_state(node);
@@ -234,7 +234,7 @@ static void handle_request_connect(
     }
     if (message->connect_attempt_id != 0 &&
         node->connect_attempt.id == message->connect_attempt_id) {
-        if (esp_openclaw_node_connect_cancel_pending_locked(node)) {
+        if (esp_openclaw_node_connect_attempt_cancelled_locked(node, message->connect_attempt_id)) {
             esp_openclaw_node_unlock_state(node);
             (void)cancel_connect_request_before_start(node, message);
             return;
@@ -278,7 +278,7 @@ static void handle_request_connect(
     }
     if (message->connect_attempt_id != 0 &&
         message->connect_attempt_id == node->connect_attempt.id &&
-        esp_openclaw_node_connect_cancel_pending_locked(node)) {
+        esp_openclaw_node_connect_attempt_cancelled_locked(node, message->connect_attempt_id)) {
         esp_openclaw_node_unlock_state(node);
         (void)cancel_connect_request_before_start(node, message);
         return;
@@ -636,10 +636,13 @@ esp_err_t esp_openclaw_node_submit_connect_request(
     esp_openclaw_node_connect_request_source_t *connect_source,
     esp_openclaw_node_connect_lease_t lease,
     uint64_t generation,
-    esp_openclaw_node_connect_attempt_id_t *out_attempt)
+    esp_openclaw_node_connect_attempt_id_t *out_attempt,
+    esp_openclaw_node_connect_authorize_t authorize,
+    void *context)
 {
     esp_openclaw_node_lock_state(node);
     esp_err_t err = !node->connect_request_pending &&
+        !esp_openclaw_node_connect_authority_pending_locked(node) &&
         !esp_openclaw_node_connect_cancel_pending_locked(node) &&
         (out_attempt == NULL || node->next_connect_attempt_id != UINT64_MAX) &&
         esp_openclaw_node_connect_lease_matches_locked(node, lease, generation)
@@ -667,6 +670,8 @@ esp_err_t esp_openclaw_node_submit_connect_request(
                 .id = message.connect_attempt_id,
                 .state = ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_QUEUED,
             };
+            node->connect_authorize = authorize;
+            node->connect_authorize_context = context;
             *out_attempt = message.connect_attempt_id;
         }
     } else {

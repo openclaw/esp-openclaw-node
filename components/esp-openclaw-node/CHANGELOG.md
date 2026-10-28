@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Bind confirmed setup sessions to native Wi-Fi attempts, retaining ownership between operations and until cancellation drains, with correlated failure and recovery receipts.
+
 - Add native-radio Wi-Fi setup attempts with correlated outcomes, authority checks, cancellation draining, and explicit recovery after drain failures. Remote-radio backends remain unsupported by this API.
 
 - Keep Wi-Fi status and connection waiters disconnected after Disconnect or Forget, even when an older IP notification arrives afterward.

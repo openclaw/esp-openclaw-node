@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise Wi-Fi status through the production station and command owners."""
+"""Exercise Wi-Fi status and confirmed setup through their production owners."""
 
 import argparse
 from pathlib import Path
@@ -36,6 +36,8 @@ def main():
             "-I", str(component / "include"), "-I", str(args.cjson_dir),
             str(tests / "test_wifi_status.c"),
             str(component / "esp_openclaw_node_wifi.c"),
+            str(component / "esp_openclaw_setup_session.c"),
+            str(component / "esp_openclaw_setup_wifi.c"),
             str(component / "esp_openclaw_node_common_device_node_cmd.c"),
             str(component / "esp_openclaw_node_example_json.c"),
             str(cjson_object), "-lm", "-o", str(binary),

@@ -82,6 +82,8 @@ static bool talk_connecting_pending;
 static bool talk_speech_failed_pending;
 static bool operator_ui_pending;
 static _Atomic size_t local_agents_request = SIZE_MAX;
+static _Atomic uint64_t local_devices_request = UINT64_MAX;
+static unsigned published_device_generation;
 static struct {
     bool selected, expired;
     char id[65], name[65], session_key[200];
@@ -372,6 +374,35 @@ static void request_local_agents(bool open, size_t offset)
     wake_talk_teardown();
 }
 
+static void request_local_devices(bool open, unsigned generation)
+{
+    atomic_store(&local_devices_request, ((uint64_t)generation << 1) | (open ? 1u : 0u));
+    wake_talk_teardown();
+}
+
+static void refresh_devices(void)
+{
+    uint64_t request = atomic_exchange(&local_devices_request, UINT64_MAX);
+    if (request == UINT64_MAX) return;
+    room_device_directory_cancel();
+    published_device_generation = (unsigned)(request >> 1);
+    if (request & 1u) (void)room_device_directory_refresh();
+}
+
+static void publish_devices(void)
+{
+    static room_devices_snapshot_t *snapshot;
+    if (!room_ui_wants_devices()) {
+        free(snapshot);
+        snapshot = NULL;
+        return;
+    }
+    if (snapshot == NULL) snapshot = malloc(sizeof(*snapshot));
+    if (snapshot == NULL) { room_ui_devices_failed(published_device_generation); return; }
+    room_device_directory_copy(snapshot);
+    room_ui_store_devices(snapshot, published_device_generation);
+}
+
 static void invalidate_talk_target_locked(void)
 {
     if (talk_target.selected && !talk_target.expired) {
@@ -649,6 +680,7 @@ static void talk_teardown_task(void *arg)
             bool defer_directory = talk_start_in_flight || talk_dialing || talk_closing;
             xSemaphoreGive(state_lock);
             refresh_agents();
+            refresh_devices();
             apply_local_conversation();
             room_agent_directory_poll(defer_directory);
             room_device_directory_poll(defer_directory);
@@ -656,6 +688,7 @@ static void talk_teardown_task(void *arg)
             room_agent_directory_copy(&agents);
             room_ui_store_agents(&agents);
             publish_conversations();
+            publish_devices();
             continue;
         }
 
@@ -2176,6 +2209,7 @@ esp_err_t esp_openclaw_room_node_start(const esp_openclaw_room_node_config_t *co
 
     room_ui_set_talk_action_handler(request_local_talk);
     room_ui_set_agents_action_handler(request_local_agents);
+    room_ui_set_devices_action_handler(request_local_devices);
     room_ui_set_conversation_handler(request_local_conversation);
     room_ui_set_agent_selection_handler(request_local_agent_selection);
     room_ui_init();

@@ -17,6 +17,7 @@
 #include "room_watch_navigation.h"
 #include "room_watch_settings.h"
 #include "room_watch_agents.h"
+#include "room_watch_devices.h"
 #include "room_watch_conversations.h"
 
 static bool watch_navigation_active(void);
@@ -100,6 +101,80 @@ static void (*agent_selection_handler)(const char *id, unsigned revision);
 static int pressed_agent_action = -100;
 static unsigned pressed_agent_revision;
 static room_agents_state_t pressed_agent_state;
+static void (*devices_action_handler)(bool open, unsigned generation);
+static room_devices_snapshot_t *current_devices, *painted_devices;
+static unsigned device_generation;
+static int pressed_device_action = -100;
+static unsigned pressed_device_revision;
+static room_devices_state_t pressed_device_state;
+
+void room_ui_set_devices_action_handler(void (*handler)(bool open, unsigned generation))
+{
+    devices_action_handler = handler;
+}
+
+bool room_ui_wants_devices(void)
+{
+    taskENTER_CRITICAL(&state_mux);
+    bool wanted = current_devices != NULL;
+    taskEXIT_CRITICAL(&state_mux);
+    return wanted;
+}
+
+void room_ui_store_devices(const room_devices_snapshot_t *snapshot, unsigned generation)
+{
+    taskENTER_CRITICAL(&state_mux);
+    bool changed = current_devices != NULL && generation == device_generation &&
+        (current_devices->revision != snapshot->revision || current_devices->state != snapshot->state);
+    if (changed) {
+        *current_devices = *snapshot;
+        pressed_device_action = -100;
+    }
+    taskEXIT_CRITICAL(&state_mux);
+    if (changed) room_ui_refresh();
+}
+
+void room_ui_devices_failed(unsigned generation)
+{
+    taskENTER_CRITICAL(&state_mux);
+    if (current_devices != NULL && generation == device_generation) {
+        current_devices->state = ROOM_DEVICES_ERROR;
+        pressed_device_action = -100;
+    }
+    taskEXIT_CRITICAL(&state_mux);
+    room_ui_refresh();
+}
+
+/* Only the display owner allocates and releases these view buffers. */
+static void close_devices(void)
+{
+    taskENTER_CRITICAL(&state_mux);
+    room_devices_snapshot_t *current = current_devices, *painted = painted_devices;
+    current_devices = painted_devices = NULL;
+    pressed_device_action = -100;
+    unsigned generation = ++device_generation;
+    taskEXIT_CRITICAL(&state_mux);
+    room_watch_devices_render(NULL, true);
+    free(current);
+    free(painted);
+    if (devices_action_handler != NULL) devices_action_handler(false, generation);
+}
+
+static void open_devices(void)
+{
+    close_devices();
+    room_devices_snapshot_t *current = calloc(1, sizeof(*current));
+    room_devices_snapshot_t *painted = calloc(1, sizeof(*painted));
+    if (current == NULL || painted == NULL) { free(current); free(painted); current = painted = NULL; }
+    if (current != NULL) { current->revision = UINT32_MAX; current->state = ROOM_DEVICES_LOADING; }
+    taskENTER_CRITICAL(&state_mux);
+    current_devices = current;
+    painted_devices = painted;
+    unsigned generation = ++device_generation;
+    taskEXIT_CRITICAL(&state_mux);
+    room_watch_devices_reset();
+    if (current != NULL && devices_action_handler != NULL) devices_action_handler(true, generation);
+}
 
 static bool conversations_open;
 static bool conversation_resume_failed;
@@ -298,6 +373,8 @@ static esp_err_t watch_navigation_show_context(room_watch_page_t page, unsigned 
             watch_page == ROOM_WATCH_SETTINGS ? ROOM_WATCH_SETTINGS : ROOM_WATCH_MENU;
     bool leaving_agents = watch_page == ROOM_WATCH_AGENTS && page != ROOM_WATCH_AGENTS;
     bool entering_agents = watch_page != ROOM_WATCH_AGENTS && page == ROOM_WATCH_AGENTS;
+    bool leaving_devices = watch_page == ROOM_WATCH_DEVICES && page != ROOM_WATCH_DEVICES;
+    bool entering_devices = watch_page != ROOM_WATCH_DEVICES && page == ROOM_WATCH_DEVICES;
     bool suspend_reader = leaving_agents && conversations_open;
     bool resume_reader = page == ROOM_WATCH_CONVERSATIONS;
     resume_reader_epoch = resume_reader ? reader_epoch : 0;
@@ -309,6 +386,8 @@ static esp_err_t watch_navigation_show_context(room_watch_page_t page, unsigned 
     pressed_watch_page = -1;
     pressed_talk_action = TALK_CONTROL_NONE;
     taskEXIT_CRITICAL(&state_mux);
+    if (leaving_devices) close_devices();
+    if (entering_devices) open_devices();
     if (entering_agents) { room_watch_agents_reset(); request_agents_page(0); }
     if (suspend_reader || (leaving_agents && resume_reader)) {
         if (suspend_reader) room_watch_conversations_suspend();
@@ -564,6 +643,41 @@ static void watch_agents_clicked(lv_event_t *event)
     if (result == ROOM_AGENT_LEAVE) (void)watch_navigation_show(ROOM_WATCH_MENU);
     else {
         if (result == ROOM_AGENT_LOAD) request_agents_page(offset);
+        room_ui_refresh();
+    }
+}
+
+static void watch_devices_clicked(lv_event_t *event)
+{
+    lv_event_code_t code = lv_event_get_code(event);
+    if (code != LV_EVENT_PRESSED && code != LV_EVENT_PRESS_LOST && code != LV_EVENT_SHORT_CLICKED) return;
+    int action = (int)(intptr_t)lv_event_get_user_data(event);
+    bool wake = code == LV_EVENT_PRESSED && room_board_display_is_dark();
+    taskENTER_CRITICAL(&state_mux);
+    bool current = watch_page == ROOM_WATCH_DEVICES && !diagnostics_open;
+    if (current_devices != NULL && painted_devices != NULL)
+        current = current && current_devices->revision == painted_devices->revision &&
+            current_devices->state == painted_devices->state;
+    unsigned revision = current_devices != NULL ? current_devices->revision : 0;
+    room_devices_state_t state = current_devices != NULL ? current_devices->state : ROOM_DEVICES_ERROR;
+    bool activate = false;
+    if (code == LV_EVENT_PRESSED) {
+        pressed_device_action = current && !wake ? action : -100;
+        pressed_device_revision = revision;
+        pressed_device_state = state;
+    } else {
+        activate = code == LV_EVENT_SHORT_CLICKED && current && pressed_device_action == action &&
+            pressed_device_revision == revision && pressed_device_state == state;
+        pressed_device_action = -100;
+    }
+    taskEXIT_CRITICAL(&state_mux);
+    if (wake) { room_ui_show_face_hint(10000); return; }
+    if (!activate) return;
+    room_device_action_t result = room_watch_devices_activate(action);
+    if (result == ROOM_DEVICE_LEAVE) (void)watch_navigation_show(ROOM_WATCH_MENU);
+    else if (result == ROOM_DEVICE_OPEN_LOCAL) (void)watch_navigation_show(ROOM_WATCH_LOCAL_DEVICE);
+    else {
+        if (result == ROOM_DEVICE_RELOAD) open_devices();
         room_ui_refresh();
     }
 }
@@ -884,6 +998,7 @@ void room_ui_init(void)
         room_watch_navigation_create(lv_layer_top(), watch_navigation_clicked);
         room_watch_settings_create(lv_layer_top(), watch_navigation_clicked);
         room_watch_agents_create(lv_layer_top(), watch_agents_clicked);
+        room_watch_devices_create(lv_layer_top(), watch_devices_clicked);
         room_watch_conversations_create(lv_layer_top(), watch_conversations_clicked);
     }
     bool board_has_animated_face = board != NULL && board->display.animated_face;
@@ -1041,8 +1156,12 @@ static bool room_ui_render_locked(void)
          current_conversations->state != painted_conversations->state ||
          current_conversations->preview_state != painted_conversations->preview_state);
     if (chats_changed) *painted_conversations = *current_conversations;
+    bool devices_changed = current_devices != NULL && painted_devices != NULL &&
+        (current_devices->revision != painted_devices->revision || current_devices->state != painted_devices->state);
+    if (devices_changed) *painted_devices = *current_devices;
     taskEXIT_CRITICAL(&state_mux);
-    if ((agents_changed || chats_changed) && page == ROOM_WATCH_AGENTS) {
+    if (((agents_changed || chats_changed) && page == ROOM_WATCH_AGENTS) ||
+        (devices_changed && page == ROOM_WATCH_DEVICES)) {
         for (lv_indev_t *input = lv_indev_get_next(NULL); input != NULL; input = lv_indev_get_next(input)) {
             if (lv_indev_get_display(input) == lv_obj_get_display(status_label) &&
                 lv_indev_get_state(input) == LV_INDEV_STATE_PRESSED) {
@@ -1062,7 +1181,9 @@ static bool room_ui_render_locked(void)
         if (pressed_reader_epoch != painted_reader_epoch) pressed_reader_epoch = 0;
         taskEXIT_CRITICAL(&state_mux);
         bool settings = page == ROOM_WATCH_SETTINGS || page == ROOM_WATCH_LOCAL_DEVICE || page == ROOM_WATCH_DISPLAY;
-        room_watch_navigation_render(page, &facts, !navigation || overlay || page == ROOM_WATCH_AGENTS || settings, resume_failed, parent);
+        room_watch_navigation_render(page, &facts, !navigation || overlay || page == ROOM_WATCH_AGENTS ||
+            page == ROOM_WATCH_DEVICES || settings, resume_failed, parent);
+        room_watch_devices_render(painted_devices, !navigation || overlay || page != ROOM_WATCH_DEVICES);
         room_watch_settings_render(page, parent, brightness, brightness_failed, camera_minimum,
             !navigation || overlay || !settings);
         room_watch_agents_render(&painted_agents, !navigation || overlay || page != ROOM_WATCH_AGENTS || chats,
@@ -1390,6 +1511,7 @@ void room_ui_set_diagnostics_open(bool open)
     diagnostics_open = open;
     if (open) {
         pressed_talk_action = TALK_CONTROL_NONE;
+        pressed_device_action = -100;
         pressed_watch_page = -1;
         pressed_reader_epoch = 0;
         painted_reader_epoch = 0;

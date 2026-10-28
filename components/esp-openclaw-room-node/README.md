@@ -299,8 +299,16 @@ The snapshot holds at most 16 devices from a 32 KiB response. An oversized list
 is rejected rather than truncated; names and model labels are bounded to 64
 bytes without splitting UTF-8 characters. Closing the view or replacing the
 operator connection invalidates pending results. A timeout retains its callback
-until completion without disconnecting the shared Talk socket. The Watch
-browser will use this owner in a separate UI change.
+until completion without disconnecting the shared Talk socket.
+
 Each refresh has its own 15-second deadline, including when it waits behind
 an invalidated request. Expiry reports a timeout and requires an explicit
 retry; the old callback cannot keep a reopened view loading indefinitely.
+
+On the Watch, **Menu → Devices** keeps **This Watch** available offline and
+shows three Gateway devices per page. Tap a remote device for its model,
+connection, and pairing facts; missing facts say **Unknown**. The top Refresh
+action reloads the inventory. Back returns to the same page. A reconnect or
+replacement result cancels a held tap, and leaving Devices releases its
+inventory. Browsing never changes the Talk recipient or sends a device
+command. Remote controls are not part of this read-only view.

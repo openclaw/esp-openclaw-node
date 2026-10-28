@@ -1706,6 +1706,32 @@ static void devices_ready(void)
     CHECK(devices_console_command(1, args) == 0, "USB reader consumes the same directory snapshot");
 }
 
+static void devices_ui(void)
+{
+    host.devices_wanted = true;
+    request_local_devices(true, 10);
+    CHECK(host.device_requests == 0, "display callback queues without entering the Gateway");
+    host_run_task("talk_teardown");
+    CHECK(host.device_requests == 1 && host.devices_state == ROOM_DEVICES_LOADING &&
+        host.devices_generation == 10, "supervisor publishes loading to the opening view");
+    request_local_devices(false, 11);
+    request_local_devices(true, 12);
+    host_run_task("talk_teardown");
+    host_reply_devices(true, device_list);
+    host_run_task("talk_teardown");
+    CHECK(host.device_requests == 2 && host.devices_state == ROOM_DEVICES_LOADING &&
+        host.devices_generation == 12, "coalesced reopen discards the previous view's response");
+    host_reply_devices(true, device_list);
+    host_run_task("talk_teardown");
+    CHECK(host.devices_state == ROOM_DEVICES_READY && host.devices_generation == 12,
+        "fresh result reaches the current view generation");
+    request_local_devices(false, 13);
+    host.devices_wanted = false;
+    host_run_task("talk_teardown");
+    CHECK(devices_snapshot().state == ROOM_DEVICES_IDLE && host.opens == 0,
+        "leaving the view releases inventory without starting Talk");
+}
+
 static void devices_reconnect(void)
 {
     room_device_directory_refresh();
@@ -1815,9 +1841,8 @@ static void devices_errors(void)
 }
 
 static const struct { const char *name; void (*run)(void); } cases[] = {
-    {"devices-ready", devices_ready}, {"devices-reconnect", devices_reconnect},
-    {"devices-timeout", devices_timeout}, {"devices-reopen-timeout", devices_reopen_timeout},
-    {"devices-cancel", devices_cancel}, {"devices-errors", devices_errors},
+    {"devices-ready", devices_ready}, {"devices-ui", devices_ui}, {"devices-reconnect", devices_reconnect},
+    {"devices-timeout", devices_timeout}, {"devices-reopen-timeout", devices_reopen_timeout}, {"devices-cancel", devices_cancel}, {"devices-errors", devices_errors},
     {"conversations-resume-retry", conversations_resume_retry},
     {"conversations-resume-owner-loss", conversations_resume_owner_loss},
     {"conversations-suspend", conversations_suspend},

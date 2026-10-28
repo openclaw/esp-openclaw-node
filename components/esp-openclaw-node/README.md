@@ -117,6 +117,7 @@ successful `hello-ok`
 - `esp_openclaw_node_connect_lease_acquire()` / `esp_openclaw_node_connect_lease_release()`
 - `esp_openclaw_node_request_connect_with_lease()` / `esp_openclaw_node_request_disconnect_with_lease()`
 - `esp_openclaw_node_connect_begin()` / `esp_openclaw_node_connect_snapshot()`
+- `esp_openclaw_node_connect_cancel()`
 - `esp_openclaw_node_gateway_request()`
 - `esp_openclaw_node_gateway_request_on_connection()`
 
@@ -162,6 +163,21 @@ handoff token store and remains true if a later stage fails. False does not
 prove that a failed storage write had no effect. The snapshot contains no
 credentials, Gateway messages, or unbounded strings. Release still requires
 settled control, and a failed result does not itself end the setup lease.
+
+Use `esp_openclaw_node_connect_cancel()` for an exact tracked request, including
+one still waiting in the work queue. Cancellation does not need a free queue
+slot. The snapshot sets `cancel_requested` but remains queued or connecting
+until the node worker discards its credentials or stops its transport. During
+that interval, replacement requests and disconnect requests are rejected.
+Repeated cancellation is harmless; old IDs, stale leases and already-terminal
+attempts are rejected.
+
+Cancelling before the worker starts the request preserves the previous link.
+Once replacement begins, cancellation cannot restore that link. The worker
+checks cancellation before each credential write; accepted cancellation prevents
+later writes, while an earlier completed write remains visible through
+`credentials_saved`. A blocked startup or cleanup must return before cancellation
+can finish. Wait for `FAILED` with reason `CANCELED` before releasing the lease.
 
 ### Inspection
 

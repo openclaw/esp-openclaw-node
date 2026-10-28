@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Cancel exact queued or active Gateway setup attempts independently of queue capacity. Keep cancellation pending until credentials or transport drain, and fence later token writes while preserving earlier saved effects.
+
 - Add lease-bound Gateway connection attempts with exact request IDs, bounded outcome snapshots, and saved-credential effects. Old connection events cannot complete a queued replacement.
 
 - Add an opt-in connection-control lease for setup owners, excluding competing console and saved-session requests without disconnecting the current Gateway. Revalidate ownership after credential loading and keep replacement work reserved through old-session callbacks.

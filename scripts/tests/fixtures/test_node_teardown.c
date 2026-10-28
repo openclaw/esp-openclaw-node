@@ -10,15 +10,18 @@ typedef int esp_openclaw_node_connect_failure_reason_t;
 typedef int esp_openclaw_node_disconnected_reason_t;
 typedef enum {
     ESP_OPENCLAW_NODE_INTERNAL_IDLE,
+    ESP_OPENCLAW_NODE_INTERNAL_CONNECTING,
     ESP_OPENCLAW_NODE_INTERNAL_READY,
     ESP_OPENCLAW_NODE_INTERNAL_DESTROYING,
     ESP_OPENCLAW_NODE_INTERNAL_CLOSED,
 } esp_openclaw_node_internal_state_t;
-enum { ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_CONNECTING, ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_FAILED };
+enum { ESP_OK, ESP_OPENCLAW_NODE_CONNECT_FAILURE_CANCELED,
+       ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_QUEUED, ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_CONNECTING,
+       ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_FAILED };
 typedef struct {
     esp_openclaw_node_internal_state_t state;
     uint64_t active_connect_attempt_id;
-    struct { uint64_t id; int state, failure_reason; esp_err_t local_err; } connect_attempt;
+    struct { uint64_t id; int state, failure_reason; esp_err_t local_err; bool cancel_requested; } connect_attempt;
     struct { const char *role; } config;
 } test_node_t;
 typedef test_node_t *esp_openclaw_node_handle_t;
@@ -91,6 +94,7 @@ static const char *esp_err_to_name(esp_err_t error) { (void)error; return "test"
 #define ESP_OPENCLAW_NODE_TAG "test"
 #define ESP_LOGW(tag, ...) do { (void)(tag); printf(__VA_ARGS__); } while (0)
 
+#include "cancel_predicates.inc"
 #include "completion_under_test.inc"
 
 static void *complete(void *argument)

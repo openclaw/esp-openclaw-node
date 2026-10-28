@@ -560,6 +560,50 @@ static esp_err_t build_connect_response_session_update(
     return ESP_OK;
 }
 
+static esp_err_t persist_handoff_device_token(
+    esp_openclaw_node_handle_t node,
+    const char *role,
+    const char *token)
+{
+    esp_openclaw_node_persisted_session_t stored = {0};
+    ESP_RETURN_ON_ERROR(
+        esp_openclaw_node_persisted_session_load(role, &stored),
+        ESP_OPENCLAW_NODE_TAG,
+        "load handed-off role session");
+    esp_openclaw_node_persisted_session_t update = {
+        .version = 1,
+        .gateway_uri = esp_openclaw_node_duplicate_string(
+            esp_openclaw_node_trimmed_or_null(node->transport_gateway_uri)),
+        .device_token = esp_openclaw_node_duplicate_string(token),
+    };
+    if (update.gateway_uri == NULL || update.device_token == NULL) {
+        esp_openclaw_node_persisted_session_free(&stored);
+        esp_openclaw_node_persisted_session_free(&update);
+        return ESP_ERR_NO_MEM;
+    }
+    /* Loading the sibling role can block. Revalidate before committing, and
+     * serialize this write with cancellation just like the current-role store. */
+    esp_openclaw_node_lock_state(node);
+    bool authorized = node->state == ESP_OPENCLAW_NODE_INTERNAL_CONNECTING &&
+        node->pending_connect_id[0] != '\0' &&
+        !esp_openclaw_node_active_connect_cancelled_locked(node);
+    esp_err_t err = authorized
+        ? esp_openclaw_node_persisted_session_store(role, &stored, &update)
+        : ESP_ERR_INVALID_STATE;
+    if (err == ESP_OK) {
+        esp_openclaw_node_note_connect_credentials_saved_locked(node);
+    }
+    esp_openclaw_node_unlock_state(node);
+    ESP_LOGI(
+        ESP_OPENCLAW_NODE_TAG,
+        "connect_diag stage=handoff_store role=%s target=%s store_attempted=%d local_err=%d(%s)",
+        connect_diagnostic_role(node), strcmp(role, "operator") == 0 ? "operator" : "node",
+        authorized, (int)err, esp_err_to_name(err));
+    esp_openclaw_node_persisted_session_free(&stored);
+    esp_openclaw_node_persisted_session_free(&update);
+    return err;
+}
+
 static esp_err_t persist_handoff_device_tokens(
     esp_openclaw_node_handle_t node,
     cJSON *auth)
@@ -601,40 +645,10 @@ static esp_err_t persist_handoff_device_tokens(
             continue;
         }
 
-        esp_openclaw_node_persisted_session_t stored = {0};
         ESP_RETURN_ON_ERROR(
-            esp_openclaw_node_persisted_session_load(role_text, &stored),
+            persist_handoff_device_token(node, role_text, token_text),
             ESP_OPENCLAW_NODE_TAG,
-            "load handed-off role session");
-        esp_openclaw_node_persisted_session_t update = {
-            .version = 1,
-            .gateway_uri = esp_openclaw_node_duplicate_string(
-                esp_openclaw_node_trimmed_or_null(node->transport_gateway_uri)),
-            .device_token = esp_openclaw_node_duplicate_string(token_text),
-        };
-        if (update.gateway_uri == NULL || update.device_token == NULL) {
-            esp_openclaw_node_persisted_session_free(&stored);
-            esp_openclaw_node_persisted_session_free(&update);
-            return ESP_ERR_NO_MEM;
-        }
-        esp_err_t err = esp_openclaw_node_persisted_session_store(
-            role_text,
-            &stored,
-            &update);
-        ESP_LOGI(
-            ESP_OPENCLAW_NODE_TAG,
-            "connect_diag stage=handoff_store role=%s target=%s store_attempted=1 local_err=%d(%s)",
-            connect_diagnostic_role(node),
-            strcmp(role_text, "operator") == 0 ? "operator" : "node",
-            (int)err, esp_err_to_name(err));
-        esp_openclaw_node_persisted_session_free(&stored);
-        esp_openclaw_node_persisted_session_free(&update);
-        if (err != ESP_OK) {
-            return err;
-        }
-        esp_openclaw_node_lock_state(node);
-        esp_openclaw_node_note_connect_credentials_saved_locked(node);
-        esp_openclaw_node_unlock_state(node);
+            "store handed-off role session");
     }
     if (!operator_entry_present) {
         ESP_LOGI(
@@ -659,7 +673,8 @@ static connect_response_finalize_result_t finalize_connect_response_success(
     esp_openclaw_node_lock_state(node);
     result.state = node->state;
     if (node->state != ESP_OPENCLAW_NODE_INTERNAL_CONNECTING ||
-        node->pending_connect_id[0] == '\0') {
+        node->pending_connect_id[0] == '\0' ||
+        esp_openclaw_node_active_connect_cancelled_locked(node)) {
         esp_openclaw_node_unlock_state(node);
         ESP_LOGI(
             ESP_OPENCLAW_NODE_TAG,

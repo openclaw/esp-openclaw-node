@@ -25,6 +25,8 @@ enum {
     ESP_OPENCLAW_NODE_DISCONNECTED_REASON_REQUESTED,
     ESP_OPENCLAW_NODE_WORK_MSG_WS_FATAL,
     ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_CONNECTING,
+    ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_QUEUED,
+    ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_FAILED,
 };
 typedef int esp_openclaw_node_internal_state_t;
 typedef struct { int kind; const char *gateway_uri; } source_t;
@@ -47,7 +49,7 @@ typedef struct {
 struct node {
     int state;
     uint64_t active_connect_attempt_id;
-    struct { uint64_t id; int state; } connect_attempt;
+    struct { uint64_t id; int state, failure_reason; esp_err_t local_err; bool cancel_requested; } connect_attempt;
     int64_t connect_started_ms;
     source_t active_connect_source;
     struct { const char *gateway_uri; } persisted_session;
@@ -93,6 +95,7 @@ static void websocket_event_handler(void *ctx, int base, int32_t event, void *da
 static void esp_openclaw_node_transport_start_begin(const char *role) { (void)role; }
 static void esp_openclaw_node_transport_start_end(const char *role, esp_err_t err)
 { (void)role; assert(err == ESP_OK); }
+#include "cancel_predicates.inc"
 #include "production_0.inc"
 static void esp_openclaw_node_cleanup_transport_instance(esp_openclaw_node_handle_t node, bool stop)
 {
@@ -130,6 +133,9 @@ static void *client_init(const esp_websocket_client_config_t *config)
 static int register_events(void *ws, int event, handler_t callback, void *ctx)
 { assert(ws == &fake_client && event == WEBSOCKET_EVENT_ANY && callback && ctx); return ESP_OK; }
 static int client_start(void *ws) { assert(ws == &fake_client); starts++; return ESP_OK; }
+static void esp_openclaw_node_clear_connect_source_struct(source_t *source) { memset(source, 0, sizeof(*source)); }
+static void esp_openclaw_node_emit_connect_failed(esp_openclaw_node_handle_t node, int reason, esp_err_t err, const char *detail)
+{ (void)node; (void)reason; (void)err; (void)detail; assert(false); }
 #include "production_1.inc"
 #include "production_2.inc"
 #include "production_3.inc"

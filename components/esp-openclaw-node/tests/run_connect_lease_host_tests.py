@@ -29,6 +29,9 @@ def main():
         (work / "completion.inc").write_text(section(
             runtime, "static bool teardown_in_progress(",
             "void esp_openclaw_node_fail_if_connect_timed_out("))
+        (work / "handoff.inc").write_text(section(
+            protocol, "static esp_err_t persist_handoff_device_token(",
+            "static esp_err_t persist_handoff_device_tokens("))
         (work / "finalize.inc").write_text(section(
             protocol, "static connect_response_finalize_result_t finalize_connect_response_success(",
             "static void complete_connect_response_outcome("))
@@ -38,7 +41,7 @@ def main():
             source[source.index("esp_err_t esp_openclaw_node_reserve_connect_request_locked("):],
             section(runtime, "static void rollback_pending_control_locked(",
                     "esp_err_t esp_openclaw_node_submit_gateway_request("),
-            section(runtime, "static void handle_request_connect(",
+            section(runtime, "static bool cancel_connect_request_before_start(",
                     "static void handle_request_gateway("),
         ]))
         binary = work / "connect-lease-test"

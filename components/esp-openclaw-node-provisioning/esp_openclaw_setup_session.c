@@ -110,13 +110,21 @@ esp_openclaw_setup_result_t esp_openclaw_setup_confirm(esp_openclaw_setup_sessio
     return ESP_OPENCLAW_SETUP_OK;
 }
 
-static esp_openclaw_setup_result_t authorize_peer(esp_openclaw_setup_session_t *session,
-                                                 uint64_t generation, uint64_t peer)
+esp_openclaw_setup_result_t esp_openclaw_setup_authorize_peer(esp_openclaw_setup_session_t *session,
+                                                             uint64_t generation, uint64_t peer)
 {
     esp_openclaw_setup_poll(session);
     if (generation != session->generation || session->phase == ESP_OPENCLAW_SETUP_CLOSED ||
         session->phase == ESP_OPENCLAW_SETUP_CLOSING) return ESP_OPENCLAW_SETUP_STALE;
     if (peer == 0 || peer != session->peer) return ESP_OPENCLAW_SETUP_UNAUTHORIZED;
+    return ESP_OPENCLAW_SETUP_OK;
+}
+
+static esp_openclaw_setup_result_t authorize_peer(esp_openclaw_setup_session_t *session,
+                                                 uint64_t generation, uint64_t peer)
+{
+    esp_openclaw_setup_result_t result = esp_openclaw_setup_authorize_peer(session, generation, peer);
+    if (result != ESP_OPENCLAW_SETUP_OK) return result;
     if (session->phase != ESP_OPENCLAW_SETUP_READY && session->phase != ESP_OPENCLAW_SETUP_BUSY)
         return ESP_OPENCLAW_SETUP_NEEDS_CONFIRMATION;
     return ESP_OPENCLAW_SETUP_OK;

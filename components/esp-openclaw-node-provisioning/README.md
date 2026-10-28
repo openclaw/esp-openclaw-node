@@ -6,6 +6,12 @@ the canonical device/Wi-Fi status handlers. Network hardware must be prepared
 by the board before `esp_openclaw_node_wifi_start()` is called; this is what
 allows the same station helper to run over native Wi-Fi or `esp_wifi_remote`.
 
+Wi-Fi credential changes, connect/disconnect commands, and scans admit one
+explicit operation at a time. A competing call returns `ESP_ERR_WIFI_STATE`
+before changing station configuration or reconnect policy. Status remains
+readable while an operation runs. This serializes existing command calls;
+exclusive phone-setup ownership is a separate integration step.
+
 Use `wifi scan` in the USB console before setting credentials to list up to 16
 nearby networks, strongest first, with channel, RSSI, and the ESP-IDF auth mode.
 It leaves credentials unchanged and refuses to scan while connected or

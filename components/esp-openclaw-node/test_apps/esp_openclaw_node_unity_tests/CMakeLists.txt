@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-set(EXTRA_COMPONENT_DIRS ../../)
+set(EXTRA_COMPONENT_DIRS ../../ ../../../esp-openclaw-chat)
 set(COMPONENTS main)
 
 list(APPEND SDKCONFIG_DEFAULTS

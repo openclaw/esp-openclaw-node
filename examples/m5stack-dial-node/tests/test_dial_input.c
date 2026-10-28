@@ -224,6 +224,24 @@ int main(int argc, char **argv)
     lv_obj_set_scrollable(screen, false);
     lv_obj_set_clickable(screen, true);
     dial_home_create(&home, screen);
+    const char *moods[] = {"neutral", "happy", "excited", "thinking", "sleepy", "sad"};
+    const uint32_t phases[] = {0, 200, 1900, 3700};
+    for (unsigned mood = 0; mood < sizeof(moods) / sizeof(moods[0]); ++mood) {
+        for (unsigned phase = 0; phase < sizeof(phases) / sizeof(phases[0]); ++phase) {
+            dial_home_animate(&home, moods[mood], phases[phase]);
+            lv_obj_update_layout(screen);
+            for (unsigned i = 0; i < lv_obj_get_child_count(home.root); ++i)
+                check_home_bounds(lv_obj_get_child(home.root, i));
+        }
+        char name[32];
+        snprintf(name, sizeof(name), "home-mood-%s", moods[mood]);
+        snapshot(name);
+    }
+    lv_obj_set_hidden(home.root, true);
+    assert(!lv_obj_is_visible(home.eyes[0]) && !lv_obj_is_visible(home.eyes[1]) && !lv_obj_is_visible(home.mouth));
+    lv_obj_set_hidden(home.root, false);
+    assert(lv_obj_is_visible(home.eyes[0]) && lv_obj_is_visible(home.eyes[1]) && lv_obj_is_visible(home.mouth));
+    dial_home_animate(&home, "neutral", 200);
     dial_home_context_t home_context = {0};
     dial_home_render(&home, true, true, true, NULL, &home_context);
     lv_obj_update_layout(screen);

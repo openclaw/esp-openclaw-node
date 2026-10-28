@@ -301,3 +301,6 @@ bytes without splitting UTF-8 characters. Closing the view or replacing the
 operator connection invalidates pending results. A timeout retains its callback
 until completion without disconnecting the shared Talk socket. The Watch
 browser will use this owner in a separate UI change.
+Each refresh has its own 15-second deadline, including when it waits behind
+an invalidated request. Expiry reports a timeout and requires an explicit
+retry; the old callback cannot keep a reopened view loading indefinitely.

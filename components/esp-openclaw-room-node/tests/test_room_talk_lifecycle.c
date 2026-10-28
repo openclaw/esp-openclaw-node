@@ -1744,6 +1744,35 @@ static void devices_timeout(void)
     CHECK(devices_snapshot().state == ROOM_DEVICES_READY && talk_active, "fresh device result preserves the call");
 }
 
+static void devices_reopen_timeout(void)
+{
+    connect_call();
+    room_device_directory_refresh();
+    host_run_task("talk_teardown");
+    host.now_us += 10000000;
+    room_device_directory_cancel();
+    room_device_directory_refresh();
+    host_run_task("talk_teardown");
+    host.now_us += 6000000;
+    host_run_task("talk_teardown");
+    CHECK(devices_snapshot().state == ROOM_DEVICES_LOADING, "reopened view has its own deadline");
+    host.now_us += 10000000;
+    host_fire_devices_timer();
+    host_run_task("talk_teardown");
+    CHECK(devices_snapshot().state == ROOM_DEVICES_TIMEOUT && host.device_requests == 1 && talk_active,
+        "reopened view times out behind a stale callback without duplicating requests or ending Talk");
+    host_reply_devices(true, device_list);
+    host_run_task("talk_teardown");
+    CHECK(devices_snapshot().state == ROOM_DEVICES_TIMEOUT && host.device_requests == 1,
+        "late callback cannot start or populate the expired view");
+    room_device_directory_refresh();
+    host_run_task("talk_teardown");
+    host_reply_devices(true, device_list);
+    host_run_task("talk_teardown");
+    CHECK(devices_snapshot().state == ROOM_DEVICES_READY && host.device_requests == 2 && talk_active,
+        "explicit retry recovers after the stale callback drains");
+}
+
 static void devices_cancel(void)
 {
     room_device_directory_refresh();
@@ -1787,7 +1816,8 @@ static void devices_errors(void)
 
 static const struct { const char *name; void (*run)(void); } cases[] = {
     {"devices-ready", devices_ready}, {"devices-reconnect", devices_reconnect},
-    {"devices-timeout", devices_timeout}, {"devices-cancel", devices_cancel}, {"devices-errors", devices_errors},
+    {"devices-timeout", devices_timeout}, {"devices-reopen-timeout", devices_reopen_timeout},
+    {"devices-cancel", devices_cancel}, {"devices-errors", devices_errors},
     {"conversations-resume-retry", conversations_resume_retry},
     {"conversations-resume-owner-loss", conversations_resume_owner_loss},
     {"conversations-suspend", conversations_suspend},

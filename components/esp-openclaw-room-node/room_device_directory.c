@@ -26,6 +26,7 @@ static struct {
     uint64_t incarnation;
     uint32_t connection;
     unsigned revision;
+    int64_t deadline;
     bool ready, interested, pending;
     room_devices_state_t state;
     room_devices_snapshot_t *page;
@@ -55,6 +56,16 @@ static void invalidate(void)
     directory.pending = directory.interested;
     directory.state = !directory.interested ? ROOM_DEVICES_IDLE :
         directory.ready ? ROOM_DEVICES_LOADING : ROOM_DEVICES_OFFLINE;
+    esp_timer_stop(directory.timer);
+    if (directory.state == ROOM_DEVICES_LOADING) {
+        /* The view owns its deadline even while an invalidated callback still
+         * occupies the single transport slot. */
+        directory.deadline = esp_timer_get_time() + DEVICES_TIMEOUT_US;
+        if (esp_timer_start_once(directory.timer, DEVICES_TIMEOUT_US) != ESP_OK) {
+            directory.state = ROOM_DEVICES_ERROR;
+            directory.pending = false;
+        }
+    }
 }
 
 void room_device_directory_set_owner_locked(esp_openclaw_node_handle_t client,
@@ -180,10 +191,10 @@ void room_device_directory_poll(bool defer_request)
     if (done != NULL) {
         room_devices_snapshot_t *page = done->json != NULL ? calloc(1, sizeof(*page)) : NULL;
         if (page != NULL) done->state = parse(done->json, page);
-        esp_timer_stop(directory.timer);
         xSemaphoreTake(directory.lock, portMAX_DELAY);
         directory.inflight = NULL;
         if (current(done)) {
+            esp_timer_stop(directory.timer);
             directory.state = esp_timer_get_time() >= done->deadline ? ROOM_DEVICES_TIMEOUT : done->state;
             if (directory.state == ROOM_DEVICES_READY || directory.state == ROOM_DEVICES_EMPTY) {
                 directory.page = page;
@@ -196,9 +207,10 @@ void room_device_directory_poll(bool defer_request)
         free(done);
     }
     xSemaphoreTake(directory.lock, portMAX_DELAY);
-    if (directory.inflight != NULL && current(directory.inflight) &&
-        esp_timer_get_time() >= directory.inflight->deadline) {
+    if (directory.state == ROOM_DEVICES_LOADING && directory.ready && directory.interested &&
+        esp_timer_get_time() >= directory.deadline) {
         directory.state = ROOM_DEVICES_TIMEOUT;
+        directory.pending = false;
         ++directory.revision;
         /* Keep the callback context until completion; the socket also owns Talk. */
     }
@@ -215,11 +227,10 @@ void room_device_directory_poll(bool defer_request)
     }
     *request = (device_request_t){.client = directory.client, .incarnation = directory.incarnation,
         .connection = directory.connection, .revision = directory.revision,
-        .deadline = esp_timer_get_time() + DEVICES_TIMEOUT_US, .state = ROOM_DEVICES_ERROR};
+        .deadline = directory.deadline, .state = ROOM_DEVICES_ERROR};
     directory.inflight = request;
     xSemaphoreGive(directory.lock);
-    esp_err_t err = esp_timer_start_once(directory.timer, DEVICES_TIMEOUT_US);
-    if (err == ESP_OK) err = esp_openclaw_node_gateway_request_on_connection(request->client,
+    esp_err_t err = esp_openclaw_node_gateway_request_on_connection(request->client,
         request->connection, "node.list", "{}", response, request);
     if (err != ESP_OK) {
         atomic_store(&completed, request);

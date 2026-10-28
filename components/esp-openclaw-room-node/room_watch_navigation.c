@@ -179,10 +179,14 @@ void room_watch_navigation_render(room_watch_page_t page, const room_ui_facts_t 
         if (connection) lv_label_set_text_fmt(connection_status[i], "%s: %s", names[i], states[i]);
     }
     int row_height = openclaw_density_row_height(false);
+    const lv_font_t *font = openclaw_reading_font();
+    lv_obj_set_style_text_font(back_label, font, 0);
+    lv_obj_set_y(back_label, (44 - font->line_height) / 2);
     for (unsigned i = 0; i < MENU_COUNT; ++i) {
         lv_obj_set_y(rows[i], (int)i * (row_height + openclaw_density_row_gap()));
         lv_obj_set_height(rows[i], row_height);
-        lv_obj_set_y(values[i], (row_height - 16) / 2);
+        lv_obj_set_style_text_font(values[i], font, 0);
+        lv_obj_set_y(values[i], (row_height - font->line_height) / 2);
     }
     if (!lv_obj_is_hidden(menu_list)) {
         lv_obj_update_layout(menu_list);

@@ -119,13 +119,11 @@ void room_watch_settings_render(room_watch_page_t page, room_watch_page_t parent
         lv_obj_set_hidden(rows[i], display || brightness_page || reading || density || permissions);
         lv_obj_set_pos(rows[i], 0, (int)i * row_step);
         lv_obj_set_height(rows[i], row_height);
-        lv_obj_set_y(lv_obj_get_child(rows[i], 0), (row_height - 16) / 2);
     }
     for (unsigned i = 0; i < 3; ++i) {
         lv_obj_set_hidden(display_rows[i], !display);
         lv_obj_set_pos(display_rows[i], 0, (int)i * row_step);
         lv_obj_set_height(display_rows[i], row_height);
-        lv_obj_set_y(lv_obj_get_child(display_rows[i], 0), (row_height - 16) / 2);
     }
     lv_obj_set_hidden(messaging_status, !permissions);
     lv_obj_set_hidden(messaging_detail, !permissions);
@@ -171,8 +169,6 @@ void room_watch_settings_render(room_watch_page_t page, room_watch_page_t parent
         lv_obj_set_hidden(density_rows[i], !density);
         lv_obj_set_height(reading_rows[i], row_height);
         lv_obj_set_height(density_rows[i], row_height);
-        lv_obj_set_y(lv_obj_get_child(reading_rows[i], 0), (row_height - 16) / 2);
-        lv_obj_set_y(lv_obj_get_child(density_rows[i], 0), (row_height - 16) / 2);
     }
     lv_obj_set_y(detail, reading || density ? 320 : 206);
     if (density) {
@@ -186,7 +182,7 @@ void room_watch_settings_render(room_watch_page_t page, room_watch_page_t parent
     if (reading) {
         lv_obj_set_style_text_font(level, openclaw_reading_font(), 0);
         lv_label_set_text_static(level, "Hello from your assistant.");
-        lv_label_set_text_static(detail, "Reading views / until restart");
+        lv_label_set_text_static(detail, "Menus and reading / until restart");
         bool large = openclaw_reading_size() == OPENCLAW_READING_LARGE;
         lv_label_set_text_static(lv_obj_get_child(reading_rows[0], 0), large ? "Standard" : LV_SYMBOL_OK "  Standard");
         lv_label_set_text_static(lv_obj_get_child(reading_rows[1], 0), large ? LV_SYMBOL_OK "  Larger" : "Larger");
@@ -200,6 +196,15 @@ void room_watch_settings_render(room_watch_page_t page, room_watch_page_t parent
         lv_label_set_text_fmt(level, "%d%%", brightness);
         lv_label_set_text_static(detail, failed ? "Couldn't change. Try again." :
             camera_minimum ? "Camera needs at least 40%" : "Awake brightness / until restart");
+    }
+    lv_obj_t *buttons[] = {back, rows[0], rows[1], rows[2], rows[3],
+        display_rows[0], display_rows[1], display_rows[2], reading_rows[0], reading_rows[1],
+        density_rows[0], density_rows[1], adjust[0], adjust[1], messaging_action};
+    const lv_font_t *font = openclaw_reading_font();
+    for (unsigned i = 0; i < sizeof(buttons) / sizeof(buttons[0]); ++i) {
+        lv_obj_t *text = lv_obj_get_child(buttons[i], 0);
+        lv_obj_set_style_text_font(text, font, 0);
+        lv_obj_set_y(text, (lv_obj_get_height(buttons[i]) - font->line_height) / 2);
     }
     if (!lv_obj_is_hidden(list)) {
         lv_obj_update_layout(list);

@@ -286,3 +286,21 @@ not prevent read-only browsing. Refreshing the roster, leaving the view, or
 replacing the operator connection invalidates pending results. A 15-second
 read timeout reports a visible state but leaves the shared Talk/Canvas
 connection intact; another read waits for the outstanding callback to finish.
+
+### Device inventory
+
+The USB commands `devices refresh`, `devices`, and `devices close` read the
+Gateway's authorized `node.list` inventory through the existing operator read
+connection. Discovery does not select an agent, start Talk, invoke a command,
+or request additional scopes. Missing pairing and connection facts remain
+unknown rather than implying approval or availability.
+
+The snapshot holds at most 16 devices from a 32 KiB response. An oversized list
+is rejected rather than truncated; names and model labels are bounded to 64
+bytes without splitting UTF-8 characters. Closing the view or replacing the
+operator connection invalidates pending results. A timeout retains its callback
+until completion without disconnecting the shared Talk socket. The Watch
+browser will use this owner in a separate UI change.
+Each refresh has its own 15-second deadline, including when it waits behind
+an invalidated request. Expiry reports a timeout and requires an explicit
+retry; the old callback cannot keep a reopened view loading indefinitely.

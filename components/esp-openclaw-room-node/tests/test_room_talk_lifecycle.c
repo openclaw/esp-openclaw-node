@@ -1676,7 +1676,148 @@ static void directory_errors(void)
     CHECK(agents_snapshot().state == ROOM_AGENTS_TOO_LARGE, "oversized response is bounded");
 }
 
+static room_devices_snapshot_t devices_snapshot(void)
+{
+    room_devices_snapshot_t result;
+    room_device_directory_copy(&result);
+    return result;
+}
+
+static const char *device_list = "{\"nodes\":[{\"nodeId\":\"watch-a\",\"displayName\":\"My Watch\","
+    "\"modelIdentifier\":\"watch\",\"connected\":true,\"paired\":false},{\"nodeId\":\"dial-b\"}]}";
+
+static void devices_ready(void)
+{
+    room_device_directory_refresh();
+    host_run_task("talk_teardown");
+    CHECK(host.device_requests == 1 && host.agent_requests == 0, "device discovery uses its own read request");
+    host_reply_devices(true, device_list);
+    host_run_task("talk_teardown");
+    room_devices_snapshot_t page = devices_snapshot();
+    CHECK(page.state == ROOM_DEVICES_READY && page.count == 2, "bounded borrowed response reaches the device owner");
+    CHECK(strcmp(page.devices[0].id, "watch-a") == 0 && strcmp(page.devices[0].name, "My Watch") == 0,
+        "device identity and display name survive callback lifetime");
+    CHECK(page.devices[0].connected_known && page.devices[0].connected &&
+        page.devices[0].paired_known && !page.devices[0].paired, "false pairing differs from unknown pairing");
+    CHECK(!page.devices[1].connected_known && !page.devices[1].paired_known &&
+        strcmp(page.devices[1].name, "dial-b") == 0, "missing metadata stays unknown with an ID label");
+    CHECK(host.config_requests == 0 && host.opens == 0, "reading devices does not start Talk");
+    char *args[] = {"devices"};
+    CHECK(devices_console_command(1, args) == 0, "USB reader consumes the same directory snapshot");
+}
+
+static void devices_reconnect(void)
+{
+    room_device_directory_refresh();
+    host_run_task("talk_teardown");
+    host_emit_node(operator_client, ESP_OPENCLAW_NODE_EVENT_DISCONNECTED);
+    host_emit_node(operator_client, ESP_OPENCLAW_NODE_EVENT_CONNECTED);
+    host_reply_devices(true, device_list);
+    host_run_task("talk_teardown");
+    CHECK(devices_snapshot().state == ROOM_DEVICES_LOADING && host.device_requests == 2,
+        "replaced connection cannot publish the old device list");
+    host_reply_devices(true, "{\"nodes\":[]}");
+    host_run_task("talk_teardown");
+    CHECK(devices_snapshot().state == ROOM_DEVICES_EMPTY && devices_snapshot().count == 0,
+        "only replacement response publishes an empty list");
+}
+
+static void devices_timeout(void)
+{
+    connect_call();
+    room_device_directory_refresh();
+    host_run_task("talk_teardown");
+    host.now_us += 16000000;
+    host_fire_devices_timer();
+    host_run_task("talk_teardown");
+    CHECK(devices_snapshot().state == ROOM_DEVICES_TIMEOUT && talk_active && host.closes == 0,
+        "device deadline leaves the shared socket and active Talk alive");
+    room_device_directory_refresh();
+    host_run_task("talk_teardown");
+    CHECK(host.device_requests == 1, "refresh cannot accumulate requests after timeout");
+    host_reply_devices(true, device_list);
+    host_run_task("talk_teardown");
+    CHECK(host.device_requests == 2 && devices_snapshot().state == ROOM_DEVICES_LOADING,
+        "late completion releases the queued fresh request without publishing");
+    host_reply_devices(true, device_list);
+    host_run_task("talk_teardown");
+    CHECK(devices_snapshot().state == ROOM_DEVICES_READY && talk_active, "fresh device result preserves the call");
+}
+
+static void devices_reopen_timeout(void)
+{
+    connect_call();
+    room_device_directory_refresh();
+    host_run_task("talk_teardown");
+    host.now_us += 10000000;
+    room_device_directory_cancel();
+    room_device_directory_refresh();
+    host_run_task("talk_teardown");
+    host.now_us += 6000000;
+    host_run_task("talk_teardown");
+    CHECK(devices_snapshot().state == ROOM_DEVICES_LOADING, "reopened view has its own deadline");
+    host.now_us += 10000000;
+    host_fire_devices_timer();
+    host_run_task("talk_teardown");
+    CHECK(devices_snapshot().state == ROOM_DEVICES_TIMEOUT && host.device_requests == 1 && talk_active,
+        "reopened view times out behind a stale callback without duplicating requests or ending Talk");
+    host_reply_devices(true, device_list);
+    host_run_task("talk_teardown");
+    CHECK(devices_snapshot().state == ROOM_DEVICES_TIMEOUT && host.device_requests == 1,
+        "late callback cannot start or populate the expired view");
+    room_device_directory_refresh();
+    host_run_task("talk_teardown");
+    host_reply_devices(true, device_list);
+    host_run_task("talk_teardown");
+    CHECK(devices_snapshot().state == ROOM_DEVICES_READY && host.device_requests == 2 && talk_active,
+        "explicit retry recovers after the stale callback drains");
+}
+
+static void devices_cancel(void)
+{
+    room_device_directory_refresh();
+    host_run_task("talk_teardown");
+    room_device_directory_cancel();
+    host_reply_devices(true, device_list);
+    host_run_task("talk_teardown");
+    CHECK(devices_snapshot().state == ROOM_DEVICES_IDLE && devices_snapshot().count == 0,
+        "closed device list rejects a late response and releases its display data");
+}
+
+static void devices_errors(void)
+{
+    const char *bad[] = {"{}", "{\"nodes\":[{}]}", "{\"nodes\":[{\"nodeId\":\"a\",\"connected\":1}]}",
+        "{\"nodes\":[{\"nodeId\":\"a\"},{\"nodeId\":\"a\"}]}", NULL};
+    for (size_t i = 0; i < sizeof(bad) / sizeof(*bad); ++i) {
+        room_device_directory_refresh(); host_run_task("talk_teardown");
+        host_reply_devices(bad[i] != NULL, bad[i]); host_run_task("talk_teardown");
+        CHECK(devices_snapshot().state == ROOM_DEVICES_ERROR && devices_snapshot().count == 0,
+            "malformed and denied responses never look like a valid empty list");
+    }
+    char *large = malloc(ROOM_DEVICES_MAX_JSON_BYTES + 2);
+    memset(large, ' ', ROOM_DEVICES_MAX_JSON_BYTES + 1); large[ROOM_DEVICES_MAX_JSON_BYTES + 1] = '\0';
+    room_device_directory_refresh(); host_run_task("talk_teardown");
+    host_reply_devices(true, large); free(large); host_run_task("talk_teardown");
+    CHECK(devices_snapshot().state == ROOM_DEVICES_TOO_LARGE, "device payload is bounded before copying");
+    cJSON *root = cJSON_CreateObject(), *nodes = cJSON_AddArrayToObject(root, "nodes");
+    for (unsigned i = 0; i <= ROOM_DEVICES_MAX; ++i) {
+        cJSON *node = cJSON_CreateObject(); char id[16]; snprintf(id, sizeof(id), "node-%u", i);
+        cJSON_AddStringToObject(node, "nodeId", id); cJSON_AddItemToArray(nodes, node);
+    }
+    large = cJSON_PrintUnformatted(root); cJSON_Delete(root);
+    room_device_directory_refresh(); host_run_task("talk_teardown");
+    host_reply_devices(true, large); free(large); host_run_task("talk_teardown");
+    CHECK(devices_snapshot().state == ROOM_DEVICES_TOO_LARGE && devices_snapshot().count == 0,
+        "an oversized inventory is rejected rather than silently truncated");
+    host.fail_device_submit = true;
+    room_device_directory_refresh(); host_run_task("talk_teardown"); host_run_task("talk_teardown");
+    CHECK(devices_snapshot().state == ROOM_DEVICES_ERROR, "local submission failure completes visibly");
+}
+
 static const struct { const char *name; void (*run)(void); } cases[] = {
+    {"devices-ready", devices_ready}, {"devices-reconnect", devices_reconnect},
+    {"devices-timeout", devices_timeout}, {"devices-reopen-timeout", devices_reopen_timeout},
+    {"devices-cancel", devices_cancel}, {"devices-errors", devices_errors},
     {"conversations-resume-retry", conversations_resume_retry},
     {"conversations-resume-owner-loss", conversations_resume_owner_loss},
     {"conversations-suspend", conversations_suspend},
@@ -1778,6 +1919,7 @@ int main(int argc, char **argv)
             free(gateway_http_base);
             gateway_http_base = NULL;
             room_agent_directory_cancel();
+            room_device_directory_cancel();
             host_release_resources();
             printf("%s: %s (%u failed assertions)\n", cases[i].name, failures ? "FAIL" : "PASS", failures);
             return failures ? 1 : 0;

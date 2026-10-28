@@ -2,6 +2,7 @@ idf_component_register(
     SRCS
         "esp_openclaw_room_node.c"
         "room_agent_directory.c"
+        "room_device_directory.c"
         "room_aec_src.c"
         "room_audio_gate.c"
         "room_board.c"

@@ -324,3 +324,7 @@ For a remotely selected USB browser context, `display.menu` also accepts
 validated selection; they do not choose a new agent or conversation. A preview
 is read-only and limited to the Gateway's returned messages, not a full chat
 history or a reply composer.
+
+Conversation previews, Activity details, and remote-device details stop at both
+ends when scrolling with the encoder, including rapid multi-detent turns.
+Reaching an edge does not wrap, change pages, or submit the configured control.

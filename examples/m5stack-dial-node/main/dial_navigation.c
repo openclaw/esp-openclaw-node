@@ -673,12 +673,9 @@ void dial_navigation_move(dial_navigation_t *nav, int direction)
             nav->handler(DIAL_NAV_BRIGHTNESS, (size_t)percent, nav->context);
         return;
     }
-    if (nav->view == DIAL_NAV_CONNECTION) {
+    if (nav->view == DIAL_NAV_PREVIEW || nav->view == DIAL_NAV_ACTIVITY ||
+        nav->view == DIAL_NAV_DEVICE_DETAIL || nav->view == DIAL_NAV_CONNECTION) {
         lv_obj_scroll_by_bounded(nav->preview_body, 0, direction > 0 ? -24 : 24, LV_ANIM_OFF);
-        return;
-    }
-    if (nav->view == DIAL_NAV_PREVIEW || nav->view == DIAL_NAV_ACTIVITY || nav->view == DIAL_NAV_DEVICE_DETAIL) {
-        lv_obj_scroll_by(nav->preview_body, 0, direction > 0 ? -24 : 24, LV_ANIM_OFF);
         return;
     }
     if (nav->view == DIAL_NAV_DETAIL) return;

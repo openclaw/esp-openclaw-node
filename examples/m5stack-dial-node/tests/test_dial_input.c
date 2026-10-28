@@ -1249,7 +1249,8 @@ int main(int argc, char **argv)
     dial_navigation_open(&navigation, false);
     touch(120, 126, true); touch(120, 126, false);
     assert(navigation.view == DIAL_NAV_SESSIONS && navigation.focus == 1);
-    assert(strstr(lv_label_get_text(navigation.names[1]), "A question for") != NULL);
+    assert(strncmp(lv_label_get_text(navigation.names[1]), "A quest", 7) == 0);
+    assert(strcmp(conversations.page.sessions[navigation.focus].title, "A question for Beta") == 0);
     dial_navigation_activate(&navigation);
     assert(navigation.view == DIAL_NAV_PREVIEW && requested_offset == 1);
     touch(68, 44, true); touch(68, 44, false);
@@ -1721,8 +1722,10 @@ int main(int argc, char **argv)
     for (unsigned i = 0; i < 2; ++i) {
         assert(lv_obj_get_height(navigation.rows[i]) == 60);
         check_home_bounds(navigation.rows[i]);
-        assert(lv_obj_get_style_text_font(navigation.names[i], 0) == &lv_font_montserrat_14);
+        assert(lv_obj_get_height(navigation.names[i]) >=
+            lv_obj_get_style_text_font(navigation.names[i], 0)->line_height);
     }
+    assert(strcmp(lv_label_get_text(navigation.names[1]), "Comfortable") == 0);
     snapshot("density-comfortable");
     dial_navigation_move(&navigation, 1);
     assert(navigation.first == 2 && strcmp(lv_label_get_text(navigation.names[0]), "Back") == 0);

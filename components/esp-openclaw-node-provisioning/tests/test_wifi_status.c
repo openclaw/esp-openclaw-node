@@ -1,5 +1,6 @@
 #include "wifi_host_sdk.h"
 #include "esp_openclaw_node_wifi.h"
+#include "esp_openclaw_setup_wifi.h"
 #include "esp_openclaw_node_common_device_node_cmd.h"
 #include "cJSON.h"
 
@@ -555,6 +556,247 @@ static void check_setup_attempts(void)
 #endif
 }
 
+typedef struct {
+    esp_openclaw_setup_session_t session;
+    esp_openclaw_setup_wifi_t wifi;
+    uint64_t generation, now, tick;
+    bool authenticated;
+    unsigned cancellations;
+} setup_fixture_t;
+
+static uint64_t setup_now(void *context)
+{
+    setup_fixture_t *f = context;
+    uint64_t now = f->now;
+    f->now += f->tick;
+    return now;
+}
+
+static bool setup_peer(uint64_t peer, void *context)
+{
+    return peer == 1 && ((setup_fixture_t *)context)->authenticated;
+}
+
+static void setup_cancel(esp_openclaw_setup_token_t token, void *context)
+{
+    setup_fixture_t *f = context;
+    ++f->cancellations;
+    esp_openclaw_setup_wifi_cancel(&f->wifi, token);
+}
+
+static void setup_open_confirm(setup_fixture_t *f)
+{
+    assert(esp_openclaw_setup_open(&f->session, &f->generation) == ESP_OPENCLAW_SETUP_OK);
+    assert(esp_openclaw_setup_attach(&f->session, f->generation, 1) == ESP_OPENCLAW_SETUP_OK);
+    check(esp_openclaw_setup_wifi_activate(&f->wifi, f->generation) == ESP_ERR_INVALID_STATE,
+          "binding cannot take ownership before physical confirmation");
+    assert(esp_openclaw_setup_input_released(&f->session, f->generation) == ESP_OPENCLAW_SETUP_OK);
+    assert(esp_openclaw_setup_confirm(&f->session, f->generation) == ESP_OPENCLAW_SETUP_OK);
+    assert(esp_openclaw_setup_wifi_activate(&f->wifi, f->generation) == ESP_OK);
+}
+
+#if SOC_WIFI_SUPPORTED && !CONFIG_ESP_WIFI_REMOTE_ENABLED && !CONFIG_ESP_HOST_WIFI_ENABLED
+static esp_openclaw_setup_receipt_t setup_submit(setup_fixture_t *f, uint32_t id)
+{
+    esp_openclaw_setup_receipt_t receipt;
+    assert(esp_openclaw_setup_wifi_submit(&f->wifi, f->generation, 1, id,
+        "Setup network", "example-password", &receipt) == ESP_OPENCLAW_SETUP_ACCEPTED);
+    return receipt;
+}
+
+static esp_openclaw_setup_wifi_snapshot_t setup_advance(setup_fixture_t *f,
+    esp_openclaw_node_wifi_attempt_state_t state)
+{
+    for (unsigned i = 0; i < 40; ++i) {
+        assert(esp_openclaw_setup_wifi_poll(&f->wifi) == ESP_OK);
+        esp_openclaw_setup_wifi_snapshot_t snapshot = esp_openclaw_setup_wifi_snapshot(&f->wifi);
+        if (snapshot.attempt.state == state) return snapshot;
+        dispatch_all();
+    }
+    assert(!"binding did not reach expected state");
+    return (esp_openclaw_setup_wifi_snapshot_t){0};
+}
+
+static esp_openclaw_setup_receipt_t setup_receipt(setup_fixture_t *f, uint32_t id)
+{
+    esp_openclaw_setup_receipt_t receipt;
+    assert(esp_openclaw_setup_get_receipt(&f->session, f->generation, 1, id, &receipt) == ESP_OPENCLAW_SETUP_OK);
+    return receipt;
+}
+#endif
+
+static void check_setup_binding(void)
+{
+    setup_fixture_t f = {.now = 100, .authenticated = true};
+    esp_openclaw_setup_callbacks_t callbacks = {
+        .now_ms = setup_now, .peer_is_current_authenticated = setup_peer,
+        .cancel = setup_cancel, .context = &f,
+    };
+    assert(esp_openclaw_setup_init(&f.session, &callbacks));
+    assert(esp_openclaw_setup_wifi_init(&f.wifi, &f.session));
+    setup_open_confirm(&f);
+    unsigned before = driver_mutations;
+    check(esp_openclaw_setup_wifi_activate(&f.wifi, f.generation) == ESP_OK,
+          "repeated activation preserves the same lease");
+    esp_openclaw_setup_receipt_t receipt;
+    check(esp_openclaw_setup_wifi_submit(&f.wifi, f.generation, 2, 1,
+          "Other network", NULL, &receipt) == ESP_OPENCLAW_SETUP_UNAUTHORIZED,
+          "binding enforces the confirmed peer");
+    check(driver_mutations == before, "admission does not mutate the radio");
+    check(esp_openclaw_node_wifi_connect() == ESP_ERR_WIFI_STATE,
+          "confirmed session excludes console writes before any operation");
+    assert(esp_openclaw_setup_wifi_submit(&f.wifi, f.generation, 1, 1,
+        NULL, NULL, &receipt) == ESP_OPENCLAW_SETUP_ACCEPTED);
+#if SOC_WIFI_SUPPORTED && !CONFIG_ESP_WIFI_REMOTE_ENABLED && !CONFIG_ESP_HOST_WIFI_ENABLED
+    check(receipt.outcome == ESP_OPENCLAW_SETUP_FAILED && receipt.detail == ESP_ERR_INVALID_ARG,
+          "synchronous validation rejection updates the returned receipt");
+#else
+    check(receipt.outcome == ESP_OPENCLAW_SETUP_FAILED && receipt.detail == ESP_ERR_NOT_SUPPORTED,
+          "remote backend rejection updates the returned receipt");
+#endif
+    esp_openclaw_setup_receipt_t duplicate;
+    check(esp_openclaw_setup_wifi_submit(&f.wifi, f.generation, 1, 1,
+          "Changed draft", NULL, &duplicate) == ESP_OPENCLAW_SETUP_DUPLICATE &&
+          duplicate.outcome == receipt.outcome && duplicate.detail == receipt.detail,
+          "synchronous failure is retained for duplicate requests");
+    check(!esp_openclaw_setup_wifi_snapshot(&f.wifi).operation_pending && driver_mutations == before,
+          "immediate rejection never leaves pending radio work");
+
+#if SOC_WIFI_SUPPORTED && !CONFIG_ESP_WIFI_REMOTE_ENABLED && !CONFIG_ESP_HOST_WIFI_ENABLED
+    receipt = setup_submit(&f, 2);
+    esp_openclaw_setup_wifi_snapshot_t pending = esp_openclaw_setup_wifi_snapshot(&f.wifi);
+    check(receipt.outcome == ESP_OPENCLAW_SETUP_PENDING && pending.operation_pending,
+          "accepted credentials remain pending until the actual connection");
+    check(esp_openclaw_setup_wifi_submit(&f.wifi, f.generation, 1, 2,
+          "Changed draft", NULL, &duplicate) == ESP_OPENCLAW_SETUP_DUPLICATE &&
+          esp_openclaw_setup_wifi_snapshot(&f.wifi).attempt.id == pending.attempt.id,
+          "duplicate request cannot start another Wi-Fi attempt");
+    check(esp_openclaw_setup_wifi_submit(&f.wifi, f.generation, 1, 3,
+          "Other network", NULL, &duplicate) == ESP_OPENCLAW_SETUP_OCCUPIED,
+          "second operation cannot overlap the pending join");
+    setup_advance(&f, ESP_OPENCLAW_NODE_WIFI_JOINING);
+    check(setup_receipt(&f, 2).outcome == ESP_OPENCLAW_SETUP_PENDING,
+          "stored credentials are not a successful setup receipt");
+    ip_event_got_ip_t ip = {.esp_netif = &station, .ip_info.ip.addr = 0x010200c0};
+    wifi_handler(wifi_context, WIFI_EVENT, WIFI_EVENT_STA_CONNECTED, NULL);
+    ip_handler(ip_context, IP_EVENT, IP_EVENT_STA_GOT_IP, &ip);
+    esp_openclaw_setup_wifi_snapshot_t snapshot = setup_advance(&f, ESP_OPENCLAW_NODE_WIFI_SUCCEEDED);
+    check(!snapshot.operation_pending && snapshot.lease_held &&
+          setup_receipt(&f, 2).outcome == ESP_OPENCLAW_SETUP_SUCCEEDED,
+          "terminal Wi-Fi success completes the session but retains its lease");
+    check(esp_openclaw_node_wifi_disconnect() == ESP_ERR_WIFI_STATE,
+          "console cannot displace a confirmed session between operations");
+    check(esp_openclaw_setup_wifi_submit(&f.wifi, f.generation, 1, 2, "Other", NULL, &duplicate) ==
+          ESP_OPENCLAW_SETUP_DUPLICATE && duplicate.outcome == ESP_OPENCLAW_SETUP_SUCCEEDED &&
+          esp_openclaw_setup_wifi_snapshot(&f.wifi).attempt.id == snapshot.attempt.id,
+          "successful duplicate returns its receipt without reconnecting");
+    esp_openclaw_setup_token_t old_token = receipt.token;
+    esp_openclaw_setup_close(&f.session);
+    assert(esp_openclaw_setup_wifi_poll(&f.wifi) == ESP_OK);
+    check(!esp_openclaw_setup_wifi_snapshot(&f.wifi).lease_held && esp_openclaw_node_wifi_is_connected(),
+          "closing an idle successful session hands back the live link");
+
+    setup_open_confirm(&f);
+    receipt = setup_submit(&f, 1);
+    before = driver_mutations;
+    esp_openclaw_setup_wifi_cancel(&f.wifi, old_token);
+    esp_openclaw_setup_close(&f.session);
+    assert(esp_openclaw_setup_wifi_poll(&f.wifi) == ESP_OK);
+    snapshot = esp_openclaw_setup_wifi_snapshot(&f.wifi);
+    check(snapshot.attempt.state == ESP_OPENCLAW_NODE_WIFI_CANCELLED && !snapshot.lease_held &&
+          esp_openclaw_node_wifi_is_connected() && driver_mutations == before,
+          "queued cancellation closes and releases without disturbing the existing link");
+    old_token = receipt.token;
+
+    setup_open_confirm(&f);
+    receipt = setup_submit(&f, 1);
+    esp_openclaw_setup_wifi_cancel(&f.wifi, old_token);
+    assert(esp_openclaw_setup_wifi_poll(&f.wifi) == ESP_OK);
+    check(esp_openclaw_setup_wifi_snapshot(&f.wifi).operation_pending,
+          "stale-generation cancellation cannot cancel a replacement operation");
+    setup_advance(&f, ESP_OPENCLAW_NODE_WIFI_JOINING);
+    esp_openclaw_setup_wifi_cancel(&f.wifi, receipt.token);
+    assert(esp_openclaw_setup_wifi_poll(&f.wifi) == ESP_OK);
+    check(setup_receipt(&f, 1).outcome == ESP_OPENCLAW_SETUP_PENDING,
+          "cancellation remains pending while the radio drains");
+    snapshot = setup_advance(&f, ESP_OPENCLAW_NODE_WIFI_CANCELLED);
+    check(snapshot.attempt.credentials_saved && snapshot.lease_held && !snapshot.operation_pending &&
+          setup_receipt(&f, 1).detail == ESP_OPENCLAW_SETUP_WIFI_CANCELLED,
+          "drained cancellation has a distinct receipt and retains saved-credential evidence");
+
+    setup_submit(&f, 2);
+    esp_openclaw_setup_wifi_cancel(&f.wifi, receipt.token);
+    setup_advance(&f, ESP_OPENCLAW_NODE_WIFI_JOINING);
+    check(esp_openclaw_setup_wifi_snapshot(&f.wifi).operation_pending,
+          "old operation ID in the same session cannot cancel its replacement");
+    wifi_event_sta_disconnected_t disconnected = {.reason = 201};
+    wifi_handler(wifi_context, WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, &disconnected);
+    assert(esp_openclaw_setup_wifi_poll(&f.wifi) == ESP_OK);
+    check(setup_receipt(&f, 2).outcome == ESP_OPENCLAW_SETUP_PENDING,
+          "disconnect cannot complete the session before drain");
+    setup_advance(&f, ESP_OPENCLAW_NODE_WIFI_FAILED);
+    check(setup_receipt(&f, 2).detail == ESP_ERR_WIFI_CONN,
+          "connection error reaches the correlated session receipt");
+
+    setup_submit(&f, 3);
+    setup_advance(&f, ESP_OPENCLAW_NODE_WIFI_JOINING);
+    now_us += (int64_t)ESP_OPENCLAW_NODE_WIFI_ATTEMPT_TIMEOUT_MS * 1000;
+    assert(esp_openclaw_setup_wifi_poll(&f.wifi) == ESP_OK);
+    check(setup_receipt(&f, 3).outcome == ESP_OPENCLAW_SETUP_PENDING,
+          "Wi-Fi timeout waits for drain before receipt completion");
+    setup_advance(&f, ESP_OPENCLAW_NODE_WIFI_FAILED);
+    check(setup_receipt(&f, 3).detail == ESP_ERR_TIMEOUT, "timeout detail survives session completion");
+
+    setup_submit(&f, 4);
+    setup_advance(&f, ESP_OPENCLAW_NODE_WIFI_JOINING);
+    stop_result = ESP_FAIL;
+    esp_openclaw_setup_close(&f.session);
+    snapshot = setup_advance(&f, ESP_OPENCLAW_NODE_WIFI_RECOVERY_REQUIRED);
+    check(snapshot.operation_pending && snapshot.lease_held &&
+          esp_openclaw_setup_snapshot(&f.session).phase == ESP_OPENCLAW_SETUP_CLOSING,
+          "failed drain retains the closing session and lease");
+    check(esp_openclaw_node_wifi_connect() == ESP_ERR_WIFI_STATE,
+          "failed cleanup cannot return the radio to console callers");
+    check(esp_openclaw_setup_open(&f.session, &f.generation) == ESP_OPENCLAW_SETUP_OCCUPIED,
+          "new setup cannot replace a closing failed drain");
+    stop_result = ESP_OK;
+    assert(esp_openclaw_setup_wifi_retry_drain(&f.wifi) == ESP_OK);
+    snapshot = setup_advance(&f, ESP_OPENCLAW_NODE_WIFI_CANCELLED);
+    check(!snapshot.operation_pending && !snapshot.lease_held && snapshot.attempt.credentials_saved &&
+          esp_openclaw_setup_snapshot(&f.session).phase == ESP_OPENCLAW_SETUP_CLOSED,
+          "explicit cleanup recovery closes and releases while retaining the final attempt");
+
+    setup_open_confirm(&f);
+    setup_submit(&f, 1);
+    before = driver_mutations;
+    unsigned canceled = f.cancellations;
+    /* The outer poll sees a live session; the Wi-Fi authorizer observes expiry. */
+    f.tick = ESP_OPENCLAW_SETUP_TIMEOUT_MS;
+    assert(esp_openclaw_setup_wifi_poll(&f.wifi) == ESP_OK);
+    f.tick = 0;
+    snapshot = esp_openclaw_setup_wifi_snapshot(&f.wifi);
+    check(f.cancellations == canceled + 1 && !snapshot.operation_pending && !snapshot.lease_held &&
+          snapshot.attempt.state == ESP_OPENCLAW_NODE_WIFI_CANCELLED && driver_mutations == before,
+          "expiry inside authorization safely cancels queued work and releases ownership");
+#else
+    esp_openclaw_setup_close(&f.session);
+    assert(esp_openclaw_setup_wifi_poll(&f.wifi) == ESP_OK);
+    check(!esp_openclaw_setup_wifi_snapshot(&f.wifi).lease_held,
+          "unsupported backend releases its lease after session close");
+#endif
+    /* A release can succeed while its deferred reconnect dispatch fails. */
+    assert(esp_openclaw_node_wifi_set_credentials("Original network", NULL) == ESP_OK);
+    setup_open_confirm(&f);
+    wifi_event_sta_disconnected_t lost = {.reason = 8};
+    wifi_handler(wifi_context, WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, &lost);
+    connect_result = ESP_FAIL;
+    esp_openclaw_setup_close(&f.session);
+    check(esp_openclaw_setup_wifi_poll(&f.wifi) == ESP_FAIL &&
+          !esp_openclaw_setup_wifi_snapshot(&f.wifi).lease_held,
+          "release reports reconnect dispatch failure without leaking admission ownership");
+    connect_result = ESP_OK;
+}
+
 int main(void)
 {
     assert(esp_openclaw_node_register_device_commands(NULL, NULL) == ESP_OK);
@@ -600,6 +842,7 @@ int main(void)
     check_setup_ownership();
     check_late_ip_after_disconnect();
     check_setup_attempts();
-    printf("Wi-Fi status: %u failed checks\n", failures);
+    check_setup_binding();
+    printf("Wi-Fi status and setup: %u failed checks\n", failures);
     return failures ? 1 : 0;
 }

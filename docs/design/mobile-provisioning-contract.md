@@ -159,6 +159,23 @@ host-tested, not yet physically qualified or connected to BLE/mobile setup.
 `wifi.apply` and setup-session completion must use its terminal result rather
 than treating admission, a saved configuration, or `RECOVERY_REQUIRED` as success.
 
+The transport-free [`esp_openclaw_setup_wifi` binding](../../components/esp-openclaw-node-provisioning/include/esp_openclaw_setup_wifi.h)
+connects these attempts to the confirmed setup session. Activate it after local
+confirmation, then submit `WIFI_APPLY` through the binding so the session owns
+peer checks and duplicate receipts. Poll it on the same owner task, including
+after closing setup. It keeps the Wi-Fi lease between operations and releases
+it when the session has closed and its pending attempt has drained.
+
+Forward the session's cancellation callback to `esp_openclaw_setup_wifi_cancel`;
+that callback only sets a matching cancellation flag. Session expiry can invoke
+it from inside the Wi-Fi authorizer, where reentering radio APIs is forbidden.
+Only terminal attempts complete receipts. A drained cancellation is `FAILED`
+with `ESP_OPENCLAW_SETUP_WIFI_CANCELLED`; it does not mean credentials were
+rolled back. `RECOVERY_REQUIRED` keeps the operation pending, and the binding's
+explicit drain retry remains available while the session is closing. Its local
+snapshot retains the final attempt even after closing clears session receipts.
+No BLE transport or device setup screen invokes this binding yet.
+
 Scanning a connected station requires an explicit, confirmed network-repair
 transition; do not silently disconnect it just because the phone opens a list.
 Preserve exact SSID bytes supported by the existing API; display names and

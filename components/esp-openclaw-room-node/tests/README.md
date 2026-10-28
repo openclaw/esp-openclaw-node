@@ -49,6 +49,18 @@ cause of a prior observation whose raw header was not retained.
 
 ## Media diagnostic regressions
 
+`python3 components/esp-openclaw-room-node/tests/run_recording_host_tests.py --managed-components "$MANAGED"`
+compiles the production recording worker against the pinned codec headers with
+synthetic codecs and pthread-backed queues. It exercises copied capture frame
+ownership, stop racing an admitted producer, bounded queue overflow, duration
+limits, actual converter output sizes, cancel/error cleanup, and media admission.
+The media drain, wake callback, and gate entrypoints are compiled directly from
+`room_media.c`; released capture storage is poisoned before the draft is read.
+These ASan/UBSan tests prove ownership and bounds, not microphone quality,
+resampler fidelity, on-device timing, transcription, or the future PTT gesture.
+The lifecycle suite's `media-busy` case checks that rejected Talk startup creates
+no peer or Gateway request and can start normally once the media becomes free.
+
 `python3 components/esp-openclaw-room-node/tests/run_audio_diagnostics_host_tests.py`
 compiles the actual AFE feed helper with the production diagnostics collector
 under ASan/UBSan. Positive, zero-drop, and negative vendor returns must preserve

@@ -14,6 +14,7 @@ typedef enum {
     ROOM_DIAGNOSTICS_CAPTURE_TRANSITION = 0,
     ROOM_DIAGNOSTICS_CAPTURE_AMBIENT,
     ROOM_DIAGNOSTICS_CAPTURE_TALK,
+    ROOM_DIAGNOSTICS_CAPTURE_RECORDING,
 } room_diagnostics_capture_owner_t;
 
 typedef struct {

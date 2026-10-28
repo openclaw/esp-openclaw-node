@@ -21,6 +21,7 @@ idf_component_register(
         "room_files.c"
         "room_media.c"
         "room_pcm_gain.c"
+        "room_recording.c"
         "room_ui_controller.c"
         "room_watch_home.c"
         "room_watch_navigation.c"
@@ -51,6 +52,7 @@ idf_component_register(
         espressif__cjson
         espressif__esp-sr
         espressif__esp_audio_codec
+        espressif__esp_audio_effects
         espressif__esp_capture
         espressif__esp_codec_dev
         espressif__esp_new_jpeg

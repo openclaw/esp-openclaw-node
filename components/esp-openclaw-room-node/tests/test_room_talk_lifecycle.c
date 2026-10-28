@@ -457,6 +457,23 @@ static void setup_failure(void)
     expect_closed();
 }
 
+static void media_busy(void)
+{
+    host.media_busy = true;
+    admit();
+    host_run_task("talk_start");
+    drain();
+    CHECK(host.opens == 0 && host.media_begins == 0 && host.media_ends == 0,
+        "busy audio starts no WebRTC and releases no unowned media");
+    CHECK(host.config_requests == 0 && talk_call == NULL && host.ui == ROOM_UI_ERROR,
+        "busy admission tears down the local call with a visible error before any Gateway request");
+    host.media_busy = false;
+    connect_call();
+    stop();
+    drain();
+    expect_closed();
+}
+
 static void lose_operator(void)
 {
     host_emit_node(talk_operator, ESP_OPENCLAW_NODE_EVENT_DISCONNECTED);
@@ -1936,6 +1953,7 @@ static const struct { const char *name; void (*run)(void); } cases[] = {
     {"cancel-inside-start", cancel_inside_start},
     {"cancel-before-signaling-start", cancel_before_signaling_start},
     {"setup-failure", setup_failure},
+    {"media-busy", media_busy},
 };
 
 int main(int argc, char **argv)

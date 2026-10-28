@@ -43,9 +43,12 @@ esp_err_t room_media_set_ambient_wake(bool enabled);
 
 esp_err_t room_media_get_webrtc_provider(esp_webrtc_media_provider_t *provider);
 
-/** Serialize the full Talk lifetime against the local speaker test. */
-void room_media_begin_talk(void);
+/** Reserve the full Talk lifetime; fail immediately if local audio is busy. */
+esp_err_t room_media_begin_talk(void);
 void room_media_end_talk(bool capture_remained_ambient);
+
+/** Capture a local draft from the ambient PCM sink; requires microphone media. */
+esp_err_t room_media_request_recording(room_media_talk_busy_cb_t busy_cb, void *ctx);
 
 /** Queue the local speaker test; generated and fed from a worker task. */
 esp_err_t room_media_request_test_tone(room_media_talk_busy_cb_t busy_cb, void *ctx);

@@ -24,6 +24,7 @@
 #include "room_board.h"
 #include "room_latency_policy.h"
 #include "room_pcm_gain.h"
+#include "room_recording.h"
 
 #define TAG "room_media"
 
@@ -36,7 +37,7 @@ static room_wake_callback_t wake_callback;
 static void *wake_callback_ctx;
 /* A binary gate, rather than a task-owned FreeRTOS mutex, spans Talk start on
  * one task and teardown on another. The diagnostics snapshot is the state
- * owner; this gate is the single serialization path for Talk and local tone. */
+ * owner; this gate serializes Talk, voice recording, and the local tone. */
 static SemaphoreHandle_t media_owner_gate;
 static portMUX_TYPE tone_mux = portMUX_INITIALIZER_UNLOCKED;
 static room_media_tone_snapshot_t tone_snapshot;
@@ -58,7 +59,7 @@ static int16_t tone_pcm[TONE_SAMPLES_PER_CHANNEL * 2];
 static void room_afe_wake(void *ctx)
 {
     (void)ctx;
-    if (wake_callback != NULL) {
+    if (wake_callback != NULL && !room_recording_active()) {
         wake_callback("hiesp", wake_callback_ctx);
     }
 }
@@ -196,6 +197,7 @@ static void wake_drain_task(void *arg)
             vTaskDelay(pdMS_TO_TICKS(10));
             continue;
         }
+        if (frame.size > 0) room_recording_feed(frame.data, (size_t)frame.size);
         esp_capture_sink_release_frame(wake_sink, &frame);
     }
 }
@@ -403,7 +405,7 @@ esp_err_t room_media_init(room_wake_callback_t callback, void *ctx)
      * Sink 1 exists only to keep the AEC/AFE pipeline running whenever no Talk
      * call is active: WakeNet lives inside that pipeline, so without an
      * always-on path the AFE never fetches and ambient wake never fires.
-     * Nothing consumes its frames; the wake callback comes from the AFE.
+     * The drain task can also copy PCM for a bounded local voice recording.
      */
     esp_capture_sink_cfg_t wake_cfg = {
         .audio_info = {
@@ -455,7 +457,7 @@ esp_err_t room_media_init(room_wake_callback_t callback, void *ctx)
     if (xTaskCreateWithCaps(
             wake_drain_task,
             "wake_drain",
-            3072,
+            4096,
             NULL,
             5,
             NULL,
@@ -515,12 +517,13 @@ esp_err_t room_media_get_webrtc_provider(esp_webrtc_media_provider_t *provider)
     return ESP_OK;
 }
 
-void room_media_begin_talk(void)
+esp_err_t room_media_begin_talk(void)
 {
-    if (media_owner_gate != NULL) {
-        xSemaphoreTake(media_owner_gate, portMAX_DELAY);
-        room_diagnostics_audio_set_capture_owner(ROOM_DIAGNOSTICS_CAPTURE_TRANSITION);
+    if (media_owner_gate == NULL || xSemaphoreTake(media_owner_gate, 0) != pdTRUE) {
+        return ESP_ERR_INVALID_STATE;
     }
+    room_diagnostics_audio_set_capture_owner(ROOM_DIAGNOSTICS_CAPTURE_TRANSITION);
+    return ESP_OK;
 }
 
 void room_media_end_talk(bool capture_remained_ambient)
@@ -529,6 +532,12 @@ void room_media_end_talk(bool capture_remained_ambient)
         room_diagnostics_audio_set_capture_owner(ROOM_DIAGNOSTICS_CAPTURE_AMBIENT);
     }
     if (media_owner_gate != NULL) xSemaphoreGive(media_owner_gate);
+}
+
+esp_err_t room_media_request_recording(room_media_talk_busy_cb_t busy_cb, void *ctx)
+{
+    if (!media_initialized || (busy_cb != NULL && busy_cb(ctx))) return ESP_ERR_INVALID_STATE;
+    return room_recording_start(media_owner_gate);
 }
 
 esp_err_t room_media_request_test_tone(room_media_talk_busy_cb_t busy_cb, void *ctx)

@@ -42,7 +42,7 @@ typedef struct {
     bool fail_scope_submit;
     unsigned ice_callbacks, signaling_connected, signaling_closed, peer_disconnects;
     unsigned critical_depth, callback_depth;
-    bool media_owned, ambient, inside_start;
+    bool media_owned, ambient, inside_start, media_busy;
     bool reject_task_creation;
     unsigned operator_connect_requests, node_connect_requests;
     room_ui_state_t ui;

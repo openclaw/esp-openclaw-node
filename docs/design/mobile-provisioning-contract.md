@@ -181,11 +181,22 @@ transition; do not silently disconnect it just because the phone opens a list.
 Preserve exact SSID bytes supported by the existing API; display names and
 ellipsized rows are never operation targets.
 
-Node connect needs equivalent ownership and outcome correlation. Current
-`CONNECTED` events carry no request identity. A new setup generation must not
-claim an old attempt's success. Add a correlated owner contract, or prove that
-exclusive ownership and terminal-event draining enforce the same invariant,
-before wiring `gateway.apply`. Preserve role-specific saved-session storage.
+The transport-free [`esp_openclaw_setup_gateway` binding](../../components/esp-openclaw-node-provisioning/include/esp_openclaw_setup_gateway.h)
+connects `GATEWAY_APPLY` to a node control lease and an exact native attempt ID.
+It uses `connect_begin_authorized` to check the current peer and setup deadline
+on the node worker before connection and token-write effects. The binding
+captures immutable operation metadata; the worker never reads the mutable
+setup session. Clock and live-peer callbacks must be bounded and thread-safe
+on both tasks, independent of queued UI notifications.
+
+Forward matching session cancellation to the binding and poll it through
+`CLOSING`. It completes receipts only from the exact terminal native result,
+retains earlier saved-token effects, and releases the lease after setup closes.
+When poll reports release, wake the application's automatic reconnect owner;
+release alone does not schedule it. A completed connection racing setup exit
+remains connected. No BLE endpoint or device screen invokes this binding yet.
+The transport/UI still own bounded payload decoding and destination confirmation;
+generic `CONNECTED` events must not substitute for a correlated result.
 
 ## Visible progress and recovery
 

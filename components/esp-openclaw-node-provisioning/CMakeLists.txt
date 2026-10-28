@@ -8,6 +8,7 @@ idf_component_register(
         "esp_openclaw_node_wifi.c"
         "esp_openclaw_setup_session.c"
         "esp_openclaw_setup_wifi.c"
+        "esp_openclaw_setup_gateway.c"
     INCLUDE_DIRS "include"
     REQUIRES
         esp-openclaw-node

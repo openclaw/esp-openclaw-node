@@ -71,3 +71,37 @@ Clock and live-peer callbacks must not reenter the owner. Dispatch and cancel ma
 synchronously call `complete` (for queue rejection or completed draining), but
 must not otherwise reenter. Keep the session and callback context alive until all
 accepted operations have drained. Do not reinitialize it to escape `CLOSING`.
+
+## Confirmed Gateway setup binding
+
+`esp_openclaw_setup_gateway.h` connects `GATEWAY_APPLY` to the native node
+connection owner. It does not expose a BLE endpoint or a device setup screen.
+Initialize it once with the setup session and node, then activate it after
+local confirmation. Activation reserves connection control while preserving
+the current link. Submit a setup code through the binding; the native owner
+validates and copies it, and Wi-Fi must already have a live IP. Admission is
+not connection success. Duplicate operation IDs return their existing receipt.
+
+Forward the session cancellation callback to `esp_openclaw_setup_gateway_cancel`
+for its Gateway operation, and poll the binding on the serialized setup owner,
+including during `CLOSING`. Cancellation uses the native exact-request flag,
+independent of queue capacity. Only a terminal native snapshot completes a
+receipt. A cancelled request is `FAILED` with
+`ESP_OPENCLAW_SETUP_GATEWAY_CANCELLED`. Earlier saved tokens remain visible in
+the binding's final snapshot; a successful connection that races setup exit is
+left connected. Polling API/ownership errors keep the operation pending and the lease held.
+
+The native worker rechecks the captured peer and deadline before connection
+and credential effects. The session's clock and live-peer callbacks must be
+bounded and thread-safe on both tasks. They must consult current transport
+revocation independently of queued UI messages, and must not access mutable
+setup/UI state or call node/session APIs. The worker never reads the mutable
+setup session. Keep the session, node, binding and callback context alive until
+the operation has drained and its lease has been released.
+
+Poll reports `released = true` exactly when it releases the node lease after
+setup closes. Wake the application's automatic reconnect owner then; lease
+release does not itself schedule a reconnect. Subsequent polls report false.
+The local snapshot retains the final request and `credentials_saved` after
+session close clears its receipts. The transport and UI still own payload bounds,
+destination display/confirmation, and safe handling of setup-code secrets.

@@ -16,12 +16,18 @@ def main():
     runtime = (component / "src/esp_openclaw_node_runtime.c").read_text()
     source = (component / "src/esp_openclaw_node_connect_source.c").read_text()
     protocol = (component / "src/esp_openclaw_node_protocol.c").read_text()
+    provisioning = component.parent / "esp-openclaw-node-provisioning"
     with tempfile.TemporaryDirectory(prefix="connect-lease-test-") as directory:
         work = Path(directory)
         (work / "esp_err.h").write_text("""#pragma once
             typedef int esp_err_t;
             enum { ESP_OK, ESP_FAIL, ESP_ERR_INVALID_ARG, ESP_ERR_INVALID_STATE,
                    ESP_ERR_NOT_FOUND, ESP_ERR_NO_MEM };
+        """)
+        (work / "esp_openclaw_node_wifi.h").write_text("""#pragma once
+            #include <stdbool.h>
+            typedef struct { bool connected; } esp_openclaw_node_wifi_status_t;
+            void esp_openclaw_node_wifi_get_status(esp_openclaw_node_wifi_status_t *status);
         """)
         (work / "control.inc").write_text(section(
             control, "bool esp_openclaw_node_connect_lease_matches_locked(",
@@ -51,7 +57,10 @@ def main():
             "cc", "-std=c11", "-D_POSIX_C_SOURCE=200809L", "-g", "-Wall", "-Wextra", "-Werror",
             "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
             "-I", str(work), "-I", str(component / "include"),
-            str(component / "tests/test_connect_lease.c"), "-o", str(binary),
+            "-I", str(provisioning / "include"),
+            str(component / "tests/test_connect_lease.c"),
+            str(provisioning / "esp_openclaw_setup_session.c"),
+            str(provisioning / "esp_openclaw_setup_gateway.c"), "-o", str(binary),
         ], check=True)
         subprocess.run([str(binary)], check=True)
 

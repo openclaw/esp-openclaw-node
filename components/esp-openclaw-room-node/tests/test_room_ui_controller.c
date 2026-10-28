@@ -397,16 +397,18 @@ static void check_talk_control(bool watch)
     }
 }
 
-static void check_dark_talk_control(void)
+static void check_dark_talk_control(bool watch)
 {
     if (room_board_config()->display.idle_brightness != 0) return;
+    if (watch) assert(room_ui_watch_menu("call") == ESP_OK);
     room_ui_facts_t facts = {.talk = ROOM_UI_TALK_READY};
     room_ui_store_facts(&facts);
     room_ui_refresh();
-    lv_obj_t *button = lv_obj_get_parent(find_text(lv_layer_top(), "Start Talk"));
+    lv_obj_t *button = lv_obj_get_parent(find_text(lv_layer_top(), watch ? "Start call" : "Start Talk"));
     unsigned starts = talk_starts;
     room_canvas_retained_kind_t previous_kind = retained_kind;
     retained_kind = ROOM_CANVAS_RETAINED_IMAGE;
+    if (watch) assert(room_ui_apply_display_brightness(0) == ESP_OK);
     assert(brightness == 0);
     click_talk(button);
     assert(talk_starts == starts && !canvas_active && brightness > 0);
@@ -414,7 +416,8 @@ static void check_dark_talk_control(void)
     assert(talk_starts == starts + 1);
 
     room_ui_set(ROOM_UI_IDLE, NULL);
-    if (brightness != 0) fire_timer("text_hint");
+    if (watch) assert(room_ui_apply_display_brightness(0) == ESP_OK);
+    else if (brightness != 0) fire_timer("text_hint");
     assert(brightness == 0);
     touch_talk(button, true);
     room_ui_show_face_hint(10000);
@@ -424,8 +427,13 @@ static void check_dark_talk_control(void)
     facts = (room_ui_facts_t){0};
     room_ui_store_facts(&facts);
     room_ui_set(ROOM_UI_IDLE, NULL);
-    if (brightness != 0) fire_timer("text_hint");
+    if (watch) assert(room_ui_apply_display_brightness(0) == ESP_OK);
+    else if (brightness != 0) fire_timer("text_hint");
     retained_kind = previous_kind;
+    if (watch) {
+        assert(room_ui_watch_menu("home") == ESP_OK);
+        fire_timer("text_hint");
+    }
 }
 static unsigned check_home_tree(lv_obj_t *parent)
 {
@@ -508,10 +516,11 @@ static void check_watch_home(const char *path)
         .gateway = ROOM_UI_GATEWAY_CONNECTED, .talk = ROOM_UI_TALK_READY};
     room_ui_store_facts(&facts);
     room_ui_set(ROOM_UI_IDLE, NULL);
+    assert(visible_watch_text("Choose agent") && !visible_watch_text("Start Talk"));
     lv_obj_t *title = find_text(lv_layer_top(), "Ready when you are");
     watch_menu_button = lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_BARS));
     watch_agent_button = lv_obj_get_parent(find_text(lv_layer_top(), "Automatic"));
-    watch_continue_button = lv_obj_get_parent(find_text(lv_layer_top(), "Continue conversations"));
+    watch_continue_button = lv_obj_get_parent(find_text(lv_layer_top(), "Choose agent"));
     watch_voice_button = lv_obj_get_parent(find_text(lv_layer_top(), "Hold to record"));
     watch_discard_button = lv_obj_get_parent(find_text(lv_layer_top(), "Discard"));
     watch_send_button = lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_UP "  Send"));
@@ -530,7 +539,7 @@ static void check_watch_home(const char *path)
     unsigned objects = check_home_tree(lv_obj_get_parent(title));
     lv_area_t title_area, action_area;
     lv_obj_get_coords(title, &title_area);
-    lv_obj_t *button = lv_obj_get_parent(find_text(lv_layer_top(), "Start Talk"));
+    lv_obj_t *button = watch_continue_button;
     lv_obj_get_coords(button, &action_area);
     assert(title_area.y1 >= 312 && title_area.y2 < action_area.y1);
     assert(action_area.x1 >= 24 && action_area.x2 < width - 24);
@@ -558,6 +567,7 @@ static void check_watch_home(const char *path)
     facts.talk = ROOM_UI_TALK_ACTIVE;
     room_ui_store_facts(&facts);
     room_ui_set(ROOM_UI_SPEAKING, NULL);
+    button = lv_obj_get_parent(find_visible_text(lv_layer_top(), "Return to call"));
     assert(!lv_obj_is_visible(watch_agent_button));
     assert(find_text(lv_layer_top(), "Conversation live"));
     assert(!find_text(lv_layer_top(), "Speaking"));
@@ -848,6 +858,69 @@ static void check_watch_live_call(const char *path)
     puts("watch Live call: deliberate start, wake-only, stale press, browse, explicit stop and offline recovery passed");
 }
 
+static void check_watch_primary(const char *path)
+{
+    room_ui_facts_t facts = {.wifi = ROOM_UI_WIFI_CONNECTED,
+        .gateway = ROOM_UI_GATEWAY_CONNECTED, .talk = ROOM_UI_TALK_READY};
+    room_conversation_context_t context = {0};
+    room_ui_talk_target_t target = {.revision = 42};
+    room_voice_snapshot_t voice = {.state = ROOM_VOICE_READY, .recipient_revision = 42, .owner_incarnation = 7};
+    room_ui_store_conversation_context(&context);
+    room_ui_store_talk_target(&target);
+    room_ui_store_facts(&facts);
+    room_ui_set_voice_action_handler(NULL);
+    assert(room_ui_watch_menu("home") == ESP_OK);
+    unsigned starts = talk_starts, stops = talk_stops, selections = agent_selections;
+    lv_obj_t *primary = watch_continue_button;
+    assert(visible_watch_text("Choose agent") && !visible_watch_text("Start Talk"));
+    assert(room_ui_apply_display_brightness(0) == ESP_OK);
+    click_talk(primary);
+    assert(brightness > 0 && visible_watch_text("Automatic"));
+    click_talk(primary);
+    assert(visible_watch_text("Agents"));
+    assert(room_ui_watch_menu("home") == ESP_OK);
+    touch_talk(primary, true);
+    facts.gateway = ROOM_UI_GATEWAY_OFFLINE;
+    room_ui_store_facts(&facts);
+    touch_talk(primary, false);
+    assert(visible_watch_text("Automatic"));
+    room_ui_refresh();
+    assert(visible_watch_text("Connection") && visible_watch_text("Let's reconnect"));
+    if (path) { char output[1024]; snprintf(output, sizeof(output), "%s-primary-offline.ppm", path); write_frame(output); }
+    click_talk(primary);
+    assert(find_visible_fragment(lv_layer_top(), "Wi-Fi connected"));
+    assert(room_ui_watch_menu("home") == ESP_OK);
+    facts.gateway = ROOM_UI_GATEWAY_CONNECTED;
+    room_ui_store_facts(&facts);
+    room_ui_set_voice_action_handler(voice_action);
+    room_ui_store_voice(&voice);
+    room_ui_refresh();
+    context.epoch = reader_epoch;
+    strcpy(context.agent_name, "Kitsune");
+    room_ui_store_conversation_context(&context);
+    assert(visible_watch_text("Hold to record") && !lv_obj_is_visible(primary));
+    if (path) { char output[1024]; snprintf(output, sizeof(output), "%s-primary-record.ppm", path); write_frame(output); }
+    voice.state = ROOM_VOICE_UNAVAILABLE;
+    room_ui_store_voice(&voice); room_ui_refresh();
+    assert(visible_watch_text("Continue conversation") && !visible_watch_text("Hold to record"));
+    assert(visible_watch_text("Kitsune"));
+    if (path) { char output[1024]; snprintf(output, sizeof(output), "%s-primary-continue.ppm", path); write_frame(output); }
+    touch_talk(primary, true);
+    voice.state = ROOM_VOICE_READY;
+    room_ui_store_voice(&voice);
+    touch_talk(primary, false);
+    assert(visible_watch_text("Automatic") && !room_ui_wants_conversations());
+    room_ui_refresh();
+    assert(visible_watch_text("Hold to record") && !lv_obj_is_visible(primary));
+    assert(starts == talk_starts && stops == talk_stops && selections == agent_selections);
+    room_ui_set_voice_action_handler(NULL);
+    voice.state = ROOM_VOICE_UNAVAILABLE;
+    room_ui_store_voice(&voice);
+    context = (room_conversation_context_t){0};
+    room_ui_store_conversation_context(&context);
+    puts("watch Home primary: one action, voice/reader priority, setup, wake-only and stale fallback passed");
+}
+
 static void check_watch_content_space(const char *path)
 {
     room_ui_facts_t facts = {.wifi = ROOM_UI_WIFI_CONNECTED,
@@ -1058,8 +1131,8 @@ static void check_watch_agents(const char *path)
     strcpy(roster.page.agents[0].name, "Kitsune");
     strcpy(roster.page.agents[0].emoji, "🦊");
     room_ui_store_agents(&roster);
-    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Kitsune")));
-    lv_obj_t *first = lv_obj_get_parent(find_text(lv_layer_top(), "Kitsune"));
+    assert(lv_obj_is_visible(find_visible_text(lv_layer_top(), "Kitsune")));
+    lv_obj_t *first = lv_obj_get_parent(find_visible_text(lv_layer_top(), "Kitsune"));
     lv_obj_t *list = lv_obj_get_parent(first);
     lv_obj_update_layout(list);
     lv_area_t bounds;
@@ -1116,7 +1189,7 @@ static void check_watch_agents(const char *path)
     assert(talk_starts == starts);
     if (path) { snprintf(output, sizeof(output), "%s-agent-detail.ppm", path); write_frame(output); }
     assert(room_ui_watch_menu("home") == ESP_OK);
-    assert(visible_watch_text("with Kitsune"));
+    assert(!visible_watch_text("with Kitsune"));
     assert(lv_obj_is_visible(watch_agent_button));
     assert(visible_watch_text("Kitsune"));
     write_frame(NULL);
@@ -1154,7 +1227,8 @@ static void check_watch_agents(const char *path)
     assert(talk_starts == starts && agent_selections == selections + 1);
     assert(room_ui_watch_menu("home") == ESP_OK);
     // A new press cannot use a changed recipient before the button is repainted.
-    lv_obj_t *start = lv_obj_get_parent(find_text(lv_layer_top(), "Start Talk"));
+    assert(room_ui_watch_menu("call") == ESP_OK);
+    lv_obj_t *start = lv_obj_get_parent(find_text(lv_layer_top(), "Start call"));
     click_talk(start);
     ++starts;
     assert(talk_starts == starts && talk_recipient == target.revision);
@@ -1178,7 +1252,7 @@ static void check_watch_agents(const char *path)
     touch_talk(start, false);
     assert(talk_starts == starts);
     assert(lv_obj_is_visible(find_text(lv_layer_top(), "Choose an agent")));
-    assert(visible_watch_text("Choose agent"));
+    assert(!visible_watch_text("Start call"));
     assert(!visible_watch_text("with Kitsune"));
     target.expired = false;
     room_ui_store_talk_target(&target);
@@ -1282,9 +1356,12 @@ static void check_watch_agents(const char *path)
     assert(agent_selections == selections + 1);
     assert(!visible_watch_text("Start Talk"));
     assert(room_ui_watch_menu("home") == ESP_OK);
-    assert(visible_watch_text("with default agent"));
+    assert(visible_watch_text("Automatic") && !visible_watch_text("with default agent"));
     assert(visible_watch_text("Ready when you are"));
     assert(!visible_watch_text("Tap to start a live conversation"));
+    assert(room_ui_watch_menu("call") == ESP_OK);
+    assert(visible_watch_text("Start call") && visible_watch_text("with default agent"));
+    assert(room_ui_watch_menu("home") == ESP_OK);
     puts("watch agents: acknowledged selection, next-call identity, paging and fenced pointer input passed");
 }
 
@@ -1297,7 +1374,7 @@ static void check_watch_conversations(const char *path)
     strcpy(roster.page.agents[0].name, "Kitsune");
     strcpy(roster.page.main_key, "agent:fox:main");
     room_ui_store_agents(&roster);
-    click_talk(lv_obj_get_parent(find_text(lv_layer_top(), "Kitsune")));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), "Kitsune")));
     unsigned selections = agent_selections, starts = talk_starts;
     lv_obj_t *choose = lv_obj_get_parent(find_text(lv_layer_top(), "Use for next Talk"));
     deny_display = true;
@@ -1392,30 +1469,21 @@ static void check_watch_conversations(const char *path)
     room_ui_store_conversation_context(&context);
     assert(room_ui_watch_menu("home") == ESP_OK);
     assert(conversation_action == ROOM_CONVERSATIONS_SUSPEND);
-    lv_obj_t *continue_hint = find_text(lv_layer_top(), "Continue conversations");
+    lv_obj_t *continue_hint = find_text(lv_layer_top(), "Continue conversation");
     lv_obj_t *continue_card = lv_obj_get_parent(continue_hint);
-    assert(lv_obj_is_visible(continue_hint));
-    assert(visible_watch_text("with Builder"));
-    lv_area_t card_area, home_talk_area;
+    assert(visible_watch_text("Continue conversation"));
+    assert(visible_watch_text("Builder") && visible_watch_text("Kitsune"));
+    assert(!visible_watch_text("Start Talk"));
+    lv_area_t card_area;
     lv_obj_update_layout(lv_layer_top());
     lv_obj_get_coords(continue_card, &card_area);
-    lv_obj_get_coords(lv_obj_get_parent(find_text(lv_layer_top(), "Start Talk")), &home_talk_area);
-    assert(card_area.y1 >= 304 && card_area.y2 < home_talk_area.y1);
+    assert(card_area.y1 == 376 && card_area.y2 == 427);
     if (path) { snprintf(output, sizeof(output), "%s-home-continue.ppm", path); write_frame(output); }
-    lv_obj_t *talk_target = find_visible_text(lv_layer_top(), "with Builder");
-    assert(talk_target != NULL);
     strcpy(target.name, "A very long agent name for the next live conversation");
     room_ui_store_talk_target(&target);
     room_ui_refresh();
     lv_obj_update_layout(lv_layer_top());
-    assert(lv_obj_is_visible(talk_target));
-    assert(strncmp(lv_label_get_text(talk_target), "with A very", 11) == 0);
-    lv_area_t target_area, action_area;
-    lv_obj_get_coords(talk_target, &target_area);
-    lv_obj_get_coords(find_text(lv_layer_top(), "Start Talk"), &action_area);
-    assert(lv_area_get_height(&target_area) <= 18 && target_area.y1 > action_area.y2);
-    assert(target_area.x1 > home_talk_area.x1 && target_area.x2 < home_talk_area.x2);
-    assert(target_area.y2 < home_talk_area.y2);
+    assert(lv_obj_is_visible(watch_agent_button) && visible_watch_text("Kitsune"));
     if (path) { snprintf(output, sizeof(output), "%s-home-talk-long-name.ppm", path); write_frame(output); }
     strcpy(target.name, "Builder");
     room_ui_store_talk_target(&target);
@@ -1426,8 +1494,8 @@ static void check_watch_conversations(const char *path)
     lv_area_t name_area, hint_area;
     lv_obj_get_coords(lv_obj_get_child(continue_card, 1), &name_area);
     lv_obj_get_coords(continue_hint, &hint_area);
-    assert(name_area.x1 > card_area.x1 && name_area.x2 < card_area.x2 - 20);
-    assert(lv_area_get_height(&name_area) <= 24 && name_area.y2 < hint_area.y1);
+    assert(name_area.x1 > card_area.x1 && name_area.x2 < card_area.x2);
+    assert(lv_area_get_height(&name_area) <= 18 && name_area.y1 > hint_area.y2 && name_area.y2 < card_area.y2);
     if (path) { snprintf(output, sizeof(output), "%s-home-long-name.ppm", path); write_frame(output); }
     strcpy(context.agent_name, "Kitsune");
     room_ui_store_conversation_context(&context);
@@ -1437,7 +1505,7 @@ static void check_watch_conversations(const char *path)
     touch_talk(continue_card, false);
     assert(conversation_action == ROOM_CONVERSATIONS_SUSPEND);
     room_ui_refresh();
-    assert(!lv_obj_is_visible(continue_hint));
+    assert(!visible_watch_text("Continue conversation"));
     context.epoch = reader_epoch;
     room_ui_store_conversation_context(&context);
     lv_obj_send_event(continue_card, LV_EVENT_PRESSED, NULL);
@@ -1452,14 +1520,14 @@ static void check_watch_conversations(const char *path)
     context.epoch = reader_epoch;
     room_ui_store_conversation_context(&context);
     assert(room_ui_watch_resume(&roster, view, reader_epoch, home_generation) == ESP_OK);
-    assert(!room_ui_wants_conversation_resume(home_generation) && lv_obj_is_visible(continue_hint));
+    assert(!room_ui_wants_conversation_resume(home_generation) && visible_watch_text("Continue conversation"));
 
     room_ui_facts_t home_facts = {.wifi = ROOM_UI_WIFI_CONNECTED,
         .gateway = ROOM_UI_GATEWAY_CONNECTED, .talk = ROOM_UI_TALK_ACTIVE};
     room_ui_store_facts(&home_facts);
     room_ui_set(ROOM_UI_SPEAKING, NULL);
-    assert(!lv_obj_is_visible(continue_hint));
-    assert(visible_watch_text("Conversation live") && visible_watch_text("Return to your call"));
+    assert(!visible_watch_text("Continue conversation"));
+    assert(visible_watch_text("Conversation live") && !visible_watch_text("Return to your call"));
     unsigned stops = talk_stops;
     if (path) { char output[1024]; snprintf(output, sizeof(output), "%s-home-return-call.ppm", path); write_frame(output); }
     click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), "Return to call")));
@@ -1470,14 +1538,14 @@ static void check_watch_conversations(const char *path)
     home_facts.talk = ROOM_UI_TALK_READY;
     room_ui_store_facts(&home_facts);
     room_ui_set(ROOM_UI_SETUP, "Pair this device");
-    assert(!lv_obj_is_visible(continue_hint) && visible_watch_text("Let's get connected"));
+    assert(!visible_watch_text("Continue conversation") && visible_watch_text("Let's get connected"));
     room_ui_set(ROOM_UI_ERROR, "Try reconnecting");
-    assert(!lv_obj_is_visible(continue_hint) && visible_watch_text("Needs attention"));
+    assert(!visible_watch_text("Continue conversation") && visible_watch_text("Needs attention"));
     room_ui_set(ROOM_UI_IDLE, NULL);
     target.expired = true;
     room_ui_store_talk_target(&target);
     room_ui_refresh();
-    assert(lv_obj_is_visible(continue_hint) && visible_watch_text("Choose an agent"));
+    assert(visible_watch_text("Continue conversation") && visible_watch_text("Choose an agent"));
     target.expired = false;
     room_ui_store_talk_target(&target);
     room_ui_refresh();
@@ -2102,6 +2170,8 @@ static void check_watch_messaging(const char *path)
     room_ui_store_messaging(&access);
     assert(visible_watch_text("Awaiting approval") && !visible_watch_text("Start Talk"));
     assert(room_ui_watch_menu("home") == ESP_OK);
+    assert(!visible_watch_text("Start Talk"));
+    assert(room_ui_watch_menu("call") == ESP_OK);
     assert(visible_watch_text("Talk unavailable") && !visible_watch_text("Start Talk"));
     assert(room_ui_watch_menu("messaging") == ESP_OK);
     messaging_snapshot(path, "waiting");
@@ -2114,10 +2184,12 @@ static void check_watch_messaging(const char *path)
     room_ui_store_messaging(&access);
     assert(visible_watch_text("Couldn't enable messaging") && !visible_watch_text("Start Talk"));
     assert(room_ui_watch_menu("home") == ESP_OK);
+    assert(!visible_watch_text("Start Talk"));
+    assert(room_ui_watch_menu("call") == ESP_OK);
     assert(visible_watch_text("Talk unavailable") && !visible_watch_text("Start Talk"));
     access.busy = false; access.can_request = true;
     room_ui_store_messaging(&access);
-    assert(visible_watch_text("Start Talk"));
+    assert(visible_watch_text("Start call"));
     assert(room_ui_watch_menu("messaging") == ESP_OK);
     click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " Settings")));
     assert(visible_watch_text("Settings"));
@@ -2596,7 +2668,7 @@ int main(int argc, char **argv)
     room_ui_init();
     assert(brightness == idle);
     check_talk_control(watch);
-    check_dark_talk_control();
+    check_dark_talk_control(watch);
     if (animated) {
         assert(!find_text(lv_screen_active(), "OpenClaw Room Node"));
         room_ui_set(ROOM_UI_LISTENING, NULL);
@@ -2710,6 +2782,7 @@ int main(int argc, char **argv)
         check_watch_navigation(argc == 3 ? argv[2] : NULL);
         check_watch_content_space(argc == 3 ? argv[2] : NULL);
         check_watch_live_call(argc == 3 ? argv[2] : NULL);
+        check_watch_primary(argc == 3 ? argv[2] : NULL);
         check_watch_call_return();
         check_watch_connection(argc == 3 ? argv[2] : NULL);
         check_watch_agents(argc == 3 ? argv[2] : NULL);

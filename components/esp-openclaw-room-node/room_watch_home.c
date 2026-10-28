@@ -9,7 +9,7 @@
 static lv_obj_t *root, *title_label, *detail_label;
 static lv_obj_t *agent_button, *agent_name, *agent_initials, *agent_image;
 static lv_image_dsc_t agent_images[3];
-static lv_obj_t *continue_card, *reader_label;
+static lv_obj_t *continue_card, *primary_label, *reader_label;
 static lv_obj_t *voice_button, *voice_label, *discard_button, *send_button, *send_label;
 static lv_obj_t *review_panel, *review_heading, *review_recipient, *review_notice, *review_body, *review_text;
 static uint32_t review_generation;
@@ -152,27 +152,14 @@ void room_watch_home_create(lv_obj_t *parent, lv_event_cb_t menu_handler, lv_eve
     lv_obj_set_height(detail_label, 18);
     lv_obj_set_style_text_align(detail_label, LV_TEXT_ALIGN_CENTER, 0);
 
-    continue_card = lv_obj_create(root);
-    lv_obj_remove_style_all(continue_card);
-    lv_obj_set_pos(continue_card, 26, 304);
-    lv_obj_set_size(continue_card, 316, 62);
-    lv_obj_set_style_bg_color(continue_card, lv_color_hex(0x2a2233), 0);
-    lv_obj_set_style_bg_color(continue_card, lv_color_hex(0x3a2e45), LV_STATE_PRESSED);
-    lv_obj_set_style_bg_opa(continue_card, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_color(continue_card, lv_color_hex(0x504054), 0);
-    lv_obj_set_style_border_width(continue_card, 1, 0);
-    lv_obj_set_style_radius(continue_card, 18, 0);
-    lv_obj_set_clickable(continue_card, true);
-    lv_obj_set_scrollable(continue_card, false);
-    lv_obj_add_event_cb(continue_card, continue_handler, LV_EVENT_ALL, NULL);
-    label(continue_card, LV_SYMBOL_ENVELOPE, 16, 23, 24, 0xc9b9db);
-    reader_label = label(continue_card, "", 50, 8, 228, 0xf4efee);
-    lv_obj_set_height(reader_label, 24);
+    continue_card = action(root, "Choose agent", continue_handler, &primary_label);
+    lv_obj_set_width(primary_label, 292);
 #if LV_FONT_MONTSERRAT_20
-    lv_obj_set_style_text_font(reader_label, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_font(primary_label, &lv_font_montserrat_20, 0);
 #endif
-    label(continue_card, "Continue conversations", 50, 35, 228, 0xb8b0bd);
-    label(continue_card, LV_SYMBOL_RIGHT, 288, 23, 14, 0xc9b9db);
+    reader_label = label(continue_card, "", 12, 30, 292, 0x64546a);
+    lv_obj_set_height(reader_label, 18);
+    lv_obj_set_style_text_align(reader_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_hidden(continue_card, true);
     review_panel = lv_obj_create(root);
     lv_obj_remove_style_all(review_panel);
@@ -224,14 +211,14 @@ bool room_watch_home_review_visible(void)
     return review_panel != NULL && lv_obj_is_visible(review_panel);
 }
 
-bool room_watch_home_render(const room_ui_facts_t *facts, const room_ui_talk_target_t *target, room_ui_state_t state,
+void room_watch_home_render(const room_ui_facts_t *facts, const room_ui_talk_target_t *target, room_ui_state_t state,
                            const char *detail, const char *reader_agent, const room_voice_snapshot_t *voice,
-                           bool voice_enabled, bool holding, bool hidden)
+                           bool voice_enabled, bool holding, room_home_action_t primary, bool hidden)
 {
-    if (root == NULL) return false;
+    if (root == NULL) return;
     bool was_hidden = !lv_obj_is_visible(root);
     lv_obj_set_flag(root, LV_OBJ_FLAG_HIDDEN, hidden);
-    if (hidden) return false;
+    if (hidden) return;
     bool wifi = facts->wifi == ROOM_UI_WIFI_CONNECTED;
     bool connected = facts->gateway == ROOM_UI_GATEWAY_CONNECTED;
     bool connection_changed = wifi_connected != wifi || gateway_connected != connected;
@@ -261,7 +248,7 @@ bool room_watch_home_render(const room_ui_facts_t *facts, const room_ui_talk_tar
     else lv_label_set_text(agent_initials, target->expired ? LV_SYMBOL_REFRESH : !target->selected ? LV_SYMBOL_SHUFFLE :
         target->avatar.text[0] ? target->avatar.text : "?");
     lv_obj_set_hidden(review_panel, !review);
-    lv_obj_set_hidden(voice_button, voice == NULL || ((transcribing || draft || submitted) && !holding));
+    lv_obj_set_hidden(voice_button, primary != ROOM_HOME_NONE || voice == NULL || ((transcribing || draft || submitted) && !holding));
     lv_obj_set_hidden(send_button, !(draft || submitted) || holding);
     lv_label_set_text_static(send_label, sending ? "Sending..." : submitted ? "Conversations" : LV_SYMBOL_UP "  Send");
     lv_obj_center(send_label);
@@ -280,13 +267,16 @@ bool room_watch_home_render(const room_ui_facts_t *facts, const room_ui_talk_tar
     /* Keep a pressed recording target enabled through the duration cap so its
      * release cannot activate the replacement draft controls. */
     lv_obj_set_state(voice_button, LV_STATE_DISABLED, !voice_enabled);
-    bool reading = !voice_busy && reader_agent != NULL && reader_agent[0] != '\0' && wifi && connected &&
-        state != ROOM_UI_ERROR && state != ROOM_UI_SETUP &&
-        facts->talk != ROOM_UI_TALK_CONNECTING && facts->talk != ROOM_UI_TALK_ACTIVE &&
-        facts->talk != ROOM_UI_TALK_STOPPING;
-    lv_obj_set_hidden(continue_card, !reading);
-    lv_obj_set_hidden(title_label, reading);
-    lv_obj_set_hidden(detail_label, reading);
+    bool reading = primary == ROOM_HOME_CONTINUE;
+    lv_obj_set_hidden(continue_card, primary == ROOM_HOME_NONE);
+    lv_label_set_text_static(primary_label, reading ? "Continue conversation" : primary == ROOM_HOME_CONNECTION ? "Connection" : "Choose agent");
+    lv_obj_set_hidden(reader_label, !reading);
+    if (reading) {
+        lv_label_set_text(reader_label, reader_agent);
+        lv_obj_align(primary_label, LV_ALIGN_TOP_MID, 0, 3);
+    } else lv_obj_center(primary_label);
+    lv_obj_set_hidden(title_label, false);
+    lv_obj_set_hidden(detail_label, false);
     if (review) {
         lv_obj_set_style_text_font(review_text, openclaw_reading_font(), 0);
         lv_obj_set_hidden(title_label, true);
@@ -313,12 +303,7 @@ bool room_watch_home_render(const room_ui_facts_t *facts, const room_ui_talk_tar
         }
         review_generation = voice->generation;
         review_state = voice->state;
-        return false;
-    }
-    if (reading) {
-        if (strcmp(lv_label_get_text(reader_label), reader_agent) != 0)
-            lv_label_set_text(reader_label, reader_agent);
-        return true;
+        return;
     }
 
     const char *title = "Your OpenClaw";
@@ -331,22 +316,22 @@ bool room_watch_home_render(const room_ui_facts_t *facts, const room_ui_talk_tar
         subtitle = detail[0] != '\0' ? detail : "Set up over USB";
     } else if (facts->talk == ROOM_UI_TALK_ACTIVE) {
         title = "Conversation live";
-        subtitle = "Return to your call";
+        subtitle = "";
     } else if (facts->talk == ROOM_UI_TALK_CONNECTING) {
         title = "Connecting";
         subtitle = "Starting your conversation";
     } else if (facts->talk == ROOM_UI_TALK_STOPPING) {
         title = "Finishing up";
         subtitle = "Ending your conversation";
-    } else if (facts->talk == ROOM_UI_TALK_READY) {
-        title = "Ready when you are";
-        subtitle = "";
     } else if (facts->wifi == ROOM_UI_WIFI_STARTING || facts->gateway == ROOM_UI_GATEWAY_STARTING) {
         title = "Your OpenClaw";
         subtitle = "Starting up";
     } else if (!wifi || !connected) {
         title = "Let's reconnect";
-        subtitle = "Hold the screen for device status";
+        subtitle = "";
+    } else if (facts->talk == ROOM_UI_TALK_READY) {
+        title = "Ready when you are";
+        subtitle = "";
     } else {
         title = "OpenClaw is here";
         subtitle = facts->talk == ROOM_UI_TALK_NO_SESSION ? "Talk needs an operator session"
@@ -398,5 +383,4 @@ bool room_watch_home_render(const room_ui_facts_t *facts, const room_ui_talk_tar
     }
     line[i] = '\0';
     if (strcmp(lv_label_get_text(detail_label), line) != 0) lv_label_set_text(detail_label, line);
-    return false;
 }

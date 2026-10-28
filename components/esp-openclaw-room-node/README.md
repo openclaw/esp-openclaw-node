@@ -55,7 +55,7 @@ On the 1.8-inch Watch, **Menu → Agents** opens the agent directory.
 Swipe the list to browse up to eight agents per page; use the arrows for more
 pages, and tap a row to inspect its name and exact ID. Initials replace emoji
 that the embedded font cannot display. Back returns to the list or menu.
-Idle pages use the full content area; return Home to start Talk. An active call
+Idle pages use the full content area; open Live call to start Talk. An active call
 offers **Return to call** without covering the page content.
 **Use for next Talk** chooses the
 agent without starting a call or changing an active conversation. The button
@@ -76,6 +76,14 @@ Returning Home keeps the screen awake for ten seconds before the configured
 idle display policy resumes. Loading, offline, empty, denied, oversized, and
 timed-out requests have visible outcomes. USB `menu agents` opens this screen
 for hardware inspection.
+
+Watch Home has one primary action below the mascot and headline. It offers
+**Hold to record** when capture is ready. Without capture, a retained reader
+offers **Continue conversation** with its own agent name; otherwise Home offers
+**Choose agent**. Offline and setup states offer **Connection**. Continue does
+not change the next Talk recipient shown in the agent capsule. During a live
+call the primary action is **Return to call**. Draft review keeps its explicit
+Send and Discard actions.
 
 The local USB command `agents refresh [offset]` reads a page of up to eight
 agents through the existing operator connection. `agents` reports its state

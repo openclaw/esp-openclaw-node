@@ -95,7 +95,7 @@ static room_watch_page_t watch_parent(room_watch_page_t page)
     if (page == ROOM_WATCH_MESSAGING) return watch_messaging_parent;
     if (page == ROOM_WATCH_CONNECTION) return watch_connection_parent;
     if (page == ROOM_WATCH_LOCAL_DEVICE) return ROOM_WATCH_DEVICES;
-    if (page == ROOM_WATCH_DEVICES || page == ROOM_WATCH_SETTINGS) return ROOM_WATCH_MENU;
+    if (page == ROOM_WATCH_DEVICES || page == ROOM_WATCH_SETTINGS || page == ROOM_WATCH_CALL) return ROOM_WATCH_MENU;
     return ROOM_WATCH_HOME;
 }
 static int pressed_watch_page = -1;
@@ -468,6 +468,7 @@ esp_err_t room_ui_watch_menu(const char *page)
     else if (strcmp(page, "density") == 0) requested = ROOM_WATCH_DENSITY;
     else if (strcmp(page, "messaging") == 0) requested = ROOM_WATCH_MESSAGING;
     else if (strcmp(page, "connection") == 0) requested = ROOM_WATCH_CONNECTION;
+    else if (strcmp(page, "call") == 0) requested = ROOM_WATCH_CALL;
     else if (strcmp(page, "canvas") == 0) requested = ROOM_WATCH_CANVAS;
     else if (strcmp(page, "home") == 0) requested = ROOM_WATCH_HOME;
     else return ESP_ERR_INVALID_ARG;
@@ -1474,9 +1475,10 @@ static bool room_ui_render_locked(void)
     }
     bool canvas_active = room_canvas_is_active();
     bool navigation = watch_home_enabled && page != ROOM_WATCH_HOME && !canvas_active;
+    bool call_page = watch_home_enabled && page == ROOM_WATCH_CALL;
     bool call_in_progress = facts.talk == ROOM_UI_TALK_CONNECTING || facts.talk == ROOM_UI_TALK_ACTIVE;
-    // Only an ongoing call reserves a footer while browsing Watch pages.
-    int content_bottom = call_in_progress ? 370 : 432;
+    // The call page keeps its control; other pages reserve space only during a call.
+    int content_bottom = call_in_progress || call_page ? 370 : 432;
     bool voice_home = watch_home_enabled && voice_action_handler != NULL &&
         facts.talk != ROOM_UI_TALK_CONNECTING && facts.talk != ROOM_UI_TALK_ACTIVE &&
         facts.talk != ROOM_UI_TALK_STOPPING;
@@ -1516,9 +1518,11 @@ static bool room_ui_render_locked(void)
             : facts.talk == ROOM_UI_TALK_CONNECTING || facts.talk == ROOM_UI_TALK_ACTIVE ? TALK_CONTROL_STOP : TALK_CONTROL_NONE;
         bool start = painted_talk_action == TALK_CONTROL_START;
         bool stop = facts.talk == ROOM_UI_TALK_CONNECTING || facts.talk == ROOM_UI_TALK_ACTIVE;
-        bool return_to_call = watch_home_enabled && (navigation || canvas_active) && stop;
+        bool return_to_call = watch_home_enabled && !call_page && (navigation || canvas_active) && stop;
         if (return_to_call) painted_talk_action = TALK_CONTROL_RETURN;
-        lv_label_set_text(talk_pill_label, return_to_call ? "Return to call" : start ? "Start Talk" : stop ? "Stop Talk"
+        const char *start_label = call_page ? "Start call" : "Start Talk";
+        const char *stop_label = call_page ? "End call" : "Stop Talk";
+        lv_label_set_text(talk_pill_label, return_to_call ? "Return to call" : start ? start_label : stop ? stop_label
             : selecting ? "Choosing agent..." : target.expired ? "Choose an agent" :
             facts.talk == ROOM_UI_TALK_STOPPING ? "Stopping..." : "Talk unavailable");
         if (talk_target_label != NULL) {
@@ -1537,11 +1541,14 @@ static bool room_ui_render_locked(void)
                 lv_obj_center(talk_pill_label);
             }
         }
+#if LV_FONT_MONTSERRAT_20
+        if (call_page) lv_obj_set_style_text_font(talk_pill_label, &lv_font_montserrat_20, 0);
+#endif
         taskENTER_CRITICAL(&state_mux);
         painted_target_revision = target.revision;
         taskEXIT_CRITICAL(&state_mux);
         lv_obj_set_state(talk_pill, LV_STATE_DISABLED, !start && !stop);
-        bool browsing_idle = watch_home_enabled && (navigation || canvas_active) && !call_in_progress;
+        bool browsing_idle = watch_home_enabled && !call_page && (navigation || canvas_active) && !call_in_progress;
         bool hidden = overlay || (voice_home && !canvas_active && !navigation) || browsing_idle;
         if (browsing_idle) {
             painted_talk_action = TALK_CONTROL_NONE;

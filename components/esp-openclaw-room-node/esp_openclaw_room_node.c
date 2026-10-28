@@ -1939,7 +1939,7 @@ static int brightness_console_command(int argc, char **argv)
 static int menu_console_command(int argc, char **argv)
 {
     if (argc > 2) {
-        printf("usage: menu [menu|agents|conversations|preview|devices|device|settings|display|brightness|reading|density|messaging|connection|canvas|home]\n");
+        printf("usage: menu [menu|agents|conversations|preview|devices|device|settings|display|brightness|reading|density|messaging|connection|call|canvas|home]\n");
         return 1;
     }
     const char *page = argc == 2 ? argv[1] : "menu";

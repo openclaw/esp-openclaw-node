@@ -29,8 +29,11 @@ media state; unavailable and stopping states disable the control. On Watch,
 browsing menus, settings, agents, conversations, or Canvas during an active call
 shows **Return to call** instead of Stop. That action returns to the call on Home
 without ending it; **Stop Talk** on that view ends it deliberately. Diagnostics
-hide the control. Idle Watch menus, readers, and Canvas hide the Talk control
-and use its space for content. On boards that sleep the display, the first touch on a dark Talk control only wakes the
+hide the control. **Menu → Live call** opens a dedicated Watch page with an
+explicit **Start call** / **End call** control and current connection/audio
+guidance. Opening the page does not start a call; Back keeps an active call
+running. USB `menu call` opens the same page. Other idle Watch menus, readers,
+and Canvas hide the Talk control and use its space for content. On boards that sleep the display, the first touch on a dark Talk control only wakes the
 display; tap the visible control again to start or stop Talk. If the
 button's action changes during a press, release and press again; a held Start
 press cannot become Stop when wake word or a remote command starts Talk.

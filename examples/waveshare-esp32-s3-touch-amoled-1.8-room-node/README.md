@@ -105,7 +105,10 @@ exceeds the selected value. Brightness and navigation work offline and never
 change the selected agent or end a call.
 
 The USB console can open the same pages with `menu`, `menu connection`,
-`menu conversations`, `menu devices`, `menu device`, `menu settings`, `menu display`, `menu canvas`, and `menu home`, without starting or stopping a conversation.
+`menu conversations`, `menu call`, `menu devices`, `menu device`, `menu settings`, `menu display`, `menu canvas`, and `menu home`, without starting or stopping a conversation.
+**Menu → Live call** keeps live audio separate from hold-to-record messages:
+open the page, then explicitly choose **Start call** or **End call**. Back
+leaves the call running while you browse.
 Use `brightness <10..100>` to set the same runtime preference over USB.
 Additional settings and press-to-record messaging are tracked in the
 [interaction plan](../../docs/design/watch-dial-interaction-plan.md).

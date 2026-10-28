@@ -7,7 +7,16 @@
 
 #include <stdint.h>
 
-static lv_obj_t *root, *heading, *back_label, *rows[5], *values[5], *empty;
+static const struct { const char *label; room_watch_page_t page; } menu[] = {
+    {LV_SYMBOL_LIST "  Agents", ROOM_WATCH_AGENTS},
+    {LV_SYMBOL_ENVELOPE "  Conversations", ROOM_WATCH_CONVERSATIONS},
+    {LV_SYMBOL_CALL "  Live call", ROOM_WATCH_CALL},
+    {LV_SYMBOL_IMAGE "  Canvas", ROOM_WATCH_CANVAS},
+    {LV_SYMBOL_CHARGE "  Devices", ROOM_WATCH_DEVICES},
+    {LV_SYMBOL_SETTINGS "  Settings", ROOM_WATCH_SETTINGS},
+};
+enum { MENU_COUNT = sizeof(menu) / sizeof(menu[0]) };
+static lv_obj_t *root, *heading, *back_label, *rows[MENU_COUNT], *values[MENU_COUNT], *empty;
 static lv_obj_t *connection_body, *connection_text, *connection_status[2], *menu_list;
 static lv_timer_t *connection_timer;
 static bool display_awake, connection_active;
@@ -35,9 +44,6 @@ void room_watch_navigation_set_awake(bool awake)
         refresh_connection(NULL);
     } else lv_timer_pause(connection_timer);
 }
-
-static const char *menu[] = {LV_SYMBOL_LIST "  Agents", LV_SYMBOL_ENVELOPE "  Conversations",
-    LV_SYMBOL_IMAGE "  Canvas", LV_SYMBOL_CHARGE "  Devices", LV_SYMBOL_SETTINGS "  Settings"};
 
 static lv_obj_t *label(lv_obj_t *parent, const char *value, int x, int y, int width)
 {
@@ -80,9 +86,7 @@ void room_watch_navigation_create(lv_obj_t *parent, lv_event_cb_t handler)
     lv_obj_set_scrollbar_mode(menu_list, LV_SCROLLBAR_MODE_AUTO);
     for (unsigned i = 0; i < 2; ++i)
         connection_status[i] = label(root, "", 26, 112 + (int)i * 24, 316);
-    const room_watch_page_t pages[] = {ROOM_WATCH_AGENTS, ROOM_WATCH_CONVERSATIONS,
-        ROOM_WATCH_CANVAS, ROOM_WATCH_DEVICES, ROOM_WATCH_SETTINGS};
-    for (unsigned i = 0; i < 5; ++i) {
+    for (unsigned i = 0; i < MENU_COUNT; ++i) {
         rows[i] = lv_obj_create(menu_list);
         lv_obj_remove_style_all(rows[i]);
         lv_obj_set_pos(rows[i], 0, (int)i * 48);
@@ -92,8 +96,8 @@ void room_watch_navigation_create(lv_obj_t *parent, lv_event_cb_t handler)
         lv_obj_set_style_radius(rows[i], 16, 0);
         lv_obj_set_scrollable(rows[i], false);
         lv_obj_set_clickable(rows[i], true);
-        values[i] = label(rows[i], menu[i], 18, 14, 280);
-        lv_obj_add_event_cb(rows[i], handler, LV_EVENT_ALL, (void *)(intptr_t)pages[i]);
+        values[i] = label(rows[i], menu[i].label, 18, 14, 280);
+        lv_obj_add_event_cb(rows[i], handler, LV_EVENT_ALL, (void *)(intptr_t)menu[i].page);
     }
     connection_body = lv_obj_create(root);
     lv_obj_remove_style_all(connection_body);
@@ -114,6 +118,22 @@ void room_watch_navigation_create(lv_obj_t *parent, lv_event_cb_t handler)
     lv_label_set_long_mode(empty, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(empty, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_hidden(root, true);
+}
+
+static const char *call_summary(const room_ui_facts_t *facts)
+{
+    switch (facts->talk) {
+    case ROOM_UI_TALK_STARTING: return "Preparing audio...\n\nNo microphone is open.";
+    case ROOM_UI_TALK_UNAVAILABLE: return "Live audio is unavailable.\n\nOpen device diagnostics to check the microphone and speaker.";
+    case ROOM_UI_TALK_NO_SESSION: return "Pair this watch with OpenClaw before calling.\n\nOpen Settings > Connection for setup.";
+    case ROOM_UI_TALK_READY: return "Start a live audio conversation.\n\nThe microphone stays open until you end the call.";
+    case ROOM_UI_TALK_CONNECTING: return "Connecting your call...\n\nYou can stop before it connects.";
+    case ROOM_UI_TALK_ACTIVE: return "Your call is active.\n\nYou can browse without ending it.";
+    case ROOM_UI_TALK_STOPPING: return "Ending your call...\n\nWait for the microphone to close.";
+    default: return facts->gateway == ROOM_UI_GATEWAY_CONNECTED
+        ? "Waiting for call access.\n\nCheck the connection or pairing in Settings."
+        : "Connect to your Gateway.\n\nOpen Settings > Connection to check setup.";
+    }
 }
 
 void room_watch_navigation_render(room_watch_page_t page, const room_ui_facts_t *facts,
@@ -138,11 +158,14 @@ void room_watch_navigation_render(room_watch_page_t page, const room_ui_facts_t 
     bool connection = page == ROOM_WATCH_CONNECTION;
     bool canvas = page == ROOM_WATCH_CANVAS;
     bool resuming = page == ROOM_WATCH_CONVERSATIONS;
-    lv_label_set_text_static(heading, connection ? "Connection" : canvas ? "Canvas" : resuming ? "Conversations" : "Menu");
-    lv_label_set_text_static(empty, resuming ? resume_failed ? "Reader unavailable.\n\nRetrying...\nYou can return Home."
+    bool call = page == ROOM_WATCH_CALL;
+    lv_label_set_text_static(heading, call ? "Live call" : connection ? "Connection" : canvas ? "Canvas" : resuming ? "Conversations" : "Menu");
+    lv_label_set_text_static(empty, call ? call_summary(facts) : resuming ? resume_failed ? "Reader unavailable.\n\nRetrying...\nYou can return Home."
         : "Opening your last conversation..."
         : "No card yet\n\nAsk your assistant to show\na card on this watch.");
-    lv_obj_set_hidden(empty, !canvas && !resuming);
+    lv_obj_set_style_text_font(empty, call ? openclaw_reading_font() : &lv_font_montserrat_14, 0);
+    lv_obj_set_height(empty, call ? content_bottom - 156 : LV_SIZE_CONTENT);
+    lv_obj_set_hidden(empty, !canvas && !resuming && !call);
     const char *gateway[] = {"Starting", "Connecting", "Connected", "Offline", "Pairing needed"};
     const char *talk[] = {"Starting", "Unavailable", "Waiting for access", "Pairing needed", "Ready", "Connecting", "Active", "Stopping"};
     const char *states[] = {
@@ -150,13 +173,13 @@ void room_watch_navigation_render(room_watch_page_t page, const room_ui_facts_t 
         (unsigned)facts->talk < sizeof(talk) / sizeof(*talk) ? talk[facts->talk] : "Unknown",
     };
     const char *names[] = {"Gateway", "Talk"};
-    lv_obj_set_hidden(menu_list, canvas || resuming || connection);
+    lv_obj_set_hidden(menu_list, canvas || resuming || connection || call);
     for (unsigned i = 0; i < 2; ++i) {
         lv_obj_set_hidden(connection_status[i], !connection);
         if (connection) lv_label_set_text_fmt(connection_status[i], "%s: %s", names[i], states[i]);
     }
     int row_height = openclaw_density_row_height(false);
-    for (unsigned i = 0; i < 5; ++i) {
+    for (unsigned i = 0; i < MENU_COUNT; ++i) {
         lv_obj_set_y(rows[i], (int)i * (row_height + openclaw_density_row_gap()));
         lv_obj_set_height(rows[i], row_height);
         lv_obj_set_y(values[i], (row_height - 16) / 2);

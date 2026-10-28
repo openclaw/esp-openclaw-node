@@ -13,11 +13,11 @@ static lv_obj_t *avatars[ESP_OPENCLAW_DIRECTORY_PAGE_SIZE], *ids[ESP_OPENCLAW_DI
 static lv_obj_t *avatar_images[ESP_OPENCLAW_DIRECTORY_PAGE_SIZE], *detail_image;
 static lv_image_dsc_t avatar_sources[3];
 static lv_obj_t *previous, *next, *refresh, *detail_name, *detail_id, *detail_note, *detail_avatar, *choose, *choose_text;
-static lv_obj_t *use_default, *default_text, *conversations;
+static lv_obj_t *use_default, *default_text, *conversations, *detail_body;
 static const room_agents_snapshot_t *agents;
 static unsigned revision;
 static room_agents_state_t state;
-static bool detail, reset_scroll, can_reset;
+static bool detail, reset_scroll, reset_detail_scroll, can_reset;
 static char selected_id[65];
 
 static lv_obj_t *label(lv_obj_t *parent, const char *text, int x, int y, int width)
@@ -120,30 +120,35 @@ void room_watch_agents_create(lv_obj_t *parent, lv_event_cb_t handler)
     lv_obj_set_style_text_align(refresh_text, LV_TEXT_ALIGN_CENTER, 0);
     next = button(root, 276, 326, 66, 44, ROOM_AGENT_NEXT, handler);
     label(next, LV_SYMBOL_RIGHT, 26, 14, 24);
-    detail_avatar = label(root, "", 32, 112, 64);
+    detail_body = lv_obj_create(root);
+    lv_obj_remove_style_all(detail_body);
+    lv_obj_set_pos(detail_body, 26, 112);
+    lv_obj_set_size(detail_body, 316, 212);
+    lv_obj_set_scroll_dir(detail_body, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(detail_body, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_set_style_pad_bottom(detail_body, 8, 0);
+    lv_obj_set_style_width(detail_body, 3, LV_PART_SCROLLBAR);
+    lv_obj_set_style_bg_color(detail_body, lv_color_hex(0xb9aabe), LV_PART_SCROLLBAR);
+    lv_obj_set_style_bg_opa(detail_body, LV_OPA_60, LV_PART_SCROLLBAR);
+    detail_avatar = label(detail_body, "", 6, 0, 64);
     lv_obj_set_height(detail_avatar, 64);
     lv_obj_set_style_pad_top(detail_avatar, 23, 0);
     lv_obj_set_style_text_align(detail_avatar, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_bg_color(detail_avatar, lv_color_hex(0x655074), 0);
     lv_obj_set_style_bg_opa(detail_avatar, LV_OPA_COVER, 0);
     lv_obj_set_style_radius(detail_avatar, LV_RADIUS_CIRCLE, 0);
-    detail_image = avatar_image(root, 32, 112, 64);
-    detail_name = label(root, "", 112, 118, 224);
+    detail_image = avatar_image(detail_body, 6, 0, 64);
+    detail_name = label(detail_body, "", 86, 6, 224);
     lv_label_set_long_mode(detail_name, LV_LABEL_LONG_WRAP);
-#if LV_FONT_MONTSERRAT_20
-    lv_obj_set_style_text_font(detail_name, &lv_font_montserrat_20, 0);
-#endif
-    lv_obj_set_height(detail_name, 72);
-    detail_id = label(root, "", 32, 188, 304);
+    detail_id = label(detail_body, "", 6, 76, 304);
     lv_label_set_long_mode(detail_id, LV_LABEL_LONG_WRAP);
-    lv_obj_set_height(detail_id, 44);
     choose = button(root, 26, 234, 316, 44, ROOM_AGENT_CHOOSE, handler);
     choose_text = label(choose, "Use for next Talk", 12, 14, 292);
     lv_obj_set_style_text_align(choose_text, LV_TEXT_ALIGN_CENTER, 0);
     conversations = button(root, 26, 288, 316, 44, ROOM_AGENT_CONVERSATIONS, handler);
     lv_obj_t *chat_text = label(conversations, LV_SYMBOL_LIST "  Conversations", 12, 14, 292);
     lv_obj_set_style_text_align(chat_text, LV_TEXT_ALIGN_CENTER, 0);
-    detail_note = label(root, "Applies to your next call.\nThe current call stays with its agent.", 32, 342, 304);
+    detail_note = label(detail_body, "Applies to your next call.\nThe current call stays with its agent.", 6, 136, 304);
     lv_label_set_long_mode(detail_note, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_color(detail_note, lv_color_hex(0xb9aabe), 0);
     lv_obj_add_flag(root, LV_OBJ_FLAG_HIDDEN);
@@ -153,6 +158,7 @@ void room_watch_agents_reset(void)
 {
     detail = false;
     reset_scroll = true;
+    reset_detail_scroll = true;
     selected_id[0] = '\0';
 }
 
@@ -214,14 +220,16 @@ void room_watch_agents_render(const room_agents_snapshot_t *snapshot, bool hidde
     lv_obj_set_hidden(previous, detail);
     lv_obj_set_hidden(next, detail);
     lv_obj_set_hidden(refresh, detail);
-    lv_obj_set_hidden(detail_avatar, !detail);
-    lv_obj_set_hidden(detail_image, !detail);
-    lv_obj_set_hidden(detail_name, !detail);
-    lv_obj_set_hidden(detail_id, !detail);
-    lv_obj_set_hidden(detail_note, !detail);
+    lv_obj_set_hidden(detail_body, !detail);
     lv_obj_set_hidden(choose, !detail);
     lv_obj_set_hidden(conversations, !detail);
     if (detail) {
+        lv_obj_set_height(detail_body, content_bottom - 220);
+        lv_obj_set_y(choose, content_bottom - 98);
+        lv_obj_set_y(conversations, content_bottom - 44);
+        lv_obj_set_style_text_font(detail_name, reading_font, 0);
+        lv_obj_set_style_text_font(detail_id, reading_font, 0);
+        lv_obj_set_style_text_font(detail_note, reading_font, 0);
         render_avatar(detail_avatar, detail_image, selected);
         lv_label_set_text(detail_name, selected->name);
         lv_label_set_text_fmt(detail_id, "Agent ID\n%s", selected->id);
@@ -232,6 +240,15 @@ void room_watch_agents_render(const room_agents_snapshot_t *snapshot, bool hidde
         lv_label_set_text_static(detail_note, failed ? "Selection changed.\nRefresh agents and choose again."
             : !available ? "Routing unavailable.\nUpdate your Gateway to choose an agent."
             : "Applies to your next call.\nThe current call stays with its agent.");
+        lv_obj_update_layout(detail_body);
+        int identity_y = lv_obj_get_y(detail_name) + lv_obj_get_height(detail_name);
+        if (identity_y < 64) identity_y = 64;
+        lv_obj_set_y(detail_id, identity_y + 12);
+        lv_obj_set_y(detail_note, identity_y + 12 + lv_obj_get_height(detail_id) + 16);
+        lv_obj_update_layout(detail_body);
+        if (reset_detail_scroll) lv_obj_scroll_to_y(detail_body, 0, LV_ANIM_OFF);
+        lv_obj_readjust_scroll(detail_body, LV_ANIM_OFF);
+        reset_detail_scroll = false;
         return;
     }
     bool loading = state == ROOM_AGENTS_LOADING;
@@ -282,6 +299,7 @@ room_agent_action_t room_watch_agents_activate(int action, size_t *offset)
     if (agents == NULL || detail) return ROOM_AGENT_STAY;
     if (action >= 0 && (size_t)action < agents->page.count && state == ROOM_AGENTS_READY) {
         snprintf(selected_id, sizeof(selected_id), "%s", agents->page.agents[action].id);
+        reset_detail_scroll = true;
         detail = true;
     } else if (action == ROOM_AGENT_REFRESH && state != ROOM_AGENTS_LOADING) {
         *offset = agents->page.offset;
@@ -308,6 +326,7 @@ bool room_watch_agents_target(char id[65], unsigned *source_revision)
 
 void room_watch_agents_focus(const char *id)
 {
+    if (!detail || strcmp(selected_id, id) != 0) reset_detail_scroll = true;
     snprintf(selected_id, sizeof(selected_id), "%s", id);
     detail = true;
 }

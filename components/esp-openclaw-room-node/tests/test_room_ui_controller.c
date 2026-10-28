@@ -1394,6 +1394,96 @@ static void check_watch_agents(const char *path)
     puts("watch agents: acknowledged selection, next-call identity, paging and fenced pointer input passed");
 }
 
+static void check_watch_agent_detail(const char *path)
+{
+    room_agents_snapshot_t roster = {.state = ROOM_AGENTS_READY, .revision = 60,
+        .page = {.count = 1, .total = 1, .main_key = "main"}};
+    strcpy(roster.page.agents[0].name, "WWW Architecture and planning assistant for all project: Kitsune");
+    strcpy(roster.page.agents[0].id, "architecture-planning-assistant-for-projects-0123456789012345678");
+    strcpy(roster.page.agents[0].emoji, "🦊");
+    const char *note_text = "Applies to your next call.\nThe current call stays with its agent.";
+    unsigned starts = talk_starts, stops = talk_stops, selections = agent_selections;
+    for (int reading = OPENCLAW_READING_STANDARD; reading <= OPENCLAW_READING_LARGE; ++reading) {
+        openclaw_reading_set_size(reading);
+        for (int density = OPENCLAW_DENSITY_COMPACT; density <= OPENCLAW_DENSITY_COMFORTABLE; ++density) {
+            openclaw_density_set(density);
+            assert(room_ui_watch_menu("agents") == ESP_OK);
+            room_ui_store_agents(&roster);
+            click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), roster.page.agents[0].name)));
+            lv_obj_t *name = find_visible_text(lv_layer_top(), roster.page.agents[0].name);
+            lv_obj_t *body = lv_obj_get_parent(name);
+            char identity[80]; snprintf(identity, sizeof(identity), "Agent ID\n%s", roster.page.agents[0].id);
+            lv_obj_t *id = find_text(body, identity), *note = find_text(body, note_text);
+            lv_obj_t *choose = lv_obj_get_parent(find_visible_text(lv_layer_top(), "Use for next Talk"));
+            lv_obj_t *chats = lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LIST "  Conversations"));
+            for (int active = 0; active <= 1; ++active) {
+                room_ui_facts_t facts = {.wifi = ROOM_UI_WIFI_CONNECTED,
+                    .gateway = ROOM_UI_GATEWAY_CONNECTED, .talk = active ? ROOM_UI_TALK_ACTIVE : ROOM_UI_TALK_READY};
+                room_ui_store_facts(&facts); room_ui_refresh();
+                lv_obj_scroll_to_y(body, 0, LV_ANIM_OFF);
+                lv_obj_update_layout(body);
+                if (path) {
+                    char output[1024]; snprintf(output, sizeof(output), "%s-agent-long-%d-%d-%d.ppm", path, reading, density, active);
+                    write_frame(output);
+                }
+                assert(id && note);
+                lv_obj_t *labels[] = {name, id, note};
+                for (unsigned i = 0; i < 3; ++i) {
+                    const lv_font_t *font = lv_obj_get_style_text_font(labels[i], 0);
+                    lv_point_t last;
+                    lv_label_get_letter_pos(labels[i], strlen(lv_label_get_text(labels[i])) - 1, &last);
+                    assert(last.y + font->line_height <= lv_obj_get_height(labels[i]));
+                    assert(font == openclaw_reading_font());
+                }
+                lv_area_t body_area, name_area, id_area, note_area, choose_area, chats_area;
+                lv_obj_get_coords(body, &body_area); lv_obj_get_coords(name, &name_area);
+                lv_obj_get_coords(id, &id_area); lv_obj_get_coords(note, &note_area);
+                lv_obj_get_coords(choose, &choose_area); lv_obj_get_coords(chats, &chats_area);
+                assert(name_area.y2 < id_area.y1 && id_area.y2 < note_area.y1);
+                assert(body_area.y1 >= 112 && body_area.y2 < choose_area.y1);
+                assert(choose_area.y2 < chats_area.y1 && chats_area.y2 < (active ? 370 : 432));
+                bool overflow = note_area.y2 > body_area.y2;
+                if (overflow) assert(lv_obj_get_scroll_bottom(body) > 0);
+                lv_obj_scroll_to_view(note, LV_ANIM_OFF);
+                lv_obj_update_layout(body);
+                if (overflow) assert(lv_obj_get_scroll_y(body) > 0);
+                lv_obj_get_coords(note, &note_area);
+                assert(note_area.y1 >= body_area.y1 && note_area.y2 <= body_area.y2);
+                int32_t scroll = lv_obj_get_scroll_y(body);
+                room_ui_refresh();
+                assert(lv_obj_get_scroll_y(body) == scroll);
+                lv_area_t fixed;
+                lv_obj_get_coords(choose, &fixed);
+                assert(fixed.y1 == choose_area.y1 && fixed.y2 == choose_area.y2);
+                if (path && reading == OPENCLAW_READING_LARGE && active) {
+                    char output[1024]; snprintf(output, sizeof(output), "%s-agent-long-end-%d.ppm", path, density);
+                    write_frame(output);
+                }
+                if (reading == OPENCLAW_READING_LARGE && density == OPENCLAW_DENSITY_COMFORTABLE && active) {
+                    lv_obj_scroll_to_y(body, 0, LV_ANIM_OFF);
+                    touch_talk(name, true);
+                    touch_point.y -= 80; lv_indev_read(touchscreen); lv_tick_inc(40);
+                    touch_state = LV_INDEV_STATE_RELEASED; lv_indev_read(touchscreen); lv_tick_inc(40);
+                    assert(lv_obj_get_scroll_y(body) > 0 && agent_selections == selections);
+                    click_talk(choose);
+                    assert(agent_selections == selections + 1 && strcmp(selected_agent, roster.page.agents[0].id) == 0);
+                    room_ui_agent_selection_complete(ESP_OK);
+                }
+            }
+            assert(room_ui_watch_menu("home") == ESP_OK);
+        }
+    }
+    assert(talk_starts == starts && talk_stops == stops && agent_selections == selections + 1);
+    room_ui_facts_t ready = {.wifi = ROOM_UI_WIFI_CONNECTED,
+        .gateway = ROOM_UI_GATEWAY_CONNECTED, .talk = ROOM_UI_TALK_READY};
+    room_ui_store_facts(&ready);
+    openclaw_reading_set_size(OPENCLAW_READING_STANDARD);
+    openclaw_density_set(OPENCLAW_DENSITY_COMPACT);
+    room_ui_set(ROOM_UI_IDLE, NULL);
+    assert(room_ui_watch_menu("home") == ESP_OK);
+    puts("watch agent detail: full identities, reading sizes, scroll reachability and fixed call-safe actions passed");
+}
+
 static void check_watch_conversations(const char *path)
 {
     assert(room_ui_watch_menu("agents") == ESP_OK);
@@ -2965,6 +3055,7 @@ int main(int argc, char **argv)
         check_watch_call_return();
         check_watch_connection(argc == 3 ? argv[2] : NULL);
         check_watch_agents(argc == 3 ? argv[2] : NULL);
+        check_watch_agent_detail(argc == 3 ? argv[2] : NULL);
         check_watch_conversations(argc == 3 ? argv[2] : NULL);
         check_watch_creation(argc == 3 ? argv[2] : NULL);
         check_watch_home_gesture();

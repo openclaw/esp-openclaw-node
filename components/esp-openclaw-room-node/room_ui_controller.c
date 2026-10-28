@@ -75,7 +75,7 @@ static bool camera_indicator_active;
 static room_ui_facts_t current_facts;
 static esp_timer_handle_t text_hint_timer;
 static void (*talk_action_handler)(bool start, uint64_t recipient_revision);
-typedef enum { TALK_CONTROL_NONE, TALK_CONTROL_START, TALK_CONTROL_STOP } talk_control_action_t;
+typedef enum { TALK_CONTROL_NONE, TALK_CONTROL_START, TALK_CONTROL_STOP, TALK_CONTROL_RETURN } talk_control_action_t;
 /* Painted intent is display-lock owned; a press is invalidated with the facts. */
 static talk_control_action_t painted_talk_action;
 static talk_control_action_t pressed_talk_action;
@@ -999,6 +999,8 @@ static void talk_control_clicked(lv_event_t *event)
     uint64_t recipient_revision = 0;
     taskENTER_CRITICAL(&state_mux);
     talk_control_action_t action = talk_control_action(current_facts.talk);
+    if (action == TALK_CONTROL_STOP && painted_talk_action == TALK_CONTROL_RETURN)
+        action = TALK_CONTROL_RETURN;
     if (code == LV_EVENT_PRESSED) {
         bool target_current = action != TALK_CONTROL_START || current_target.revision == painted_target_revision;
         pressed_talk_action = !wake && !diagnostics_open && target_current && action == painted_talk_action
@@ -1013,6 +1015,8 @@ static void talk_control_clicked(lv_event_t *event)
     taskEXIT_CRITICAL(&state_mux);
     if (wake) {
         room_ui_show_face_hint(10000);
+    } else if (requested == TALK_CONTROL_RETURN) {
+        (void)watch_navigation_show(ROOM_WATCH_HOME);
     } else if (talk_action_handler != NULL && requested != TALK_CONTROL_NONE) {
         talk_action_handler(requested == TALK_CONTROL_START, recipient_revision);
     }
@@ -1501,7 +1505,9 @@ static bool room_ui_render_locked(void)
             : facts.talk == ROOM_UI_TALK_CONNECTING || facts.talk == ROOM_UI_TALK_ACTIVE ? TALK_CONTROL_STOP : TALK_CONTROL_NONE;
         bool start = painted_talk_action == TALK_CONTROL_START;
         bool stop = facts.talk == ROOM_UI_TALK_CONNECTING || facts.talk == ROOM_UI_TALK_ACTIVE;
-        lv_label_set_text(talk_pill_label, start ? "Start Talk" : stop ? "Stop Talk"
+        bool return_to_call = watch_home_enabled && (navigation || canvas_active) && stop;
+        if (return_to_call) painted_talk_action = TALK_CONTROL_RETURN;
+        lv_label_set_text(talk_pill_label, return_to_call ? "Return to call" : start ? "Start Talk" : stop ? "Stop Talk"
             : selecting ? "Choosing agent..." : target.expired ? "Choose an agent" :
             facts.talk == ROOM_UI_TALK_STOPPING ? "Stopping..." : "Talk unavailable");
         if (talk_target_label != NULL) {

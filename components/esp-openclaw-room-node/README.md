@@ -24,9 +24,12 @@ This preserves internal RAM for the radio and task stacks as menus grow; other
 boards retain their configured LVGL allocator.
 
 The local **Start Talk / Stop Talk** control uses the same admission and cleanup
-as wake-word and remote Talk commands. It stays visible over the home, face,
-and Canvas, and is hidden by diagnostics. Readiness comes from the operator and
-media state; unavailable and stopping states disable the control. On boards
+as wake-word and remote Talk commands. Readiness comes from the operator and
+media state; unavailable and stopping states disable the control. On Watch,
+browsing menus, settings, agents, conversations, or Canvas during an active call
+shows **Return to call** instead of Stop. That action returns to the call on Home
+without ending it; **Stop Talk** on that view ends it deliberately. Diagnostics
+hide the control. On boards
 that sleep the display, the first touch on a dark Talk control only wakes the
 display; tap the visible control again to start or stop Talk. If the
 button's action changes during a press, release and press again; a held Start
@@ -49,7 +52,8 @@ On the 1.8-inch Watch, **Menu → Agents** opens the agent directory.
 Swipe the list to browse up to eight agents per page; use the arrows for more
 pages, and tap a row to inspect its name and exact ID. Initials replace emoji
 that the embedded font cannot display. Back returns to the list or menu, and
-Start Talk / Stop Talk remains available. **Use for next Talk** chooses the
+Start Talk remains available while idle; an active call offers **Return to call**.
+**Use for next Talk** chooses the
 agent without starting a call or changing an active conversation. The button
 confirms the choice after the room owner accepts it; Home shows the next
 agent. While selection is pending, Start Talk is disabled. A lost operator

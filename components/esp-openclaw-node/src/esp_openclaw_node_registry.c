@@ -187,6 +187,30 @@ esp_err_t esp_openclaw_node_register_scope_internal(
     return ESP_OK;
 }
 
+esp_err_t esp_openclaw_node_unregister_scope_internal(
+    esp_openclaw_node_handle_t node,
+    const char *scope)
+{
+    if (node == NULL || scope == NULL || scope[0] == '\0') return ESP_ERR_INVALID_ARG;
+    esp_openclaw_node_lock_state(node);
+    if (node->state != ESP_OPENCLAW_NODE_INTERNAL_IDLE ||
+        node->pending_control != ESP_OPENCLAW_NODE_PENDING_CONTROL_REQUEST_NONE) {
+        esp_openclaw_node_unlock_state(node);
+        return ESP_ERR_INVALID_STATE;
+    }
+    for (size_t i = 0; i < node->scope_count; ++i) {
+        if (strcmp(node->scopes[i], scope) != 0) continue;
+        free(node->scopes[i]);
+        --node->scope_count;
+        memmove(&node->scopes[i], &node->scopes[i + 1],
+            (node->scope_count - i) * sizeof(node->scopes[0]));
+        node->scopes[node->scope_count] = NULL;
+        break;
+    }
+    esp_openclaw_node_unlock_state(node);
+    return ESP_OK;
+}
+
 esp_err_t esp_openclaw_node_register_command_internal(
     esp_openclaw_node_handle_t node,
     const esp_openclaw_node_command_t *command)

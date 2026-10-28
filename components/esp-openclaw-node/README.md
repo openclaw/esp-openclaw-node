@@ -319,6 +319,12 @@ off to another task if it cannot complete quickly.
 
 ## Connect and Session Model
 
+An application can narrow its next connection request with
+`esp_openclaw_node_unregister_scope(node, "operator.write")` while the client
+is idle and has no pending connect or disconnect request. Removing a missing
+scope succeeds. This only changes the locally advertised scopes; it does not
+revoke previously approved Gateway scopes or alter the saved credential.
+
 ### Connect Model
 
 The component performs one connection attempt at a time. It does not run an

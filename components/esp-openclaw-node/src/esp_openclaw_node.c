@@ -547,6 +547,13 @@ esp_err_t esp_openclaw_node_register_scope(
     return esp_openclaw_node_register_scope_internal(node, scope);
 }
 
+esp_err_t esp_openclaw_node_unregister_scope(
+    esp_openclaw_node_handle_t node,
+    const char *scope)
+{
+    return esp_openclaw_node_unregister_scope_internal(node, scope);
+}
+
 esp_err_t esp_openclaw_node_register_command(
     esp_openclaw_node_handle_t node,
     const esp_openclaw_node_command_t *command)

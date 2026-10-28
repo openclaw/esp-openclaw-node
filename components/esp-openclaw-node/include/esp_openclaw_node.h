@@ -327,6 +327,18 @@ esp_err_t esp_openclaw_node_register_scope(
     const char *scope);
 
 /**
+ * @brief Remove a locally advertised scope while this client is idle.
+ *
+ * Returns ESP_OK even if the scope was not registered. Returns
+ * ESP_ERR_INVALID_STATE while connected, connecting, disconnecting, or closing.
+ * This changes future connection requests; it does not revoke Gateway grants
+ * or modify the saved credential.
+ */
+esp_err_t esp_openclaw_node_unregister_scope(
+    esp_openclaw_node_handle_t node,
+    const char *scope);
+
+/**
  * @brief Register a handler for one OpenClaw command.
  *
  * @param[in] node Node handle.

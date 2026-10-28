@@ -91,6 +91,12 @@ an empty-state explanation. Home returns to the latest conversation state;
 Active calls remain reachable from menu pages. Device status opens the
 existing diagnostics overlay from Settings. The first touch on a dark screen only wakes it.
 
+Settings → Help opens short Navigation, Messages, USB setup, and Status guides.
+The same Help is available through This Watch and `menu help` in the USB console.
+Topics support larger reading text and scrolling; Back retains the entry point,
+and an active call stays reachable without ending it. USB remains the implemented
+setup route; QR and Bluetooth provisioning are not enabled by these guides.
+
 Conversations returns to the last reader and its scroll position while the
 same content is still current. Leaving for Menu or Home keeps that reader in
 memory and releases the hidden display buffers; returning does not fetch it

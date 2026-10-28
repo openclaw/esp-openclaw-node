@@ -56,7 +56,7 @@ struct node {
     esp_openclaw_node_transport_event_ctx_t *transport_ctx;
     char *transport_gateway_uri;
     void *ws, *work_queue;
-    bool client_started, transport_connected;
+    bool client_started, transport_connected, connect_request_pending;
     char pending_connect_id[32];
 };
 typedef struct { int type, local_err; uint32_t transport_id; source_t connect_source; } esp_openclaw_node_work_message_t;

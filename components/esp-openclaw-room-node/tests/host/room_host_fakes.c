@@ -429,12 +429,26 @@ esp_err_t esp_openclaw_node_destroy(esp_openclaw_node_handle_t node)
 { (void)node; host_require(false, "unexpected Node destruction"); return ESP_FAIL; }
 esp_err_t esp_openclaw_node_register_scope(esp_openclaw_node_handle_t node, const char *scope)
 {
+    host_require(node->connection == 0, "scope registration requires an idle client");
+    for (unsigned i = 0; i < node->scope_count; ++i)
+        if (strcmp(node->scopes[i], scope) == 0) return ESP_OK;
     host_require(node->scope_count < sizeof(node->scopes) / sizeof(*node->scopes), "room client scope capacity");
     node->scopes[node->scope_count++] = scope;
     return ESP_OK;
 }
 unsigned host_node_scope_count(esp_openclaw_node_handle_t node)
 { return node->scope_count; }
+esp_err_t esp_openclaw_node_unregister_scope(esp_openclaw_node_handle_t node, const char *scope)
+{
+    if (node->connection != 0) return ESP_ERR_INVALID_STATE;
+    for (unsigned i = 0; i < node->scope_count; ++i) {
+        if (strcmp(node->scopes[i], scope) != 0) continue;
+        --node->scope_count;
+        memmove(node->scopes + i, node->scopes + i + 1, (node->scope_count - i) * sizeof(*node->scopes));
+        break;
+    }
+    return ESP_OK;
+}
 bool host_node_has_scope(esp_openclaw_node_handle_t node, const char *scope)
 {
     for (unsigned i = 0; i < node->scope_count; ++i) {
@@ -463,7 +477,7 @@ esp_err_t esp_openclaw_node_request_connect(esp_openclaw_node_handle_t node,
         strcpy(host.token_uri, request->gateway_uri);
         host.token_node = node;
         ++host.token_connects;
-        return ESP_OK;
+        return host.token_connect_result;
     }
     host_require(request->source == ESP_OPENCLAW_NODE_CONNECT_SOURCE_SAVED_SESSION,
         "synthetic saved-session connect only; no credentials accessed");
@@ -475,7 +489,7 @@ esp_err_t esp_openclaw_node_request_connect(esp_openclaw_node_handle_t node,
     return host.operator_connect_result;
 }
 esp_err_t esp_openclaw_node_request_disconnect(esp_openclaw_node_handle_t node)
-{ (void)node; return ESP_OK; }
+{ if (strcmp(node->config.role, "operator") == 0) ++host.operator_disconnects; return ESP_OK; }
 char *esp_openclaw_node_dup_gateway_uri(esp_openclaw_node_handle_t node)
 {
     const char *uri = strcmp(node->config.role, "node") == 0 ? host.node_uri : host.operator_uri;
@@ -541,7 +555,8 @@ esp_err_t esp_openclaw_node_gateway_request(esp_openclaw_node_handle_t node,
     bool transcription = strncmp(method, "talk.session.", 13) == 0;
     bool chat = strcmp(method, "chat.history") == 0 || strcmp(method, "chat.send") == 0;
     bool creation = strcmp(method, "sessions.create") == 0;
-    host_require(host.critical_depth == 0 && (transcription || chat || creation || mutex_depth == 0),
+    bool scope = strncmp(method, "device.scopes.", 14) == 0;
+    host_require(host.critical_depth == 0 && (transcription || chat || creation || scope || mutex_depth == 0),
         "read-only RPC outside owner locks");
     if (creation) host_require(mutex_depth == 1, "creation authority held through nonblocking enqueue");
     pending_rpc_t request = {.callback = callback, .ctx = ctx, .node = node};

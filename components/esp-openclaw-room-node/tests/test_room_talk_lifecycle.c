@@ -108,6 +108,181 @@ static const char *approved_scope =
     "{\"requestId\":\"scope-a\",\"status\":\"approved\",\"deviceToken\":\"approved-test-token\","
     "\"scopes\":[\"operator.read\",\"operator.talk\",\"operator.write\",\"operator.admin\"]}";
 
+static room_messaging_snapshot_t messaging_snapshot(void)
+{
+    room_messaging_snapshot_t snapshot;
+    xSemaphoreTake(state_lock, portMAX_DELAY);
+    room_messaging_copy_locked(&snapshot, messaging_idle_locked());
+    xSemaphoreGive(state_lock);
+    return snapshot;
+}
+
+static esp_err_t request_messaging(unsigned revision)
+{
+    xSemaphoreTake(state_lock, portMAX_DELAY);
+    esp_err_t result = room_messaging_request_locked(revision, messaging_idle_locked());
+    xSemaphoreGive(state_lock);
+    return result;
+}
+
+#if !CONFIG_OPENCLAW_ROOM_VOICE_ACTIONS
+static void wait_for_messaging_approval(void)
+{
+    room_messaging_snapshot_t snapshot = messaging_snapshot();
+    host_require(snapshot.can_request && request_messaging(snapshot.revision) == ESP_OK,
+        "idle connected default build can request messaging approval");
+    host_run_task("talk_teardown");
+    host_require(strcmp(host.scope_method, "device.scopes.requestUpgrade") == 0,
+        "identity-bound scope request queued");
+    CHECK(strcmp(host.scope_params,
+        "{\"scopes\":[\"operator.read\",\"operator.talk\",\"operator.write\"]}") == 0,
+        "messaging requests exactly read/talk/write, never admin");
+    host_reply_scope(true, "{\"requestId\":\"scope-a\"}");
+    host_run_task("talk_teardown");
+    host_require(messaging_snapshot().state == ROOM_MESSAGING_WAITING &&
+        strcmp(host.scope_method, "device.scopes.waitUpgrade") == 0,
+        "request receipt advances to identity-bound approval wait");
+    CHECK(strcmp(host.scope_params, "{\"requestId\":\"scope-a\"}") == 0,
+        "wait carries the exact returned approval ID");
+}
+#endif
+
+static void messaging_lifecycle(void)
+{
+    room_messaging_snapshot_t snapshot = messaging_snapshot();
+#if CONFIG_OPENCLAW_ROOM_VOICE_ACTIONS
+    CHECK(snapshot.state == ROOM_MESSAGING_READY && !snapshot.can_request,
+        "approved four-scope build is already enabled");
+    CHECK(request_messaging(snapshot.revision) == ESP_ERR_INVALID_STATE && host.scope_requests == 0,
+        "enabled build never requests a narrower scope upgrade");
+#else
+    CHECK(snapshot.state == ROOM_MESSAGING_REQUIRED && snapshot.can_request, "default starts without write access");
+    CHECK(request_messaging(snapshot.revision + 1) == ESP_ERR_INVALID_STATE, "stale screen cannot request access");
+    wait_for_messaging_approval();
+    CHECK(request_messaging(snapshot.revision) == ESP_ERR_INVALID_STATE && host.scope_requests == 2,
+        "held or repeated input cannot create a second request");
+    char *legacy[] = {"voice-actions", "request"};
+    CHECK(voice_actions_console_command(2, legacy) != 0, "legacy USB approval cannot overlap messaging");
+    CHECK(host_command_params(node_client, "talk.start", "{}") == ESP_ERR_INVALID_STATE,
+        "Talk command reports that permission owns the connection");
+    CHECK(talk_call == NULL, "pending permission cannot be interrupted by Talk admission");
+    host_reply_scope(true, approved_scope);
+    CHECK(host.token_connects == 0, "SDK callback does not reconnect or enable messaging");
+    host_run_task("talk_teardown");
+    CHECK(messaging_snapshot().state == ROOM_MESSAGING_CONNECTING && host.operator_disconnects == 1 &&
+        host.token_connects == 0 && !host_node_has_scope(operator_client, "operator.write"),
+        "supervisor waits for old socket teardown before idle-only scope registration");
+    host_emit_node(operator_client, ESP_OPENCLAW_NODE_EVENT_DISCONNECTED);
+    host_fire_operator_timer(operator_start_timer);
+    unsigned ordinary = host.operator_connect_requests;
+    host_run_task("talk_teardown");
+    CHECK(host.token_connects == 1 && host.operator_connect_requests == ordinary &&
+        strcmp(host.token_value, "approved-test-token") == 0 &&
+        strcmp(host.token_uri, "wss://gateway.example") == 0,
+        "rotated credential wins over ordinary saved-session retry on the pinned Gateway");
+    CHECK(host_node_scope_count(operator_client) == 3 && !host_node_has_scope(operator_client, "operator.admin"),
+        "only write is added, even when the token had a previous admin grant");
+    host_emit_node(operator_client, ESP_OPENCLAW_NODE_EVENT_CONNECTED);
+    host_run_task("talk_teardown");
+    CHECK(messaging_snapshot().state == ROOM_MESSAGING_READY && host.token_connects == 1,
+        "only connected handshake enables messaging and ends the handoff");
+#endif
+}
+
+#if !CONFIG_OPENCLAW_ROOM_VOICE_ACTIONS
+static void messaging_delayed_approval(void)
+{
+    wait_for_messaging_approval();
+    host.now_us += 316000000;
+    host.expire_queue_wait = true;
+    host_run_task("talk_teardown");
+    CHECK(messaging_snapshot().state == ROOM_MESSAGING_EXPIRED && !messaging_snapshot().can_request,
+        "timeout is visible but keeps the outstanding callback owned");
+    host_reply_scope(true, approved_scope);
+    host_emit_node(operator_client, ESP_OPENCLAW_NODE_EVENT_DISCONNECTED);
+    host_run_task("talk_teardown");
+    CHECK(host.token_connects == 1 && messaging_snapshot().state == ROOM_MESSAGING_CONNECTING,
+        "late valid receipt survives a following socket close without replay");
+    host_emit_node(operator_client, ESP_OPENCLAW_NODE_EVENT_CONNECTED);
+    host_run_task("talk_teardown");
+    CHECK(messaging_snapshot().state == ROOM_MESSAGING_READY && host.scope_requests == 2,
+        "late approval finishes the original request exactly once");
+}
+
+static void messaging_errors(void)
+{
+    const char *bad[] = {
+        "{\"requestId\":\"other\",\"status\":\"approved\",\"deviceToken\":\"test\",\"scopes\":[\"operator.read\",\"operator.talk\",\"operator.write\"]}",
+        "{\"requestId\":\"scope-a\",\"status\":\"approved\",\"deviceToken\":\"test\",\"scopes\":[\"operator.read\",\"operator.write\"]}",
+        "{\"requestId\":\"scope-a\",\"status\":\"approved\",\"deviceToken\":\"test\\u0000suffix\",\"scopes\":[\"operator.read\",\"operator.talk\",\"operator.write\"]}",
+        "{\"requestId\":\"scope-a\",\"status\":\"approved\",\"deviceToken\":\"\"}",
+        "{\"requestId\":\"scope-a\",\"status\":\"approved\"} trailing",
+    };
+    for (size_t i = 0; i < sizeof(bad) / sizeof(*bad); ++i) {
+        wait_for_messaging_approval();
+        host_reply_scope(true, bad[i]);
+        host_run_task("talk_teardown");
+        CHECK(messaging_snapshot().state == ROOM_MESSAGING_ERROR && messaging_snapshot().can_request &&
+            host.token_connects == 0, "malformed, mismatched, or under-scoped reply cannot authorize reconnect");
+    }
+    wait_for_messaging_approval();
+    host_reply_scope(true, "{\"requestId\":\"scope-a\",\"status\":\"rejected\"}");
+    host_run_task("talk_teardown");
+    CHECK(messaging_snapshot().state == ROOM_MESSAGING_REJECTED, "rejection is explicit");
+    wait_for_messaging_approval();
+    host_reply_scope(true, "{\"requestId\":\"scope-a\",\"status\":\"expired\"}");
+    host_run_task("talk_teardown");
+    CHECK(messaging_snapshot().state == ROOM_MESSAGING_EXPIRED, "server expiration is explicit");
+    host.fail_scope_submit = true;
+    CHECK(request_messaging(messaging_snapshot().revision) == ESP_OK, "request intent accepted before queue failure");
+    host_run_task("talk_teardown");
+    CHECK(messaging_snapshot().state == ROOM_MESSAGING_ERROR && messaging_snapshot().can_request,
+        "queue rejection releases callback ownership and permits explicit retry");
+}
+
+static void messaging_retry(void)
+{
+    wait_for_messaging_approval();
+    host_reply_scope(true, approved_scope);
+    host_run_task("talk_teardown");
+    host_emit_node(operator_client, ESP_OPENCLAW_NODE_EVENT_DISCONNECTED);
+    host.token_connect_result = ESP_ERR_NO_MEM;
+    host_run_task("talk_teardown");
+    CHECK(messaging_snapshot().state == ROOM_MESSAGING_ERROR && messaging_snapshot().can_request,
+        "failed token queue preserves a retryable rotated credential");
+    host_fire_operator_timer(operator_start_timer);
+    host_run_task("talk_teardown");
+    CHECK(host.token_connects == 1, "failure never silently replays token handoff");
+    host.token_connect_result = ESP_OK;
+    CHECK(request_messaging(messaging_snapshot().revision) == ESP_OK, "explicit retry resumes existing approval");
+    host_run_task("talk_teardown");
+    host_emit_node(operator_client, ESP_OPENCLAW_NODE_EVENT_CONNECT_FAILED);
+    CHECK(messaging_snapshot().state == ROOM_MESSAGING_ERROR && messaging_snapshot().can_request,
+        "handshake failure also retains the token for explicit retry");
+    CHECK(request_messaging(messaging_snapshot().revision) == ESP_OK, "retry after handshake failure");
+    host_run_task("talk_teardown");
+    host_emit_node(operator_client, ESP_OPENCLAW_NODE_EVENT_CONNECTED);
+    CHECK(messaging_snapshot().state == ROOM_MESSAGING_READY && host.scope_requests == 2 &&
+        host_node_scope_count(operator_client) == 3, "retries neither duplicate approval nor register duplicate scopes");
+}
+
+static void messaging_repair(void)
+{
+    wait_for_messaging_approval();
+    host.operator_uri = host.node_uri = "wss://replacement.example";
+    host_emit_node(node_client, ESP_OPENCLAW_NODE_EVENT_CONNECTED);
+    host_reply_scope(true, approved_scope);
+    host_emit_node(operator_client, ESP_OPENCLAW_NODE_EVENT_DISCONNECTED);
+    host_run_task("talk_teardown");
+    CHECK(host.token_connects == 0 && !host_node_has_scope(operator_client, "operator.write"),
+        "a primary Gateway change revokes the old approval even if it arrives later");
+    host_emit_node(operator_client, ESP_OPENCLAW_NODE_EVENT_CONNECTED);
+    CHECK(messaging_snapshot().state == ROOM_MESSAGING_REQUIRED && messaging_snapshot().can_request,
+        "new Gateway requires its own approval");
+}
+
+#endif
+
 static void voice_actions_provision(void)
 {
     char *request[] = {"voice-actions", "request"};
@@ -2103,6 +2278,9 @@ static void voice_draft_lifecycle(void)
     voice_begin(1);
     CHECK(host.recording_starts == 1 && host.voice.state == ROOM_VOICE_STARTING,
         "UI intent opens one asynchronous recording");
+    CHECK(!messaging_snapshot().can_request &&
+        request_messaging(messaging_snapshot().revision) == ESP_ERR_INVALID_STATE,
+        "permission changes cannot replace a recording connection");
     host.recording.state = ROOM_RECORDING_ACTIVE;
     host.recording.audio_bytes = 16000;
     host.expire_queue_wait = true;
@@ -2120,6 +2298,9 @@ static void voice_draft_lifecycle(void)
     transcription_finish("{\"text\":\"Turn on the reading light.\"}");
     CHECK(host.voice.state == ROOM_VOICE_DRAFT && strcmp(host.voice.text, "Turn on the reading light.") == 0,
         "only completed transcription becomes reviewable text");
+    CHECK(!messaging_snapshot().can_request &&
+        request_messaging(messaging_snapshot().revision) == ESP_ERR_INVALID_STATE,
+        "permission changes preserve an editable draft");
     request_local_voice(ROOM_VOICE_FINISH, 1, 0, 0);
     host_run_task("talk_teardown");
     CHECK(host.voice.state == ROOM_VOICE_DRAFT && host.recording_stops == 1,
@@ -2394,6 +2575,24 @@ static void voice_send_disabled(void)
         strstr(host.voice.detail, "Enable voice actions") != NULL, "default firmware keeps its read-only voice authority");
     request_local_voice(ROOM_VOICE_CANCEL, 1, 0, 0); voice_tick();
 }
+
+static void messaging_enabled_repair(void)
+{
+    messaging_lifecycle();
+    host.operator_uri = host.node_uri = "wss://replacement.example";
+    host_emit_node(node_client, ESP_OPENCLAW_NODE_EVENT_CONNECTED);
+    host_emit_node(operator_client, ESP_OPENCLAW_NODE_EVENT_DISCONNECTED);
+    host_fire_operator_timer(operator_start_timer);
+    host_run_task("talk_teardown");
+    CHECK(host_node_scope_count(operator_client) == 2 && !host_node_has_scope(operator_client, "operator.write"),
+        "Gateway replacement returns the idle operator to read/talk before reconnect");
+    host_emit_node(operator_client, ESP_OPENCLAW_NODE_EVENT_CONNECTED);
+    CHECK(messaging_snapshot().state == ROOM_MESSAGING_REQUIRED && messaging_snapshot().can_request,
+        "a replacement Gateway cannot inherit the previous runtime approval");
+    wait_for_messaging_approval();
+    host_reply_scope(false, NULL);
+    host_run_task("talk_teardown");
+}
 #endif
 
 static void voice_send_without_agent(void)
@@ -2406,7 +2605,46 @@ static void voice_send_without_agent(void)
     request_local_voice(ROOM_VOICE_CANCEL, 1, 0, 0); voice_tick();
 }
 
+static void messaging_runtime_writes(void)
+{
+    messaging_lifecycle();
+    room_creation_snapshot_t creation = review_empty_conversation();
+    CHECK(creation.can_create && room_conversations_creation_submit(creation.revision) == ESP_OK,
+        "runtime approval enables reviewed creation without a firmware rebuild");
+    host_run_task("talk_teardown");
+    host_reply_creation(true,
+        "{\"ok\":true,\"key\":\"agent:fixture:dashboard:new\",\"sessionId\":\"created\",\"runStarted\":false}", NULL);
+    host_run_task("talk_teardown");
+    CHECK(conversations_snapshot().creation.state == ROOM_CREATION_CREATED, "creation receives its authoritative receipt");
+    unsigned revision = load_target_roster(target_roster);
+    request_local_agent_selection("builder", revision);
+    host_run_task("talk_teardown");
+    voice_begin(1);
+    CHECK(host.chat_prepares == 1, "runtime approval prepares the selected chat");
+    host_reply_chat(true,
+        "{\"sessionId\":\"conversation-1\",\"sessionInfo\":{\"key\":\"agent:builder:work\","
+        "\"agentId\":\"builder\",\"sessionId\":\"conversation-1\",\"activeLeafEntryId\":\"leaf-1\"}}");
+    voice_complete(); transcription_upload(32000);
+    transcription_finish("{\"text\":\"Turn on the reading light.\"}");
+    CHECK(host.voice.state == ROOM_VOICE_DRAFT && host.voice.can_send && host.chat_sends == 0,
+        "approved default firmware still requires explicit Send");
+    request_local_voice(ROOM_VOICE_SEND, 1, host.voice.recipient_revision, host.voice.owner_incarnation);
+    voice_tick();
+    CHECK(host.chat_sends == 1 && room_voice_draft_connection_busy(), "submitted chat holds its connection owner");
+    request_local_voice(ROOM_VOICE_CANCEL, 1, 0, 0); voice_tick();
+    host_reply_chat(true, "{\"status\":\"ok\"}");
+}
+
 static const struct { const char *name; void (*run)(void); } cases[] = {
+    {"messaging-runtime-writes", messaging_runtime_writes},
+    {"messaging-lifecycle", messaging_lifecycle},
+#if !CONFIG_OPENCLAW_ROOM_VOICE_ACTIONS
+    {"messaging-delayed-approval", messaging_delayed_approval},
+    {"messaging-errors", messaging_errors},
+    {"messaging-retry", messaging_retry},
+    {"messaging-repair", messaging_repair},
+    {"messaging-enabled-repair", messaging_enabled_repair},
+#endif
 #if CONFIG_OPENCLAW_ROOM_VOICE_ACTIONS
     {"voice-send-lifecycle", voice_send_lifecycle}, {"voice-send-stale", voice_send_stale},
     {"voice-send-unknown", voice_send_unknown}, {"voice-send-queue-failure", voice_send_queue_failure},

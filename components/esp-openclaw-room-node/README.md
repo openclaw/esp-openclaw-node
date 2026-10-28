@@ -243,6 +243,30 @@ synthetic transports. Verify operator control loss and acoustic teardown on the
 target board as well; host results do not establish audible continuation or
 hardware behavior.
 
+## Messaging access
+
+Default Watch and room-node firmware can request messaging access without a
+rebuild. Finish Live Talk, discard any unsent voice draft, and wait for pending
+chats to finish. Run `messaging request` in the USB console, then approve the
+exact device request on the Gateway. Run `messaging` to inspect its status.
+This requests `operator.read`, `operator.talk`, and `operator.write`; it does
+not request `operator.admin` or enable owner-level voice tools.
+
+The supervisor waits for approval, disconnects only the operator, adds write
+to its declared scopes while idle, and reconnects with the approved token to
+the original Gateway. `enabled` appears only after that handshake succeeds.
+The existing SDK saves the credential; this flow adds no token store. If the
+handoff fails, `messaging request` retries that approved credential without a
+new approval request. Keep the device powered until it reports enabled.
+An expired local wait can still accept a late approval; it never resubmits on
+its own. Changing Gateways invalidates the previous pending approval.
+
+Messaging enables explicit new-chat creation and reviewed voice-draft Send.
+The runtime selection resets after a reboot; default firmware again declares
+only read/talk until access is requested. Previously granted Gateway scopes
+are not revoked by rebooting. The Settings interface for this flow is separate
+from the current USB command.
+
 ## Voice agent actions
 
 Default firmware requests `operator.read` and `operator.talk`. Conversation and

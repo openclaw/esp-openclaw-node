@@ -43,6 +43,7 @@
 #include "room_ui_controller.h"
 #include "room_board.h"
 #include "room_agent_directory.h"
+#include "room_messaging.h"
 #include "esp_openclaw_devices.h"
 #include "esp_openclaw_room_node.h"
 
@@ -81,6 +82,7 @@ static bool talk_speaking_pending;
 static bool talk_connecting_pending;
 static bool talk_speech_failed_pending;
 static bool operator_ui_pending;
+static bool voice_actions_pending;
 static _Atomic size_t local_agents_request = SIZE_MAX;
 static _Atomic uint64_t local_devices_request = UINT64_MAX;
 static unsigned published_device_generation;
@@ -310,6 +312,7 @@ static esp_err_t create_connection_timers(void)
     args.name = "node_reconnect";
     ESP_RETURN_ON_ERROR(esp_timer_create(&args, &node_reconnect_timer), TAG, "node retry timer");
     esp_err_t err = room_agent_directory_init(state_lock, wake_talk_teardown);
+    room_messaging_init(state_lock, wake_talk_teardown);
     if (err != ESP_OK) ESP_LOGW(TAG, "agent directory unavailable: %s", esp_err_to_name(err));
     err = esp_openclaw_devices_init(state_lock, wake_talk_teardown);
     if (err != ESP_OK) ESP_LOGW(TAG, "device directory unavailable: %s", esp_err_to_name(err));
@@ -606,15 +609,13 @@ static void refresh_voice(void)
         .owner_incarnation = operator_incarnation,
         .operator_node = operator_client,
     };
-    context.available = context.valid && media_ready && talk_call == NULL;
+    context.available = context.valid && media_ready && talk_call == NULL && !room_messaging_busy_locked();
     strlcpy(context.recipient, talk_target.selected ? talk_target.name : "Default agent", sizeof(context.recipient));
     if (talk_target.selected && !talk_target.expired) {
         strlcpy(context.agent_id, talk_target.id, sizeof(context.agent_id));
         strlcpy(context.session_key, talk_target.session_key, sizeof(context.session_key));
     }
-#if CONFIG_OPENCLAW_ROOM_VOICE_ACTIONS
-    context.send_enabled = true;
-#endif
+    context.send_enabled = room_messaging_ready_locked();
     static room_voice_snapshot_t snapshot;
     bool changed = room_voice_draft_poll(&context, &snapshot);
     xSemaphoreGive(state_lock);
@@ -650,8 +651,11 @@ static void talk_teardown_task(void *arg)
     for (;;) {
         talk_teardown_request_t wake;
         bool poll = conversation_resume.pending || room_voice_draft_needs_poll();
-        TickType_t wait = poll ? pdMS_TO_TICKS(100) : portMAX_DELAY;
-        if (xQueueReceive(talk_teardown_queue, &wake, wait) != pdTRUE && !poll) continue;
+        xSemaphoreTake(state_lock, portMAX_DELAY);
+        bool messaging_poll = room_messaging_busy_locked();
+        xSemaphoreGive(state_lock);
+        TickType_t wait = poll ? pdMS_TO_TICKS(100) : messaging_poll ? pdMS_TO_TICKS(1000) : portMAX_DELAY;
+        if (xQueueReceive(talk_teardown_queue, &wake, wait) != pdTRUE && !poll && !messaging_poll) continue;
         /* Publish the target and repaint once below, after selection and Talk work. */
         apply_local_agent_selection();
         portENTER_CRITICAL(&talk_timeout_lock);
@@ -716,6 +720,7 @@ static void talk_teardown_task(void *arg)
         if (speech_failed) room_ui_set(ROOM_UI_ERROR, "Speech request failed; try again");
         if (!close) {
             start_node_if_pending();
+            room_messaging_poll();
             start_operator_if_pending();
             xSemaphoreTake(state_lock, portMAX_DELAY);
             bool defer_directory = talk_start_in_flight || talk_dialing || talk_closing;
@@ -844,7 +849,7 @@ static int webrtc_event(esp_webrtc_event_t *event, void *ctx)
 static bool admit_talk_locked(void)
 {
     if (!operator_ready || operator_client == NULL || gateway_http_base == NULL ||
-        camera_active || talk_call != NULL || room_voice_draft_busy() ||
+        camera_active || talk_call != NULL || room_voice_draft_busy() || room_messaging_busy_locked() ||
         talk_generation == UINT32_MAX) return false;
     if (talk_target.selected && talk_target.expired) return false;
     uint32_t generation = talk_generation + 1;
@@ -1055,6 +1060,7 @@ static void operator_event(
     }
     bool ready = current && operator_ready;
     if (current) {
+        room_messaging_set_operator_locked(client, operator_incarnation, connection, connected);
         room_agent_directory_set_owner_locked(client, operator_incarnation, connection, connected);
         esp_openclaw_devices_set_owner_locked(client, operator_incarnation, connection, connected);
         operator_ui_pending = true;
@@ -1137,7 +1143,8 @@ static esp_err_t start_operator_client(void)
 static void start_operator_if_pending(void)
 {
     xSemaphoreTake(state_lock, portMAX_DELAY);
-    bool start = operator_start_pending && talk_call == NULL && !room_voice_draft_busy();
+    bool start = operator_start_pending && talk_call == NULL && !room_voice_draft_busy() &&
+        !room_messaging_busy_locked();
     if (start) {
         operator_start_pending = false;
         operator_start_scheduled = false;
@@ -1284,6 +1291,8 @@ static void node_event(
                 ESP_LOGI(TAG, "Gateway changed; reconnecting the operator client");
                 xSemaphoreTake(state_lock, portMAX_DELAY);
                 operator_ready = false;
+                room_messaging_invalidate_locked();
+                room_messaging_set_operator_locked(existing_operator, operator_incarnation, 0, false);
                 invalidate_talk_target_locked();
                 room_agent_directory_set_owner_locked(existing_operator, operator_incarnation, 0, false);
                 esp_openclaw_devices_set_owner_locked(existing_operator, operator_incarnation, 0, false);
@@ -1418,6 +1427,7 @@ static esp_err_t handle_talk_start(
     xSemaphoreTake(state_lock, portMAX_DELAY);
     bool already_active = camera_active || talk_call != NULL;
     bool voice_busy = room_voice_draft_busy();
+    bool messaging_busy = room_messaging_busy_locked();
     bool start = admit_talk_locked();
     bool operator_offline = !operator_ready;
     bool target_expired = talk_target.selected && talk_target.expired;
@@ -1428,6 +1438,11 @@ static esp_err_t handle_talk_start(
         return ESP_ERR_INVALID_STATE;
     }
     if (!start) {
+        if (messaging_busy) {
+            out_error->code = "UNAVAILABLE";
+            out_error->message = "finish the messaging permission request before starting Talk";
+            return ESP_ERR_INVALID_STATE;
+        }
         if (voice_busy) {
             out_error->code = "UNAVAILABLE";
             out_error->message = "finish or discard the recording before starting Talk";
@@ -1610,6 +1625,7 @@ static void voice_actions_reply(
     voice_actions_request_t *request = ctx;
     char *gateway_uri = esp_openclaw_node_dup_gateway_uri(client);
     xSemaphoreTake(state_lock, portMAX_DELAY);
+    voice_actions_pending = false;
     bool current = client == operator_client && operator_ready &&
         operator_incarnation == request->incarnation && talk_call == NULL;
     xSemaphoreGive(state_lock);
@@ -1673,7 +1689,10 @@ static int voice_actions_console_command(int argc, char **argv)
     if (request == NULL) return 1;
     xSemaphoreTake(state_lock, portMAX_DELAY);
     esp_openclaw_node_handle_t client = operator_client;
-    bool ready = client != NULL && operator_ready && talk_call == NULL;
+    bool ready = client != NULL && operator_ready && talk_call == NULL &&
+        !room_messaging_busy_locked() && !voice_actions_pending &&
+        !room_voice_draft_connection_busy() && !room_conversations_creation_busy_locked();
+    if (ready) voice_actions_pending = true;
     request->incarnation = operator_incarnation;
     xSemaphoreGive(state_lock);
     request->gateway_uri = ready ? esp_openclaw_node_dup_gateway_uri(client) : NULL;
@@ -1696,12 +1715,43 @@ static int voice_actions_console_command(int argc, char **argv)
         : ESP_ERR_INVALID_STATE;
     free(json);
     if (err != ESP_OK) {
+        xSemaphoreTake(state_lock, portMAX_DELAY);
+        if (ready) voice_actions_pending = false;
+        xSemaphoreGive(state_lock);
         printf("voice-actions unavailable: wait for an idle, connected operator session and retry\n");
         voice_actions_request_free(request);
         return 1;
     }
     printf("voice-actions %s queued\n", complete ? "completion" : "approval request");
     return 0;
+}
+
+static bool messaging_idle_locked(void)
+{
+    return talk_call == NULL && !camera_active && !voice_actions_pending &&
+        !room_voice_draft_connection_busy() && !room_conversations_creation_busy_locked();
+}
+
+static int messaging_console_command(int argc, char **argv)
+{
+    bool request = argc == 2 && strcmp(argv[1], "request") == 0;
+    if (!request && argc != 1) {
+        printf("usage: messaging [request]\n");
+        return 1;
+    }
+    room_messaging_snapshot_t snapshot;
+    xSemaphoreTake(state_lock, portMAX_DELAY);
+    bool idle = messaging_idle_locked();
+    room_messaging_copy_locked(&snapshot, idle);
+    esp_err_t err = request ? room_messaging_request_locked(snapshot.revision, idle) : ESP_OK;
+    room_messaging_copy_locked(&snapshot, idle);
+    xSemaphoreGive(state_lock);
+    const char *states[] = {"access-required", "requesting", "waiting-for-approval", "connecting",
+        "enabled", "rejected", "expired", "error"};
+    printf("messaging=%s connected=%s can-request=%s request-id=%s\n", states[snapshot.state],
+        snapshot.connected ? "yes" : "no", snapshot.can_request ? "yes" : "no", snapshot.request_id);
+    if (err != ESP_OK) printf("finish Talk, drafts, and pending chats; wait for the operator, then retry\n");
+    return err == ESP_OK ? 0 : 1;
 }
 
 static int diagnostics_display_command(bool open)
@@ -2070,6 +2120,12 @@ static esp_err_t register_room_console_commands(void)
             .help = "Inspect agents and choose the next Talk target",
             .hint = "refresh [offset] | close | select <id> | default | selection",
             .func = agents_console_command,
+        },
+        {
+            .command = "messaging",
+            .help = "Request Gateway-approved messaging access or inspect its status",
+            .hint = "[request]",
+            .func = messaging_console_command,
         },
         {
             .command = "voice-actions",

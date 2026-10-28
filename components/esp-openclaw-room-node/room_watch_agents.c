@@ -1,4 +1,5 @@
 #include "openclaw_density.h"
+#include "openclaw_reading.h"
 #include "room_watch_agents.h"
 #include "esp_openclaw_avatar.h"
 
@@ -176,13 +177,19 @@ void room_watch_agents_render(const room_agents_snapshot_t *snapshot, bool hidde
     lv_obj_set_y(refresh, content_bottom - 44);
     lv_obj_set_y(next, content_bottom - 44);
     int row_height = openclaw_density_row_height(true);
+    const lv_font_t *reading_font = openclaw_reading_font();
+    int line_height = reading_font->line_height;
+    lv_obj_set_style_text_font(message, reading_font, 0);
     for (unsigned i = 0; i < ESP_OPENCLAW_DIRECTORY_PAGE_SIZE; ++i) {
         lv_obj_set_y(rows[i], (int)i * (row_height + 8));
         lv_obj_set_height(rows[i], row_height);
         lv_obj_set_y(avatars[i], (row_height - 36) / 2);
         lv_obj_set_y(avatar_images[i], (row_height - 36) / 2);
-        lv_obj_set_y(names[i], (row_height - 38) / 2);
-        lv_obj_set_y(ids[i], (row_height - 38) / 2 + 23);
+        lv_obj_set_style_text_font(names[i], reading_font, 0);
+        lv_obj_set_style_text_font(ids[i], reading_font, 0);
+        int name_y = (row_height - 2 * line_height - 4) / 2;
+        lv_obj_set_y(names[i], name_y);
+        lv_obj_set_y(ids[i], name_y + line_height + 4);
     }
     can_reset = target_id[0] != '\0' && !pending;
     lv_obj_set_state(use_default, LV_STATE_DISABLED, !can_reset);

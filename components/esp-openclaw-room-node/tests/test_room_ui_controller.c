@@ -2571,6 +2571,29 @@ static void check_watch_reading_size(const char *path)
     assert(lv_obj_get_style_text_font(sample, 0) == &lv_font_montserrat_20);
     assert(visible_watch_text(LV_SYMBOL_OK "  Larger"));
     if (path) { char output[1024]; snprintf(output, sizeof(output), "%s-reading-settings.ppm", path); write_frame(output); }
+    room_agents_snapshot_t reading_roster = {.state = ROOM_AGENTS_READY, .revision = 950,
+        .page = {.count = 1, .total = 1, .main_key = "main"}};
+    strcpy(reading_roster.page.agents[0].id, "reading-agent");
+    strcpy(reading_roster.page.agents[0].name, "Reading preview");
+    assert(room_ui_watch_menu("agents") == ESP_OK);
+    room_ui_store_agents(&reading_roster); room_ui_refresh();
+    for (int density = OPENCLAW_DENSITY_COMPACT; density <= OPENCLAW_DENSITY_COMFORTABLE; ++density) {
+        openclaw_density_set(density); room_ui_refresh();
+        lv_obj_t *agent_name = find_visible_text(lv_layer_top(), "Reading preview");
+        lv_obj_t *agent_id = find_visible_text(lv_layer_top(), "reading-agent");
+        lv_obj_t *row = lv_obj_get_parent(agent_name);
+        lv_obj_update_layout(row);
+        if (path) { char output[1024]; snprintf(output, sizeof(output), "%s-reading-agents-%d.ppm", path, density); write_frame(output); }
+        assert(lv_obj_get_style_text_font(agent_name, 0) == &lv_font_montserrat_20);
+        assert(lv_obj_get_style_text_font(agent_id, 0) == &lv_font_montserrat_20);
+        lv_area_t name_area, id_area, row_area;
+        lv_obj_get_coords(agent_name, &name_area);
+        lv_obj_get_coords(agent_id, &id_area);
+        lv_obj_get_coords(row, &row_area);
+        assert(name_area.y1 >= row_area.y1 && name_area.y2 < id_area.y1 && id_area.y2 <= row_area.y2);
+        assert(lv_obj_get_height(row) == (density == OPENCLAW_DENSITY_COMPACT ? 60 : 76));
+    }
+    openclaw_density_set(OPENCLAW_DENSITY_COMPACT);
     assert(room_ui_watch_menu("menu") == ESP_OK);
     lv_obj_update_layout(menu_text);
     assert(lv_obj_get_height(menu_text) > standard_menu_height);
@@ -2614,6 +2637,10 @@ static void check_watch_reading_size(const char *path)
     if (path) { char output[1024]; snprintf(output, sizeof(output), "%s-reading-large.ppm", path); write_frame(output); }
     assert(room_ui_watch_menu("reading") == ESP_OK);
     click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), "Standard")));
+    assert(room_ui_watch_menu("agents") == ESP_OK);
+    room_ui_store_agents(&reading_roster); room_ui_refresh();
+    lv_obj_t *standard_agent = find_visible_text(lv_layer_top(), "Reading preview");
+    assert(standard_agent && lv_obj_get_style_text_font(standard_agent, 0) == &lv_font_montserrat_14);
     assert(room_ui_watch_menu("home") == ESP_OK);
     ++draft.generation; room_ui_store_voice(&draft); room_ui_refresh();
     text = find_visible_text(lv_layer_top(), draft.text);

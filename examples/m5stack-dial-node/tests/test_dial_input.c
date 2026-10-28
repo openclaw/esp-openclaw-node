@@ -173,6 +173,30 @@ static void snapshot(const char *name)
     assert(fclose(file) == 0);
 }
 
+static unsigned reader_boundary_failures;
+
+static void check_reader_limits(lv_indev_t *encoder, const char *name)
+{
+    lv_obj_t *body = navigation.preview_body;
+    lv_obj_update_layout(body);
+    int32_t saved_y = lv_obj_get_scroll_y(body);
+    dial_navigation_view_t page = navigation.view;
+    unsigned before = confirmations;
+    for (int direction = 1; direction >= -1; direction -= 2) {
+        lv_obj_scroll_to_y(body, 0, LV_ANIM_OFF);
+        encoder_diff = 100 * direction;
+        lv_indev_read(encoder);
+        if (lv_obj_get_scroll_top(body) < 0 || lv_obj_get_scroll_bottom(body) < 0) {
+            fprintf(stderr, "%s: encoder escaped the %s boundary\n", name, direction > 0 ? "bottom" : "top");
+            ++reader_boundary_failures;
+        }
+        assert(navigation.view == page && confirmations == before);
+        if (direction > 0 && snapshot_prefix != NULL) snapshot(name);
+    }
+    lv_obj_scroll_to_y(body, saved_y, LV_ANIM_OFF);
+    advance(40);
+}
+
 static unsigned active_pixels(int x1, int x2)
 {
     unsigned count = 0;
@@ -653,6 +677,7 @@ int main(int argc, char **argv)
     advance(40);
     assert(lv_obj_get_scroll_y(navigation.preview_body) > 0);
     snapshot("scrolled");
+    check_reader_limits(encoder, "preview-bottom");
     // Home and the menu retain the last read row without another list request.
     unsigned before_resume = refreshes;
     encoder_state = LV_INDEV_STATE_PRESSED;
@@ -927,6 +952,7 @@ int main(int argc, char **argv)
     dial_navigation_activity_update(&navigation, &action_state.activity);
     advance(40);
     assert(lv_obj_get_scroll_y(navigation.preview_body) == reading_at);
+    check_reader_limits(encoder, "activity-bottom");
     // A new result cancels a held Back and preserves the reading position.
     touch(68, 44, true);
     assert(dial_action_resolve(&action_state, token, true,
@@ -1017,6 +1043,7 @@ int main(int argc, char **argv)
     assert(strstr(lv_label_get_text(navigation.preview_text), "Connection: Online") != NULL);
     assert(strstr(lv_label_get_text(navigation.preview_text), "Pairing: Unknown") != NULL);
     snapshot("device-detail");
+    check_reader_limits(encoder, "device-bottom");
     lv_obj_update_layout(screen);
     for (unsigned i = 0; i < lv_obj_get_child_count(navigation.root); ++i)
         check_home_bounds(lv_obj_get_child(navigation.root, i));
@@ -1088,5 +1115,6 @@ int main(int argc, char **argv)
     assert(confirmations == before_settings);
     puts("Control Back: tap, drag, replaced press and hold preserve confirmation semantics");
 
+    assert(reader_boundary_failures == 0);
     lv_deinit();
 }

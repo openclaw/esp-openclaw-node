@@ -464,7 +464,9 @@ static void input_event(dial_input_event_t event, int value, bool pointer, void 
     } else {
         if (pointer) ++ui.touches;
         if (event == DIAL_INPUT_CONFIRM) commit_action();
-        else if (ui.view == VIEW_FACE && event == DIAL_INPUT_OPEN) {
+        else if (event == DIAL_INPUT_HOME_MENU || event == DIAL_INPUT_HOME_AGENTS) {
+            if (ui.view == VIEW_FACE) open_navigation(event == DIAL_INPUT_HOME_AGENTS);
+        } else if (ui.view == VIEW_FACE && event == DIAL_INPUT_OPEN) {
             dial_home_context_t context;
             dial_reader_home_copy(&context);
             xSemaphoreTake(action_lock, portMAX_DELAY);
@@ -477,8 +479,10 @@ static void input_event(dial_input_event_t event, int value, bool pointer, void 
                 return;
             }
             open_navigation(online && !context.available);
-            if (online && context.available && ui.view == VIEW_NAVIGATION)
-                navigation_event(DIAL_NAV_RESUME, ui.home.destination, NULL);
+            if (ui.view == VIEW_NAVIGATION) {
+                if (!online) dial_navigation_open_home_connection(&ui.navigation);
+                else if (context.available) navigation_event(DIAL_NAV_RESUME, ui.home.destination, NULL);
+            }
         } else open_navigation(false);
     }
 }
@@ -609,6 +613,7 @@ static esp_err_t start_display(void)
     ui.footer = label(screen, 158, 70, &lv_font_montserrat_16);
     lv_label_set_text(ui.footer, "USB setup");
     dial_home_create(&ui.home, screen);
+    dial_input_bind_home(&ui.input, ui.home.menu_button, ui.home.agent_button, ui.home.primary_button);
     dial_navigation_create(&ui.navigation, screen, navigation_event, NULL);
     dial_navigation_set_brightness(&ui.navigation, ui.brightness, false);
     update_value();

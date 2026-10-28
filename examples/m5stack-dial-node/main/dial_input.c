@@ -22,6 +22,7 @@ static void object_event(lv_event_t *event)
     lv_indev_t *indev = lv_indev_active();
     bool pointer = indev != NULL && lv_indev_get_type(indev) == LV_INDEV_TYPE_POINTER;
     lv_event_code_t code = lv_event_get_code(event);
+    lv_obj_t *target = lv_event_get_current_target(event);
     if (code == LV_EVENT_PRESSED && pointer) {
         input->pointer_moved = false;
         lv_indev_get_point(indev, &input->press_point);
@@ -38,20 +39,36 @@ static void object_event(lv_event_t *event)
         if (pointer) input->pointer_moved = true;
         emit(input, DIAL_INPUT_CHANGE, pointer);
     } else if (code == LV_EVENT_LONG_PRESSED && pointer) {
+        if (!lv_obj_is_visible(target)) return;
         pointer_motion(input, indev);
         if (!input->pointer_moved) {
             emit(input, DIAL_INPUT_HOME, true);
             lv_indev_wait_release(indev);
         }
     } else if (code == LV_EVENT_SHORT_CLICKED) {
+        if (!lv_obj_is_visible(target)) return;
         if (!pointer || !input->pointer_moved) {
-            emit(input, lv_event_get_target(event) == input->back ? DIAL_INPUT_BACK :
+            if (target == input->home_menu) emit(input, DIAL_INPUT_HOME_MENU, pointer);
+            else if (target == input->home_agents) emit(input, DIAL_INPUT_HOME_AGENTS, pointer);
+            else if (pointer && target == input->screen && input->home_primary != NULL &&
+                     lv_obj_is_visible(input->home_primary)) return;
+            else emit(input, target == input->back ? DIAL_INPUT_BACK :
                 input->control ? DIAL_INPUT_CONFIRM : DIAL_INPUT_OPEN, pointer);
         }
     } else if (code == LV_EVENT_RELEASED && input->control) {
         // LVGL's arc exits encoder editing on release; this is always a dial.
         lv_group_set_editing(input->group, true);
     }
+}
+
+void dial_input_bind_home(dial_input_t *input, lv_obj_t *menu, lv_obj_t *agents, lv_obj_t *primary)
+{
+    input->home_menu = menu;
+    input->home_agents = agents;
+    input->home_primary = primary;
+    lv_obj_add_event_cb(menu, object_event, LV_EVENT_ALL, input);
+    lv_obj_add_event_cb(agents, object_event, LV_EVENT_ALL, input);
+    lv_obj_add_event_cb(primary, object_event, LV_EVENT_ALL, input);
 }
 
 static void encoder_long_press(lv_event_t *event)

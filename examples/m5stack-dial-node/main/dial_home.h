@@ -7,10 +7,11 @@
 #include "dial_directory.h"
 #include "openclaw_status_bar.h"
 
-typedef enum { DIAL_HOME_MENU, DIAL_HOME_AGENTS, DIAL_HOME_READER, DIAL_HOME_PREVIEW } dial_home_destination_t;
+typedef enum { DIAL_HOME_CONNECTION, DIAL_HOME_AGENTS, DIAL_HOME_READER, DIAL_HOME_PREVIEW } dial_home_destination_t;
 
 typedef struct {
     lv_obj_t *root, *title, *headline, *action;
+    lv_obj_t *agent_button, *menu_button, *primary_button;
     openclaw_status_bar_t status;
     lv_obj_t *eyes[2], *mouth;
     dial_home_destination_t destination;

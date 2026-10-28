@@ -1,8 +1,8 @@
 # Mobile setup frames
 
 The Watch and Dial share this version 1 byte format for the encrypted custom
-setup endpoint. The structural codec is implemented; BLE transport, transfer
-reassembly, application messages, and mobile integration are not connected yet.
+setup endpoint. The structural codec and transfer owner are implemented; BLE
+transport, application messages, and mobile integration are not connected yet.
 See the [setup contract](mobile-provisioning-contract.md) for local confirmation
 and operation ownership. A valid frame does not authorize a setup operation.
 
@@ -68,26 +68,32 @@ must reject it through the transport without inventing a correlated error frame.
 Error 7 is available only inside an authenticated connection; it does not make
 an unauthenticated endpoint or saved-state disclosure permissible.
 
-## Transfer adapter requirements
+## Transfer owner
 
-The following are requirements for the later adapter, not codec capabilities:
+[`esp_openclaw_setup_transfer.h`](../../components/esp-openclaw-node-provisioning/include/esp_openclaw_setup_transfer.h)
+implements these rules on the canonical serialized setup owner:
 
 - Admit one logical transfer per current authenticated peer. Require increasing
   nonzero transfer IDs within that connection. Exhaustion requires a new
   authenticated session and local confirmation; never wrap to reuse an ID.
 - Receive contiguous fragments from offset zero. A repeated fragment is
-  acknowledged only when its total, offset, and bytes match already received
-  data. Reject gaps, changed totals, conflicting overlaps, and another peer.
-- Do not dispatch until the complete request has passed application decoding,
-  current-generation/peer checks, and operation admission. A final acknowledgment
-  means bytes were accepted, not that Wi-Fi or Gateway setup succeeded.
+  acknowledged only when its total and bytes match a fully received range.
+  Different fragment boundaries are allowed within that range. Gaps are invalid;
+  changed totals, differing bytes, and overlaps extending past the received
+  prefix are conflicts. A different peer cannot affect the current transfer.
+- Hand off a complete request once, after checking the current generation/peer.
+  The application must decode and admit operations separately before dispatch.
+  A final acknowledgment means bytes were accepted, not that Wi-Fi or Gateway
+  setup succeeded.
 - Retain the completed transfer and response until the next transfer is admitted
   or setup closes. A repeated final fragment cannot dispatch twice. Keep enough
   request identity to check retransmissions after response generation; never
   overwrite the request buffer and then treat a matching ID alone as a duplicate.
 - Return pending while the serialized owner prepares a response. Pulls are
   read-only and repeatable at a requested offset. They cannot trigger a mutation.
-  A response beyond 8192 bytes fails explicitly.
+  A response beyond 8192 bytes fails with `TOO_LARGE`; an empty/null response
+  fails with `INTERNAL`. Failure remains available to pull, and cannot be replaced
+  by a late completion. Pulls at or beyond the response end are invalid.
 - Keep mutating-operation receipts in the setup owner. A new transport transfer
   cannot bypass the owner's duplicate-operation protection. After a lost response,
   query that receipt rather than silently submitting a new operation ID.
@@ -95,6 +101,30 @@ The following are requirements for the later adapter, not codec capabilities:
   retained transfer is retired or setup closes. Stop admitting work immediately
   on live transport revocation;
   do not wait for a queued UI disconnect notification.
+
+The owner reserves separate fixed 8 KiB request and response buffers; keep its
+storage outside small task stacks. Initialize once per boot and open once per
+canonical setup generation. Closing wipes both entire buffers and does not
+permit reopening the same generation to reset IDs. A higher ID can start only
+at offset zero after the current response or failure is ready. An invalid start
+does not consume an ID or discard the retained response. IDs never wrap.
+
+Every receive, completion and pull checks the live canonical session. Poll even
+without incoming frames. Revocation closes and wipes the transfer; the session
+still owns cancellation and draining of admitted native operations. Completion
+requires the exact pending generation, peer and transfer ID. A stranger's frame
+or a stale completion cannot overwrite current work. Request views borrow
+storage until the next admitted transfer or close; asynchronous consumers must
+copy them. Input, output and owner storage must not overlap.
+
+Replies require a buffer of at least 464 bytes. Rejected malformed or unauthorized
+input leaves output bytes and arguments unchanged. The owner checks authority
+again immediately before exposing a reply and request view; an endpoint that
+awaits before sending must revalidate afterward. Transport exchange is allowed
+in the comparison phase so the phone can show the challenge, but application
+mutations and saved-state reads still require local confirmation.
+
+## BLE integration requirements
 
 The SDK's Security 2 implementation replaces its old session in
 `new_transport_session`. The adapter must reject a second connection before
@@ -122,3 +152,9 @@ The [native tests](../../components/esp-openclaw-node-provisioning/tests/test_se
 include independent byte vectors for every kind, size/offset boundaries,
 malformed input, and unchanged outputs after rejection. Firmware CI builds the
 same codec; this is not evidence of an encrypted phone-to-device transfer.
+
+The [transfer tests](../../components/esp-openclaw-node-provisioning/tests/test_setup_transfer.c)
+exercise 8 KiB assembly, retry identity after response generation, repeatable
+pulls, monotonic IDs, terminal errors, full-buffer wiping, stale completions,
+live revocation, and the canonical confirmation/cancellation boundary. These are
+native owner tests, not physical BLE or mobile SDK qualification.

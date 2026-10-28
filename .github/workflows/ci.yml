@@ -85,6 +85,15 @@ jobs:
             components/esp-openclaw-node-provisioning/tests/test_setup_frame.c \
             -o /tmp/setup_frame_test
           /tmp/setup_frame_test
+          cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+            -fno-sanitize-recover=all \
+            -I components/esp-openclaw-node-provisioning/include \
+            components/esp-openclaw-node-provisioning/esp_openclaw_setup_session.c \
+            components/esp-openclaw-node-provisioning/esp_openclaw_setup_frame.c \
+            components/esp-openclaw-node-provisioning/esp_openclaw_setup_transfer.c \
+            components/esp-openclaw-node-provisioning/tests/test_setup_transfer.c \
+            -o /tmp/setup_transfer_test
+          /tmp/setup_transfer_test
           python3 components/esp-openclaw-node/tests/run_connect_lease_host_tests.py
           python3 -m unittest discover -s scripts/tests -p test_saved_session_reconnect.py -v
 

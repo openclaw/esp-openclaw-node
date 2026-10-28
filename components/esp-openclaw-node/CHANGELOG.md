@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add bounded phone-setup transfer assembly with checked retries, repeatable response pulls, live peer authorization, and credential-buffer wiping. BLE and mobile integration remain separate work.
+
 - Reveal long conversation titles on the focused M5Dial row and reader heading, keeping neighboring rows still and selection unchanged.
 
 - Bind confirmed Gateway setup operations to native connection ownership, live authority, exact outcomes, cancellation draining, and explicit reconnect handback.

@@ -102,6 +102,11 @@ esp_openclaw_setup_result_t esp_openclaw_setup_open(esp_openclaw_setup_session_t
  * Attach only after authenticating and binding the displayed comparison to it. */
 esp_openclaw_setup_result_t esp_openclaw_setup_attach(esp_openclaw_setup_session_t *session,
                                                      uint64_t generation, uint64_t peer);
+/* Current encrypted peer, including comparison before local confirmation.
+ * Permits transport exchange only; mutations and saved-state reads still need
+ * confirmation. Polls live authority on the serialized setup owner. */
+esp_openclaw_setup_result_t esp_openclaw_setup_authorize_peer(esp_openclaw_setup_session_t *session,
+                                                             uint64_t generation, uint64_t peer);
 /* Local UI only: observe neutral input AFTER displaying this peer's comparison,
  * then confirm on a new physical press. Never expose either call over transport. */
 esp_openclaw_setup_result_t esp_openclaw_setup_input_released(esp_openclaw_setup_session_t *session,

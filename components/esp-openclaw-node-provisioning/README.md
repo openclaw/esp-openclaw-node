@@ -33,6 +33,24 @@ display unavailable RSSI as `unknown`.
 shared byte envelope and bounded fragment sizes; it does not authenticate a
 peer, reassemble a transfer, or expose a BLE endpoint.
 
+`esp_openclaw_setup_transfer.h` assembles those frames on the serialized setup
+owner. Initialize its caller-owned storage once per boot, outside small task
+stacks, and bind it after the session attaches an authenticated peer. It reserves
+two fixed 8 KiB buffers: the original request remains available for retry checks
+while a separate response is retained for repeatable pulls. Only one transfer
+can be pending; increasing IDs replace a completed transfer and wipe both buffers.
+Close also wipes them, and the same setup generation cannot reopen the transfer
+owner. Poll it even when no frames arrive to detect revocation and expiry.
+
+`receive` returns an encoded reply and hands off a complete request exactly once.
+Copy the borrowed request before asynchronous work or retiring the transfer.
+Decode and authorize application operations separately; an ACK is not operation
+success. `complete` accepts only the current pending generation/peer/transfer
+token. Empty or oversized responses become stable transport errors, not partial
+responses. Before local confirmation, peer authorization permits comparison
+messages only; it does not enable mutations or saved-state reads. BLE endpoint
+and application-message integration remain separate work.
+
 `esp_openclaw_setup_session.h` provides transport-independent setup admission
 for Watch and Dial. It is a library foundation; no example exposes BLE setup
 or a new pairing screen yet. Wi-Fi/node lifecycle integration and the encrypted

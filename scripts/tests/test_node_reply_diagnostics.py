@@ -25,6 +25,10 @@ class ReplyDiagnosticsTests(unittest.TestCase):
         temporary = tempfile.TemporaryDirectory(prefix="node-reply-test-")
         cls.addClassCleanup(temporary.cleanup)
         directory = Path(temporary.name)
+        control = (NODE / "src/esp_openclaw_node.c").read_text()
+        start = control.index("bool esp_openclaw_node_connect_cancel_pending_locked(")
+        end = control.index("esp_err_t esp_openclaw_node_connect_cancel(", start)
+        (directory / "cancel_predicates.inc").write_text(control[start:end])
         source = Path(os.environ.get(
             "NODE_REPLY_SOURCE", str(NODE / "src/esp_openclaw_node_protocol.c"),
         )).read_text()

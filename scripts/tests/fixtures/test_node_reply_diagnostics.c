@@ -25,9 +25,15 @@ typedef void *esp_websocket_client_handle_t;
 #define ESP_OPENCLAW_NODE_MAX_PENDING_REQUESTS 8
 #define ESP_OPENCLAW_NODE_MAX_SESSION_KEY_LEN 256
 #define ESP_OPENCLAW_NODE_INTERNAL_READY 1
+#define ESP_OPENCLAW_NODE_INTERNAL_CONNECTING 2
+#define ESP_OPENCLAW_NODE_INTERNAL_DESTROYING 3
+#define ESP_OPENCLAW_NODE_INTERNAL_CLOSED 4
 #define pdMS_TO_TICKS(value) ((TickType_t)(value))
 
 typedef struct node *esp_openclaw_node_handle_t;
+typedef uint64_t esp_openclaw_node_connect_attempt_id_t;
+enum { ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_QUEUED,
+       ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_CONNECTING };
 typedef struct {
     bool ok;
     const char *payload_json;
@@ -47,6 +53,10 @@ typedef struct {
 } websocket_ops_t;
 struct node {
     int state;
+    uint64_t active_connect_attempt_id;
+    struct { uint64_t id; int state; bool cancel_requested; } connect_attempt;
+    bool (*connect_authorize)(void *);
+    void *connect_authorize_context;
     int pending_control;
     uint32_t active_transport_id;
     void *work_queue;
@@ -197,6 +207,8 @@ static char *tracked_print(const cJSON *item)
     cJSON_InitHooks(NULL);
     return serialized;
 }
+
+#include "cancel_predicates.inc"
 
 #define free tracked_free
 #define cJSON_Delete tracked_delete

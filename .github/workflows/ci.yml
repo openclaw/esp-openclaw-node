@@ -169,7 +169,9 @@ jobs:
             if [ "${{ matrix.name }}" = "waveshare-amoled-room-node" ]; then
               python3 ../../components/esp-openclaw-room-node/tests/run_recording_host_tests.py --managed-components managed_components &&
               python3 ../../components/esp-openclaw-room-node/tests/run_lifecycle_host_tests.py --managed-components managed_components &&
-              python3 ../../components/esp-openclaw-room-node/tests/run_lifecycle_host_tests.py --managed-components managed_components --voice-actions --log-mode tagged --case operator-scopes &&
+              python3 ../../components/esp-openclaw-room-node/tests/run_lifecycle_host_tests.py --managed-components managed_components --voice-actions --log-mode tagged \
+                --case operator-scopes --case voice-send-lifecycle --case voice-send-stale --case voice-send-unknown \
+                --case voice-send-queue-failure --case voice-send-prepare-failure --case voice-send-without-agent &&
               python3 ../../components/esp-openclaw-room-node/tests/run_ui_host_tests.py --lvgl-dir managed_components/lvgl__lvgl
             fi &&
             if [ "${{ matrix.name }}" != "component-test-app-build" ]; then

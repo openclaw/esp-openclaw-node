@@ -1887,6 +1887,65 @@ static void voice_complete(void)
     host_run_task("talk_teardown");
 }
 
+static const char transcription_created[] =
+    "{\"sessionId\":\"draft-1\",\"transcriptionSessionId\":\"draft-1\","
+    "\"mode\":\"transcription\",\"transport\":\"gateway-relay\",\"brain\":\"none\","
+    "\"audio\":{\"inputEncoding\":\"g711_ulaw\",\"inputSampleRateHz\":8000}}";
+
+static void voice_tick(void)
+{
+    host.expire_queue_wait = true;
+    host_run_task("talk_teardown");
+}
+
+static void transcription_event(esp_openclaw_node_handle_t node, const char *type, unsigned seq, const char *payload)
+{
+    char json[4096];
+    snprintf(json, sizeof(json), "{\"transcriptionSessionId\":\"draft-1\",\"talkEvent\":{"
+        "\"sessionId\":\"draft-1\",\"mode\":\"transcription\",\"transport\":\"gateway-relay\","
+        "\"brain\":\"none\",\"type\":\"%s\",\"seq\":%u,\"payload\":%s}}", type, seq, payload);
+    host_emit_gateway(node, "talk.event", json);
+}
+
+static void transcription_ready(void)
+{
+    // A ready event may beat the create callback; the published owner must receive it.
+    transcription_event(operator_client, "session.ready", 1, "{}");
+    host_reply_transcription(true, transcription_created);
+    voice_tick();
+}
+
+static void transcription_upload(unsigned bytes)
+{
+    unsigned baseline = host.transcription_bytes;
+    transcription_ready();
+    for (unsigned i = 0; i < (bytes + 3199) / 3200; ++i) {
+        CHECK(host.voice.state == ROOM_VOICE_TRANSCRIBING, "upload remains a non-sendable draft");
+        host_reply_transcription(true, "{\"ok\":true}");
+        voice_tick();
+    }
+    CHECK(host.transcription_bytes - baseline == bytes, "every recorded byte uploaded exactly once");
+    host_reply_transcription(true, "{\"ok\":true}"); // Close acknowledgement is not completion.
+    voice_tick();
+    CHECK(host.voice.state == ROOM_VOICE_TRANSCRIBING, "provider finals must drain after close acknowledgement");
+}
+
+static void transcription_finish(const char *payload)
+{
+    transcription_event(operator_client, "transcript.done", 2, payload);
+    voice_tick();
+    CHECK(host.voice.text[0] == '\0', "partial/final segments are hidden until completed close");
+    transcription_event(operator_client, "session.closed", 3, "{\"reason\":\"completed\"}");
+    voice_tick();
+}
+
+static void cancel_pending_transcription(void)
+{
+    host_reply_transcription(true, transcription_created);
+    host_reply_transcription(true, "{\"ok\":true}");
+    voice_tick();
+}
+
 static void voice_draft_lifecycle(void)
 {
     voice_begin(1);
@@ -1903,14 +1962,18 @@ static void voice_draft_lifecycle(void)
     CHECK(host.recording_stops == 1 && host.voice.state == ROOM_VOICE_FINISHING,
         "release finishes the capture without blocking the UI");
     voice_complete();
-    CHECK(host.voice.state == ROOM_VOICE_DRAFT && host.voice.duration_ms == 4000,
-        "terminal audio becomes a local draft");
+    CHECK(host.voice.state == ROOM_VOICE_TRANSCRIBING && host.voice.duration_ms == 4000,
+        "terminal audio starts transcription on the captured operator");
+    transcription_upload(32000);
+    transcription_finish("{\"text\":\"Turn on the reading light.\"}");
+    CHECK(host.voice.state == ROOM_VOICE_DRAFT && strcmp(host.voice.text, "Turn on the reading light.") == 0,
+        "only completed transcription becomes reviewable text");
     request_local_voice(ROOM_VOICE_FINISH, 1, 0, 0);
     host_run_task("talk_teardown");
     CHECK(host.voice.state == ROOM_VOICE_DRAFT && host.recording_stops == 1,
         "late release after a duration cap preserves the draft");
     CHECK(host.opens == 0 && host.create_requests == 0 && host.speech_requests == 0,
-        "a local draft sends no Talk or speech request");
+        "transcription never starts Live Talk or sends a chat/speech request");
     request_local_voice(ROOM_VOICE_CANCEL, 1, 0, 0);
     host_run_task("talk_teardown");
     CHECK(host.voice.state == ROOM_VOICE_READY, "discard frees the draft and restores readiness");
@@ -1953,6 +2016,8 @@ static void voice_context_loss(void)
     CHECK(host.voice.state == ROOM_VOICE_ERROR, "capture owner loss is visible");
     voice_begin(2);
     voice_complete();
+    transcription_upload(32000);
+    transcription_finish("{\"text\":\"A completed draft.\"}");
     ++talk_target_revision;
     wake_talk_teardown(); host_run_task("talk_teardown");
     CHECK(host.voice.state == ROOM_VOICE_ERROR, "recipient change discards a completed draft");
@@ -1972,7 +2037,9 @@ static void voice_media_exclusion(void)
         "busy audio rejects capture visibly");
     host.media_busy = false;
     voice_begin(2);
-    admit(); host_run_task("talk_start");
+    CHECK(host_command_params(node_client, "talk.start", "{}") == ESP_ERR_INVALID_STATE,
+        "recording rejects Live Talk admission visibly");
+    host_run_task("talk_start");
     CHECK(host.opens == 0 && host.voice.state == ROOM_VOICE_STARTING,
         "Live Talk cannot steal the recording's media gate");
     request_local_voice(ROOM_VOICE_CANCEL, 2, 0, 0); host_run_task("talk_teardown");
@@ -1988,9 +2055,10 @@ static void voice_completion_race(void)
     host.finish_after_recording_snapshot = true;
     host.expire_queue_wait = true; host_run_task("talk_teardown");
     host.expire_queue_wait = true; host_run_task("talk_teardown");
-    CHECK(host.voice.state == ROOM_VOICE_DRAFT && host.voice.duration_ms == 2000,
+    CHECK(host.voice.state == ROOM_VOICE_TRANSCRIBING && host.voice.duration_ms == 2000,
         "completion between status reads must retain the backend draft");
     request_local_voice(ROOM_VOICE_CANCEL, 1, 0, 0); host_run_task("talk_teardown");
+    cancel_pending_transcription();
     voice_begin(2);
     CHECK(host.recording_starts == 2 && host.voice.state == ROOM_VOICE_STARTING,
         "racing completion cannot wedge the next recording");
@@ -1999,7 +2067,57 @@ static void voice_completion_race(void)
     host.expire_queue_wait = true; host_run_task("talk_teardown");
 }
 
+static void voice_transcription_cancel(void)
+{
+    voice_begin(1); voice_complete(); transcription_ready();
+    CHECK(host.transcription_appends == 1, "one audio request in flight");
+    request_local_voice(ROOM_VOICE_CANCEL, 1, 0, 0); host_run_task("talk_teardown");
+    CHECK(host.voice.text[0] == '\0' && room_voice_draft_busy(), "cancel retains pending callback ownership");
+    transcription_event(operator_client, "transcript.done", 2, "{\"text\":\"Canceled words\"}");
+    host_reply_transcription(true, "{\"ok\":true}");
+    host_reply_transcription(true, "{\"ok\":true}");
+    voice_tick();
+    CHECK(host.voice.state == ROOM_VOICE_READY && host.voice.text[0] == '\0', "late result cannot revive canceled text");
+    CHECK(host.transcription_appends == 1 && !room_voice_draft_busy(), "cancel stops upload and drains owner");
+}
+
+static void voice_transcription_reconnect(void)
+{
+    voice_begin(1); voice_complete(); transcription_ready();
+    host_emit_node(operator_client, ESP_OPENCLAW_NODE_EVENT_DISCONNECTED);
+    voice_tick();
+    CHECK(host.voice.state == ROOM_VOICE_ERROR && host.voice.text[0] == '\0', "disconnect discards destination-bound draft");
+    host_reply_transcription(false, NULL); // Pending callback still owns the long-lived original node.
+    host_emit_node(operator_client, ESP_OPENCLAW_NODE_EVENT_CONNECTED);
+    transcription_event(operator_client, "transcript.done", 2, "{\"text\":\"Stale words\"}");
+    voice_tick();
+    CHECK(host.transcription_appends == 1 && host.voice.text[0] == '\0', "replacement connection never receives old audio or text");
+}
+
+static void voice_transcription_empty(void)
+{
+    voice_begin(1); voice_complete(); transcription_upload(32000);
+    transcription_finish("{\"text\":\"\"}");
+    CHECK(host.voice.state == ROOM_VOICE_TRANSCRIPTION_ERROR && strstr(host.voice.detail, "No speech") != NULL,
+        "empty transcript gives actionable retry feedback, not an empty sendable draft");
+}
+
+static void voice_transcription_timeout(void)
+{
+    voice_begin(1); voice_complete();
+    host.now_us += 16000000;
+    voice_tick();
+    CHECK(host.voice.state == ROOM_VOICE_TRANSCRIPTION_ERROR && strstr(host.voice.detail, "timed out") != NULL,
+        "timeout becomes visible while create callback drains");
+    cancel_pending_transcription();
+    CHECK(host.voice.text[0] == '\0' && !room_voice_draft_busy(), "timeout releases all owner resources");
+}
+
 static const struct { const char *name; void (*run)(void); } cases[] = {
+    {"voice-transcription-cancel", voice_transcription_cancel},
+    {"voice-transcription-reconnect", voice_transcription_reconnect},
+    {"voice-transcription-empty", voice_transcription_empty},
+    {"voice-transcription-timeout", voice_transcription_timeout},
     {"voice-draft-lifecycle", voice_draft_lifecycle}, {"voice-canceled-intent", voice_canceled_intent},
     {"voice-context-loss", voice_context_loss}, {"voice-media-exclusion", voice_media_exclusion},
     {"voice-completion-race", voice_completion_race},

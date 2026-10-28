@@ -129,6 +129,7 @@ def main():
             "-I", str(component.parent / "esp-openclaw-directory/include"),
             "-I", str(component.parent / "esp-openclaw-node-provisioning/include"),
             "-I", str(component.parent / "esp-openclaw-ui/include"),
+            "-I", str(component.parent / "esp-openclaw-talk/include"),
             str(component / "room_ui_controller.c"), str(component / "room_board.c"),
             str(component / "room_watch_home.c"),
             str(component.parent / "esp-openclaw-ui/openclaw_status_bar.c"),

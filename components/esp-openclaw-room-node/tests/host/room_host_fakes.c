@@ -57,14 +57,14 @@ static esp_timer_handle_t node_timer;
 static esp_timer_handle_t directory_timer, devices_timer;
 static esp_openclaw_node_handle_t nodes[4];
 static size_t node_count;
-static unsigned mutex_depth;
+static unsigned mutex_depth, mutex_count;
 
 typedef struct {
     esp_openclaw_node_gateway_request_cb_t callback;
     void *ctx;
     esp_openclaw_node_handle_t node;
 } pending_rpc_t;
-static pending_rpc_t config_rpc, create_rpc, scope_rpc, speech_rpc, agents_rpc, devices_rpc;
+static pending_rpc_t config_rpc, create_rpc, scope_rpc, speech_rpc, agents_rpc, devices_rpc, transcription_rpc;
 
 typedef struct {
     esp_webrtc_cfg_t config;
@@ -169,10 +169,11 @@ void host_exit_critical(portMUX_TYPE *lock)
 
 SemaphoreHandle_t xSemaphoreCreateMutex(void)
 {
-    host_require(mutex == NULL, "fixture creates one room mutex");
-    mutex = calloc(1, sizeof(*mutex));
-    host_require(mutex != NULL, "mutex allocation");
-    return mutex;
+    SemaphoreHandle_t value = calloc(1, sizeof(*value));
+    host_require(value != NULL, "mutex allocation");
+    if (mutex == NULL) mutex = value;
+    ++mutex_count;
+    return value;
 }
 
 BaseType_t xSemaphoreTake(SemaphoreHandle_t value, TickType_t wait)
@@ -205,7 +206,12 @@ SemaphoreHandle_t xSemaphoreCreateBinary(void)
     value->binary = true;
     return value;
 }
-void vSemaphoreDelete(SemaphoreHandle_t value) { free(value); }
+void vSemaphoreDelete(SemaphoreHandle_t value)
+{
+    host_require(!value->held, "destroy unlocked semaphore");
+    if (!value->binary) --mutex_count;
+    free(value);
+}
 
 static bool queue_storage_size(size_t capacity, size_t size, size_t *bytes)
 {
@@ -531,9 +537,35 @@ void host_command(esp_openclaw_node_handle_t node, const char *name)
 esp_err_t esp_openclaw_node_gateway_request(esp_openclaw_node_handle_t node,
     const char *method, const char *params, esp_openclaw_node_gateway_request_cb_t callback, void *ctx)
 {
-    host_require(host.critical_depth == 0 && mutex_depth == 0, "RPC outside locks");
+    bool transcription = strncmp(method, "talk.session.", 13) == 0;
+    host_require(host.critical_depth == 0 && (transcription || mutex_depth == 0), "non-transcription RPC outside locks");
     pending_rpc_t request = {.callback = callback, .ctx = ctx, .node = node};
-    if (strcmp(method, "node.list") == 0) {
+    if (transcription) {
+        host_require(transcription_rpc.callback == NULL, "one transcription request outstanding");
+        cJSON *json = cJSON_Parse(params);
+        host_require(json != NULL, "transcription JSON parses");
+        if (strcmp(method, "talk.session.create") == 0) {
+            host_require(strcmp(params, "{\"mode\":\"transcription\",\"transport\":\"gateway-relay\",\"brain\":\"none\"}") == 0,
+                "transcription has no agent brain or chat target");
+            ++host.transcription_creates;
+        } else {
+            cJSON *id = cJSON_GetObjectItemCaseSensitive(json, "sessionId");
+            host_require(cJSON_IsString(id) && strcmp(id->valuestring, "draft-1") == 0, "original transcription identity");
+            if (strcmp(method, "talk.session.appendAudio") == 0) {
+                cJSON *audio = cJSON_GetObjectItemCaseSensitive(json, "audioBase64");
+                host_require(cJSON_IsString(audio) && strlen(audio->valuestring) <= 4268, "bounded audio chunk");
+                size_t n = strlen(audio->valuestring);
+                host_require(n >= 4 && n % 4 == 0, "base64 chunk shape");
+                host.transcription_bytes += n / 4 * 3 - (audio->valuestring[n - 1] == '=') - (audio->valuestring[n - 2] == '=');
+                ++host.transcription_appends;
+            } else {
+                host_require(strcmp(method, "talk.session.close") == 0, "only transcription RPCs expected");
+                ++host.transcription_closes;
+            }
+        }
+        cJSON_Delete(json);
+        transcription_rpc = request;
+    } else if (strcmp(method, "node.list") == 0) {
         if (host.fail_device_submit) return ESP_FAIL;
         host_require(devices_rpc.callback == NULL, "one device request outstanding");
         host_require(strcmp(params, "{}") == 0, "node.list has no pagination or filters");
@@ -625,6 +657,10 @@ static void reply(pending_rpc_t *slot, bool ok, const char *payload)
     request.callback(request.node, &result, request.ctx);
     --host.callback_depth;
     free(borrowed);
+}
+void host_reply_transcription(bool ok, const char *payload)
+{
+    reply(&transcription_rpc, ok, payload);
 }
 void host_reply_scope(bool ok, const char *payload)
 {
@@ -830,6 +866,7 @@ esp_err_t room_recording_take(uint8_t **audio, size_t *bytes)
     *bytes = host.recording.audio_bytes;
     *audio = malloc(*bytes);
     host_require(*audio != NULL, "audio fixture allocated");
+    memset(*audio, 0x7f, *bytes);
     host.recording.state = ROOM_RECORDING_IDLE;
     return ESP_OK;
 }
@@ -978,13 +1015,14 @@ esp_err_t esp_http_client_cleanup(esp_http_client_handle_t client)
 void host_release_resources(void)
 {
     host_require(config_rpc.callback == NULL && create_rpc.callback == NULL && scope_rpc.callback == NULL &&
-        agents_rpc.callback == NULL,
+        agents_rpc.callback == NULL && transcription_rpc.callback == NULL,
         "all real RPC references drained");
     host_require(!host.media_owned && mutex_depth == 0 && host.critical_depth == 0, "fixture leaves no ownership");
     for (size_t i = 0; i < node_count; ++i) free(nodes[i]);
     free(queue->data);
     free(queue);
-    free(mutex);
+    host_require(mutex_count == (mutex != NULL ? 1U : 0U), "transcription mutexes released after callbacks");
+    if (mutex != NULL) vSemaphoreDelete(mutex);
     free(timeout);
     free(operator_timer);
     free(node_timer);

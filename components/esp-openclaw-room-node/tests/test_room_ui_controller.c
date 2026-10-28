@@ -77,7 +77,7 @@ static lv_indev_t *touchscreen;
 static lv_indev_state_t touch_state;
 static lv_point_t touch_point;
 static lv_obj_t *modal;
-static lv_obj_t *watch_menu_button, *watch_continue_button, *watch_voice_button, *watch_discard_button;
+static lv_obj_t *watch_menu_button, *watch_continue_button, *watch_voice_button, *watch_discard_button, *watch_review_body;
 static room_canvas_action_handler_t canvas_action;
 struct ui_timer { esp_timer_create_args_t args; bool active; };
 static struct ui_timer timers[4];
@@ -421,8 +421,8 @@ static void check_dark_talk_control(void)
 static unsigned check_home_tree(lv_obj_t *parent)
 {
     unsigned count = 1;
-    assert(!lv_obj_has_flag(parent, LV_OBJ_FLAG_SCROLLABLE));
-    if (parent == watch_menu_button || parent == watch_continue_button ||
+    assert(lv_obj_has_flag(parent, LV_OBJ_FLAG_SCROLLABLE) == (parent == watch_review_body));
+    if (parent == watch_review_body || parent == watch_menu_button || parent == watch_continue_button ||
         parent == watch_voice_button || parent == watch_discard_button)
         assert(lv_obj_has_flag(parent, LV_OBJ_FLAG_CLICKABLE));
     else assert(!lv_obj_has_flag(parent, LV_OBJ_FLAG_CLICKABLE));
@@ -447,7 +447,7 @@ static void write_frame(const char *path)
     assert(fclose(out) == 0);
 }
 
-static void snapshot(const char *path)
+static void snapshot_content(const char *path, bool mascot)
 {
     lv_refr_now(display);
     unsigned red = 0, light = 0;
@@ -456,9 +456,11 @@ static void snapshot(const char *path)
         red += p[2] > 140 && p[2] > p[1] * 2;
         light += p[0] > 150 && p[1] > 150 && p[2] > 150;
     }
-    assert(red > 2000 && light > 500);
+    assert(light > 500 && (!mascot || red > 2000));
     write_frame(path);
 }
+
+static void snapshot(const char *path) { snapshot_content(path, true); }
 
 static void check_watch_repaint(void)
 {
@@ -500,6 +502,15 @@ static void check_watch_home(const char *path)
     watch_continue_button = lv_obj_get_parent(find_text(lv_layer_top(), "Continue conversations"));
     watch_voice_button = lv_obj_get_parent(find_text(lv_layer_top(), "Hold to record"));
     watch_discard_button = lv_obj_get_parent(find_text(lv_layer_top(), "Discard"));
+    lv_obj_t *review = lv_obj_get_parent(find_text(lv_layer_top(), "Text draft"));
+    for (unsigned i = 0; i < lv_obj_get_child_count(review); ++i) {
+        lv_obj_t *child = lv_obj_get_child(review, i);
+        if (lv_obj_has_flag(child, LV_OBJ_FLAG_SCROLLABLE)) {
+            assert(watch_review_body == NULL);
+            watch_review_body = child;
+        }
+    }
+    assert(watch_review_body != NULL);
     assert(title && lv_obj_is_visible(title));
     assert(room_face_is_visible());
     lv_obj_update_layout(lv_layer_top());
@@ -1620,6 +1631,7 @@ static void voice_action(room_voice_action_t action, uint32_t generation, uint64
 
 static room_voice_snapshot_t test_voice = {
     .state = ROOM_VOICE_READY, .recipient_revision = 42, .owner_incarnation = 7,
+    .recipient = "Kitsune", .text = "Turn on the reading light.",
 };
 static void show_voice(room_voice_state_t state)
 {
@@ -1640,7 +1652,14 @@ static void voice_snapshot(const char *base, const char *state)
     if (base == NULL) return;
     char path[1024];
     assert(snprintf(path, sizeof(path), "%s.voice-%s.ppm", base, state) < (int)sizeof(path));
-    snapshot(path);
+    bool review = test_voice.state == ROOM_VOICE_TRANSCRIBING || test_voice.state == ROOM_VOICE_CANCELING ||
+        test_voice.state == ROOM_VOICE_DRAFT || test_voice.state == ROOM_VOICE_TRANSCRIPTION_ERROR;
+    if (review) {
+        assert(!room_face_is_visible());
+        room_ui_show_face_hint(10000);
+        assert(!room_face_is_visible());
+    }
+    snapshot_content(path, !review);
 }
 static void check_watch_voice(const char *path)
 {
@@ -1669,8 +1688,12 @@ static void check_watch_voice(const char *path)
     voice_snapshot(path, "recording");
     touch_talk(button, false);
     assert(voice_finishes == 1);
+    show_voice(ROOM_VOICE_TRANSCRIBING);
+    assert(visible_watch_text("Transcribing") && visible_watch_text("Cancel"));
+    voice_snapshot(path, "transcribing");
     show_voice(ROOM_VOICE_DRAFT);
-    assert(visible_watch_text("Not sent. Discarded when you leave."));
+    assert(visible_watch_text("Text draft") && visible_watch_text("Kitsune / Not sent"));
+    assert(visible_watch_text("Turn on the reading light."));
     voice_snapshot(path, "draft");
     lv_obj_t *discard_button = lv_obj_get_parent(find_visible_text(lv_layer_top(), "Discard"));
     click_talk(discard_button);
@@ -1727,6 +1750,52 @@ static void check_watch_voice(const char *path)
     show_voice(ROOM_VOICE_ERROR);
     assert(visible_watch_text("Couldn't record") && brightness > 0);
     voice_snapshot(path, "error");
+    show_voice(ROOM_VOICE_TRANSCRIPTION_ERROR);
+    assert(visible_watch_text("Couldn't transcribe"));
+    voice_snapshot(path, "transcription-error");
+    // Review a new gesture; earlier coverage already canceled the previous generation.
+    show_voice(ROOM_VOICE_READY);
+    unsigned previous_begins = voice_begins;
+    hold_voice(button);
+    touch_talk(button, false);
+    assert(voice_begins == previous_begins + 1);
+    for (size_t i = 0; i < 16; ++i)
+        strcat(test_voice.text, " Review every word before sending. This is a longer recorded message.");
+    show_voice(ROOM_VOICE_DRAFT);
+    lv_obj_t *text = find_visible_text(lv_layer_top(), test_voice.text);
+    assert(text != NULL);
+    lv_obj_t *viewport = lv_obj_get_parent(text);
+    lv_obj_update_layout(viewport);
+    unsigned begins = voice_begins, cancels = voice_cancels, finishes = voice_finishes;
+    touch_point = (lv_point_t){180, 315};
+    touch_state = LV_INDEV_STATE_PRESSED;
+    lv_indev_read(touchscreen);
+    for (int y = 300; y >= 180; y -= 20) {
+        touch_point.y = y;
+        lv_tick_inc(40);
+        lv_indev_read(touchscreen);
+    }
+    touch_state = LV_INDEV_STATE_RELEASED;
+    lv_indev_read(touchscreen);
+    lv_tick_inc(400);
+    lv_timer_handler();
+    int32_t scroll = lv_obj_get_scroll_y(viewport);
+    assert(scroll > 0);
+    room_ui_refresh();
+    assert(lv_obj_get_scroll_y(viewport) == scroll);
+    assert(voice_begins == begins && voice_cancels == cancels && voice_finishes == finishes);
+    lv_obj_scroll_to_y(viewport, lv_obj_get_scroll_y(viewport) + lv_obj_get_scroll_bottom(viewport), LV_ANIM_OFF);
+    voice_snapshot(path, "long-draft");
+    ++test_voice.generation;
+    room_ui_store_voice(&test_voice);
+    room_ui_refresh();
+    assert(lv_obj_get_scroll_y(viewport) == 0);
+    show_voice(ROOM_VOICE_TRANSCRIBING);
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), "Cancel")));
+    assert(voice_cancels == cancels + 1);
+    show_voice(ROOM_VOICE_CANCELING);
+    assert(lv_obj_has_state(lv_obj_get_parent(find_visible_text(lv_layer_top(), "Canceling...")), LV_STATE_DISABLED));
+    voice_snapshot(path, "canceling");
     puts("watch voice: wake, tap, hold, release, cap, discard, cover and stale-owner gestures passed");
 }
 

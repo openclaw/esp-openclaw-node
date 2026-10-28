@@ -598,12 +598,14 @@ static void refresh_voice(void)
         .valid = node_ready && operator_ready && !talk_target.expired,
         .recipient_revision = talk_target_revision,
         .owner_incarnation = operator_incarnation,
+        .operator_node = operator_client,
     };
     context.available = context.valid && media_ready && talk_call == NULL;
     strlcpy(context.recipient, talk_target.selected ? talk_target.name : "Default agent", sizeof(context.recipient));
+    static room_voice_snapshot_t snapshot;
+    bool changed = room_voice_draft_poll(&context, &snapshot);
     xSemaphoreGive(state_lock);
-    room_voice_snapshot_t snapshot;
-    if (room_voice_draft_poll(&context, &snapshot)) {
+    if (changed) {
         room_ui_store_voice(&snapshot);
         room_ui_refresh();
     }
@@ -826,7 +828,8 @@ static int webrtc_event(esp_webrtc_event_t *event, void *ctx)
 static bool admit_talk_locked(void)
 {
     if (!operator_ready || operator_client == NULL || gateway_http_base == NULL ||
-        camera_active || talk_call != NULL || talk_generation == UINT32_MAX) return false;
+        camera_active || talk_call != NULL || room_voice_draft_busy() ||
+        talk_generation == UINT32_MAX) return false;
     if (talk_target.selected && talk_target.expired) return false;
     uint32_t generation = talk_generation + 1;
     esp_openclaw_talk_signaling_config_t signaling = {
@@ -990,11 +993,13 @@ static void operator_gateway_event(
 {
     (void)ctx;
     xSemaphoreTake(state_lock, portMAX_DELAY);
+    room_voice_draft_event(client, event, payload_json, talk_target_revision, operator_incarnation);
     esp_openclaw_talk_call_handle_t call = talk_call;
     bool bound = call != NULL && client == talk_operator && !talk_cancel_requested && !talk_closing &&
         (client != operator_client || talk_operator_incarnation == operator_incarnation);
     if (bound) esp_openclaw_talk_call_retain(call);
     xSemaphoreGive(state_lock);
+    wake_talk_teardown();
     if (bound) {
         esp_openclaw_talk_call_gateway_event(call, client, event, payload_json);
         esp_openclaw_talk_call_release(call);
@@ -1116,7 +1121,7 @@ static esp_err_t start_operator_client(void)
 static void start_operator_if_pending(void)
 {
     xSemaphoreTake(state_lock, portMAX_DELAY);
-    bool start = operator_start_pending && talk_call == NULL;
+    bool start = operator_start_pending && talk_call == NULL && !room_voice_draft_busy();
     if (start) {
         operator_start_pending = false;
         operator_start_scheduled = false;
@@ -1396,6 +1401,7 @@ static esp_err_t handle_talk_start(
     }
     xSemaphoreTake(state_lock, portMAX_DELAY);
     bool already_active = camera_active || talk_call != NULL;
+    bool voice_busy = room_voice_draft_busy();
     bool start = admit_talk_locked();
     bool operator_offline = !operator_ready;
     bool target_expired = talk_target.selected && talk_target.expired;
@@ -1406,6 +1412,11 @@ static esp_err_t handle_talk_start(
         return ESP_ERR_INVALID_STATE;
     }
     if (!start) {
+        if (voice_busy) {
+            out_error->code = "UNAVAILABLE";
+            out_error->message = "finish or discard the recording before starting Talk";
+            return ESP_ERR_INVALID_STATE;
+        }
         if (target_expired && !already_active) {
             out_error->code = "UNAVAILABLE";
             out_error->message = "choose an agent again after reconnecting, or explicitly use the Gateway default";

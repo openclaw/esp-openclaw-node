@@ -85,6 +85,7 @@ def main():
         command += [
             str(tests / "test_room_talk_lifecycle.c"), str(tests / "host/room_host_fakes.c"),
             str(repo / "components/esp-openclaw-talk/src/esp_openclaw_talk.c"),
+            str(repo / "components/esp-openclaw-talk/src/esp_openclaw_transcription.c"),
             str(tests.parent / "room_agent_directory.c"),
             str(tests.parent / "room_voice_draft.c"),
             str(repo / "components/esp-openclaw-directory/esp_openclaw_devices.c"),

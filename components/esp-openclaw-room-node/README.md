@@ -166,7 +166,14 @@ at most 30 seconds (240,000 encoded bytes) in PSRAM. Stop preserves the draft;
 cancel, queue overflow, malformed input, codec failure, or a stalled source
 discards it. Recording, the speaker test, and Live Talk share one media owner;
 busy Talk startup fails visibly without opening a peer or contacting the Gateway.
-The backend does not yet expose a recording gesture, transcribe, or send a message.
+On Watch, hold **Record** for 250 ms to start, release to transcribe, or slide
+up to cancel. The 30-second limit ends capture automatically. A transcription-only
+Gateway session receives bounded audio chunks on the original operator connection;
+it never starts an agent turn. The review screen shows final text only after the
+provider finishes, with scrolling for long drafts. **Discard**, leaving Home,
+changing the recipient, or losing the connection clears the draft. Empty speech,
+provider failures, and timeouts offer re-recording. Sending text to an agent is
+not available in this slice.
 
 Room endpoints request 400 ms of provider server-VAD post-speech silence for
 each Talk session. The player uses the pinned 4 KiB raw and 6 KiB render queue

@@ -21,6 +21,25 @@ static room_voice_snapshot_t view, published;
 static bool recording_owned, discarding;
 static const char *discard_error;
 static uint8_t *audio;
+static size_t audio_bytes, audio_offset;
+static esp_openclaw_transcription_handle_t transcription;
+static bool draining;
+/* Keep the bounded provider text off the supervisor's small task stack. */
+static esp_openclaw_transcription_snapshot_t transcript;
+
+bool room_voice_draft_busy(void)
+{
+    return recording_owned || transcription != NULL;
+}
+
+void room_voice_draft_event(esp_openclaw_node_handle_t source, const char *event,
+                           const char *payload, uint64_t revision, uint64_t owner)
+{
+    if (transcription != NULL && !draining && !discarding &&
+        revision == view.recipient_revision && owner == view.owner_incarnation) {
+        esp_openclaw_transcription_event(transcription, source, event, payload);
+    }
+}
 
 void room_voice_draft_request(room_voice_action_t action, uint32_t generation, uint64_t revision, uint64_t owner)
 {
@@ -59,9 +78,71 @@ static void discard(const char *error)
 {
     free(audio);
     audio = NULL;
+    audio_bytes = audio_offset = 0;
+    view.text[0] = '\0';
     discarding = true;
     discard_error = error;
     if (recording_owned) room_recording_cancel();
+    if (transcription != NULL) {
+        view.state = ROOM_VOICE_CANCELING;
+        draining = true;
+        esp_openclaw_transcription_cancel(transcription);
+    }
+}
+
+static void transcription_error(const char *message)
+{
+    view.state = ROOM_VOICE_TRANSCRIPTION_ERROR;
+    view.text[0] = '\0';
+    strlcpy(view.detail, message, sizeof(view.detail));
+}
+
+static void poll_transcription(void)
+{
+    if (transcription == NULL) return;
+    esp_openclaw_transcription_poll(transcription);
+    if (!draining) {
+        esp_openclaw_transcription_copy(transcription, &transcript);
+        if (transcript.state == ESP_OPENCLAW_TRANSCRIPTION_READY) {
+            esp_err_t err;
+            if (audio_offset < audio_bytes) {
+                size_t length = audio_bytes - audio_offset;
+                if (length > ESP_OPENCLAW_TRANSCRIPTION_CHUNK_BYTES) length = ESP_OPENCLAW_TRANSCRIPTION_CHUNK_BYTES;
+                err = esp_openclaw_transcription_append(transcription, audio + audio_offset, length);
+                if (err == ESP_OK) audio_offset += length;
+            } else {
+                err = esp_openclaw_transcription_finish(transcription);
+            }
+            if (err != ESP_OK) {
+                transcription_error("Couldn't transcribe. Record again.");
+                draining = true;
+            }
+        } else if (transcript.state == ESP_OPENCLAW_TRANSCRIPTION_COMPLETE) {
+            if (transcript.text[0] == '\0') transcription_error("No speech heard. Record again.");
+            else {
+                strlcpy(view.text, transcript.text, sizeof(view.text));
+                view.state = ROOM_VOICE_DRAFT;
+            }
+            draining = true;
+        } else if (transcript.state == ESP_OPENCLAW_TRANSCRIPTION_FAILED ||
+                   transcript.state == ESP_OPENCLAW_TRANSCRIPTION_CANCELED) {
+            transcription_error(transcript.error == ESP_OPENCLAW_TRANSCRIPTION_ERROR_TIMEOUT
+                ? "Transcription timed out. Record again."
+                : transcript.error == ESP_OPENCLAW_TRANSCRIPTION_ERROR_CONNECTION
+                ? "Connection lost. Reconnect and record again."
+                : "Couldn't transcribe. Record again.");
+            draining = true;
+        }
+    }
+    if (draining) {
+        free(audio);
+        audio = NULL;
+        audio_bytes = audio_offset = 0;
+        if (esp_openclaw_transcription_destroy(transcription) == ESP_OK) {
+            transcription = NULL;
+            draining = false;
+        }
+    }
 }
 
 static const char *recording_error(room_recording_error_t error)
@@ -87,7 +168,7 @@ bool room_voice_draft_poll(const room_voice_context_t *context, room_voice_snaps
     intent.begin = false;
     portEXIT_CRITICAL(&intent_mux);
 
-    if ((recording_owned || audio != NULL) &&
+    if (!discarding && (room_voice_draft_busy() || view.state == ROOM_VOICE_DRAFT) &&
         (!context->valid || view.recipient_revision != context->recipient_revision ||
          view.owner_incarnation != context->owner_incarnation)) {
         discard("Destination changed. Record again.");
@@ -97,13 +178,14 @@ bool room_voice_draft_poll(const room_voice_context_t *context, room_voice_snaps
         view = (room_voice_snapshot_t){.generation = generation,
             .recipient_revision = revision, .owner_incarnation = owner};
         strlcpy(view.recipient, context->recipient, sizeof(view.recipient));
+        if (transcription != NULL) view.state = ROOM_VOICE_CANCELING;
         if (end == ROOM_VOICE_CANCEL) {
             /* A covered or canceled gesture never opens the microphone. */
         } else if (end == ROOM_VOICE_FINISH) {
             discard_error = "Released before recording started. Try again.";
-        } else if (recording_owned || !context->valid || revision != context->recipient_revision ||
+        } else if (room_voice_draft_busy() || !context->valid || revision != context->recipient_revision ||
                    owner != context->owner_incarnation) {
-            discard_error = recording_owned ? "Audio is finishing. Try again." : "Destination changed. Record again.";
+            discard_error = room_voice_draft_busy() ? "Audio is finishing. Try again." : "Destination changed. Record again.";
         } else if (!context->available || room_media_request_recording(NULL, NULL) != ESP_OK) {
             discard_error = "Audio unavailable. Try again when ready.";
         } else {
@@ -134,7 +216,16 @@ bool room_voice_draft_poll(const room_voice_context_t *context, room_voice_snaps
                 size_t bytes = 0;
                 if (room_recording_take(&audio, &bytes) == ESP_OK) {
                     view.duration_ms = (uint32_t)(bytes / 8);
-                    view.state = ROOM_VOICE_DRAFT;
+                    audio_bytes = bytes;
+                    audio_offset = 0;
+                    if (esp_openclaw_transcription_begin(context->operator_node, &transcription) == ESP_OK) {
+                        view.state = ROOM_VOICE_TRANSCRIBING;
+                    } else {
+                        free(audio);
+                        audio = NULL;
+                        audio_bytes = 0;
+                        transcription_error("Couldn't start transcription. Record again.");
+                    }
                 } else {
                     set_error("Recording couldn't be kept. Try again.");
                 }
@@ -143,21 +234,23 @@ bool room_voice_draft_poll(const room_voice_context_t *context, room_voice_snaps
             }
         }
     }
-    if (discarding && !recording_owned) {
+    poll_transcription();
+    if (discarding && !room_voice_draft_busy()) {
         view.duration_ms = 0;
         view.detail[0] = '\0';
         if (discard_error != NULL) set_error(discard_error);
         else view.state = context->available ? ROOM_VOICE_READY : ROOM_VOICE_UNAVAILABLE;
         discarding = false;
-    } else if (!recording_owned && audio == NULL && view.state != ROOM_VOICE_ERROR) {
+    } else if (!room_voice_draft_busy() && view.state != ROOM_VOICE_ERROR &&
+               view.state != ROOM_VOICE_TRANSCRIPTION_ERROR && view.state != ROOM_VOICE_DRAFT) {
         view.state = context->available ? ROOM_VOICE_READY : ROOM_VOICE_UNAVAILABLE;
     }
-    if (!recording_owned && audio == NULL) {
+    if (!room_voice_draft_busy() && view.state != ROOM_VOICE_DRAFT) {
         view.recipient_revision = context->recipient_revision;
         view.owner_incarnation = context->owner_incarnation;
     }
     portENTER_CRITICAL(&intent_mux);
-    polling = recording_owned;
+    polling = room_voice_draft_busy();
     portEXIT_CRITICAL(&intent_mux);
     bool changed = memcmp(&view, &published, sizeof(view)) != 0;
     published = view;

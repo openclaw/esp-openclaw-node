@@ -1179,6 +1179,158 @@ static void conversations_read(void)
         "close releases all reader content");
 }
 
+static room_creation_snapshot_t review_empty_conversation(void)
+{
+    unsigned revision = load_target_roster(target_roster);
+    CHECK(room_conversations_open("fixture", revision) == ESP_OK, "open the selected agent");
+    host_run_task("talk_teardown");
+    host_reply_agents(true, "{\"sessions\":[],\"offset\":0,\"hasMore\":false,\"nextOffset\":null}");
+    host_run_task("talk_teardown");
+    room_conversations_snapshot_t view = conversations_snapshot();
+    CHECK(room_conversations_creation_begin(view.revision + 1) == ESP_ERR_INVALID_STATE,
+        "old list identity cannot begin a creation review");
+    request_local_conversation(ROOM_CONVERSATIONS_NEW, "", view.revision, 0, 1);
+    host_run_task("talk_teardown");
+    CHECK(conversations_snapshot().creation.state == ROOM_CREATION_REVIEW,
+        "an empty list can review through the real UI intent mailbox");
+    return conversations_snapshot().creation;
+}
+
+static void conversations_creation(void)
+{
+    room_creation_snapshot_t creation = review_empty_conversation();
+    CHECK(creation.state == ROOM_CREATION_REVIEW && strcmp(creation.agent.id, "fixture") == 0,
+        "review retains the selected agent without a write");
+    CHECK(host.session_creations == 0 && host.chat_sends == 0, "review sends no request or message");
+#if CONFIG_OPENCLAW_ROOM_VOICE_ACTIONS
+    CHECK(creation.can_create, "approved write build can offer explicit Create");
+    CHECK(room_conversations_creation_submit(creation.revision + 1) == ESP_ERR_INVALID_STATE,
+        "stale confirmation does not queue a write");
+    request_local_conversation(ROOM_CONVERSATIONS_CREATE, "", creation.revision, 0, 1);
+    CHECK(host.session_creations == 0, "UI callback only records confirmation");
+    host_run_task("talk_teardown");
+    CHECK(room_conversations_creation_submit(creation.revision) == ESP_ERR_INVALID_STATE,
+        "double confirmation cannot duplicate the intent");
+    CHECK(host.session_creations == 1 && strcmp(host.reader_method, "sessions.create") == 0,
+        "one creation request is submitted");
+    cJSON *params = cJSON_Parse(host.reader_params);
+    cJSON *agent = cJSON_GetObjectItemCaseSensitive(params, "agentId");
+    cJSON *key = cJSON_GetObjectItemCaseSensitive(params, "idempotencyKey");
+    CHECK(cJSON_GetArraySize(params) == 2 && cJSON_IsString(agent) && strcmp(agent->valuestring, "fixture") == 0 &&
+        cJSON_IsString(key) && strlen(key->valuestring) == 32,
+        "request contains only selected agent and random idempotency identity; no key, message, reset, or task");
+    cJSON_Delete(params);
+    host_reply_creation(true,
+        "{\"ok\":true,\"key\":\"agent:fixture:dashboard:server-chosen\",\"sessionId\":\"server-session\",\"runStarted\":false}", NULL);
+    host_run_task("talk_teardown");
+    creation = conversations_snapshot().creation;
+    CHECK(creation.state == ROOM_CREATION_CREATED && creation.can_open && host.chat_sends == 0 && !talk_target.selected,
+        "receipt alone neither opens a preview nor sends or changes Talk routing");
+    request_local_conversation(ROOM_CONVERSATIONS_OPEN_CREATED, "", creation.revision, 0, 1);
+    host_run_task("talk_teardown");
+    CHECK(strcmp(host.reader_method, "sessions.preview") == 0 &&
+        strstr(host.reader_params, "agent:fixture:dashboard:server-chosen") != NULL,
+        "preview requests the exact server key");
+    host_reply_agents(true, "{\"previews\":[{\"key\":\"agent:fixture:dashboard:server-chosen\",\"status\":\"empty\",\"items\":[]}]}");
+    host_run_task("talk_teardown");
+    CHECK(conversations_snapshot().preview.status == ESP_OPENCLAW_PREVIEW_EMPTY && host.chat_sends == 0,
+        "new empty conversation is readable without a fabricated initial turn");
+#else
+    CHECK(!creation.can_create && strstr(creation.detail, "USB setup") != NULL,
+        "default read/talk build explains its existing approval path");
+    CHECK(room_conversations_creation_submit(creation.revision) == ESP_ERR_INVALID_STATE,
+        "default build cannot create even through a forged intent");
+    host_run_task("talk_teardown");
+    CHECK(host.session_creations == 0, "unapproved build submits no write");
+#endif
+}
+
+static void conversations_creation_uncertain(void)
+{
+#if CONFIG_OPENCLAW_ROOM_VOICE_ACTIONS
+    connect_call();
+    room_creation_snapshot_t creation = review_empty_conversation();
+    CHECK(room_conversations_creation_submit(creation.revision) == ESP_OK, "creation can coexist with active Talk");
+    host_run_task("talk_teardown");
+    host.now_us += 15000000;
+    host_fire_directory_timer();
+    host_run_task("talk_teardown");
+    creation = conversations_snapshot().creation;
+    CHECK(creation.state == ROOM_CREATION_UNKNOWN && host.session_creations == 1 &&
+        talk_active && operator_ready && host.closes == 0, "timeout is uncertain and leaves the shared call alive");
+    CHECK(room_conversations_creation_begin(conversations_snapshot().revision) == ESP_ERR_INVALID_STATE,
+        "outstanding callback prevents a replacement write");
+    CHECK(room_conversations_creation_submit(creation.revision) == ESP_ERR_INVALID_STATE,
+        "uncertain write cannot be resubmitted");
+    host_reply_creation(true,
+        "{\"ok\":true,\"key\":\"agent:fixture:dashboard:late\",\"sessionId\":\"late-id\",\"runStarted\":false}", NULL);
+    host_run_task("talk_teardown");
+    creation = conversations_snapshot().creation;
+    CHECK(creation.state == ROOM_CREATION_CREATED && creation.can_open && host.session_creations == 1,
+        "a late valid receipt resolves uncertainty without replay");
+    CHECK(room_conversations_creation_open(creation.revision) == ESP_OK, "receipt remains available after timeout");
+    host_run_task("talk_teardown");
+    host_reply_agents(true, "{\"previews\":[{\"key\":\"agent:fixture:dashboard:late\",\"status\":\"empty\",\"items\":[]}]}");
+    host_run_task("talk_teardown");
+    creation = review_empty_conversation();
+    CHECK(room_conversations_creation_submit(creation.revision) == ESP_OK, "prepare a second independent creation");
+    host_run_task("talk_teardown");
+    host_emit_node(operator_client, ESP_OPENCLAW_NODE_EVENT_DISCONNECTED);
+    CHECK(conversations_snapshot().creation.state == ROOM_CREATION_UNKNOWN,
+        "owner loss immediately surfaces uncertain delivery");
+    host_reply_creation(true,
+        "{\"ok\":true,\"key\":\"agent:fixture:dashboard:disconnected\",\"sessionId\":\"detached-id\",\"runStarted\":false}", NULL);
+    host_run_task("talk_teardown");
+    creation = conversations_snapshot().creation;
+    CHECK(creation.state == ROOM_CREATION_CREATED && !creation.can_open,
+        "confirmed receipt survives owner loss but cannot grant routing authority");
+    CHECK(room_conversations_creation_open(creation.revision) == ESP_ERR_INVALID_STATE,
+        "disconnected receipt cannot be opened");
+    CHECK(host.session_creations == 2, "disconnect never replays either intent");
+#else
+    conversations_creation();
+#endif
+}
+
+static void conversations_creation_rejection(void)
+{
+#if CONFIG_OPENCLAW_ROOM_VOICE_ACTIONS
+    const char *errors[] = {"INVALID_REQUEST", "FORBIDDEN", "STALE_CONNECTION", "UNAVAILABLE", "TRANSPORT_ERROR", NULL};
+    for (size_t i = 0; i < sizeof(errors) / sizeof(*errors); ++i) {
+        room_creation_snapshot_t creation = review_empty_conversation();
+        CHECK(room_conversations_creation_submit(creation.revision) == ESP_OK, "review an independent error case");
+        host_run_task("talk_teardown");
+        host_reply_creation(false, NULL, errors[i]);
+        host_run_task("talk_teardown");
+        creation = conversations_snapshot().creation;
+        CHECK(creation.state == (i < 3 ? ROOM_CREATION_FAILED : ROOM_CREATION_UNKNOWN),
+            "only definite precommit validation errors are classified as failed");
+    }
+    room_creation_snapshot_t creation = review_empty_conversation();
+    CHECK(room_conversations_creation_submit(creation.revision) == ESP_OK, "queue a malformed success case");
+    host_run_task("talk_teardown");
+    host_reply_creation(true, "{\"ok\":true,\"key\":\"agent:builder:dashboard:wrong-owner\",\"sessionId\":\"id\",\"runStarted\":false}", NULL);
+    host_run_task("talk_teardown");
+    CHECK(conversations_snapshot().creation.state == ROOM_CREATION_UNKNOWN,
+        "malformed or wrong-agent receipt never fabricates success");
+    creation = review_empty_conversation();
+    CHECK(room_conversations_creation_submit(creation.revision) == ESP_OK, "queue before local selection change");
+    room_conversations_close();
+    host_run_task("talk_teardown");
+    CHECK(conversations_snapshot().creation.state == ROOM_CREATION_FAILED && host.session_creations == 7,
+        "selection change before submission prevents the eighth write");
+    creation = review_empty_conversation();
+    CHECK(room_conversations_creation_submit(creation.revision) == ESP_OK, "prepare immediate enqueue rejection");
+    host.fail_agent_submit = true;
+    host_run_task("talk_teardown");
+    host_run_task("talk_teardown");
+    CHECK(conversations_snapshot().creation.state == ROOM_CREATION_FAILED && host.session_creations == 7,
+        "immediate enqueue rejection is definitely unsent");
+#else
+    conversations_creation();
+#endif
+}
+
 static void conversations_stale(void)
 {
     unsigned revision = load_target_roster(target_roster);
@@ -2280,6 +2432,9 @@ static const struct { const char *name; void (*run)(void); } cases[] = {
     {"conversations-local-intent", conversations_local_intent},
     {"conversations-read", conversations_read},
     {"conversations-stale", conversations_stale},
+    {"conversations-creation", conversations_creation},
+    {"conversations-creation-uncertain", conversations_creation_uncertain},
+    {"conversations-creation-rejection", conversations_creation_rejection},
     {"conversations-timeout-talk", conversations_timeout_talk},
     {"directory-ready", directory_ready},
     {"target-selection", target_selection},

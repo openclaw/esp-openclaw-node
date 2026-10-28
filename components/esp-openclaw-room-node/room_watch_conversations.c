@@ -5,19 +5,21 @@
 #include <string.h>
 
 static lv_obj_t *root, *back_text, *heading, *list, *message, *body, *body_text;
-static lv_obj_t *previous, *next, *refresh;
+static lv_obj_t *previous, *next, *refresh, *new_chat, *creation_button, *creation_caption;
 static lv_obj_t *rows[ESP_OPENCLAW_DIRECTORY_PAGE_SIZE], *titles[ESP_OPENCLAW_DIRECTORY_PAGE_SIZE];
 static lv_obj_t *summaries[ESP_OPENCLAW_DIRECTORY_PAGE_SIZE];
 static const room_conversations_snapshot_t *current;
-static bool preview, painted_preview, reset_scroll;
+static bool preview, painted_preview, creation, painted_creation, opening_created, reset_scroll;
+static room_creation_snapshot_t painted_creation_snapshot;
 static unsigned revision, preview_revision;
 static room_agents_state_t state, preview_state;
 static char agent_id[65];
 static size_t selected;
 static struct {
-    bool valid, preview, restore_scroll;
+    bool valid, preview, creation, restore_scroll;
     char agent_id[65];
     unsigned revision, preview_revision;
+    unsigned creation_revision;
     size_t selected;
     room_agents_state_t state, preview_state;
     int32_t list_y, body_y;
@@ -62,6 +64,8 @@ void room_watch_conversations_create(lv_obj_t *parent, lv_event_cb_t handler)
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
     lv_obj_t *back = button(root, 26, 18, 116, 44, ROOM_CHAT_BACK, handler);
     back_text = label(back, LV_SYMBOL_LEFT " Agent", 10, 14, 100);
+    new_chat = button(root, 218, 18, 124, 44, ROOM_CHAT_NEW_BUTTON, handler);
+    label(new_chat, LV_SYMBOL_PLUS "  New chat", 10, 14, 108);
     heading = label(root, "Conversations", 26, 76, 316);
 #if LV_FONT_MONTSERRAT_20
     lv_obj_set_style_text_font(heading, &lv_font_montserrat_20, 0);
@@ -102,6 +106,11 @@ void room_watch_conversations_create(lv_obj_t *parent, lv_event_cb_t handler)
     lv_obj_set_style_bg_opa(body, LV_OPA_60, LV_PART_SCROLLBAR);
     body_text = label(body, "", 0, 0, 306);
     lv_label_set_long_mode(body_text, LV_LABEL_LONG_WRAP);
+    creation_button = button(root, 26, 318, 316, 44, ROOM_CHAT_CREATION_BUTTON, handler);
+    lv_obj_set_style_opa(creation_button, LV_OPA_40, LV_STATE_DISABLED);
+    creation_caption = label(creation_button, "", 12, 14, 292);
+    lv_obj_set_style_text_align(creation_caption, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_add_flag(creation_button, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(root, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -109,6 +118,7 @@ void room_watch_conversations_reset(bool show_preview)
 {
     suspended.valid = suspended.restore_scroll = false;
     preview = show_preview;
+    creation = opening_created = false;
     reset_scroll = true;
     current = NULL;
 }
@@ -117,6 +127,8 @@ void room_watch_conversations_suspend(void)
 {
     suspended.valid = agent_id[0] != '\0';
     suspended.preview = preview;
+    suspended.creation = creation;
+    suspended.creation_revision = painted_creation_snapshot.revision;
     memcpy(suspended.agent_id, agent_id, sizeof(agent_id));
     suspended.revision = revision;
     suspended.preview_revision = preview_revision;
@@ -132,8 +144,11 @@ void room_watch_conversations_resume(const room_conversations_snapshot_t *snapsh
     bool same = suspended.valid && strcmp(suspended.agent_id, snapshot->agent.id) == 0 &&
         suspended.revision == snapshot->revision && suspended.selected == snapshot->selected;
     preview = same && suspended.preview && snapshot->preview_state != ROOM_AGENTS_IDLE;
+    creation = same && suspended.creation && snapshot->creation.state != ROOM_CREATION_IDLE;
+    opening_created = false;
     suspended.restore_scroll = same && suspended.state == snapshot->state &&
-        suspended.preview_revision == snapshot->preview_revision && suspended.preview_state == snapshot->preview_state;
+        suspended.preview_revision == snapshot->preview_revision && suspended.preview_state == snapshot->preview_state &&
+        suspended.creation_revision == snapshot->creation.revision;
     reset_scroll = !suspended.restore_scroll;
     current = NULL;
 }
@@ -158,6 +173,7 @@ void room_watch_conversations_render(const room_conversations_snapshot_t *snapsh
     if (hidden) { current = NULL; return; }
     if (snapshot == NULL) {
         painted_preview = preview;
+        painted_creation = creation;
         lv_label_set_text_static(back_text, LV_SYMBOL_LEFT " Agent");
         lv_label_set_text_static(heading, "Conversations");
         lv_label_set_text_static(message, "Reader unavailable.\n\nGo back and try again.");
@@ -167,11 +183,21 @@ void room_watch_conversations_render(const room_conversations_snapshot_t *snapsh
         lv_obj_set_hidden(previous, true);
         lv_obj_set_hidden(next, true);
         lv_obj_set_hidden(refresh, true);
+        lv_obj_set_hidden(new_chat, true);
+        lv_obj_set_hidden(creation_button, true);
         return;
     }
     bool changed = current == NULL || revision != snapshot->revision || state != snapshot->state;
     bool content_changed = changed || preview_revision != snapshot->preview_revision || preview_state != snapshot->preview_state;
-    if (current != NULL && revision != snapshot->revision) preview = false;
+    bool creation_changed = memcmp(&painted_creation_snapshot, &snapshot->creation, sizeof(snapshot->creation)) != 0;
+    if (!snapshot->creation.can_open) opening_created = false;
+    if (opening_created && snapshot->preview_revision != preview_revision &&
+        snapshot->creation.state == ROOM_CREATION_CREATED && snapshot->selected < snapshot->page.count &&
+        snapshot->preview_state != ROOM_AGENTS_IDLE) {
+        preview = true;
+        creation = opening_created = false;
+        reset_scroll = true;
+    } else if (current != NULL && revision != snapshot->revision) preview = false;
     current = snapshot;
     memcpy(agent_id, snapshot->agent.id, sizeof(agent_id));
     selected = snapshot->selected;
@@ -179,17 +205,48 @@ void room_watch_conversations_render(const room_conversations_snapshot_t *snapsh
     state = snapshot->state;
     preview_revision = snapshot->preview_revision;
     preview_state = snapshot->preview_state;
-    lv_label_set_text_static(back_text, preview ? LV_SYMBOL_LEFT " Chats" : LV_SYMBOL_LEFT " Agent");
-    lv_label_set_text(heading, preview && snapshot->selected < snapshot->page.count
+    lv_label_set_text_static(back_text, preview || creation ? LV_SYMBOL_LEFT " Chats" : LV_SYMBOL_LEFT " Agent");
+    lv_label_set_text(heading, creation ? snapshot->creation.state == ROOM_CREATION_CREATING ? "Creating chat"
+        : snapshot->creation.state == ROOM_CREATION_CREATED ? "Chat created"
+        : snapshot->creation.state == ROOM_CREATION_UNKNOWN ? "Unknown"
+        : snapshot->creation.state == ROOM_CREATION_FAILED ? "Couldn't create chat" : "New chat"
+        : preview && snapshot->selected < snapshot->page.count
         ? snapshot->page.sessions[snapshot->selected].title : "Conversations");
     bool ready = state == ROOM_AGENTS_READY && snapshot->page.count > 0;
-    lv_obj_set_hidden(list, preview || !ready);
-    lv_obj_set_hidden(message, preview || ready);
-    lv_obj_set_hidden(body, !preview);
-    lv_obj_set_hidden(previous, preview);
-    lv_obj_set_hidden(next, preview);
-    lv_obj_set_hidden(refresh, preview);
-    if (preview && (content_changed || reset_scroll)) {
+    lv_obj_set_hidden(list, preview || creation || !ready);
+    lv_obj_set_hidden(message, preview || creation || ready);
+    lv_obj_set_hidden(body, !preview && !creation);
+    lv_obj_set_hidden(previous, preview || creation);
+    lv_obj_set_hidden(next, preview || creation);
+    lv_obj_set_hidden(refresh, preview || creation);
+    lv_obj_set_hidden(new_chat, preview || creation ||
+        (state != ROOM_AGENTS_READY && state != ROOM_AGENTS_EMPTY));
+    lv_obj_set_hidden(creation_button, !creation);
+    lv_obj_set_height(body, creation ? 194 : 250);
+    if (creation) {
+        const room_creation_snapshot_t *draft = &snapshot->creation;
+        const char *caption = "Create empty conversation";
+        bool enabled = draft->state == ROOM_CREATION_REVIEW && draft->can_create;
+        if (draft->state == ROOM_CREATION_CREATED) { caption = "Open conversation"; enabled = draft->can_open; }
+        else if (draft->state == ROOM_CREATION_UNKNOWN) { caption = "Chats"; enabled = true; }
+        else if (draft->state == ROOM_CREATION_FAILED) {
+            enabled = true;
+            caption = state == ROOM_AGENTS_READY || state == ROOM_AGENTS_EMPTY ? "Review again" : "Chats";
+        } else if (draft->state == ROOM_CREATION_CREATING || draft->state == ROOM_CREATION_IDLE) caption = "Please wait";
+        lv_label_set_text_static(creation_caption, caption);
+        lv_obj_set_state(creation_button, LV_STATE_DISABLED, !enabled);
+        if (creation_changed || reset_scroll || changed) {
+            char text[640];
+            const char *detail = draft->state == ROOM_CREATION_IDLE ? "Preparing a new chat..." : draft->detail;
+            snprintf(text, sizeof(text), "%s\n\n%s\n\nAgent ID\n%s%s",
+                draft->agent.name[0] ? draft->agent.name : snapshot->agent.name, detail,
+                draft->agent.id[0] ? draft->agent.id : snapshot->agent.id,
+                draft->state == ROOM_CREATION_REVIEW ? ""
+                : "\n\nA created chat remains even if you leave this screen.");
+            lv_label_set_text(body_text, text);
+            lv_obj_scroll_to_y(body, 0, LV_ANIM_OFF);
+        }
+    } else if (preview && (content_changed || reset_scroll)) {
         const char *roles[] = {"You", "Assistant", "Tool", "System", "Other"};
         char text[1100] = {0};
         size_t used = 0;
@@ -224,6 +281,8 @@ void room_watch_conversations_render(const room_conversations_snapshot_t *snapsh
     }
     reset_scroll = false;
     painted_preview = preview;
+    painted_creation = creation;
+    painted_creation_snapshot = snapshot->creation;
     if (suspended.restore_scroll) {
         lv_obj_update_layout(root);
         lv_obj_scroll_to_y(list, suspended.list_y, LV_ANIM_OFF);
@@ -234,18 +293,45 @@ void room_watch_conversations_render(const room_conversations_snapshot_t *snapsh
 
 bool room_watch_conversations_input_current(void)
 {
-    return preview == painted_preview;
+    return preview == painted_preview && creation == painted_creation;
 }
 
 room_chat_action_t room_watch_conversations_activate(int action, size_t *value)
 {
     if (!room_watch_conversations_input_current()) return ROOM_CHAT_STAY;
     if (action == ROOM_CHAT_BACK) {
+        if (creation) {
+            creation = opening_created = false;
+            reset_scroll = true;
+            return ROOM_CHAT_DISMISS_CREATION;
+        }
         if (!preview) return ROOM_CHAT_LEAVE;
         preview = false;
         return ROOM_CHAT_STAY;
     }
     if (current == NULL || preview) return ROOM_CHAT_STAY;
+    if (creation) {
+        if (action != ROOM_CHAT_CREATION_BUTTON) return ROOM_CHAT_STAY;
+        const room_creation_snapshot_t *draft = &current->creation;
+        if (draft->state == ROOM_CREATION_REVIEW && draft->can_create) return ROOM_CHAT_CREATE;
+        if (draft->state == ROOM_CREATION_CREATED && draft->can_open) {
+            opening_created = true;
+            return ROOM_CHAT_OPEN_CREATED;
+        }
+        if (draft->state == ROOM_CREATION_FAILED &&
+            (state == ROOM_AGENTS_READY || state == ROOM_AGENTS_EMPTY)) return ROOM_CHAT_NEW;
+        if (draft->state == ROOM_CREATION_UNKNOWN || draft->state == ROOM_CREATION_FAILED) {
+            creation = opening_created = false;
+            reset_scroll = true;
+            return ROOM_CHAT_DISMISS_CREATION;
+        }
+        return ROOM_CHAT_STAY;
+    }
+    if (action == ROOM_CHAT_NEW_BUTTON && (state == ROOM_AGENTS_READY || state == ROOM_AGENTS_EMPTY)) {
+        creation = reset_scroll = true;
+        opening_created = false;
+        return current->creation.state == ROOM_CREATION_CREATING ? ROOM_CHAT_STAY : ROOM_CHAT_NEW;
+    }
     if (action >= 0 && state == ROOM_AGENTS_READY && (size_t)action < current->page.count) {
         *value = (size_t)action;
         preview = true;

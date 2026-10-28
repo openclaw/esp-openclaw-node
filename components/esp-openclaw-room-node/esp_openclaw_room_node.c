@@ -517,10 +517,16 @@ static void apply_local_conversation(void)
     if (action == ROOM_CONVERSATIONS_OPEN) err = room_conversations_open(id, revision);
     else if (action == ROOM_CONVERSATIONS_LOAD) err = room_conversations_refresh(value);
     else if (action == ROOM_CONVERSATIONS_READ) err = room_conversations_preview(value, revision);
+    else if (action == ROOM_CONVERSATIONS_NEW) err = room_conversations_creation_begin(revision);
+    else if (action == ROOM_CONVERSATIONS_CREATE) err = room_conversations_creation_submit(revision);
+    else if (action == ROOM_CONVERSATIONS_DISMISS_CREATION) room_conversations_creation_dismiss(revision);
+    else if (action == ROOM_CONVERSATIONS_OPEN_CREATED) err = room_conversations_creation_open(revision);
     else if (action == ROOM_CONVERSATIONS_SUSPEND) room_agent_directory_suspend();
     else room_conversations_close();
     atomic_store(&published_conversation_generation, generation);
-    if (err != ESP_OK) { room_conversations_close(); room_ui_conversations_failed(generation); }
+    bool creation = action == ROOM_CONVERSATIONS_NEW || action == ROOM_CONVERSATIONS_CREATE ||
+        action == ROOM_CONVERSATIONS_DISMISS_CREATION || action == ROOM_CONVERSATIONS_OPEN_CREATED;
+    if (err != ESP_OK && !creation) { room_conversations_close(); room_ui_conversations_failed(generation); }
 }
 
 static void publish_conversations(void)
@@ -775,6 +781,9 @@ static void talk_teardown_task(void *arg)
         refresh_voice();
         start_node_if_pending();
         start_operator_if_pending();
+        /* Teardown may have consumed the wake for a completed directory write.
+         * Revisit deferred work after releasing the call and its media owner. */
+        wake_talk_teardown();
     }
 }
 

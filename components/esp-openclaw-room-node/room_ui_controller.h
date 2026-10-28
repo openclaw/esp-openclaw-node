@@ -86,7 +86,9 @@ void room_ui_store_talk_target(const room_ui_talk_target_t *target);
 void room_ui_agent_selection_complete(esp_err_t result);
 typedef enum { ROOM_CONVERSATIONS_OPEN, ROOM_CONVERSATIONS_LOAD,
     ROOM_CONVERSATIONS_READ, ROOM_CONVERSATIONS_CLOSE,
-    ROOM_CONVERSATIONS_SUSPEND, ROOM_CONVERSATIONS_RESUME } room_ui_conversation_action_t;
+    ROOM_CONVERSATIONS_SUSPEND, ROOM_CONVERSATIONS_RESUME,
+    ROOM_CONVERSATIONS_NEW, ROOM_CONVERSATIONS_CREATE,
+    ROOM_CONVERSATIONS_DISMISS_CREATION, ROOM_CONVERSATIONS_OPEN_CREATED } room_ui_conversation_action_t;
 void room_ui_set_conversation_handler(void (*handler)(room_ui_conversation_action_t,
     const char *agent_id, unsigned revision, size_t value, unsigned generation));
 bool room_ui_wants_conversations(void);

@@ -7,6 +7,7 @@
 #include "dial_reader.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "esp_timer.h"
 
 struct esp_openclaw_node { uint32_t id; const char *uri; };
 static struct esp_openclaw_node node = {0, "ws://gateway-a.example"};
@@ -24,7 +25,20 @@ static char last_method[32], last_params[1024];
 static esp_err_t query_result = ESP_OK;
 static esp_openclaw_node_gateway_request_cb_t response;
 static void *response_context;
+static esp_openclaw_node_gateway_request_cb_t devices_response;
+static void *devices_context;
+static struct fake_timer { void (*callback)(void *); void *arg; int64_t deadline; } timer;
 int64_t esp_timer_get_time(void) { return now; }
+esp_err_t esp_timer_create(const esp_timer_create_args_t *args, esp_timer_handle_t *out) {
+    assert(timer.callback == NULL); timer.callback = args->callback; timer.arg = args->arg;
+    *out = &timer; return ESP_OK;
+}
+esp_err_t esp_timer_start_once(esp_timer_handle_t handle, uint64_t delay) {
+    assert(handle == &timer); timer.deadline = now + delay; return ESP_OK;
+}
+esp_err_t esp_timer_stop(esp_timer_handle_t handle) {
+    assert(handle == &timer); timer.deadline = 0; return ESP_OK;
+}
 esp_err_t esp_openclaw_node_gateway_request_on_connection(esp_openclaw_node_handle_t handle,
     uint32_t connection, const char *method, const char *params,
     esp_openclaw_node_gateway_request_cb_t callback, void *context) {
@@ -34,7 +48,12 @@ esp_err_t esp_openclaw_node_gateway_request_on_connection(esp_openclaw_node_hand
     strcpy(last_params, params);
     assert(strcmp(method, "agents.list") != 0 || strcmp(params, "{}") == 0);
     ++queries;
-    if (query_result == ESP_OK) { assert(response == NULL); response = callback; response_context = context; }
+    if (query_result == ESP_OK) {
+        if (strcmp(method, "node.list") == 0) {
+            assert(devices_response == NULL && strcmp(params, "{}") == 0);
+            devices_response = callback; devices_context = context;
+        } else { assert(response == NULL); response = callback; response_context = context; }
+    }
     return query_result;
 }
 
@@ -105,6 +124,13 @@ static void respond(const char *json) {
     response(&client, &result, response_context);
     in_callback = false; locked = 0; response = NULL; response_context = NULL;
 }
+static void respond_devices(const char *json) {
+    assert(devices_response != NULL);
+    esp_openclaw_node_gateway_result_t result = {.ok = json != NULL, .payload_json = json};
+    locked = 1; in_callback = true;
+    devices_response(&client, &result, devices_context);
+    in_callback = false; locked = 0; devices_response = NULL; devices_context = NULL;
+}
 static void node_connected(uint32_t id) {
     node.id = id; locked = 1; in_callback = true;
     dial_reader_node_event(ESP_OPENCLAW_NODE_EVENT_CONNECTED);
@@ -125,10 +151,18 @@ static void disconnected(esp_openclaw_node_disconnected_reason_t reason) {
 
 int main(void) {
     status("unavailable", false);
+    esp_openclaw_devices_snapshot_t devices;
+    dial_reader_devices_copy(&devices);
+    assert(devices.state == ESP_OPENCLAW_DEVICES_ERROR);
+    assert(dial_reader_devices_refresh() == ESP_ERR_INVALID_STATE);
     assert(dial_reader_start(NULL) == ESP_ERR_INVALID_ARG);
     assert(dial_reader_start(&node) == ESP_OK);
     assert(dial_reader_start(&node) == ESP_ERR_INVALID_STATE);
     step(); status("offline", false); assert(creates == 0);
+    assert(dial_reader_devices_refresh() == ESP_OK); step();
+    dial_reader_devices_copy(&devices);
+    assert(devices.state == ESP_OPENCLAW_DEVICES_OFFLINE && queries == 0);
+    dial_reader_devices_close();
 
     node_connected(11); create_result = ESP_ERR_NO_MEM;
     step(); status("error", false); assert(connects == 0);
@@ -315,6 +349,49 @@ int main(void) {
     assert(view->state == DIAL_AGENTS_IDLE && view->page.count == 0);
     respond("{\"agents\":[{\"id\":\"beta\"}]}"); step();
     free(view);
+    before = scopes;
+    assert(dial_reader_devices_refresh() == ESP_OK); step();
+    assert(strcmp(last_method, "node.list") == 0 && scopes == before);
+    char nodes[] = "{\"nodes\":[{\"nodeId\":\"studio-dial\",\"displayName\":\"Studio Dial\",\"connected\":true}]}";
+    respond_devices(nodes); memset(nodes, 'x', sizeof(nodes) - 1); step();
+    dial_reader_devices_copy(&devices);
+    assert(devices.state == ESP_OPENCLAW_DEVICES_READY && devices.count == 1);
+    assert(strcmp(devices.devices[0].name, "Studio Dial") == 0);
+    assert(!devices.devices[0].paired_known);
+
+    /* Agent browsing can finish while a canceled inventory callback drains. */
+    assert(dial_reader_devices_refresh() == ESP_OK); step();
+    dial_reader_devices_close();
+    assert(dial_reader_agents_refresh(0) == ESP_OK); step();
+    respond("{\"agents\":[{\"id\":\"beta\"}]}"); step();
+    respond_devices("{\"nodes\":[{\"nodeId\":\"stale\"}]}"); step();
+    dial_reader_devices_copy(&devices);
+    assert(devices.state == ESP_OPENCLAW_DEVICES_IDLE && devices.count == 0);
+
+    assert(dial_reader_devices_refresh() == ESP_OK); step();
+    dial_reader_devices_close();
+    assert(dial_reader_devices_refresh() == ESP_OK);
+    now += 15000000; timer.callback(timer.arg);
+    before = disconnects; step();
+    dial_reader_devices_copy(&devices);
+    assert(devices.state == ESP_OPENCLAW_DEVICES_TIMEOUT && disconnects == before);
+    before = queries;
+    respond_devices("{\"nodes\":[{\"nodeId\":\"late\"}]}"); step();
+    assert(queries == before);
+    dial_reader_devices_copy(&devices); assert(devices.count == 0);
+
+    assert(dial_reader_devices_refresh() == ESP_OK); step();
+    node.id = 0; dial_reader_node_event(ESP_OPENCLAW_NODE_EVENT_DISCONNECTED);
+    dial_reader_devices_copy(&devices);
+    assert(devices.state == ESP_OPENCLAW_DEVICES_OFFLINE && devices.count == 0);
+    step(); respond_devices("{\"nodes\":[{\"nodeId\":\"old-gateway\"}]}");
+    disconnected(ESP_OPENCLAW_NODE_DISCONNECTED_REASON_REQUESTED); step();
+    node_connected(21); step(); connected(82); step();
+    respond("{\"agents\":[{\"id\":\"beta\"}]}"); step();
+    respond_devices("{\"nodes\":[]}"); step();
+    dial_reader_devices_copy(&devices);
+    assert(devices.state == ESP_OPENCLAW_DEVICES_EMPTY && devices.count == 0);
+    dial_reader_devices_close();
     puts("Dial reader: role, handoff, loss, auth, origin and stale-connection cases passed");
     return 0;
 }

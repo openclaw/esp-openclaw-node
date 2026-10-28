@@ -262,6 +262,19 @@ python3 tests/run_input_host_tests.py --lvgl-dir managed_components/lvgl__lvgl
 Physical qualification additionally checks boot/pair/reconnect,
 touch and rotary operation, screen output, and audible buzzer playback.
 
+### Device inventory integration
+
+The reader exposes `dial_reader_devices_refresh`, `dial_reader_devices_copy`,
+and `dial_reader_devices_close` for device views. They use the shared bounded
+`node.list` owner through the existing `operator.read` connection. No extra
+scope, client, device command, or control-session assignment is requested.
+
+Inventory copies clear immediately when the node or reader connection is no
+longer current. Closing a view invalidates late replies. A 15-second inventory
+timeout leaves the reader connection usable and requires an explicit refresh;
+it does not disconnect a configured control. Agent and conversation requests
+can still complete while an old inventory callback drains.
+
 ### Read-only conversations over USB
 
 Refresh `agents`, then use `conversations open <agent-id>` to request that

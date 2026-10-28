@@ -48,7 +48,16 @@ void xSemaphoreTake(SemaphoreHandle_t, uint32_t);
 void xSemaphoreGive(SemaphoreHandle_t);
 void vSemaphoreDelete(SemaphoreHandle_t);
 """)
-        (work / "esp_timer.h").write_text("#include <stdint.h>\nint64_t esp_timer_get_time(void);\n")
+        (work / "esp_timer.h").write_text("""#pragma once
+#include <stdint.h>
+#include "esp_err.h"
+typedef struct fake_timer *esp_timer_handle_t;
+typedef struct { void (*callback)(void *); void *arg; const char *name; } esp_timer_create_args_t;
+int64_t esp_timer_get_time(void);
+esp_err_t esp_timer_create(const esp_timer_create_args_t *, esp_timer_handle_t *);
+esp_err_t esp_timer_start_once(esp_timer_handle_t, uint64_t);
+esp_err_t esp_timer_stop(esp_timer_handle_t);
+""")
         directory = root / "components/esp-openclaw-directory"
         binary = work / "reader-test"
         cjson_object = work / "cjson.o"
@@ -63,6 +72,7 @@ void vSemaphoreDelete(SemaphoreHandle_t);
             "-I", str(directory / "include"),
             "-I", str(args.cjson_dir), str(tests / "test_dial_reader.c"),
             str(tests.parent / "main/dial_reader.c"), str(directory / "esp_openclaw_directory.c"),
+            str(directory / "esp_openclaw_devices.c"),
             str(cjson_object), "-lm", "-o", str(binary),
         ], check=True)
         subprocess.run([str(binary)], check=True)

@@ -47,6 +47,7 @@ static struct {
     reader_phase_t phase;
     reader_status_t status;
     bool retry;
+    bool devices_initialized, devices_available;
     bool directory_enabled, directory_pending, force_disconnect;
     size_t directory_offset;
     dial_agents_state_t directory_state;
@@ -57,6 +58,11 @@ static struct {
     unsigned conversations_revision, preview_revision;
     bool sessions_pending, preview_pending;
 } reader;
+
+static void wake_reader(void)
+{
+    xTaskNotifyGive(reader.task);
+}
 
 static bool current_node(void)
 {
@@ -349,6 +355,12 @@ static esp_err_t create_client(void)
 static void reader_task(void *context)
 {
     (void)context;
+    xSemaphoreTake(reader.lock, portMAX_DELAY);
+    if (!reader.devices_initialized) {
+        reader.devices_available = esp_openclaw_devices_init(reader.lock, wake_reader) == ESP_OK;
+        reader.devices_initialized = true;
+    }
+    xSemaphoreGive(reader.lock);
     for (;;) {
         /* Also retry a rejected queue submission: it produces no SDK event.
          * This bounds reconnects without polling NVS or retrying auth failures. */
@@ -379,6 +391,9 @@ static void reader_task(void *context)
             reader.status = STARTING;
             reader.retry = false;
         }
+        if (reader.devices_available)
+            esp_openclaw_devices_set_owner_locked(reader.client, reader.generation,
+                reader.reader_id, !stop && !start && current_reader());
         xSemaphoreGive(reader.lock);
 
         if (stop) {
@@ -416,6 +431,11 @@ static void reader_task(void *context)
             }
         }
         request_next();
+        xSemaphoreTake(reader.lock, portMAX_DELAY);
+        bool defer_devices = reader.inflight != NULL;
+        bool devices_available = reader.devices_available;
+        xSemaphoreGive(reader.lock);
+        if (devices_available) esp_openclaw_devices_poll(defer_devices);
     }
 }
 
@@ -462,6 +482,41 @@ cJSON *dial_reader_status(void)
         return NULL;
     }
     return status;
+}
+
+esp_err_t dial_reader_devices_refresh(void)
+{
+    if (reader.lock == NULL) return ESP_ERR_INVALID_STATE;
+    xSemaphoreTake(reader.lock, portMAX_DELAY);
+    bool available = reader.devices_available;
+    xSemaphoreGive(reader.lock);
+    return available ? esp_openclaw_devices_refresh() : ESP_ERR_INVALID_STATE;
+}
+
+void dial_reader_devices_close(void)
+{
+    if (reader.lock == NULL) return;
+    xSemaphoreTake(reader.lock, portMAX_DELAY);
+    bool available = reader.devices_available;
+    xSemaphoreGive(reader.lock);
+    if (available) esp_openclaw_devices_cancel();
+}
+
+void dial_reader_devices_copy(esp_openclaw_devices_snapshot_t *snapshot)
+{
+    *snapshot = (esp_openclaw_devices_snapshot_t){.state = ESP_OPENCLAW_DEVICES_ERROR};
+    if (reader.lock == NULL) return;
+    xSemaphoreTake(reader.lock, portMAX_DELAY);
+    bool available = reader.devices_available;
+    unsigned generation = reader.generation;
+    xSemaphoreGive(reader.lock);
+    if (!available) return;
+    esp_openclaw_devices_copy(snapshot);
+    xSemaphoreTake(reader.lock, portMAX_DELAY);
+    /* SDK events revoke visible inventory before the worker handles reconnect. */
+    if (!current_reader() || generation != reader.generation)
+        *snapshot = (esp_openclaw_devices_snapshot_t){.state = ESP_OPENCLAW_DEVICES_OFFLINE};
+    xSemaphoreGive(reader.lock);
 }
 
 esp_err_t dial_reader_agents_refresh(size_t offset)

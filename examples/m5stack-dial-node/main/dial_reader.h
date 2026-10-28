@@ -2,12 +2,18 @@
 
 #include "cJSON.h"
 #include "esp_openclaw_node.h"
+#include "esp_openclaw_devices.h"
 #include "dial_directory.h"
 
 /* The node remains usable when optional operator access is unavailable. */
 esp_err_t dial_reader_start(esp_openclaw_node_handle_t node);
 void dial_reader_node_event(esp_openclaw_node_event_t event);
 cJSON *dial_reader_status(void);
+/* Read-only inventory shares the reader connection, never the assigned control
+ * session. Copy clears stale devices immediately when either connection is lost. */
+esp_err_t dial_reader_devices_refresh(void);
+void dial_reader_devices_close(void);
+void dial_reader_devices_copy(esp_openclaw_devices_snapshot_t *snapshot);
 esp_err_t dial_reader_agents_refresh(size_t offset);
 void dial_reader_agents_copy(dial_agents_snapshot_t *snapshot);
 

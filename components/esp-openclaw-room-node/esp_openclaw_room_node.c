@@ -83,6 +83,7 @@ static bool talk_connecting_pending;
 static bool talk_speech_failed_pending;
 static bool operator_ui_pending;
 static bool voice_actions_pending;
+static _Atomic uint64_t local_messaging_request = UINT64_MAX;
 static _Atomic size_t local_agents_request = SIZE_MAX;
 static _Atomic uint64_t local_devices_request = UINT64_MAX;
 static unsigned published_device_generation;
@@ -289,6 +290,7 @@ static void start_operator_if_pending(void);
 static void start_node_if_pending(void);
 static void node_reconnect_timer_fired(void *arg);
 static void wake_talk_teardown(void);
+static bool messaging_idle_locked(void);
 
 /* The timer only hands work to the supervisor. A transient startup stack
  * competes with the SDK worker and WebSocket stacks at their allocation peak. */
@@ -594,6 +596,24 @@ static void request_local_talk(bool start, uint64_t recipient_revision)
     wake_talk_teardown();
 }
 
+static void request_local_messaging(unsigned revision)
+{
+    atomic_store(&local_messaging_request, revision);
+    wake_talk_teardown();
+}
+
+static void refresh_messaging(void)
+{
+    uint64_t revision = atomic_exchange(&local_messaging_request, UINT64_MAX);
+    room_messaging_snapshot_t snapshot;
+    xSemaphoreTake(state_lock, portMAX_DELAY);
+    bool idle = messaging_idle_locked();
+    if (revision != UINT64_MAX) (void)room_messaging_request_locked((unsigned)revision, idle);
+    room_messaging_copy_locked(&snapshot, idle);
+    xSemaphoreGive(state_lock);
+    room_ui_store_messaging(&snapshot);
+}
+
 static void request_local_voice(room_voice_action_t action, uint32_t generation, uint64_t revision, uint64_t owner)
 {
     room_voice_draft_request(action, generation, revision, owner);
@@ -720,7 +740,9 @@ static void talk_teardown_task(void *arg)
         if (speech_failed) room_ui_set(ROOM_UI_ERROR, "Speech request failed; try again");
         if (!close) {
             start_node_if_pending();
+            refresh_messaging();
             room_messaging_poll();
+            refresh_messaging();
             start_operator_if_pending();
             xSemaphoreTake(state_lock, portMAX_DELAY);
             bool defer_directory = talk_start_in_flight || talk_dialing || talk_closing;
@@ -1915,7 +1937,7 @@ static int brightness_console_command(int argc, char **argv)
 static int menu_console_command(int argc, char **argv)
 {
     if (argc > 2) {
-        printf("usage: menu [menu|agents|conversations|preview|devices|device|settings|display|connection|canvas|home]\n");
+        printf("usage: menu [menu|agents|conversations|preview|devices|device|settings|display|messaging|connection|canvas|home]\n");
         return 1;
     }
     const char *page = argc == 2 ? argv[1] : "menu";
@@ -2106,7 +2128,7 @@ static esp_err_t register_room_console_commands(void)
         {
             .command = "menu",
             .help = "Open a local watch menu page without starting Talk",
-            .hint = "[menu|agents|conversations|preview|devices|device|settings|display|connection|canvas|home]",
+            .hint = "[menu|agents|conversations|preview|devices|device|settings|display|messaging|connection|canvas|home]",
             .func = menu_console_command,
         },
         {
@@ -2329,6 +2351,7 @@ esp_err_t esp_openclaw_room_node_start(const esp_openclaw_room_node_config_t *co
 
     room_ui_set_talk_action_handler(request_local_talk);
     room_ui_set_voice_action_handler(request_local_voice);
+    room_ui_set_messaging_handler(request_local_messaging);
     room_ui_set_agents_action_handler(request_local_agents);
     room_ui_set_devices_action_handler(request_local_devices);
     room_ui_set_conversation_handler(request_local_conversation);

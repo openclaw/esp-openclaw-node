@@ -4,7 +4,8 @@
 #include "room_watch_navigation.h"
 
 static lv_obj_t *root, *heading, *back;
-static lv_obj_t *rows[3], *level, *detail, *adjust[2];
+static lv_obj_t *rows[4], *level, *detail, *adjust[2];
+static lv_obj_t *messaging_status, *messaging_detail, *messaging_action;
 
 static lv_obj_t *label(lv_obj_t *parent, const char *value, int y, int width)
 {
@@ -35,7 +36,7 @@ static lv_obj_t *button(const char *text, int x, int y, int width, room_watch_pa
     return row;
 }
 
-void room_watch_settings_create(lv_obj_t *parent, lv_event_cb_t handler)
+void room_watch_settings_create(lv_obj_t *parent, lv_event_cb_t handler, lv_event_cb_t messaging_handler)
 {
     root = lv_obj_create(parent);
     lv_obj_remove_style_all(root);
@@ -52,6 +53,17 @@ void room_watch_settings_create(lv_obj_t *parent, lv_event_cb_t handler)
     rows[0] = button(LV_SYMBOL_IMAGE "  Display", 26, 120, 316, ROOM_WATCH_DISPLAY, handler);
     rows[1] = button(LV_SYMBOL_WIFI "  Connection", 26, 184, 316, ROOM_WATCH_CONNECTION, handler);
     rows[2] = button(LV_SYMBOL_SETTINGS "  Device status", 26, 248, 316, ROOM_WATCH_DEVICE_STATUS, handler);
+    rows[3] = button(LV_SYMBOL_ENVELOPE "  Messaging", 26, 312, 316, ROOM_WATCH_MESSAGING, handler);
+    messaging_status = label(root, "", 126, 316);
+    lv_obj_set_x(messaging_status, 26);
+#if LV_FONT_MONTSERRAT_20
+    lv_obj_set_style_text_font(messaging_status, &lv_font_montserrat_20, 0);
+#endif
+    messaging_detail = label(root, "", 170, 316);
+    lv_obj_set_x(messaging_detail, 26);
+    lv_label_set_long_mode(messaging_detail, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_color(messaging_detail, lv_color_hex(0xb8b0bd), 0);
+    messaging_action = button("Request access", 26, 292, 316, ROOM_WATCH_MESSAGING, messaging_handler);
     level = label(root, "", 136, 316);
     lv_obj_set_x(level, 26);
     lv_obj_set_style_text_align(level, LV_TEXT_ALIGN_CENTER, 0);
@@ -67,17 +79,54 @@ void room_watch_settings_create(lv_obj_t *parent, lv_event_cb_t handler)
     lv_obj_set_hidden(root, true);
 }
 
-void room_watch_settings_render(room_watch_page_t page, room_watch_page_t parent, int brightness, bool failed, bool camera_minimum, bool hidden)
+void room_watch_settings_render(room_watch_page_t page, room_watch_page_t parent, int brightness, bool failed, bool camera_minimum, const room_messaging_snapshot_t *messaging, bool hidden)
 {
     if (root == NULL) return;
     lv_obj_set_hidden(root, hidden);
     if (hidden) return;
     bool display = page == ROOM_WATCH_DISPLAY;
-    lv_label_set_text_static(heading, display ? "Display" : page == ROOM_WATCH_LOCAL_DEVICE ? "This Watch" : "Settings");
+    bool permissions = page == ROOM_WATCH_MESSAGING;
+    lv_label_set_text_static(heading, display ? "Display" : permissions ? "Messaging" : page == ROOM_WATCH_LOCAL_DEVICE ? "This Watch" : "Settings");
     lv_label_set_text_static(lv_obj_get_child(back, 0), parent == ROOM_WATCH_LOCAL_DEVICE ? LV_SYMBOL_LEFT " This Watch" :
         parent == ROOM_WATCH_SETTINGS ? LV_SYMBOL_LEFT " Settings" :
         parent == ROOM_WATCH_DEVICES ? LV_SYMBOL_LEFT " Devices" : LV_SYMBOL_LEFT " Menu");
-    for (unsigned i = 0; i < 3; ++i) lv_obj_set_hidden(rows[i], display);
+    for (unsigned i = 0; i < 4; ++i) lv_obj_set_hidden(rows[i], display || permissions);
+    lv_obj_set_hidden(messaging_status, !permissions);
+    lv_obj_set_hidden(messaging_detail, !permissions);
+    lv_obj_set_hidden(messaging_action, !permissions);
+    if (permissions && messaging != NULL) {
+        const char *status = "Messaging off";
+        const char *description = "Approve access on your Gateway to send messages and create conversations.";
+        const char *action = "Request access";
+        switch (messaging->state) {
+        case ROOM_MESSAGING_REQUESTING:
+            status = "Requesting access"; description = "Sending your request to the Gateway."; action = "Requesting..."; break;
+        case ROOM_MESSAGING_WAITING:
+            status = "Awaiting approval"; description = "Approve this Watch on your Gateway. You can leave this screen while you wait."; action = "Waiting..."; break;
+        case ROOM_MESSAGING_CONNECTING:
+            status = "Connecting"; description = "Access approved. Reconnecting before messaging is enabled."; action = "Connecting..."; break;
+        case ROOM_MESSAGING_READY:
+            status = messaging->connected ? "Messaging enabled" : "Gateway offline";
+            description = messaging->connected ? "You can send reviewed voice drafts and create conversations." : "Messaging is approved. Reconnect to your Gateway to use it.";
+            lv_obj_set_hidden(messaging_action, true); break;
+        case ROOM_MESSAGING_REJECTED:
+            status = "Request declined"; description = "The Gateway declined access. You can request it again."; action = "Try again"; break;
+        case ROOM_MESSAGING_EXPIRED:
+            status = "Request expired"; description = "Approval did not finish in time. You can try again when ready."; action = "Try again"; break;
+        case ROOM_MESSAGING_ERROR:
+            status = "Couldn't enable messaging"; description = "Check your Gateway connection, then try again."; action = "Try again"; break;
+        case ROOM_MESSAGING_REQUIRED: break;
+        }
+        if (messaging->state == ROOM_MESSAGING_REQUIRED && !messaging->can_request)
+            description = messaging->connected ? "Finish Talk, drafts, or pending chats before requesting access." : "Connect to your Gateway before requesting access.";
+        lv_label_set_text_static(messaging_status, status);
+        lv_label_set_text_static(messaging_detail, description);
+        lv_label_set_text_static(lv_obj_get_child(messaging_action, 0), action);
+        lv_obj_set_clickable(messaging_action, messaging->can_request);
+        if (messaging->can_request) lv_obj_clear_state(messaging_action, LV_STATE_DISABLED);
+        else lv_obj_add_state(messaging_action, LV_STATE_DISABLED);
+        lv_obj_set_style_bg_color(messaging_action, lv_color_hex(messaging->can_request ? 0xa83648 : 0x302535), 0);
+    }
     lv_obj_set_hidden(level, !display);
     lv_obj_set_hidden(detail, !display);
     for (unsigned i = 0; i < 2; ++i) lv_obj_set_hidden(adjust[i], !display);

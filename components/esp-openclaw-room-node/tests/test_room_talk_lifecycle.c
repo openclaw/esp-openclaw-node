@@ -190,13 +190,37 @@ static void messaging_lifecycle(void)
 }
 
 #if !CONFIG_OPENCLAW_ROOM_VOICE_ACTIONS
+static void messaging_ui_intent(void)
+{
+    room_messaging_snapshot_t snapshot = messaging_snapshot();
+    request_local_messaging(snapshot.revision + 1);
+    host_run_task("talk_teardown");
+    CHECK(host.scope_requests == 0 && host.messaging.can_request, "supervisor rejects stale painted permission revision");
+    request_local_messaging(snapshot.revision);
+    CHECK(host.scope_requests == 0, "display callback only queues permission intent");
+    host_run_task("talk_teardown");
+    CHECK(host.scope_requests == 1 && host.messaging.state == ROOM_MESSAGING_REQUESTING &&
+        !host.messaging.can_request, "supervisor requests access and publishes disabled request state");
+    request_local_messaging(snapshot.revision);
+    host_run_task("talk_teardown");
+    CHECK(host.scope_requests == 1, "duplicate display intent cannot overlap a permission request");
+    host_reply_scope(true, "{\"requestId\":\"scope-a\"}");
+    host_run_task("talk_teardown");
+    CHECK(host.scope_requests == 2 && host.messaging.state == ROOM_MESSAGING_WAITING,
+        "approval wait is published without another display action");
+    host_reply_scope(true, "{\"requestId\":\"scope-a\",\"status\":\"rejected\"}");
+    host_run_task("talk_teardown");
+    CHECK(host.messaging.state == ROOM_MESSAGING_REJECTED && host.messaging.can_request,
+        "terminal approval result restores the visible retry action");
+}
+
 static void messaging_delayed_approval(void)
 {
     wait_for_messaging_approval();
     host.now_us += 316000000;
     host.expire_queue_wait = true;
     host_run_task("talk_teardown");
-    CHECK(messaging_snapshot().state == ROOM_MESSAGING_EXPIRED && !messaging_snapshot().can_request,
+    CHECK(messaging_snapshot().state == ROOM_MESSAGING_EXPIRED && !messaging_snapshot().can_request && messaging_snapshot().busy,
         "timeout is visible but keeps the outstanding callback owned");
     host_reply_scope(true, approved_scope);
     host_emit_node(operator_client, ESP_OPENCLAW_NODE_EVENT_DISCONNECTED);
@@ -2639,6 +2663,7 @@ static const struct { const char *name; void (*run)(void); } cases[] = {
     {"messaging-runtime-writes", messaging_runtime_writes},
     {"messaging-lifecycle", messaging_lifecycle},
 #if !CONFIG_OPENCLAW_ROOM_VOICE_ACTIONS
+    {"messaging-ui-intent", messaging_ui_intent},
     {"messaging-delayed-approval", messaging_delayed_approval},
     {"messaging-errors", messaging_errors},
     {"messaging-retry", messaging_retry},

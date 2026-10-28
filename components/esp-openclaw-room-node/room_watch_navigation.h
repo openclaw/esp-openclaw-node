@@ -10,6 +10,7 @@ typedef enum {
     ROOM_WATCH_CONVERSATIONS, ROOM_WATCH_DEVICES, ROOM_WATCH_LOCAL_DEVICE, ROOM_WATCH_BACK,
 } room_watch_page_t;
 
+void room_watch_navigation_set_awake(bool awake);
 void room_watch_navigation_create(lv_obj_t *parent, lv_event_cb_t handler);
 void room_watch_navigation_render(room_watch_page_t page, const room_ui_facts_t *facts,
                                   bool hidden, bool resume_failed, room_watch_page_t parent);

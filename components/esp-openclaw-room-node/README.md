@@ -312,3 +312,12 @@ action reloads the inventory. Back returns to the same page. A reconnect or
 replacement result cancels a held tap, and leaving Devices releases its
 inventory. Browsing never changes the Talk recipient or sends a device
 command. Remote controls are not part of this read-only view.
+
+On the Watch, **Settings → Connection** (also reachable through **This Watch**)
+shows Gateway and Talk state above a scrollable Wi-Fi readout. The readout uses
+the same bounded formatter as the Dial: saved network, current IP, measured
+signal/channel, unknown observations, disconnect code, and USB setup guidance.
+Phone pairing is explicitly marked unavailable. These are read-only details.
+The network sample refreshes once per second while this page is visible and the
+display is awake. Refreshing preserves the reading position; reopening starts
+at the top. Hidden pages and accepted display sleep stop network polling.

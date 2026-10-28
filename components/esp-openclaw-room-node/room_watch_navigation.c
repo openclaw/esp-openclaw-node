@@ -1,8 +1,39 @@
 #include "room_watch_navigation.h"
+#include "openclaw_connection_details.h"
+
+#include <string.h>
 
 #include <stdint.h>
 
 static lv_obj_t *root, *heading, *back_label, *rows[5], *values[5], *empty;
+static lv_obj_t *connection_body, *connection_text;
+static lv_timer_t *connection_timer;
+static bool display_awake, connection_active;
+
+static void refresh_connection(lv_timer_t *timer)
+{
+    (void)timer;
+    if (!display_awake || !connection_active || !lv_obj_is_visible(root)) return;
+    esp_openclaw_node_wifi_status_t wifi;
+    esp_openclaw_node_wifi_get_status(&wifi);
+    char details[384];
+    openclaw_wifi_details_format(details, sizeof(details), &wifi);
+    if (strcmp(lv_label_get_text(connection_text), details) != 0)
+        lv_label_set_text(connection_text, details);
+}
+
+void room_watch_navigation_set_awake(bool awake)
+{
+    if (display_awake == awake) return;
+    display_awake = awake;
+    if (connection_timer == NULL) return;
+    if (awake) {
+        lv_timer_resume(connection_timer);
+        lv_timer_reset(connection_timer);
+        refresh_connection(NULL);
+    } else lv_timer_pause(connection_timer);
+}
+
 static const char *menu[] = {LV_SYMBOL_LIST "  Agents", LV_SYMBOL_ENVELOPE "  Conversations",
     LV_SYMBOL_IMAGE "  Canvas", LV_SYMBOL_CHARGE "  Devices", LV_SYMBOL_SETTINGS "  Settings"};
 
@@ -54,6 +85,21 @@ void room_watch_navigation_create(lv_obj_t *parent, lv_event_cb_t handler)
         values[i] = label(rows[i], menu[i], 18, 14, 280);
         lv_obj_add_event_cb(rows[i], handler, LV_EVENT_ALL, (void *)(intptr_t)pages[i]);
     }
+    connection_body = lv_obj_create(root);
+    lv_obj_remove_style_all(connection_body);
+    lv_obj_set_pos(connection_body, 26, 164);
+    lv_obj_set_size(connection_body, 316, 194);
+    lv_obj_set_scroll_dir(connection_body, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(connection_body, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_set_style_width(connection_body, 2, LV_PART_SCROLLBAR);
+    lv_obj_set_style_bg_color(connection_body, lv_color_hex(0xb8b0bd), LV_PART_SCROLLBAR);
+    lv_obj_set_style_bg_opa(connection_body, LV_OPA_60, LV_PART_SCROLLBAR);
+    connection_text = label(connection_body, "Reading network...", 0, 0, 306);
+    lv_label_set_long_mode(connection_text, LV_LABEL_LONG_WRAP);
+    lv_obj_set_height(connection_text, LV_SIZE_CONTENT);
+    connection_timer = lv_timer_create(refresh_connection, 1000, NULL);
+    if (!display_awake) lv_timer_pause(connection_timer);
+    lv_obj_set_hidden(connection_body, true);
     empty = label(root, "No card yet\n\nAsk your assistant to show\na card on this watch.", 26, 156, 316);
     lv_label_set_long_mode(empty, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(empty, LV_TEXT_ALIGN_CENTER, 0);
@@ -64,8 +110,15 @@ void room_watch_navigation_render(room_watch_page_t page, const room_ui_facts_t 
                                   bool hidden, bool resume_failed, room_watch_page_t parent)
 {
     if (root == NULL) return;
+    bool entering_connection = !connection_active && !hidden && page == ROOM_WATCH_CONNECTION;
+    connection_active = !hidden && page == ROOM_WATCH_CONNECTION;
     lv_obj_set_hidden(root, hidden);
     if (hidden) return;
+    lv_obj_set_hidden(connection_body, !connection_active);
+    if (entering_connection) {
+        refresh_connection(NULL);
+        lv_obj_scroll_to_y(connection_body, 0, LV_ANIM_OFF);
+    }
     lv_label_set_text_static(back_label, parent == ROOM_WATCH_LOCAL_DEVICE ? LV_SYMBOL_LEFT " This Watch" :
         parent == ROOM_WATCH_SETTINGS ? LV_SYMBOL_LEFT " Settings" :
         parent == ROOM_WATCH_MENU ? LV_SYMBOL_LEFT " Menu" : LV_SYMBOL_LEFT " Home");
@@ -77,22 +130,21 @@ void room_watch_navigation_render(room_watch_page_t page, const room_ui_facts_t 
         : "Opening your last conversation..."
         : "No card yet\n\nAsk your assistant to show\na card on this watch.");
     lv_obj_set_hidden(empty, !canvas && !resuming);
-    const char *wifi[] = {"Starting", "Not configured", "Connecting", "Connected", "Offline", "Unavailable"};
     const char *gateway[] = {"Starting", "Connecting", "Connected", "Offline", "Pairing needed"};
     const char *talk[] = {"Starting", "Unavailable", "Waiting for access", "Pairing needed", "Ready", "Connecting", "Active", "Stopping"};
     const char *states[] = {
-        (unsigned)facts->wifi < sizeof(wifi) / sizeof(*wifi) ? wifi[facts->wifi] : "Unknown",
         (unsigned)facts->gateway < sizeof(gateway) / sizeof(*gateway) ? gateway[facts->gateway] : "Unknown",
         (unsigned)facts->talk < sizeof(talk) / sizeof(*talk) ? talk[facts->talk] : "Unknown",
     };
-    const char *names[] = {"Wi-Fi", "Gateway", "Talk"};
+    const char *names[] = {"Gateway", "Talk"};
     for (unsigned i = 0; i < 5; ++i) {
-        lv_obj_set_hidden(rows[i], canvas || resuming || (connection && i >= 3));
+        lv_obj_set_hidden(rows[i], canvas || resuming || (connection && i >= 2));
         lv_obj_set_clickable(rows[i], !connection);
-        lv_obj_set_y(rows[i], 116 + (int)i * (connection ? 60 : 48));
-        lv_obj_set_height(rows[i], connection ? 52 : 44);
-        lv_obj_set_y(values[i], connection ? 18 : 14);
-        if (connection && i < 3) lv_label_set_text_fmt(values[i], "%s: %s", names[i], states[i]);
+        lv_obj_set_y(rows[i], (connection ? 112 : 116) + (int)i * (connection ? 24 : 48));
+        lv_obj_set_height(rows[i], connection ? 22 : 44);
+        lv_obj_set_style_bg_opa(rows[i], connection ? LV_OPA_TRANSP : LV_OPA_COVER, 0);
+        lv_obj_set_pos(values[i], connection ? 0 : 18, connection ? 0 : 14);
+        if (connection && i < 2) lv_label_set_text_fmt(values[i], "%s: %s", names[i], states[i]);
         else lv_label_set_text_static(values[i], menu[i]);
     }
 }

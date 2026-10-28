@@ -44,6 +44,7 @@
 - Honor the Watch's reading-size preference in agent names, IDs, and directory status messages while preserving compact or comfortable row spacing.
 - Keep long Watch agent identities readable in a scrollable detail view, with reading-size-aware text and fixed actions above the live-call footer.
 - Honor the Watch's reading size in conversation titles and summaries, keeping long text within separate single-line rows in both list densities.
+- Follow reading size in Watch and Dial conversation-reader headings, revealing long titles while preserving menu styles and reading space.
 
 ## 1.3.1 - 2026-10-23
 

@@ -2654,6 +2654,20 @@ static void check_watch_voice(const char *path)
     puts("watch voice: wake, recording, review, guarded Send, delivery states and conversation routing passed");
 }
 
+static uint32_t watch_label_pixels(lv_obj_t *label)
+{
+    lv_refr_now(display);
+    lv_area_t area;
+    lv_obj_get_coords(label, &area);
+    assert(area.x1 >= 0 && area.y1 >= 0 && area.x2 < width && area.y2 < height);
+    uint32_t hash = 2166136261u;
+    for (int y = area.y1; y <= area.y2; ++y)
+        for (int x = area.x1; x <= area.x2; ++x)
+            for (int byte = 0; byte < 4; ++byte)
+                hash = (hash ^ frame[(y * width + x) * 4 + byte]) * 16777619u;
+    return hash;
+}
+
 static void check_watch_reading_size(const char *path)
 {
     unsigned starts = talk_starts, sends = voice_sends, begins = voice_begins;
@@ -2761,8 +2775,46 @@ static void check_watch_reading_size(const char *path)
                 assert(conversation_generation == generation && talk_starts == starts && voice_sends == sends);
                 click_talk(last);
                 assert(conversation_action == ROOM_CONVERSATIONS_READ && conversation_value == chats->page.count - 1);
-                assert(find_visible_fragment(lv_layer_top(), last_prefix));
+                unsigned reader_generation = conversation_generation;
+                chats->selected = chats->page.count - 1;
+                chats->preview_state = ROOM_AGENTS_READY;
+                ++chats->preview_revision;
+                chats->preview.status = ESP_OPENCLAW_PREVIEW_OK;
+                chats->preview.count = 1;
+                strcpy(chats->preview.items[0].text, "Reader body stays below the selected title.");
+                room_ui_store_conversations(chats, conversation_generation);
+                lv_obj_t *reader_title = find_visible_fragment(lv_layer_top(), last_prefix);
+                lv_obj_t *reader_body = find_visible_fragment(lv_layer_top(), "Reader body stays below");
+                assert(reader_title && reader_body);
+                if (path && reading < 2) {
+                    char output[1024]; snprintf(output, sizeof(output), "%s-reading-reader-%u-%d-%d.ppm", path, reading, density, active);
+                    write_frame(output);
+                }
+                assert(lv_obj_get_style_text_font(reader_title, 0) == openclaw_reading_font());
+                assert(lv_obj_get_style_text_font(reader_body, 0) == openclaw_reading_font());
+                assert(strcmp(lv_label_get_text(reader_title), chats->page.sessions[chats->selected].title) == 0);
+                lv_area_t heading_area, body_area;
+                lv_obj_get_coords(reader_title, &heading_area);
+                lv_obj_get_coords(lv_obj_get_parent(reader_body), &body_area);
+                assert(lv_area_get_height(&heading_area) == openclaw_reading_font()->line_height);
+                assert(heading_area.y2 < body_area.y1 && body_area.y2 < (active ? 370 : 432));
+                if (reading == 0 && density == OPENCLAW_DENSITY_COMPACT && !active) {
+                    uint32_t initial = watch_label_pixels(reader_title);
+                    bool moved = false;
+                    for (unsigned sample = 0; sample < 30; ++sample) {
+                        lv_tick_inc(200); lv_timer_handler();
+                        if (watch_label_pixels(reader_title) != initial) moved = true;
+                    }
+                    assert(moved);
+                    if (path) {
+                        char output[1024]; snprintf(output, sizeof(output), "%s-reading-reader-scrolled.ppm", path);
+                        write_frame(output);
+                    }
+                }
+                assert(conversation_generation == reader_generation && talk_starts == starts && voice_sends == sends);
                 click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " Chats")));
+                lv_obj_t *list_heading = find_visible_text(lv_layer_top(), "Conversations");
+                assert(list_heading && lv_obj_get_style_text_font(list_heading, 0) == &lv_font_montserrat_20);
             }
         }
     }

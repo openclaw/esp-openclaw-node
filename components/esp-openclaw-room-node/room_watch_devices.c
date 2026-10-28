@@ -52,9 +52,9 @@ void room_watch_devices_create(lv_obj_t *parent, lv_event_cb_t handler)
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
     lv_obj_t *back = button(26, 18, 144, 44, ROOM_DEVICE_BACK, handler);
     back_text = label(back, LV_SYMBOL_LEFT " Menu", 10, 14, 124);
-    refresh = button(228, 18, 114, 44, ROOM_DEVICE_REFRESH, handler);
+    refresh = button(228, 64, 114, 44, ROOM_DEVICE_REFRESH, handler);
     label(refresh, LV_SYMBOL_REFRESH " Refresh", 10, 14, 100);
-    heading = label(root, "Devices", 26, 72, 316);
+    heading = label(root, "Devices", 26, 72, 190);
 #if LV_FONT_MONTSERRAT_28
     lv_obj_set_style_text_font(heading, &lv_font_montserrat_28, 0);
 #endif

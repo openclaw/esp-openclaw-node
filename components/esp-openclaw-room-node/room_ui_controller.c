@@ -1546,7 +1546,8 @@ static bool room_ui_render_locked(void)
         room_watch_conversations_render(painted_conversations,
             !navigation || overlay || page != ROOM_WATCH_AGENTS || !chats, content_bottom);
         bool status_page = page == ROOM_WATCH_HOME || page == ROOM_WATCH_MENU ||
-            page == ROOM_WATCH_CONNECTION || page == ROOM_WATCH_CALL || settings;
+            page == ROOM_WATCH_CONNECTION || page == ROOM_WATCH_CALL ||
+            page == ROOM_WATCH_AGENTS || page == ROOM_WATCH_DEVICES || settings;
         room_watch_status_render(&facts, !status_page || canvas_active || overlay || camera_active);
     }
     if (talk_pill != NULL) {

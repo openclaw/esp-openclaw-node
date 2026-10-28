@@ -66,9 +66,9 @@ void room_watch_conversations_create(lv_obj_t *parent, lv_event_cb_t handler)
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
     lv_obj_t *back = button(root, 26, 18, 116, 44, ROOM_CHAT_BACK, handler);
     back_text = label(back, LV_SYMBOL_LEFT " Agent", 10, 14, 100);
-    new_chat = button(root, 218, 18, 124, 44, ROOM_CHAT_NEW_BUTTON, handler);
+    new_chat = button(root, 218, 64, 124, 44, ROOM_CHAT_NEW_BUTTON, handler);
     label(new_chat, LV_SYMBOL_PLUS "  New chat", 10, 14, 108);
-    heading = label(root, "Conversations", 26, 76, 316);
+    heading = label(root, "Conversations", 26, 76, 184);
 #if LV_FONT_MONTSERRAT_20
     lv_obj_set_style_text_font(heading, &lv_font_montserrat_20, 0);
 #endif
@@ -191,6 +191,7 @@ void room_watch_conversations_render(const room_conversations_snapshot_t *snapsh
         painted_creation = creation;
         lv_label_set_text_static(back_text, LV_SYMBOL_LEFT " Agent");
         lv_label_set_text_static(heading, "Conversations");
+        lv_obj_set_width(heading, 316);
         lv_label_set_text_static(message, "Reader unavailable.\n\nGo back and try again.");
         lv_obj_set_hidden(message, false);
         lv_obj_set_hidden(list, true);
@@ -234,8 +235,10 @@ void room_watch_conversations_render(const room_conversations_snapshot_t *snapsh
     lv_obj_set_hidden(previous, preview || creation);
     lv_obj_set_hidden(next, preview || creation);
     lv_obj_set_hidden(refresh, preview || creation);
-    lv_obj_set_hidden(new_chat, preview || creation ||
-        (state != ROOM_AGENTS_READY && state != ROOM_AGENTS_EMPTY));
+    bool show_new = !preview && !creation &&
+        (state == ROOM_AGENTS_READY || state == ROOM_AGENTS_EMPTY);
+    lv_obj_set_hidden(new_chat, !show_new);
+    lv_obj_set_width(heading, show_new ? 184 : 316);
     lv_obj_set_hidden(creation_button, !creation);
     lv_obj_set_height(body, content_bottom - (creation ? 168 : 112));
     if (creation) {

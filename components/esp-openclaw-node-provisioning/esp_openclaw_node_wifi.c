@@ -44,16 +44,13 @@ static void clear_ip_fields_locked(void)
     s_status.authmode = WIFI_AUTH_OPEN;
 }
 
-static void clear_connection_state(void)
+static void clear_connection_state_locked(void)
 {
+    /* Publish the snapshot and waiter signal in the same critical section. */
+    clear_ip_fields_locked();
+    s_status.last_disconnect_reason = 0;
     if (s_wifi_events != NULL) {
         xEventGroupClearBits(s_wifi_events, WIFI_CONNECTED_BIT);
-    }
-    if (s_wifi_lock != NULL) {
-        xSemaphoreTake(s_wifi_lock, portMAX_DELAY);
-        clear_ip_fields_locked();
-        s_status.last_disconnect_reason = 0;
-        xSemaphoreGive(s_wifi_lock);
     }
 }
 
@@ -230,12 +227,9 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
             const wifi_event_sta_disconnected_t *event =
                 (const wifi_event_sta_disconnected_t *)event_data;
             bool should_retry = false;
-            if (s_wifi_events != NULL) {
-                xEventGroupClearBits(s_wifi_events, WIFI_CONNECTED_BIT);
-            }
             if (s_wifi_lock != NULL) {
                 xSemaphoreTake(s_wifi_lock, portMAX_DELAY);
-                clear_ip_fields_locked();
+                clear_connection_state_locked();
                 s_status.last_disconnect_reason = (uint8_t)event->reason;
                 should_retry = reserve_reconnect_locked();
                 xSemaphoreGive(s_wifi_lock);
@@ -258,15 +252,20 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
         const ip_event_got_ip_t *event = (const ip_event_got_ip_t *)event_data;
         if (s_wifi_lock != NULL) {
             xSemaphoreTake(s_wifi_lock, portMAX_DELAY);
+            /* A queued IP event cannot undo an explicit disconnect or forget. */
+            if (!s_should_reconnect || !s_status.has_saved_network) {
+                xSemaphoreGive(s_wifi_lock);
+                return;
+            }
             s_status.connected = true;
             s_status.last_disconnect_reason = 0;
             snprintf(s_status.ip, sizeof(s_status.ip), IPSTR, IP2STR(&event->ip_info.ip));
             snprintf(s_status.netmask, sizeof(s_status.netmask), IPSTR, IP2STR(&event->ip_info.netmask));
             snprintf(s_status.gateway, sizeof(s_status.gateway), IPSTR, IP2STR(&event->ip_info.gw));
+            if (s_wifi_events != NULL) {
+                xEventGroupSetBits(s_wifi_events, WIFI_CONNECTED_BIT);
+            }
             xSemaphoreGive(s_wifi_lock);
-        }
-        if (s_wifi_events != NULL) {
-            xEventGroupSetBits(s_wifi_events, WIFI_CONNECTED_BIT);
         }
         ESP_LOGI(TAG, "got IP " IPSTR, IP2STR(&event->ip_info.ip));
     }
@@ -339,8 +338,8 @@ esp_err_t esp_openclaw_node_wifi_set_credentials(const char *ssid, const char *p
     err = esp_wifi_set_config(WIFI_IF_STA, &new_config);
     if (err != ESP_OK) goto done;
 
-    clear_connection_state();
     xSemaphoreTake(s_wifi_lock, portMAX_DELAY);
+    clear_connection_state_locked();
     update_credentials_status_locked(ssid);
     s_should_reconnect = true;
     xSemaphoreGive(s_wifi_lock);
@@ -378,8 +377,8 @@ esp_err_t esp_openclaw_node_wifi_clear_credentials(void)
     err = esp_wifi_set_mode(WIFI_MODE_STA);
     if (err != ESP_OK) goto done;
 
-    clear_connection_state();
     xSemaphoreTake(s_wifi_lock, portMAX_DELAY);
+    clear_connection_state_locked();
     update_credentials_status_locked(NULL);
     s_should_reconnect = false;
     xSemaphoreGive(s_wifi_lock);
@@ -426,9 +425,9 @@ esp_err_t esp_openclaw_node_wifi_disconnect(void)
 
     esp_err_t err = begin_operation();
     if (err != ESP_OK) return err;
-    clear_connection_state();
     xSemaphoreTake(s_wifi_lock, portMAX_DELAY);
     s_should_reconnect = false;
+    clear_connection_state_locked();
     xSemaphoreGive(s_wifi_lock);
 
     err = esp_wifi_disconnect();

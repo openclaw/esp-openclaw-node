@@ -27,6 +27,11 @@ static esp_openclaw_node_gateway_request_cb_t response;
 static void *response_context;
 static esp_openclaw_node_gateway_request_cb_t devices_response;
 static void *devices_context;
+static esp_openclaw_node_gateway_request_cb_t approval_response;
+static void *approval_context;
+static int write_scopes;
+static bool registered_write;
+static esp_openclaw_node_connect_source_t last_source;
 static struct fake_timer { void (*callback)(void *); void *arg; int64_t deadline; } timer;
 int64_t esp_timer_get_time(void) { return now; }
 esp_err_t esp_timer_create(const esp_timer_create_args_t *args, esp_timer_handle_t *out) {
@@ -52,6 +57,8 @@ esp_err_t esp_openclaw_node_gateway_request_on_connection(esp_openclaw_node_hand
         if (strcmp(method, "node.list") == 0) {
             assert(devices_response == NULL && strcmp(params, "{}") == 0);
             devices_response = callback; devices_context = context;
+        } else if (strncmp(method, "device.scopes.", 14) == 0) {
+            assert(approval_response == NULL); approval_response = callback; approval_context = context;
         } else { assert(response == NULL); response = callback; response_context = context; }
     }
     return query_result;
@@ -89,14 +96,25 @@ esp_err_t esp_openclaw_node_create(const esp_openclaw_node_config_t *config, esp
     event_cb = config->event_cb; *out = &client; return ESP_OK;
 }
 esp_err_t esp_openclaw_node_register_scope(esp_openclaw_node_handle_t handle, const char *scope) {
-    assert(handle == &client && strcmp(scope, "operator.read") == 0); ++scopes; return ESP_OK;
+    assert(handle == &client && client.id == 0);
+    if (strcmp(scope, "operator.write") == 0) { ++write_scopes; registered_write = true; }
+    else { assert(strcmp(scope, "operator.read") == 0); ++scopes; }
+    return ESP_OK;
 }
 esp_err_t esp_openclaw_node_destroy(esp_openclaw_node_handle_t handle) {
-    assert(handle == &client); ++destroys; return ESP_OK;
+    assert(handle == &client); registered_write = false; ++destroys; return ESP_OK;
 }
 esp_err_t esp_openclaw_node_request_connect(esp_openclaw_node_handle_t handle, const esp_openclaw_node_connect_request_t *request) {
-    assert(!locked && handle == &client && request->source == ESP_OPENCLAW_NODE_CONNECT_SOURCE_SAVED_SESSION);
-    assert(request->gateway_uri == NULL && request->value == NULL); ++connects; return connect_result;
+    assert(!locked && handle == &client);
+    last_source = request->source;
+    if (request->source == ESP_OPENCLAW_NODE_CONNECT_SOURCE_DEVICE_TOKEN) {
+        assert(registered_write && strcmp(request->gateway_uri, node.uri) == 0);
+        assert(strcmp(request->value, "test-approved-token") == 0);
+    } else {
+        assert(request->source == ESP_OPENCLAW_NODE_CONNECT_SOURCE_SAVED_SESSION);
+        assert(request->gateway_uri == NULL && request->value == NULL);
+    }
+    ++connects; return connect_result;
 }
 esp_err_t esp_openclaw_node_request_disconnect(esp_openclaw_node_handle_t handle) {
     assert(!locked && handle == &client); ++disconnects; return disconnect_result;
@@ -130,6 +148,32 @@ static void respond_devices(const char *json) {
     locked = 1; in_callback = true;
     devices_response(&client, &result, devices_context);
     in_callback = false; locked = 0; devices_response = NULL; devices_context = NULL;
+}
+static void approve_response(const char *json) {
+    assert(approval_response != NULL);
+    esp_openclaw_node_gateway_result_t result = {.ok = json != NULL, .payload_json = json};
+    locked = 1; in_callback = true;
+    approval_response(&client, &result, approval_context);
+    in_callback = false; locked = 0; approval_response = NULL; approval_context = NULL;
+}
+static dial_messaging_snapshot_t messaging(dial_messaging_state_t expected) {
+    dial_messaging_snapshot_t snapshot;
+    dial_reader_messaging_copy(&snapshot);
+    assert(snapshot.state == expected);
+    return snapshot;
+}
+static void request_messaging(void) {
+    dial_messaging_snapshot_t snapshot;
+    dial_reader_messaging_copy(&snapshot);
+    assert(dial_reader_messaging_request(snapshot.revision) == ESP_OK);
+    messaging(DIAL_MESSAGING_REQUESTING); step();
+    assert(strcmp(last_method, "device.scopes.requestUpgrade") == 0);
+    assert(strcmp(last_params, "{\"scopes\":[\"operator.read\",\"operator.write\"]}") == 0);
+    approve_response("{\"requestId\":\"approval-one\"}"); step();
+    snapshot = messaging(DIAL_MESSAGING_WAITING);
+    assert(strcmp(snapshot.request_id, "approval-one") == 0);
+    assert(strcmp(last_method, "device.scopes.waitUpgrade") == 0);
+    assert(strcmp(last_params, "{\"requestId\":\"approval-one\"}") == 0);
 }
 static void node_connected(uint32_t id) {
     node.id = id; locked = 1; in_callback = true;
@@ -392,6 +436,161 @@ int main(void) {
     dial_reader_devices_copy(&devices);
     assert(devices.state == ESP_OPENCLAW_DEVICES_EMPTY && devices.count == 0);
     dial_reader_devices_close();
+    /* Approval waits coexist with browsing and outlive normal read deadlines. */
+    dial_messaging_snapshot_t access = messaging(DIAL_MESSAGING_OFF);
+    assert(dial_reader_messaging_request(access.revision + 1) == ESP_ERR_INVALID_STATE);
+    request_messaging();
+    access = messaging(DIAL_MESSAGING_WAITING);
+    assert(dial_reader_messaging_request(access.revision) == ESP_ERR_INVALID_STATE);
+    before = disconnects;
+    now += 16000000; step(); assert(disconnects == before);
+    assert(dial_reader_agents_refresh(0) == ESP_OK); step();
+    respond("{\"agents\":[{\"id\":\"beta\"}]}"); step();
+    agent_status(DIAL_AGENTS_READY, 1);
+    approve_response("{\"requestId\":\"approval-one\",\"status\":\"rejected\"}"); step();
+    messaging(DIAL_MESSAGING_REJECTED); status("ready", true); assert(write_scopes == 0);
+
+    const char *invalid_approvals[] = {
+        "{\"requestId\":\"other\",\"status\":\"approved\",\"deviceToken\":\"test-approved-token\",\"scopes\":[\"operator.read\",\"operator.write\"]}",
+        "{\"requestId\":\"approval-one\",\"status\":\"approved\",\"deviceToken\":\"test-approved-token\",\"scopes\":[\"operator.read\"]}",
+        "{\"requestId\":\"approval-one\",\"status\":\"approved\",\"deviceToken\":\"\",\"scopes\":[\"operator.read\",\"operator.write\"]}",
+        "not JSON",
+        "{\"requestId\":\"approval-one\",\"status\":\"approved\",\"deviceToken\":\"test-approved-token\",\"scopes\":[\"operator.read\",\"operator.write\"]} trailing",
+        "{\"requestId\":\"approval-one\\u0000other\",\"status\":\"approved\",\"deviceToken\":\"test-approved-token\",\"scopes\":[\"operator.read\",\"operator.write\"]}",
+        "{\"extra\":[[[[]]]]}",
+    };
+    for (size_t i = 0; i < sizeof(invalid_approvals) / sizeof(invalid_approvals[0]); ++i) {
+        request_messaging(); approve_response(invalid_approvals[i]); step();
+        messaging(DIAL_MESSAGING_ERROR); status("ready", true); assert(write_scopes == 0);
+    }
+    request_messaging();
+    approve_response("{\"requestId\":\"approval-one\",\"status\":\"expired\"}"); step();
+    messaging(DIAL_MESSAGING_EXPIRED); status("ready", true);
+
+    const char *approved = "{\"requestId\":\"approval-one\",\"status\":\"approved\",\"deviceToken\":\"test-approved-token\",\"scopes\":[\"operator.read\",\"operator.write\"]}";
+    request_messaging(); access = messaging(DIAL_MESSAGING_WAITING);
+    assert(dial_reader_messaging_cancel(access.revision - 1) == ESP_ERR_INVALID_STATE);
+    assert(dial_reader_messaging_cancel(access.revision) == ESP_OK);
+    messaging(DIAL_MESSAGING_OFF); step();
+    approve_response(approved); // Approval arriving after local cancel must never apply.
+    disconnected(ESP_OPENCLAW_NODE_DISCONNECTED_REASON_REQUESTED); step();
+    assert(write_scopes == 0); connected(83); step();
+    respond("{\"agents\":[]}"); step(); status("ready", true);
+
+    request_messaging(); approve_response(approved); step();
+    access = messaging(DIAL_MESSAGING_CONNECTING);
+    assert(write_scopes == 0); // Still on the original transport until it closes.
+    disconnected(ESP_OPENCLAW_NODE_DISCONNECTED_REASON_REQUESTED); step();
+    assert(write_scopes == 1 && last_source == ESP_OPENCLAW_NODE_CONNECT_SOURCE_DEVICE_TOKEN);
+    messaging(DIAL_MESSAGING_CONNECTING); // Queue admission is not successful auth.
+    connected(84); step(); messaging(DIAL_MESSAGING_READY); status("ready", true);
+    respond("{\"agents\":[]}"); step();
+    assert(dial_reader_messaging_cancel(access.revision) == ESP_ERR_INVALID_STATE);
+
+    client.id = 0; messaging(DIAL_MESSAGING_CONNECTING);
+    disconnected(ESP_OPENCLAW_NODE_DISCONNECTED_REASON_CONNECTION_LOST); step();
+    messaging(DIAL_MESSAGING_CONNECTING);
+    assert(last_source == ESP_OPENCLAW_NODE_CONNECT_SOURCE_SAVED_SESSION);
+    connected(85); step(); messaging(DIAL_MESSAGING_READY);
+    respond("{\"agents\":[]}"); step();
+
+    // Primary reconnect invalidates write intent and reconstructs a read-only client.
+    node_connected(22); messaging(DIAL_MESSAGING_OFF); step();
+    disconnected(ESP_OPENCLAW_NODE_DISCONNECTED_REASON_REQUESTED); step();
+    assert(!registered_write && destroys == 1);
+    connected(86); step(); respond("{\"agents\":[]}"); step();
+    messaging(DIAL_MESSAGING_OFF); status("ready", true);
+
+    request_messaging(); now += 315000000; before = disconnects; step();
+    messaging(DIAL_MESSAGING_EXPIRED); assert(disconnects == before + 1);
+    approve_response(approved); disconnected(ESP_OPENCLAW_NODE_DISCONNECTED_REASON_REQUESTED); step();
+    assert(write_scopes == 1); connected(87); step(); respond("{\"agents\":[]}"); step();
+    messaging(DIAL_MESSAGING_EXPIRED); status("ready", true);
+
+    request_messaging(); approve_response(approved); step();
+    disconnected(ESP_OPENCLAW_NODE_DISCONNECTED_REASON_REQUESTED); step();
+    access = messaging(DIAL_MESSAGING_CONNECTING);
+    assert(dial_reader_messaging_cancel(access.revision) == ESP_OK); step();
+    // Even a late handshake cannot restore canceled authority.
+    connected(88); step(); messaging(DIAL_MESSAGING_OFF);
+    disconnected(ESP_OPENCLAW_NODE_DISCONNECTED_REASON_REQUESTED); step();
+    assert(!registered_write && destroys == 2);
+    connected(89); step(); respond("{\"agents\":[]}"); step();
+    messaging(DIAL_MESSAGING_OFF); status("ready", true);
+
+    request_messaging(); approve_response(approved); step();
+    connect_result = ESP_ERR_NO_MEM;
+    disconnected(ESP_OPENCLAW_NODE_DISCONNECTED_REASON_REQUESTED); step();
+    messaging(DIAL_MESSAGING_CONNECTING);
+    connect_result = ESP_OK; step();
+    assert(last_source == ESP_OPENCLAW_NODE_CONNECT_SOURCE_DEVICE_TOKEN);
+    connected(90); step(); respond("{\"agents\":[]}"); step();
+    access = messaging(DIAL_MESSAGING_READY);
+    assert(dial_reader_messaging_cancel(access.revision) == ESP_OK);
+    messaging(DIAL_MESSAGING_OFF); step();
+    disconnected(ESP_OPENCLAW_NODE_DISCONNECTED_REASON_REQUESTED); step();
+    assert(!registered_write && destroys == 3);
+    connected(91); step(); respond("{\"agents\":[]}"); step();
+    status("ready", true);
+
+    request_messaging(); approve_response(approved); step();
+    disconnected(ESP_OPENCLAW_NODE_DISCONNECTED_REASON_REQUESTED); step();
+    failure.reason = ESP_OPENCLAW_NODE_CONNECT_FAILURE_AUTH_REJECTED;
+    event_cb(&client, ESP_OPENCLAW_NODE_EVENT_CONNECT_FAILED, &failure, NULL); step();
+    messaging(DIAL_MESSAGING_ERROR);
+    assert(!registered_write && destroys == 4);
+    assert(last_source == ESP_OPENCLAW_NODE_CONNECT_SOURCE_SAVED_SESSION);
+    connected(92); step(); respond("{\"agents\":[]}"); step();
+    status("ready", true);
+
+    // The approved token is already rotated when its callback precedes a loss.
+    request_messaging();
+    approve_response(approved);
+    disconnected(ESP_OPENCLAW_NODE_DISCONNECTED_REASON_CONNECTION_LOST);
+    step();
+    messaging(DIAL_MESSAGING_CONNECTING);
+    assert(last_source == ESP_OPENCLAW_NODE_CONNECT_SOURCE_DEVICE_TOKEN);
+    connected(93); step(); respond("{\"agents\":[]}"); step();
+    messaging(DIAL_MESSAGING_READY); status("ready", true);
+
+    access = messaging(DIAL_MESSAGING_READY);
+    assert(dial_reader_messaging_cancel(access.revision) == ESP_OK); step();
+    disconnected(ESP_OPENCLAW_NODE_DISCONNECTED_REASON_REQUESTED); step();
+    connected(94); step(); respond("{\"agents\":[]}"); step();
+
+    // A stalled read still reports its deadline without aborting a live grant.
+    request_messaging();
+    assert(dial_reader_agents_refresh(0) == ESP_OK); step();
+    before = disconnects; now += 15000000; step();
+    agent_status(DIAL_AGENTS_ERROR, 0);
+    messaging(DIAL_MESSAGING_WAITING); assert(disconnects == before);
+    approve_response(approved); step();
+    respond(NULL); disconnected(ESP_OPENCLAW_NODE_DISCONNECTED_REASON_REQUESTED); step();
+    connected(95); step(); messaging(DIAL_MESSAGING_READY); status("ready", true);
+
+    access = messaging(DIAL_MESSAGING_READY);
+    assert(dial_reader_messaging_cancel(access.revision) == ESP_OK); step();
+    disconnected(ESP_OPENCLAW_NODE_DISCONNECTED_REASON_REQUESTED); step();
+    connected(96); step();
+
+    // Canceling a rejected connect queue restores a usable read-only session.
+    request_messaging(); approve_response(approved); step();
+    connect_result = ESP_ERR_NO_MEM;
+    disconnected(ESP_OPENCLAW_NODE_DISCONNECTED_REASON_REQUESTED); step();
+    access = messaging(DIAL_MESSAGING_CONNECTING);
+    assert(dial_reader_messaging_cancel(access.revision) == ESP_OK);
+    connect_result = ESP_OK; step(); connected(97); step();
+    messaging(DIAL_MESSAGING_OFF); status("ready", true);
+
+    request_messaging();
+    assert(dial_reader_agents_refresh(0) == ESP_OK); step();
+    now += 15000000; step();
+    agent_status(DIAL_AGENTS_ERROR, 0); messaging(DIAL_MESSAGING_WAITING);
+    before = disconnects;
+    approve_response("{\"requestId\":\"approval-one\",\"status\":\"rejected\"}"); step();
+    messaging(DIAL_MESSAGING_REJECTED); assert(disconnects == before + 1);
+    respond(NULL); disconnected(ESP_OPENCLAW_NODE_DISCONNECTED_REASON_REQUESTED); step();
+    connected(98); step(); status("ready", true);
     puts("Dial reader: role, handoff, loss, auth, origin and stale-connection cases passed");
     return 0;
 }

@@ -26,9 +26,9 @@ boards retain their configured LVGL allocator.
 The local **Start Talk / Stop Talk** control uses the same admission and cleanup
 as wake-word and remote Talk commands. Readiness comes from the operator and
 media state; unavailable and stopping states disable the control. On Watch,
-browsing menus, settings, agents, conversations, or Canvas during an active call
-shows **Return to call** instead of Stop. That action returns to the call on Home
-without ending it; **Stop Talk** on that view ends it deliberately. Diagnostics
+browsing Home, menus, settings, agents, conversations, or Canvas during an active call
+shows **Return to call** instead of Stop. That action opens **Live call**
+without ending it; **End call** on that page ends it deliberately. Diagnostics
 hide the control. **Menu → Live call** opens a dedicated Watch page with an
 explicit **Start call** / **End call** control and current connection/audio
 guidance. Opening the page does not start a call; Back keeps an active call

@@ -331,7 +331,7 @@ bool room_watch_home_render(const room_ui_facts_t *facts, const room_ui_talk_tar
         subtitle = detail[0] != '\0' ? detail : "Set up over USB";
     } else if (facts->talk == ROOM_UI_TALK_ACTIVE) {
         title = "Conversation live";
-        subtitle = "Tap Stop Talk to finish";
+        subtitle = "Return to your call";
     } else if (facts->talk == ROOM_UI_TALK_CONNECTING) {
         title = "Connecting";
         subtitle = "Starting your conversation";

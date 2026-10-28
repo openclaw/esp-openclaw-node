@@ -1025,7 +1025,7 @@ static void talk_control_clicked(lv_event_t *event)
     if (wake) {
         room_ui_show_face_hint(10000);
     } else if (requested == TALK_CONTROL_RETURN) {
-        (void)watch_navigation_show(ROOM_WATCH_HOME);
+        (void)watch_navigation_show(ROOM_WATCH_CALL);
     } else if (talk_action_handler != NULL && requested != TALK_CONTROL_NONE) {
         talk_action_handler(requested == TALK_CONTROL_START, recipient_revision);
     }
@@ -1518,7 +1518,7 @@ static bool room_ui_render_locked(void)
             : facts.talk == ROOM_UI_TALK_CONNECTING || facts.talk == ROOM_UI_TALK_ACTIVE ? TALK_CONTROL_STOP : TALK_CONTROL_NONE;
         bool start = painted_talk_action == TALK_CONTROL_START;
         bool stop = facts.talk == ROOM_UI_TALK_CONNECTING || facts.talk == ROOM_UI_TALK_ACTIVE;
-        bool return_to_call = watch_home_enabled && !call_page && (navigation || canvas_active) && stop;
+        bool return_to_call = watch_home_enabled && !call_page && stop;
         if (return_to_call) painted_talk_action = TALK_CONTROL_RETURN;
         const char *start_label = call_page ? "Start call" : "Start Talk";
         const char *stop_label = call_page ? "End call" : "Stop Talk";

@@ -24,7 +24,7 @@ static SemaphoreHandle_t s_wifi_lock;
 static esp_openclaw_node_wifi_status_t s_status;
 static bool s_started;
 static bool s_should_reconnect;
-static bool s_scan_in_progress;
+static bool s_operation_in_progress;
 
 #define WIFI_CONNECTED_BIT BIT0
 
@@ -119,6 +119,23 @@ static esp_err_t init_wifi_config(wifi_config_t *config, const char *ssid, const
     config->sta.pmf_cfg.capable = true;
     config->sta.pmf_cfg.required = false;
     return ESP_OK;
+}
+
+static esp_err_t begin_operation(void)
+{
+    if (!s_started || s_wifi_lock == NULL) return ESP_ERR_INVALID_STATE;
+    xSemaphoreTake(s_wifi_lock, portMAX_DELAY);
+    bool busy = s_operation_in_progress;
+    if (!busy) s_operation_in_progress = true;
+    xSemaphoreGive(s_wifi_lock);
+    return busy ? ESP_ERR_WIFI_STATE : ESP_OK;
+}
+
+static void end_operation(void)
+{
+    xSemaphoreTake(s_wifi_lock, portMAX_DELAY);
+    s_operation_in_progress = false;
+    xSemaphoreGive(s_wifi_lock);
 }
 
 static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
@@ -252,10 +269,10 @@ esp_err_t esp_openclaw_node_wifi_set_credentials(const char *ssid, const char *p
     wifi_config_t new_config = {0};
     ESP_RETURN_ON_ERROR(init_wifi_config(&new_config, ssid, resolved_passphrase), TAG, "invalid wifi config");
 
-    ESP_RETURN_ON_ERROR(
-        esp_wifi_set_config(WIFI_IF_STA, &new_config),
-        TAG,
-        "esp_wifi_set_config failed");
+    esp_err_t err = begin_operation();
+    if (err != ESP_OK) return err;
+    err = esp_wifi_set_config(WIFI_IF_STA, &new_config);
+    if (err != ESP_OK) goto done;
 
     clear_connection_state();
     xSemaphoreTake(s_wifi_lock, portMAX_DELAY);
@@ -263,16 +280,17 @@ esp_err_t esp_openclaw_node_wifi_set_credentials(const char *ssid, const char *p
     s_should_reconnect = true;
     xSemaphoreGive(s_wifi_lock);
 
-    esp_err_t err = esp_wifi_disconnect();
+    err = esp_wifi_disconnect();
     if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_CONNECT && err != ESP_ERR_WIFI_CONN) {
-        return err;
+        goto done;
     }
     err = esp_wifi_connect();
     if (err == ESP_ERR_WIFI_CONN) {
-        return ESP_OK;
+        err = ESP_OK;
     }
-    ESP_RETURN_ON_ERROR(err, TAG, "starting wifi connect failed");
-    return ESP_OK;
+done:
+    end_operation();
+    return err;
 }
 
 esp_err_t esp_openclaw_node_wifi_clear_credentials(void)
@@ -281,14 +299,19 @@ esp_err_t esp_openclaw_node_wifi_clear_credentials(void)
         return ESP_ERR_INVALID_STATE;
     }
 
-    esp_err_t err = esp_wifi_stop();
+    esp_err_t err = begin_operation();
+    if (err != ESP_OK) return err;
+    err = esp_wifi_stop();
     if (err != ESP_OK && err != ESP_ERR_WIFI_NOT_INIT) {
-        return err;
+        goto done;
     }
 
-    ESP_RETURN_ON_ERROR(esp_wifi_restore(), TAG, "esp_wifi_restore failed");
-    ESP_RETURN_ON_ERROR(esp_wifi_set_storage(WIFI_STORAGE_FLASH), TAG, "esp_wifi_set_storage failed");
-    ESP_RETURN_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_STA), TAG, "esp_wifi_set_mode failed");
+    err = esp_wifi_restore();
+    if (err != ESP_OK) goto done;
+    err = esp_wifi_set_storage(WIFI_STORAGE_FLASH);
+    if (err != ESP_OK) goto done;
+    err = esp_wifi_set_mode(WIFI_MODE_STA);
+    if (err != ESP_OK) goto done;
 
     clear_connection_state();
     xSemaphoreTake(s_wifi_lock, portMAX_DELAY);
@@ -296,9 +319,12 @@ esp_err_t esp_openclaw_node_wifi_clear_credentials(void)
     s_should_reconnect = false;
     xSemaphoreGive(s_wifi_lock);
 
-    ESP_RETURN_ON_ERROR(esp_wifi_start(), TAG, "esp_wifi_start failed");
-    ESP_RETURN_ON_ERROR(esp_wifi_set_ps(WIFI_PS_NONE), TAG, "esp_wifi_set_ps failed");
-    return ESP_OK;
+    err = esp_wifi_start();
+    if (err != ESP_OK) goto done;
+    err = esp_wifi_set_ps(WIFI_PS_NONE);
+done:
+    end_operation();
+    return err;
 }
 
 esp_err_t esp_openclaw_node_wifi_connect(void)
@@ -307,15 +333,19 @@ esp_err_t esp_openclaw_node_wifi_connect(void)
         return ESP_ERR_INVALID_STATE;
     }
 
+    esp_err_t err = begin_operation();
+    if (err != ESP_OK) return err;
     xSemaphoreTake(s_wifi_lock, portMAX_DELAY);
     bool wifi_is_configured = s_status.has_saved_network;
     s_should_reconnect = wifi_is_configured;
     xSemaphoreGive(s_wifi_lock);
     if (!wifi_is_configured) {
+        end_operation();
         return ESP_ERR_INVALID_STATE;
     }
 
-    esp_err_t err = esp_wifi_connect();
+    err = esp_wifi_connect();
+    end_operation();
     if (err == ESP_ERR_WIFI_CONN) {
         return ESP_OK;
     }
@@ -329,12 +359,15 @@ esp_err_t esp_openclaw_node_wifi_disconnect(void)
         return ESP_ERR_INVALID_STATE;
     }
 
+    esp_err_t err = begin_operation();
+    if (err != ESP_OK) return err;
     clear_connection_state();
     xSemaphoreTake(s_wifi_lock, portMAX_DELAY);
     s_should_reconnect = false;
     xSemaphoreGive(s_wifi_lock);
 
-    esp_err_t err = esp_wifi_disconnect();
+    err = esp_wifi_disconnect();
+    end_operation();
     if (err == ESP_ERR_WIFI_NOT_CONNECT) {
         err = ESP_OK;
     }
@@ -356,8 +389,8 @@ esp_err_t esp_openclaw_node_wifi_scan(wifi_ap_record_t *records, uint16_t *count
 
     xSemaphoreTake(s_wifi_lock, portMAX_DELAY);
     // Provisioning scans must not compete with a live connection or its retries.
-    bool busy = s_status.connected || s_should_reconnect || s_scan_in_progress;
-    if (!busy) s_scan_in_progress = true;
+    bool busy = s_status.connected || s_should_reconnect || s_operation_in_progress;
+    if (!busy) s_operation_in_progress = true;
     xSemaphoreGive(s_wifi_lock);
     if (busy) return ESP_ERR_WIFI_STATE;
 
@@ -378,9 +411,7 @@ esp_err_t esp_openclaw_node_wifi_scan(wifi_ap_record_t *records, uint16_t *count
         if (err != ESP_OK || *total == 0) esp_wifi_clear_ap_list();
     }
 
-    xSemaphoreTake(s_wifi_lock, portMAX_DELAY);
-    s_scan_in_progress = false;
-    xSemaphoreGive(s_wifi_lock);
+    end_operation();
     return err;
 }
 

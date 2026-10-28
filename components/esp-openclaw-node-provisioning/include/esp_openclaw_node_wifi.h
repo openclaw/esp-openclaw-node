@@ -15,6 +15,10 @@
 
 #define ESP_OPENCLAW_NODE_WIFI_SCAN_LIMIT 16
 
+/* Credential changes, connect/disconnect, and scans serialize their driver
+ * calls. A competing explicit operation returns ESP_ERR_WIFI_STATE without
+ * changing credentials or reconnect policy. Status reads remain available. */
+
 /** @brief Snapshot of the example Wi-Fi station state. */
 typedef struct {
     bool has_saved_network; /**< Whether station credentials are currently stored in NVS. */

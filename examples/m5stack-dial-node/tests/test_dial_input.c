@@ -834,6 +834,45 @@ static void check_creation(lv_indev_t *encoder)
     puts("New conversation: empty list, reviewed creation, permission recovery, stale presses, outcomes and safe retry passed");
 }
 
+static void check_local_back(lv_indev_t *encoder)
+{
+    unsigned commands = confirmations, sends = reply_sends + creation_submits;
+    navigating = true;
+    lv_obj_set_hidden(home.root, true);
+    lv_obj_set_hidden(input.arc, true);
+    dial_input_set_control(&input, false);
+    for (unsigned comfortable = 0; comfortable < 2; ++comfortable) {
+        openclaw_density_set(comfortable ? OPENCLAW_DENSITY_COMFORTABLE : OPENCLAW_DENSITY_COMPACT);
+        dial_navigation_open_devices(&navigation);
+        press_encoder(encoder);
+        assert(navigation.view == DIAL_NAV_LOCAL_DEVICE);
+        encoder_diff = 4; lv_indev_read(encoder); advance(40);
+        unsigned row = navigation.focus - navigation.first;
+        snapshot(comfortable ? "local-back-comfortable" : "local-back-compact");
+        assert(strcmp(lv_label_get_text(navigation.names[row]), "Back") == 0);
+        check_home_bounds(navigation.rows[row]);
+        unsigned refreshes_before = device_refreshes;
+        press_encoder(encoder);
+        assert(navigation.view == DIAL_NAV_DEVICES && navigation.focus == 0);
+        assert(device_refreshes == refreshes_before + 1);
+        press_encoder(encoder);
+        encoder_diff = 4; lv_indev_read(encoder); advance(40);
+        row = navigation.focus - navigation.first;
+        lv_area_t area;
+        lv_obj_get_coords(navigation.rows[row], &area);
+        int x = (area.x1 + area.x2) / 2, y = (area.y1 + area.y2) / 2;
+        touch(x, y, true); touch(x, y, false);
+        assert(navigation.view == DIAL_NAV_DEVICES && navigation.focus == 0);
+        assert(device_refreshes == refreshes_before + 2);
+    }
+    openclaw_density_set(OPENCLAW_DENSITY_COMPACT);
+    assert(confirmations == commands && reply_sends + creation_submits == sends);
+    navigating = false;
+    lv_obj_set_hidden(navigation.root, true);
+    lv_obj_set_hidden(home.root, false);
+    puts("This Dial Back: encoder and touch return to Devices in both list spacings without submissions");
+}
+
 static void check_help(lv_indev_t *encoder)
 {
     unsigned commands = confirmations, requests = refreshes + device_refreshes + messaging_requests;
@@ -1919,6 +1958,7 @@ int main(int argc, char **argv)
     assert(home_agents == 2 && !input.control && confirmations == home_confirmations);
     puts("Home targets: decorative center, distinct actions, gesture fences and Connection Back passed");
     check_help(encoder);
+    check_local_back(encoder);
     assert(reader_boundary_failures == 0);
     lv_deinit();
 }

@@ -712,7 +712,7 @@ static void render_devices(dial_navigation_t *nav)
     bool detail = nav->view == DIAL_NAV_DEVICE_DETAIL;
     bool local = nav->view == DIAL_NAV_LOCAL_DEVICE;
     unsigned count = device_count(nav);
-    nav->count = local ? 4 : count + 3;
+    nav->count = local ? 5 : count + 3;
     if (nav->focus >= nav->count) nav->focus = 0;
     unsigned visible = list_visible();
     nav->first = nav->focus / visible * visible;
@@ -753,8 +753,8 @@ static void render_devices(dial_navigation_t *nav)
         if (detail || i >= visible || index >= nav->count) continue;
         const char *name, *icon;
         if (local) {
-            const char *names[] = {"Control", "Display", "Connection", "Help"};
-            const char *icons[] = {LV_SYMBOL_SETTINGS, LV_SYMBOL_IMAGE, LV_SYMBOL_WIFI, "?"};
+            const char *names[] = {"Control", "Display", "Connection", "Help", "Back"};
+            const char *icons[] = {LV_SYMBOL_SETTINGS, LV_SYMBOL_IMAGE, LV_SYMBOL_WIFI, "?", LV_SYMBOL_LEFT};
             name = names[index]; icon = icons[index];
         } else if (index == 0) { name = "This Dial"; icon = LV_SYMBOL_HOME; }
         else if (index <= count) {
@@ -1188,6 +1188,7 @@ void dial_navigation_activate(dial_navigation_t *nav)
     if (nav->view == DIAL_NAV_DEVICE_DETAIL) { back(nav); return; }
     if (nav->view == DIAL_NAV_LOCAL_DEVICE) {
         if (nav->focus == 0) nav->handler(DIAL_NAV_CONTROL, 0, nav->context);
+        else if (nav->focus == 4) back(nav);
         else dial_navigation_open_settings(nav, nav->focus == 1 ? DIAL_NAV_DISPLAY :
             nav->focus == 2 ? DIAL_NAV_CONNECTION : DIAL_NAV_HELP);
         return;

@@ -79,14 +79,14 @@ void room_watch_agents_create(lv_obj_t *parent, lv_event_cb_t handler)
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
     lv_obj_t *back = button(root, 26, 18, 104, 44, ROOM_AGENT_BACK, handler);
     back_text = label(back, LV_SYMBOL_LEFT " Menu", 10, 14, 94);
-    use_default = button(root, 218, 18, 124, 44, ROOM_AGENT_DEFAULT, handler);
+    use_default = button(root, 218, 64, 124, 44, ROOM_AGENT_DEFAULT, handler);
     default_text = label(use_default, "Default", 8, 14, 108);
     lv_obj_set_style_text_align(default_text, LV_TEXT_ALIGN_CENTER, 0);
-    heading = label(root, "Agents", 26, 72, 218);
+    heading = label(root, "Agents", 26, 72, 180);
 #if LV_FONT_MONTSERRAT_28
     lv_obj_set_style_text_font(heading, &lv_font_montserrat_28, 0);
 #endif
-    counter = label(root, "", 242, 84, 100);
+    counter = label(root, "", 242, 44, 100);
     lv_obj_set_style_text_align(counter, LV_TEXT_ALIGN_RIGHT, 0);
     lv_obj_set_style_text_color(counter, lv_color_hex(0xb9aabe), 0);
     list = lv_obj_create(root);

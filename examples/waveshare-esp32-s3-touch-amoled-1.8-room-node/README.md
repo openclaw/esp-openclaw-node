@@ -63,7 +63,9 @@ and a changed recipient must be repainted before a new press is accepted.
 Diagnostics hides the Talk control until closed.
 
 The Watch shares the Dial's compact Wi-Fi, OpenClaw link, and battery strip.
-It appears on Home, Menu, settings subpages, Connection and Live call. Home
+It appears on Home, Menu, settings subpages, Connection, Live call, Agents,
+Conversations and Devices. Browser actions sit beside the page title below
+the strip, preserving the list area and touch target sizes. Home
 keeps its bounded headline and separate bottom action. Signal is sampled once
 per second while the strip is visible and the display is awake. Canvas,
 diagnostics and camera overlays hide the strip. Missing signal stays neutral;

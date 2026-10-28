@@ -714,7 +714,7 @@ static void check_watch_status(const char *path)
     assert(room_ui_watch_menu("agents") == ESP_OK);
     reads = wifi_reads;
     status_tick();
-    assert(wifi_reads == reads && watch_status_pixels(248, 275) == 0);
+    assert(wifi_reads == reads + 1 && watch_status_pixels(248, 275) == weak);
     assert(room_ui_watch_menu("home") == ESP_OK);
     assert(wifi_reads > reads);
     wifi_status = (esp_openclaw_node_wifi_status_t){.connected = true};
@@ -1437,6 +1437,7 @@ static void check_watch_conversations(const char *path)
     assert(!visible_watch_text("Couldn't load conversations.\n\nGo back and refresh to try again."));
     room_ui_store_conversations(view, generation);
     assert(lv_obj_is_visible(find_text(lv_layer_top(), "Planning a trip")));
+    assert(watch_status_pixels(284, 307) > 0);
     char output[1024];
     if (path) { snprintf(output, sizeof(output), "%s-conversations.ppm", path); write_frame(output); }
     lv_obj_t *row = lv_obj_get_parent(find_text(lv_layer_top(), "Planning a trip"));
@@ -1900,6 +1901,7 @@ static void check_watch_devices(const char *path)
     assert(room_ui_watch_menu("devices") == ESP_OK);
     assert(device_open && room_ui_wants_devices());
     assert(visible_watch_text("Finding your devices..."));
+    assert(watch_status_pixels(284, 307) > 0);
     lv_obj_t *refresh = lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_REFRESH " Refresh"));
     unsigned requests = device_requests;
     click_talk(refresh);

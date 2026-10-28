@@ -82,14 +82,20 @@ static unsigned list_visible(void)
     return openclaw_density() == OPENCLAW_DENSITY_COMPACT ? 3 : 2;
 }
 
-static void list_row(dial_navigation_t *nav, unsigned row)
+static void list_row(dial_navigation_t *nav, unsigned row, const char *name)
 {
     int height = openclaw_density_row_height(false);
     bool compact = openclaw_density() == OPENCLAW_DENSITY_COMPACT;
     lv_obj_set_pos(nav->rows[row], 38, (compact ? 58 : 66) + (int)row * (compact ? 46 : 68));
     lv_obj_set_size(nav->rows[row], 164, height);
     lv_obj_set_pos(nav->icons[row], 12, (height - 16) / 2);
-    lv_obj_set_pos(nav->names[row], 40, (height - 16) / 2);
+    const lv_font_t *font = &lv_font_montserrat_16;
+    lv_point_t measured;
+    lv_text_get_size(&measured, name, &lv_font_montserrat_20, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    if (nav->first + row == nav->focus && measured.x <= 112) font = &lv_font_montserrat_20;
+    lv_obj_set_style_text_font(nav->names[row], font, 0);
+    lv_obj_set_height(nav->names[row], font->line_height);
+    lv_obj_set_pos(nav->names[row], 40, (height - font->line_height) / 2);
     lv_obj_set_width(nav->names[row], 112);
     lv_obj_set_y(nav->avatars[row], (height - 24) / 2);
 }
@@ -522,7 +528,7 @@ static void reply_button(dial_navigation_t *nav, unsigned row, const char *name,
     lv_obj_set_width(nav->names[row], bottom ? 88 : 112);
     lv_label_set_text_static(nav->names[row], name);
     lv_label_set_text_static(nav->icons[row], icon);
-    if (!bottom) list_row(nav, row);
+    if (!bottom) list_row(nav, row, name);
     bool focus = bottom || nav->focus == nav->first + row;
     lv_obj_set_style_bg_color(nav->rows[row], lv_color_hex(focus ? 0xf4efee : 0x302535), 0);
     lv_color_t color = lv_color_hex(focus ? 0x302131 : 0xf4efee);
@@ -692,7 +698,6 @@ static void render_devices(dial_navigation_t *nav)
         unsigned index = nav->first + i;
         lv_obj_set_hidden(nav->rows[i], detail || i >= visible || index >= nav->count);
         if (detail || i >= visible || index >= nav->count) continue;
-        list_row(nav, i);
         const char *name, *icon;
         if (local) {
             const char *names[] = {"Control", "Display", "Connection"};
@@ -705,6 +710,7 @@ static void render_devices(dial_navigation_t *nav)
             icon = !device->connected_known ? "?" : device->connected ? LV_SYMBOL_OK : LV_SYMBOL_MINUS;
         } else { name = index == count + 1 ? "Refresh" : "Back"; icon = index == count + 1 ? LV_SYMBOL_REFRESH : LV_SYMBOL_LEFT; }
         lv_label_set_text(nav->names[i], name);
+        list_row(nav, i, name);
         lv_label_set_text_static(nav->icons[i], icon);
         bool selected = index == nav->focus;
         lv_obj_set_style_bg_color(nav->rows[i], lv_color_hex(selected ? 0xf4efee : 0x302535), 0);
@@ -889,7 +895,7 @@ static void render(dial_navigation_t *nav)
         if (detail) { name = "Conversations"; icon = LV_SYMBOL_LIST; }
         else item(nav, index, &name, &icon);
         lv_label_set_text(nav->names[i], name);
-        if (!detail && !message) list_row(nav, i);
+        if (!detail && !message) list_row(nav, i, name);
         if (reading) {
             lv_obj_set_style_text_font(nav->names[i], openclaw_reading_font(), 0);
             lv_obj_set_height(nav->names[i], LV_SIZE_CONTENT);

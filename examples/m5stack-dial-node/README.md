@@ -135,6 +135,9 @@ quick-reply choices. Turn to reveal the remaining rows and press to choose; Back
 returns to the same selected item. Both layouts retain at least 44-pixel row
 height within the circular display. Compact is the default and the selection
 lasts until restart. It does not change text size or the assigned control.
+Browse lists use 16-pixel text, increasing the selected label to 20 pixels when
+it fits. Long names stay on one line with an ellipsis; open
+the item to read its full identity.
 
 Settings → Connection is a read-only, scrollable network summary. Turn the
 encoder or swipe to read the saved network, signal and channel (when available),

@@ -48,9 +48,9 @@ the default firmware uses read-only voice access.
 
 Tap the screen or press BOOT to wake the display. Home's **Hold to record**
 control captures a local audio draft after a 250 ms hold; release to keep it or
-slide up to discard. Recording stops at 30 seconds. The draft is **not sent**:
-use **Discard** or hold to record again. Transcription and message submission
-are not connected to this control yet. Leaving Home, opening Canvas or
+slide up to discard. Recording stops at 30 seconds. Configured transcription
+prepares text for review; **Send** is explicit and requires messaging access.
+Use **Discard** or hold to record again. Leaving Home, opening Canvas or
 Device status, or changing the selected agent/operator session discards it.
 Recording and drafts keep the screen awake and share the audio gate with Talk.
 
@@ -71,11 +71,12 @@ says **Conversation live**; it does not infer speech playback from the
 connection state. Missing clock telemetry is omitted. The display still sleeps when idle;
 waking it does not start a conversation. Idle, setup and error views keep static
 mascot artwork without running the animation timer; wake-up hints still animate.
-When a retained reader is available, Home shows its agent and **Continue
-conversations** above the recording control. Continue restores the reader
-without changing the next Talk agent; a reader changed during the tap is not
-opened. Without a reader, a selected next-Talk agent appears in the compact
-headline. Setup, errors, and active calls take priority over the Continue card.
+Home has one primary action: **Hold to record** when capture is ready,
+otherwise **Continue conversation** for a retained reader or **Choose agent**.
+Offline and setup states offer **Connection**. Continue names the reader's
+agent and restores it without changing the next Talk agent shown in the header;
+a reader changed during the tap is not opened. Active calls offer **Return to
+call**. No separate conversation card competes with the primary action.
 Agents shows local fox and lobster artwork for configured 🦊 and 🦞 identities,
 with an ASCII symbol or name initials for other identities. The same avatar
 appears in the list and detail view; it does not change agent routing.

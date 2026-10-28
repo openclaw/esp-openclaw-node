@@ -166,6 +166,9 @@ struct esp_openclaw_node {
     esp_openclaw_node_config_t config;
     esp_openclaw_node_internal_state_t state;
     esp_openclaw_node_pending_control_request_t pending_control;
+    esp_openclaw_node_connect_lease_t connect_lease;
+    uint64_t connect_lease_generation;
+    bool connect_request_pending;
     esp_websocket_client_handle_t ws;
     esp_openclaw_node_transport_event_ctx_t *transport_ctx;
     uint32_t next_transport_id;
@@ -346,9 +349,16 @@ void esp_openclaw_node_enqueue_work_message_from_callback(
 void esp_openclaw_node_task(void *arg);
 esp_err_t esp_openclaw_node_submit_connect_request(
     esp_openclaw_node_handle_t node,
-    esp_openclaw_node_connect_request_source_t *connect_source);
+    esp_openclaw_node_connect_request_source_t *connect_source,
+    esp_openclaw_node_connect_lease_t lease,
+    uint64_t generation);
+bool esp_openclaw_node_connect_lease_matches_locked(
+    esp_openclaw_node_handle_t node,
+    esp_openclaw_node_connect_lease_t lease,
+    uint64_t generation);
 esp_err_t esp_openclaw_node_submit_disconnect_request(
-    esp_openclaw_node_handle_t node);
+    esp_openclaw_node_handle_t node,
+    esp_openclaw_node_connect_lease_t lease);
 esp_err_t esp_openclaw_node_submit_gateway_request(
     esp_openclaw_node_handle_t node,
     uint32_t connection_id,

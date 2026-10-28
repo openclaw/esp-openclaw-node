@@ -114,6 +114,8 @@ successful `hello-ok`
 
 - `esp_openclaw_node_request_connect()`
 - `esp_openclaw_node_request_disconnect()`
+- `esp_openclaw_node_connect_lease_acquire()` / `esp_openclaw_node_connect_lease_release()`
+- `esp_openclaw_node_request_connect_with_lease()` / `esp_openclaw_node_request_disconnect_with_lease()`
 - `esp_openclaw_node_gateway_request()`
 - `esp_openclaw_node_gateway_request_on_connection()`
 
@@ -129,6 +131,21 @@ pass it to `esp_openclaw_node_gateway_request_on_connection()`. A zero ID means
 no connection is ready. A replaced connection is rejected before submission;
 the callback runs only when submission succeeds. IDs are scoped to one node
 handle and identify transport lifetimes, not Gateway identities.
+
+A locally confirmed setup session can acquire a connection-control lease while
+the client is idle or ready with no pending control request. Acquisition preserves
+the current connection. Until release, ordinary connect/disconnect calls,
+including saved-session reconnect, are rejected with `ESP_ERR_INVALID_STATE`.
+The owner uses the matching `_with_lease` APIs; released or superseded IDs are
+rejected. Ownership is checked again after request preparation and NVS loading.
+
+Release is allowed only when connection control is settled (idle or ready, with
+no queued request). The application must then wake its suppressed reconnect
+worker explicitly: a rejected request produces no terminal event. Leases govern
+admission, not result correlation or local confirmation, and do not change the
+existing events. The disconnect API still cannot cancel a connect request before
+the component task dequeues it. A setup adapter must not treat an unrelated
+terminal event from the replaced connection as its own result.
 
 ### Inspection
 
@@ -791,3 +808,8 @@ at a time.
 
 Component tests live under  
 [components/esp-openclaw-node/test_apps](./test_apps/README.md).
+
+Run `python3 components/esp-openclaw-node/tests/run_connect_lease_host_tests.py`
+from the repository root for the sanitized host admission tests. They execute
+the production public API and queue/worker transitions against fake platform
+boundaries; on-device transport timing remains separate qualification.

@@ -210,6 +210,7 @@ static void handle_request_connect(
     esp_openclaw_node_move_connect_source_struct(
         &node->active_connect_source,
         &message->connect_source);
+    node->connect_request_pending = false;
     node->state = ESP_OPENCLAW_NODE_INTERNAL_CONNECTING;
     node->connect_started_ms = esp_timer_get_time() / 1000LL;
     esp_openclaw_node_unlock_state(node);
@@ -546,11 +547,20 @@ static esp_err_t submit_pending_request(
 
 esp_err_t esp_openclaw_node_submit_connect_request(
     esp_openclaw_node_handle_t node,
-    esp_openclaw_node_connect_request_source_t *connect_source)
+    esp_openclaw_node_connect_request_source_t *connect_source,
+    esp_openclaw_node_connect_lease_t lease,
+    uint64_t generation)
 {
     esp_openclaw_node_lock_state(node);
-    esp_err_t err =
-        esp_openclaw_node_reserve_connect_request_locked(node, connect_source);
+    esp_err_t err = !node->connect_request_pending &&
+        esp_openclaw_node_connect_lease_matches_locked(node, lease, generation)
+        ? esp_openclaw_node_reserve_connect_request_locked(node, connect_source)
+        : ESP_ERR_INVALID_STATE;
+    if (err == ESP_OK) {
+        /* The old connection's terminal callback clears pending_control.
+         * Keep this request reserved until its replacement starts. */
+        node->connect_request_pending = true;
+    }
     esp_openclaw_node_unlock_state(node);
     if (err != ESP_OK) {
         return err;
@@ -569,15 +579,20 @@ esp_err_t esp_openclaw_node_submit_connect_request(
         ESP_OPENCLAW_NODE_PENDING_CONTROL_REQUEST_CONNECT,
         ESP_OPENCLAW_NODE_PENDING_CONTROL_REQUEST_NONE);
     if (err != ESP_OK) {
+        esp_openclaw_node_lock_state(node);
+        node->connect_request_pending = false;
+        esp_openclaw_node_unlock_state(node);
         return err;
     }
     return ESP_OK;
 }
 
-static esp_err_t reserve_disconnect_request_locked(esp_openclaw_node_handle_t node)
+static esp_err_t reserve_disconnect_request_locked(
+    esp_openclaw_node_handle_t node,
+    esp_openclaw_node_connect_lease_t lease)
 {
-    if (node->state == ESP_OPENCLAW_NODE_INTERNAL_DESTROYING ||
-        node->state == ESP_OPENCLAW_NODE_INTERNAL_CLOSED) {
+    if (node->connect_request_pending || !esp_openclaw_node_connect_lease_matches_locked(
+            node, lease, node->connect_lease_generation)) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -597,10 +612,12 @@ static esp_err_t reserve_disconnect_request_locked(esp_openclaw_node_handle_t no
     return ESP_OK;
 }
 
-esp_err_t esp_openclaw_node_submit_disconnect_request(esp_openclaw_node_handle_t node)
+esp_err_t esp_openclaw_node_submit_disconnect_request(
+    esp_openclaw_node_handle_t node,
+    esp_openclaw_node_connect_lease_t lease)
 {
     esp_openclaw_node_lock_state(node);
-    esp_err_t err = reserve_disconnect_request_locked(node);
+    esp_err_t err = reserve_disconnect_request_locked(node, lease);
     esp_openclaw_node_unlock_state(node);
     if (err != ESP_OK) {
         return err;

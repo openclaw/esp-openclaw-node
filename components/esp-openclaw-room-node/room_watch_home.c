@@ -143,7 +143,7 @@ void room_watch_home_create(lv_obj_t *parent, lv_event_cb_t menu_handler, lv_eve
     status_timer = lv_timer_create(refresh_status, 1000, NULL);
     if (!display_awake) lv_timer_pause(status_timer);
     title_label = label(root, "Your OpenClaw", 26, 312, 316, 0xf4efee);
-    lv_obj_set_height(title_label, 28);
+    lv_obj_set_height(title_label, 34);
 #if LV_FONT_MONTSERRAT_20
     lv_obj_set_style_text_font(title_label, &lv_font_montserrat_20, 0);
 #endif
@@ -340,7 +340,7 @@ bool room_watch_home_render(const room_ui_facts_t *facts, const room_ui_talk_tar
         subtitle = "Ending your conversation";
     } else if (facts->talk == ROOM_UI_TALK_READY) {
         title = "Ready when you are";
-        subtitle = "Tap to start a live conversation";
+        subtitle = "";
     } else if (facts->wifi == ROOM_UI_WIFI_STARTING || facts->gateway == ROOM_UI_GATEWAY_STARTING) {
         title = "Your OpenClaw";
         subtitle = "Starting up";
@@ -359,10 +359,6 @@ bool room_watch_home_render(const room_ui_facts_t *facts, const room_ui_talk_tar
         if (target->expired) {
             if (facts->talk == ROOM_UI_TALK_READY) title = "Choose an agent";
             subtitle = "Refresh Agents to choose again";
-        } else {
-            snprintf(next_agent, sizeof(next_agent), "Next Talk: %s", target->name);
-            title = next_agent;
-            subtitle = "Ready for your next conversation";
         }
     }
     if (voice != NULL) {
@@ -381,11 +377,18 @@ bool room_watch_home_render(const room_ui_facts_t *facts, const room_ui_talk_tar
             title = "Couldn't record";
             subtitle = voice->detail;
         } else if (voice_enabled) {
-            snprintf(next_agent, sizeof(next_agent), "For %s", target->selected ? target->name : "default agent");
             title = "Ready when you are";
-            subtitle = next_agent;
+            subtitle = "";
         }
     }
+    const lv_font_t *headline_font = &lv_font_montserrat_14;
+#if LV_FONT_MONTSERRAT_20
+    headline_font = &lv_font_montserrat_20;
+#endif
+#if LV_FONT_MONTSERRAT_28
+    if (strcmp(title, "Ready when you are") == 0) headline_font = &lv_font_montserrat_28;
+#endif
+    lv_obj_set_style_text_font(title_label, headline_font, 0);
     if (strcmp(lv_label_get_text(title_label), title) != 0) lv_label_set_text(title_label, title);
     /* Setup details can contain line breaks; keep them above the action. */
     char line[96];

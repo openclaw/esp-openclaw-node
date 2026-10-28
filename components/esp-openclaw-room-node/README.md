@@ -59,7 +59,8 @@ agent without starting a call or changing an active conversation. The button
 confirms the choice after the room owner accepts it; Home shows the next
 agent. The Home agent capsule opens the directory directly and shows that
 accepted agent's configured fox/lobster avatar or initials. **Automatic** means
-Gateway-default routing. The capsule hides during calls and voice drafts so it
+Gateway-default routing. A short Home headline shows availability rather than
+repeating the selected agent or the action below it. The capsule hides during calls and voice drafts so it
 cannot be mistaken for their recipient. While selection is pending, Start Talk is disabled. A lost operator
 connection expires the choice and disables Start until an agent is chosen
 again, or **Use default** restores Gateway-default routing for the next call.

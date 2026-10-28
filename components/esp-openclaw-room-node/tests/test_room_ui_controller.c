@@ -1182,7 +1182,7 @@ static void check_watch_agents(const char *path)
     room_ui_store_facts(&facts);
     room_ui_set(ROOM_UI_IDLE, NULL);
     assert(room_ui_watch_menu("home") == ESP_OK);
-    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Next Talk: Kitsune")));
+    assert(visible_watch_text("Ready when you are") && visible_watch_text("Kitsune"));
     assert(room_ui_watch_menu("agents") == ESP_OK);
     target.expired = true;
     room_ui_store_talk_target(&target);
@@ -1204,7 +1204,8 @@ static void check_watch_agents(const char *path)
     assert(!visible_watch_text("Start Talk"));
     assert(room_ui_watch_menu("home") == ESP_OK);
     assert(visible_watch_text("with default agent"));
-    assert(lv_obj_is_visible(find_text(lv_layer_top(), "Tap to start a live conversation")));
+    assert(visible_watch_text("Ready when you are"));
+    assert(!visible_watch_text("Tap to start a live conversation"));
     puts("watch agents: acknowledged selection, next-call identity, paging and fenced pointer input passed");
 }
 
@@ -1407,7 +1408,7 @@ static void check_watch_conversations(const char *path)
     assert(room_ui_watch_menu("home") == ESP_OK);
     context = (room_conversation_context_t){0};
     room_ui_store_conversation_context(&context);
-    assert(visible_watch_text("Next Talk: Builder"));
+    assert(visible_watch_text("Ready when you are") && visible_watch_text("Builder"));
     target = (room_ui_talk_target_t){0};
     room_ui_store_talk_target(&target);
     assert(room_ui_watch_menu("conversations") == ESP_OK);

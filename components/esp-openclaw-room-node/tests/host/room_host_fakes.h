@@ -11,6 +11,7 @@
 #include "freertos/timers.h"
 #include "room_ui_controller.h"
 #include "room_media.h"
+#include "room_recording.h"
 #include "esp_openclaw_node_wifi.h"
 
 /* Single-threaded schedule points, not a model of the controller. */
@@ -43,6 +44,11 @@ typedef struct {
     unsigned ice_callbacks, signaling_connected, signaling_closed, peer_disconnects;
     unsigned critical_depth, callback_depth;
     bool media_owned, ambient, inside_start, media_busy;
+    unsigned recording_starts, recording_stops, recording_cancels;
+    bool recording_active;
+    bool finish_after_recording_snapshot;
+    room_recording_snapshot_t recording;
+    room_voice_snapshot_t voice;
     bool reject_task_creation;
     unsigned operator_connect_requests, node_connect_requests;
     room_ui_state_t ui;

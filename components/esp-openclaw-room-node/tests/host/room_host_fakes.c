@@ -763,7 +763,7 @@ int esp_webrtc_close(esp_webrtc_handle_t session)
 
 esp_err_t room_media_begin_talk(void)
 {
-    if (host.media_busy) return ESP_ERR_INVALID_STATE;
+    if (host.media_busy || host.recording_active) return ESP_ERR_INVALID_STATE;
     host_require(!host.media_owned && host.ambient, "exclusive ambient-to-Talk media admission");
     host.media_owned = true;
     ++host.media_begins;
@@ -798,6 +798,41 @@ esp_err_t room_media_get_webrtc_provider(esp_webrtc_media_provider_t *provider)
 void room_ui_set(room_ui_state_t state, const char *detail)
 { (void)detail; host.ui = state; }
 void room_ui_store_facts(const room_ui_facts_t *facts) { host.home = *facts; }
+void room_ui_set_voice_action_handler(void (*handler)(room_voice_action_t, uint32_t, uint64_t, uint64_t))
+{ (void)handler; }
+void room_ui_store_voice(const room_voice_snapshot_t *snapshot) { host.voice = *snapshot; }
+
+esp_err_t room_media_request_recording(room_media_talk_busy_cb_t busy, void *ctx)
+{
+    if (host.media_owned || host.media_busy || host.recording_active || host.recording.state == ROOM_RECORDING_READY ||
+        (busy != NULL && busy(ctx)))
+        return ESP_ERR_INVALID_STATE;
+    ++host.recording_starts;
+    host.recording_active = true;
+    host.recording = (room_recording_snapshot_t){.state = ROOM_RECORDING_STARTING};
+    return ESP_OK;
+}
+bool room_recording_active(void) { return host.recording_active; }
+void room_recording_stop(void) { ++host.recording_stops; host.recording.state = ROOM_RECORDING_STOPPING; }
+void room_recording_cancel(void) { ++host.recording_cancels; host.recording.state = ROOM_RECORDING_CANCELED; }
+void room_recording_snapshot(room_recording_snapshot_t *snapshot)
+{
+    *snapshot = host.recording;
+    if (host.finish_after_recording_snapshot) {
+        host.finish_after_recording_snapshot = false;
+        host.recording_active = false;
+        host.recording.state = ROOM_RECORDING_READY;
+    }
+}
+esp_err_t room_recording_take(uint8_t **audio, size_t *bytes)
+{
+    host_require(!host.recording_active && host.recording.state == ROOM_RECORDING_READY, "take terminal recording");
+    *bytes = host.recording.audio_bytes;
+    *audio = malloc(*bytes);
+    host_require(*audio != NULL, "audio fixture allocated");
+    host.recording.state = ROOM_RECORDING_IDLE;
+    return ESP_OK;
+}
 void room_ui_set_agents_action_handler(void (*handler)(bool, size_t)) { (void)handler; }
 void room_ui_set_devices_action_handler(void (*handler)(bool, unsigned)) { (void)handler; }
 bool room_ui_wants_devices(void) { return host.devices_wanted; }
@@ -917,7 +952,6 @@ int64_t esp_timer_get_time(void)
 }
 size_t strlcpy(char *destination, const char *source, size_t capacity)
 {
-    if (!host.console_snapshots) unsupported_boundary(__func__);
     size_t length = strlen(source);
     if (capacity > 0) {
         size_t copied = length < capacity - 1 ? length : capacity - 1;

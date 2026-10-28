@@ -77,7 +77,7 @@ static lv_indev_t *touchscreen;
 static lv_indev_state_t touch_state;
 static lv_point_t touch_point;
 static lv_obj_t *modal;
-static lv_obj_t *watch_menu_button, *watch_continue_button;
+static lv_obj_t *watch_menu_button, *watch_continue_button, *watch_voice_button, *watch_discard_button;
 static room_canvas_action_handler_t canvas_action;
 struct ui_timer { esp_timer_create_args_t args; bool active; };
 static struct ui_timer timers[4];
@@ -422,7 +422,8 @@ static unsigned check_home_tree(lv_obj_t *parent)
 {
     unsigned count = 1;
     assert(!lv_obj_has_flag(parent, LV_OBJ_FLAG_SCROLLABLE));
-    if (parent == watch_menu_button || parent == watch_continue_button)
+    if (parent == watch_menu_button || parent == watch_continue_button ||
+        parent == watch_voice_button || parent == watch_discard_button)
         assert(lv_obj_has_flag(parent, LV_OBJ_FLAG_CLICKABLE));
     else assert(!lv_obj_has_flag(parent, LV_OBJ_FLAG_CLICKABLE));
     lv_area_t area;
@@ -497,6 +498,8 @@ static void check_watch_home(const char *path)
     lv_obj_t *title = find_text(lv_layer_top(), "Ready when you are");
     watch_menu_button = lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_BARS "  Menu"));
     watch_continue_button = lv_obj_get_parent(find_text(lv_layer_top(), "Continue conversations"));
+    watch_voice_button = lv_obj_get_parent(find_text(lv_layer_top(), "Hold to record"));
+    watch_discard_button = lv_obj_get_parent(find_text(lv_layer_top(), "Discard"));
     assert(title && lv_obj_is_visible(title));
     assert(room_face_is_visible());
     lv_obj_update_layout(lv_layer_top());
@@ -1602,6 +1605,131 @@ static void check_watch_display_settings(const char *path)
     puts("watch display: accepted writes, failures, camera floor, sleep, stale presses and offline navigation passed");
 }
 
+static unsigned voice_begins, voice_finishes, voice_cancels;
+static uint32_t voice_request_generation;
+static void voice_action(room_voice_action_t action, uint32_t generation, uint64_t revision, uint64_t owner)
+{
+    assert(critical_depth == 0);
+    voice_request_generation = generation;
+    if (action == ROOM_VOICE_BEGIN) {
+        assert(revision == 42 && owner == 7);
+        ++voice_begins;
+    } else if (action == ROOM_VOICE_FINISH) ++voice_finishes;
+    else ++voice_cancels;
+}
+
+static room_voice_snapshot_t test_voice = {
+    .state = ROOM_VOICE_READY, .recipient_revision = 42, .owner_incarnation = 7,
+};
+static void show_voice(room_voice_state_t state)
+{
+    test_voice.state = state;
+    test_voice.generation = voice_request_generation;
+    test_voice.duration_ms = state == ROOM_VOICE_DRAFT ? 30000 : 4200;
+    room_ui_store_voice(&test_voice);
+    room_ui_refresh();
+}
+static void hold_voice(lv_obj_t *button)
+{
+    touch_talk(button, true);
+    lv_tick_inc(260);
+    lv_indev_read(touchscreen);
+}
+static void voice_snapshot(const char *base, const char *state)
+{
+    if (base == NULL) return;
+    char path[1024];
+    assert(snprintf(path, sizeof(path), "%s.voice-%s.ppm", base, state) < (int)sizeof(path));
+    snapshot(path);
+}
+static void check_watch_voice(const char *path)
+{
+    assert(room_ui_watch_menu("home") == ESP_OK);
+    room_ui_set_voice_action_handler(voice_action);
+    room_ui_talk_target_t target = {.revision = 42};
+    room_ui_store_talk_target(&target);
+    room_ui_facts_t facts = {.wifi = ROOM_UI_WIFI_CONNECTED, .gateway = ROOM_UI_GATEWAY_CONNECTED,
+        .talk = ROOM_UI_TALK_READY};
+    room_ui_store_facts(&facts);
+    room_ui_set(ROOM_UI_IDLE, NULL);
+    show_voice(ROOM_VOICE_READY);
+    expire_watch_hint();
+    lv_obj_t *button = lv_obj_get_parent(find_visible_text(lv_layer_top(), "Hold to record"));
+    assert(button != NULL && brightness == 0);
+    click_talk(button);
+    assert(voice_begins == 0 && brightness > 0); // First touch only wakes.
+    click_talk(button);
+    assert(voice_begins == 0); // A short tap never opens the microphone.
+    voice_snapshot(path, "ready");
+    hold_voice(button);
+    assert(voice_begins == 1);
+    show_voice(ROOM_VOICE_RECORDING);
+    fire_timer("text_hint");
+    assert(brightness > 0 && visible_watch_text("Recording: 4.2 s"));
+    voice_snapshot(path, "recording");
+    touch_talk(button, false);
+    assert(voice_finishes == 1);
+    show_voice(ROOM_VOICE_DRAFT);
+    assert(visible_watch_text("Not sent. Discarded when you leave."));
+    voice_snapshot(path, "draft");
+    lv_obj_t *discard_button = lv_obj_get_parent(find_visible_text(lv_layer_top(), "Discard"));
+    click_talk(discard_button);
+    assert(voice_cancels == 1);
+    show_voice(ROOM_VOICE_READY);
+    hold_voice(button);
+    assert(voice_begins == 2);
+    show_voice(ROOM_VOICE_DRAFT); // Duration cap while the finger is still down.
+    assert(!visible_watch_text("Discard"));
+    touch_talk(button, false);
+    assert(voice_finishes == 1 && voice_cancels == 1 && visible_watch_text("Discard"));
+    uint32_t draft_generation = test_voice.generation;
+    click_talk(button); // A short re-record tap must leave the draft cancellable.
+    assert(room_ui_watch_menu("menu") == ESP_OK);
+    assert(voice_request_generation == draft_generation);
+    assert(voice_cancels == 2); // Leaving discards the capped draft.
+    assert(room_ui_watch_menu("home") == ESP_OK);
+    show_voice(ROOM_VOICE_READY);
+    hold_voice(button);
+    touch_point.y -= 50;
+    lv_indev_read(touchscreen);
+    assert(voice_cancels == 3);
+    touch_talk(button, false);
+    assert(voice_finishes == 1);
+    show_voice(ROOM_VOICE_READY);
+    hold_voice(button);
+    lv_obj_send_event(button, LV_EVENT_PRESS_LOST, NULL);
+    assert(voice_cancels == 4);
+    touch_talk(button, false);
+    show_voice(ROOM_VOICE_READY);
+    hold_voice(button);
+    room_diagnostics_open();
+    assert(voice_cancels == 5);
+    touch_talk(button, false);
+    room_diagnostics_close();
+    show_voice(ROOM_VOICE_READY);
+    hold_voice(button);
+    canvas_active = true;
+    room_ui_refresh();
+    assert(voice_cancels == 6);
+    touch_talk(button, false);
+    canvas_active = false;
+    show_voice(ROOM_VOICE_READY);
+    // Context changes before repaint must reject even a still-painted control.
+    ++test_voice.owner_incarnation;
+    room_ui_store_voice(&test_voice);
+    hold_voice(button);
+    assert(voice_begins == 6);
+    touch_talk(button, false);
+    --test_voice.owner_incarnation;
+    show_voice(ROOM_VOICE_RECORDING);
+    fire_timer("text_hint");
+    snprintf(test_voice.detail, sizeof(test_voice.detail), "Microphone input stopped. Try again.");
+    show_voice(ROOM_VOICE_ERROR);
+    assert(visible_watch_text("Couldn't record") && brightness > 0);
+    voice_snapshot(path, "error");
+    puts("watch voice: wake, tap, hold, release, cap, discard, cover and stale-owner gestures passed");
+}
+
 int main(int argc, char **argv)
 {
     assert(argc >= 2);
@@ -1755,6 +1883,7 @@ int main(int argc, char **argv)
         check_watch_home_gesture();
         check_watch_devices(argc == 3 ? argv[2] : NULL);
         check_watch_display_settings(argc == 3 ? argv[2] : NULL);
+        check_watch_voice(argc == 3 ? argv[2] : NULL);
         // This isolated fixture replaces and destroys the mascot singleton.
         check_watch_repaint();
     }

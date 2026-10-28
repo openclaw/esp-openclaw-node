@@ -46,14 +46,20 @@ Voice-agent write actions require the shared
 [opt-in and Gateway approval steps](../../components/esp-openclaw-room-node/README.md#voice-agent-actions);
 the default firmware uses read-only voice access.
 
-Tap the screen or press BOOT to wake the display, then use **Start Talk** at the
-bottom of the screen. During connection and conversation it becomes **Stop Talk**.
-Start Talk names its next recipient below the action, independently of the
-conversation being browsed. The compact Canvas control omits this second line.
-A changed recipient must be repainted before a new Start press is accepted.
-It is disabled while Talk is unavailable or stopping. The control also appears
-over Canvas; the existing screen tap/hold gestures still toggle Canvas and open
-diagnostics. Diagnostics hides the Talk control until closed.
+Tap the screen or press BOOT to wake the display. Home's **Hold to record**
+control captures a local audio draft after a 250 ms hold; release to keep it or
+slide up to discard. Recording stops at 30 seconds. The draft is **not sent**:
+use **Discard** or hold to record again. Transcription and message submission
+are not connected to this control yet. Leaving Home, opening Canvas or
+Device status, or changing the selected agent/operator session discards it.
+Recording and drafts keep the screen awake and share the audio gate with Talk.
+
+For a live conversation, open **Menu** and use **Start Talk**. It names the next
+recipient independently of the conversation being browsed. During connection
+and conversation it becomes **Stop Talk**, including on Home. Start is disabled
+while Talk is unavailable or stopping, and a changed recipient must be
+repainted before a new press is accepted. The compact control over Canvas omits
+the recipient line. Diagnostics hides the Talk control until closed.
 
 The watch Home shares the Dial's compact Wi-Fi, OpenClaw link, and battery
 strip above the lobster, with a bounded headline and a separate bottom action.
@@ -65,7 +71,7 @@ connection state. Missing clock telemetry is omitted. The display still sleeps w
 waking it does not start a conversation. Idle, setup and error views keep static
 mascot artwork without running the animation timer; wake-up hints still animate.
 When a retained reader is available, Home shows its agent and **Continue
-conversations** above the separate Talk button. Continue restores the reader
+conversations** above the recording control. Continue restores the reader
 without changing the next Talk agent; a reader changed during the tap is not
 opened. Without a reader, a selected next-Talk agent appears in the compact
 headline. Setup, errors, and active calls take priority over the Continue card.

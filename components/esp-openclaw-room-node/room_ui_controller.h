@@ -5,6 +5,7 @@
 #include "esp_err.h"
 #include "room_agent_directory.h"
 #include "esp_openclaw_devices.h"
+#include "room_voice_draft.h"
 
 typedef enum {
     ROOM_UI_IDLE = 0,
@@ -65,6 +66,9 @@ typedef struct {
 void room_ui_init(void);
 /** Start carries the painted owner revision; Stop ignores it. Register before init. */
 void room_ui_set_talk_action_handler(void (*handler)(bool start, uint64_t recipient_revision));
+void room_ui_set_voice_action_handler(void (*handler)(room_voice_action_t action, uint32_t generation,
+                                                     uint64_t recipient_revision, uint64_t owner_incarnation));
+void room_ui_store_voice(const room_voice_snapshot_t *snapshot);
 /** Records directory intent without waiting for the Gateway or room owner lock. */
 void room_ui_set_agents_action_handler(void (*handler)(bool open, size_t offset));
 /** Copy a directory result outside the room owner lock; repaint retries on contention. */

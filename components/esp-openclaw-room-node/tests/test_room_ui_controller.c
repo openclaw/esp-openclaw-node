@@ -495,6 +495,8 @@ static void check_watch_repaint(void)
 
 static void check_watch_home(const char *path)
 {
+    wifi_status = (esp_openclaw_node_wifi_status_t){.connected = true,
+        .has_saved_network = true, .ssid = "Studio Wi-Fi", .ap_info_valid = true, .rssi = -55};
     room_ui_facts_t facts = {.wifi = ROOM_UI_WIFI_CONNECTED,
         .gateway = ROOM_UI_GATEWAY_CONNECTED, .talk = ROOM_UI_TALK_READY};
     room_ui_store_facts(&facts);
@@ -526,6 +528,18 @@ static void check_watch_home(const char *path)
     assert(action_area.x1 >= 24 && action_area.x2 < width - 24);
     assert(action_area.y1 >= 376 && action_area.y2 < height - 16);
     snapshot(path);
+    int left = width, right = 0, top = height, bottom = 0;
+    for (int y = 0; y < 300; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const uint8_t *pixel = frame + (y * width + x) * 4;
+            if (pixel[2] <= 140 || pixel[2] <= pixel[1] * 2) continue;
+            left = x < left ? x : left; right = x > right ? x : right;
+            top = y < top ? y : top; bottom = y > bottom ? y : bottom;
+        }
+    }
+    // The mascot must leave the status/header and the Home headline clear.
+    assert(right - left >= 100 && right - left < 174);
+    assert(top >= 100 && bottom < 296 && left >= 96 && right < width - 96);
 
     facts.talk = ROOM_UI_TALK_ACTIVE;
     room_ui_store_facts(&facts);

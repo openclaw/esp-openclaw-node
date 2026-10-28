@@ -5,12 +5,12 @@
 
 #include "watch_lobster_parts.h"
 
-#define LOBSTER_SIZE 288
+#define LOBSTER_SIZE WATCH_LOBSTER_SIZE
 #define INK 0x050810
 
 extern const uint8_t lobster_pixels[] asm("_binary_watch_lobster_argb8888_start");
-static lv_obj_t *root, *parts[5], *eyes[2], *glows[2], *happy_eyes[2], *mouth, *mouth_o;
-static lv_image_dsc_t images[5];
+static lv_obj_t *root, *frame, *parts[5], *eyes[2], *glows[2], *happy_eyes[2], *mouth, *mouth_o;
+static lv_image_dsc_t images[5], frame_image;
 static lv_point_precise_t mouth_points[9], happy_points[2][9];
 
 static int32_t unit(int32_t n) { return n * LOBSTER_SIZE / 120; }
@@ -43,8 +43,24 @@ static void round_part(lv_obj_t *obj, uint32_t color)
 
 esp_err_t room_lobster_create(lv_obj_t *parent)
 {
+    frame = lv_image_create(parent);
+    if (frame == NULL) return ESP_ERR_NO_MEM;
+    bare(frame);
+    frame_image = (lv_image_dsc_t){
+        .header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_ARGB8888,
+                   .w = WATCH_LOBSTER_FRAME_SIZE, .h = WATCH_LOBSTER_FRAME_SIZE,
+                   .stride = WATCH_LOBSTER_FRAME_SIZE * 4},
+        .data_size = WATCH_LOBSTER_FRAME_SIZE * WATCH_LOBSTER_FRAME_SIZE * 4,
+        .data = lobster_pixels + WATCH_LOBSTER_FRAME_OFFSET,
+    };
+    lv_image_set_src(frame, &frame_image);
+    lv_obj_center(frame);
     root = lv_obj_create(parent);
-    if (root == NULL) return ESP_ERR_NO_MEM;
+    if (root == NULL) {
+        lv_obj_delete(frame);
+        frame = NULL;
+        return ESP_ERR_NO_MEM;
+    }
     bare(root);
     lv_obj_set_size(root, LOBSTER_SIZE, LOBSTER_SIZE);
     lv_obj_add_flag(root, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
@@ -77,7 +93,7 @@ esp_err_t room_lobster_create(lv_obj_t *parent)
         round_part(glows[i], 0x00e5cc);
         bare(happy_eyes[i]);
         lv_obj_set_style_line_color(happy_eyes[i], lv_color_hex(INK), 0);
-        lv_obj_set_style_line_width(happy_eyes[i], 6, 0);
+        lv_obj_set_style_line_width(happy_eyes[i], 3, 0);
         lv_obj_set_style_line_rounded(happy_eyes[i], true, 0);
         for (int j = 0; j < 9; ++j) {
             happy_points[i][j] = (lv_point_precise_t){
@@ -90,7 +106,7 @@ esp_err_t room_lobster_create(lv_obj_t *parent)
     if (mouth == NULL || mouth_o == NULL) return ESP_ERR_NO_MEM;
     bare(mouth);
     lv_obj_set_style_line_color(mouth, lv_color_hex(INK), 0);
-    lv_obj_set_style_line_width(mouth, 5, 0);
+    lv_obj_set_style_line_width(mouth, 3, 0);
     lv_obj_set_style_line_rounded(mouth, true, 0);
     round_part(mouth_o, INK);
     room_lobster_update(&(room_lobster_pose_t){.eye_open_pct = 100, .eye_width_pct = 100});

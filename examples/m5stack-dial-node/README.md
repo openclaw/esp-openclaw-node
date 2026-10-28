@@ -7,9 +7,10 @@ examples. The Dial has no microphone or PSRAM; use the
 [Waveshare watch](../waveshare-esp32-s3-touch-amoled-1.8-room-node/README.md)
 for voice, wake word, and the image/A2UI Canvas.
 
-The display uses one 9.6 KiB DMA buffer. The face uses LVGL primitives, with no
-image assets or audio stack. The BSP owns touch, encoder, and button drivers;
-the application uses its existing LVGL input device.
+The display uses one 9.6 KiB DMA buffer. The face uses LVGL primitives;
+agent avatars use small local image assets. There is no audio stack. The BSP owns
+touch, encoder, and button drivers; the application uses its existing LVGL input
+device.
 
 ## Build and pair
 
@@ -102,8 +103,12 @@ not guarantee access to a later conversation or device action.
 
 The screen is upright with the USB connector on the right. The home screen
 shows a compact connection strip, a blinking face, and one primary action. Wi-Fi and
-Gateway status are separate; no battery level is invented. Home shows whether
-an agent action is assigned and retains a short status for the latest action.
+Gateway status are separate; no battery level is invented. The same strip stays
+visible above navigation pages. Signal refreshes once per second while browsing
+with the display awake, without interrupting a held selection. Compact keeps
+three rows and Comfortable keeps two; edge rows narrow to fit the round screen.
+Home shows whether an agent action is assigned and retains a short status for the
+latest action.
 With a retained reader selection, Home shows the agent name: press or tap
 **Continue** to return to its preview, or **Conversations** to return
 to its list. With no selection, **Choose agent** opens Agents. Offline,

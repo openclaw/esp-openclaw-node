@@ -10,6 +10,21 @@
 const char *WIFI_EVENT = "wifi", *IP_EVENT = "ip";
 static esp_event_handler_t ip_handler, wifi_handler;
 static void *ip_context, *wifi_context;
+static esp_netif_t station;
+static esp_event_handler_t drain_handler;
+static esp_event_base_t drain_base;
+static struct queued_event {
+    esp_event_base_t base;
+    int32_t id;
+    uint64_t data[8];
+    size_t size;
+} queue[32];
+static unsigned queued;
+static int64_t now_us = 1000000;
+static esp_err_t stop_result, deinit_result, post_result, init_result, start_result, ps_result;
+static bool initialized, running;
+static unsigned config_writes;
+static wifi_config_t saved_config;
 static EventBits_t event_bits;
 static esp_openclaw_node_command_t wifi_command;
 static wifi_ap_record_t ap;
@@ -54,17 +69,53 @@ esp_err_t esp_event_handler_register(esp_event_base_t base, int32_t id, esp_even
 {
     if (base == IP_EVENT) { assert(id == IP_EVENT_STA_GOT_IP); ip_handler = handler; ip_context = context; }
     if (base == WIFI_EVENT) { assert(id == ESP_EVENT_ANY_ID); wifi_handler = handler; wifi_context = context; }
+    if (base != IP_EVENT && base != WIFI_EVENT) {
+        assert(id == ESP_EVENT_ANY_ID); drain_handler = handler; drain_base = base;
+    }
     return ESP_OK;
 }
-void *esp_netif_create_default_wifi_sta(void) { static int netif; return &netif; }
-esp_err_t esp_wifi_init(const wifi_init_config_t *config) { (void)config; return ESP_OK; }
+esp_err_t esp_event_post(esp_event_base_t base, int32_t id, const void *data, size_t size, TickType_t wait)
+{
+    (void)wait;
+    if (post_result != ESP_OK) return post_result;
+    assert(queued < 32 && size <= sizeof(queue[0].data));
+    queue[queued].base = base; queue[queued].id = id; queue[queued].size = size;
+    memcpy(queue[queued++].data, data, size);
+    return ESP_OK;
+}
+#if SOC_WIFI_SUPPORTED && !CONFIG_ESP_WIFI_REMOTE_ENABLED && !CONFIG_ESP_HOST_WIFI_ENABLED
+static void dispatch_one(void)
+{
+    assert(queued);
+    struct queued_event event = queue[0];
+    memmove(queue, queue + 1, --queued * sizeof(queue[0]));
+    if (event.base == drain_base) drain_handler(NULL, event.base, event.id, event.data);
+    else if (event.base == IP_EVENT) ip_handler(ip_context, event.base, event.id, event.data);
+    else wifi_handler(wifi_context, event.base, event.id, event.data);
+}
+static void dispatch_all(void) { while (queued) dispatch_one(); }
+#endif
+esp_netif_t *esp_netif_create_default_wifi_sta(void) { return &station; }
+esp_err_t esp_wifi_init(const wifi_init_config_t *config)
+{
+    (void)config; assert(!initialized);
+    if (init_result == ESP_OK) initialized = true;
+    return init_result;
+}
+esp_err_t esp_wifi_deinit(void)
+{
+    assert(initialized && !running); ++driver_mutations;
+    if (deinit_result == ESP_OK) initialized = false;
+    return deinit_result;
+}
 esp_err_t esp_wifi_set_storage(int storage) { (void)storage; ++driver_mutations; return ESP_OK; }
 esp_err_t esp_wifi_set_mode(int mode) { (void)mode; ++driver_mutations; return ESP_OK; }
 esp_err_t esp_wifi_get_config(int iface, wifi_config_t *config)
 { (void)iface; *config = (wifi_config_t){0}; memcpy(config->sta.ssid, "Example Wi-Fi", 13); return ESP_OK; }
 esp_err_t esp_wifi_set_config(int iface, const wifi_config_t *config)
 {
-    (void)iface; (void)config; ++driver_mutations;
+    (void)iface; ++driver_mutations; ++config_writes;
+    if (config_result == ESP_OK) saved_config = *config;
     if (inject_disconnect) {
         inject_disconnect = false;
         wifi_event_sta_disconnected_t event = {.reason = 8};
@@ -72,10 +123,10 @@ esp_err_t esp_wifi_set_config(int iface, const wifi_config_t *config)
     }
     return config_result;
 }
-esp_err_t esp_wifi_start(void) { ++driver_mutations; return ESP_OK; }
-esp_err_t esp_wifi_stop(void) { ++driver_mutations; return ESP_OK; }
+esp_err_t esp_wifi_start(void) { assert(initialized); ++driver_mutations; if (start_result == ESP_OK) running = true; return start_result; }
+esp_err_t esp_wifi_stop(void) { assert(initialized); ++driver_mutations; if (stop_result == ESP_OK) running = false; return stop_result; }
 esp_err_t esp_wifi_restore(void) { ++driver_mutations; return ESP_OK; }
-esp_err_t esp_wifi_set_ps(int mode) { (void)mode; ++driver_mutations; return ESP_OK; }
+esp_err_t esp_wifi_set_ps(int mode) { (void)mode; ++driver_mutations; return ps_result; }
 esp_err_t esp_wifi_connect(void) { ++driver_mutations; ++connects; return connect_result; }
 esp_err_t esp_wifi_disconnect(void) { ++driver_mutations; return ESP_OK; }
 esp_err_t esp_wifi_sta_get_ap_info(wifi_ap_record_t *record) { ++ap_reads; *record = ap; return ap_result; }
@@ -117,7 +168,7 @@ esp_err_t esp_openclaw_node_register_command(esp_openclaw_node_handle_t node, co
 { (void)node; if (strcmp(command->name, "wifi.status") == 0) wifi_command = *command; return ESP_OK; }
 const esp_app_desc_t *esp_app_get_description(void) { static const esp_app_desc_t app = {.version = "test"}; return &app; }
 const char *esp_get_idf_version(void) { return "host"; }
-int64_t esp_timer_get_time(void) { return 1000000; }
+int64_t esp_timer_get_time(void) { return now_us; }
 
 static void check(bool condition, const char *message)
 {
@@ -186,7 +237,7 @@ static void check_setup_ownership(void)
     esp_err_t resumed = ESP_FAIL;
     wifi_ap_record_t records[1];
     uint16_t count = 1, total = 0;
-    ip_event_got_ip_t ip = {.ip_info.ip.addr = 0x010200c0};
+    ip_event_got_ip_t ip = {.esp_netif = &station, .ip_info.ip.addr = 0x010200c0};
     wifi_event_sta_disconnected_t disconnected = {.reason = 8};
     ip_handler(ip_context, IP_EVENT, IP_EVENT_STA_GOT_IP, &ip);
     unsigned before = driver_mutations;
@@ -255,7 +306,7 @@ static void check_setup_ownership(void)
 
 static void check_late_ip_after_disconnect(void)
 {
-    ip_event_got_ip_t ip = {.ip_info.ip.addr = 0x010200c0};
+    ip_event_got_ip_t ip = {.esp_netif = &station, .ip_info.ip.addr = 0x010200c0};
     check(esp_openclaw_node_wifi_disconnect() == ESP_OK, "explicit disconnect accepted");
     ip_handler(ip_context, IP_EVENT, IP_EVENT_STA_GOT_IP, &ip);
     esp_openclaw_node_wifi_status_t wifi;
@@ -281,6 +332,229 @@ static void check_late_ip_after_disconnect(void)
     check(!esp_openclaw_node_wifi_wait_for_connection(0), "forgotten network cannot wake connection waiters");
 }
 
+static bool authorized(void *context) { return *(bool *)context; }
+
+#if SOC_WIFI_SUPPORTED && !CONFIG_ESP_WIFI_REMOTE_ENABLED && !CONFIG_ESP_HOST_WIFI_ENABLED
+static esp_openclaw_node_wifi_attempt_t poll_join(uint64_t lease, uint64_t id, bool allowed)
+{
+    esp_openclaw_node_wifi_attempt_t result = {0};
+    assert(esp_openclaw_node_wifi_setup_join_poll(lease, id, authorized, &allowed, &result) == ESP_OK);
+    return result;
+}
+
+static esp_openclaw_node_wifi_attempt_t advance_join(uint64_t lease, uint64_t id,
+    esp_openclaw_node_wifi_attempt_state_t state, bool allowed)
+{
+    for (unsigned i = 0; i < 40; ++i) {
+        esp_openclaw_node_wifi_attempt_t result = poll_join(lease, id, allowed);
+        if (result.state == state) return result;
+        dispatch_all();
+    }
+    assert(!"attempt did not reach expected outcome");
+    return (esp_openclaw_node_wifi_attempt_t){0};
+}
+
+static bool revoke_before_write(void *context)
+{
+    unsigned *calls = context;
+    return ++*calls == 1;
+}
+
+static uint64_t begin_join(uint64_t lease)
+{
+    uint64_t id = 0;
+    assert(esp_openclaw_node_wifi_setup_join_begin(lease, "Setup network", "example-password", &id) == ESP_OK);
+    assert(id != 0);
+    return id;
+}
+
+static void advance_to_barrier(uint64_t lease, uint64_t id)
+{
+    for (unsigned i = 0; i < 10 && !queued; ++i) poll_join(lease, id, true);
+    assert(queued && queue[0].base == drain_base);
+}
+#endif
+
+static void check_setup_attempts(void)
+{
+    uint64_t lease = 0, id = 0;
+    assert(esp_openclaw_node_wifi_setup_acquire(&lease) == ESP_OK);
+#if SOC_WIFI_SUPPORTED && !CONFIG_ESP_WIFI_REMOTE_ENABLED && !CONFIG_ESP_HOST_WIFI_ENABLED
+    ip_event_got_ip_t ip = {.esp_netif = &station, .ip_info.ip.addr = 0x010200c0};
+    wifi_event_sta_disconnected_t disconnected = {.reason = 201};
+    esp_err_t resumed;
+    unsigned before = driver_mutations;
+    id = begin_join(lease);
+    check(esp_openclaw_node_wifi_setup_join_begin(lease, "Other", NULL, &id) == ESP_ERR_WIFI_STATE,
+          "overlapping attempt is rejected without replacing its ID");
+    check(driver_mutations == before, "begin only queues credentials");
+    check(esp_openclaw_node_wifi_setup_release(lease, &resumed) == ESP_ERR_WIFI_STATE,
+          "active attempt retains ownership");
+    check(esp_openclaw_node_wifi_setup_join_cancel(lease, id) == ESP_OK, "queued attempt can cancel");
+    check(poll_join(lease, id, true).state == ESP_OPENCLAW_NODE_WIFI_CANCELLED && driver_mutations == before,
+          "cancel before start does not touch the radio");
+
+    uint64_t old_id = id;
+    id = begin_join(lease);
+    check(id != old_id && esp_openclaw_node_wifi_setup_join_cancel(lease, old_id) == ESP_ERR_INVALID_STATE,
+          "stale attempt cannot cancel its replacement");
+    unsigned writes = config_writes;
+    advance_to_barrier(lease, id);
+    struct queued_event stale_marker = queue[0];
+    /* A prior connection's queued events, including IP queued by another event,
+     * must drain before a new configuration is committed. */
+    wifi_handler(wifi_context, WIFI_EVENT, WIFI_EVENT_STA_CONNECTED, NULL);
+    ip_handler(ip_context, IP_EVENT, IP_EVENT_STA_GOT_IP, &ip);
+    dispatch_one();
+    assert(esp_event_post(IP_EVENT, IP_EVENT_STA_GOT_IP, &ip, sizeof(ip), 0) == ESP_OK);
+    poll_join(lease, id, true);
+    check(config_writes == writes && !esp_openclaw_node_wifi_is_connected(),
+          "first barrier is not sufficient to apply credentials or accept old IP");
+    dispatch_one();
+    poll_join(lease, id, true);
+    check(config_writes == writes, "nested old IP remains fenced behind second barrier");
+    dispatch_all();
+    advance_join(lease, id, ESP_OPENCLAW_NODE_WIFI_JOINING, true);
+    check(config_writes == writes + 1 && strcmp((char *)saved_config.sta.ssid, "Setup network") == 0,
+          "configuration is applied after both barriers");
+    ip_handler(ip_context, IP_EVENT, IP_EVENT_STA_GOT_IP, &ip);
+    check(poll_join(lease, id, true).state == ESP_OPENCLAW_NODE_WIFI_JOINING,
+          "IP without this attempt's association cannot complete join");
+    wifi_handler(wifi_context, WIFI_EVENT, WIFI_EVENT_STA_CONNECTED, NULL);
+    esp_netif_t other_station;
+    ip.esp_netif = &other_station;
+    ip_handler(ip_context, IP_EVENT, IP_EVENT_STA_GOT_IP, &ip);
+    check(poll_join(lease, id, true).state == ESP_OPENCLAW_NODE_WIFI_JOINING,
+          "another netif cannot complete join");
+    ip.esp_netif = &station;
+    ip_handler(ip_context, IP_EVENT, IP_EVENT_STA_GOT_IP, &ip);
+    esp_openclaw_node_wifi_attempt_t result = poll_join(lease, id, true);
+    check(result.state == ESP_OPENCLAW_NODE_WIFI_SUCCEEDED && result.credentials_saved,
+          "own association and IP complete an authorized join");
+    check(esp_openclaw_node_wifi_setup_join_cancel(lease, id) == ESP_OK &&
+          poll_join(lease, id, false).state == ESP_OPENCLAW_NODE_WIFI_SUCCEEDED,
+          "terminal receipt cannot be rewritten by cancellation");
+    check(esp_openclaw_node_wifi_setup_release(lease, &resumed) == ESP_OK &&
+          esp_openclaw_node_wifi_is_connected(), "successful link transfers to ordinary ownership");
+
+    assert(esp_openclaw_node_wifi_setup_acquire(&lease) == ESP_OK);
+    id = begin_join(lease);
+    before = driver_mutations;
+    check(poll_join(lease, id, false).state == ESP_OPENCLAW_NODE_WIFI_CANCELLED &&
+          driver_mutations == before && esp_openclaw_node_wifi_is_connected(),
+          "revoked queued work preserves existing connection");
+    id = begin_join(lease);
+    advance_join(lease, id, ESP_OPENCLAW_NODE_WIFI_JOINING, true);
+    wifi_handler(wifi_context, WIFI_EVENT, WIFI_EVENT_STA_CONNECTED, NULL);
+    ip_handler(ip_context, IP_EVENT, IP_EVENT_STA_GOT_IP, &ip);
+    check(poll_join(lease, id, false).state == ESP_OPENCLAW_NODE_WIFI_DRAINING,
+          "authority lost after IP cancels instead of reporting success");
+    advance_join(lease, id, ESP_OPENCLAW_NODE_WIFI_CANCELLED, false);
+    check(!esp_openclaw_node_wifi_is_connected(), "revocation drains even without authority");
+
+    id = begin_join(lease);
+    advance_join(lease, id, ESP_OPENCLAW_NODE_WIFI_JOINING, true);
+    wifi_handler(wifi_context, WIFI_EVENT, WIFI_EVENT_STA_CONNECTED, NULL);
+    wifi_handler(wifi_context, WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, &disconnected);
+    wifi_handler(wifi_context, WIFI_EVENT, WIFI_EVENT_STA_CONNECTED, NULL);
+    ip_handler(ip_context, IP_EVENT, IP_EVENT_STA_GOT_IP, &ip);
+    check(!esp_openclaw_node_wifi_is_connected() &&
+          poll_join(lease, id, true).state == ESP_OPENCLAW_NODE_WIFI_DRAINING,
+          "disconnect remains latched despite a later association and IP");
+    result = advance_join(lease, id, ESP_OPENCLAW_NODE_WIFI_FAILED, true);
+    check(result.error == ESP_ERR_WIFI_CONN && result.disconnect_reason == 201 && result.credentials_saved,
+          "failed receipt keeps join error and saved-credential outcome");
+
+    id = begin_join(lease);
+    advance_join(lease, id, ESP_OPENCLAW_NODE_WIFI_JOINING, true);
+    now_us += (int64_t)ESP_OPENCLAW_NODE_WIFI_ATTEMPT_TIMEOUT_MS * 1000;
+    check(poll_join(lease, id, true).state == ESP_OPENCLAW_NODE_WIFI_DRAINING,
+          "join timeout is not drain completion");
+    result = advance_join(lease, id, ESP_OPENCLAW_NODE_WIFI_FAILED, true);
+    check(result.error == ESP_ERR_TIMEOUT, "join deadline produces bounded failed receipt");
+
+    /* Failure at each lifecycle boundary must retain ownership without retrying
+     * until the owner explicitly requests recovery. The fake driver rejects
+     * deinit while running and init over an existing instance. */
+    esp_err_t *failures_at[] = {&stop_result, &deinit_result, &post_result,
+        &init_result, &start_result, &ps_result};
+    for (size_t i = 0; i < sizeof(failures_at) / sizeof(failures_at[0]); ++i) {
+        id = begin_join(lease);
+        *failures_at[i] = ESP_FAIL;
+        result = advance_join(lease, id, ESP_OPENCLAW_NODE_WIFI_RECOVERY_REQUIRED, true);
+        before = driver_mutations;
+        check(result.recovery_error == ESP_FAIL &&
+              esp_openclaw_node_wifi_setup_release(lease, &resumed) == ESP_ERR_WIFI_STATE,
+              "failed drain retains ownership with recovery reason");
+        poll_join(lease, id, true);
+        poll_join(lease, id, true);
+        check(driver_mutations == before, "blocked drain does not retry driver calls automatically");
+        *failures_at[i] = ESP_OK;
+        assert(esp_openclaw_node_wifi_setup_join_retry_drain(lease, id) == ESP_OK);
+        advance_join(lease, id, ESP_OPENCLAW_NODE_WIFI_FAILED, true);
+    }
+
+    id = begin_join(lease);
+    advance_to_barrier(lease, id);
+    struct queued_event old_round = queue[0];
+    now_us += (int64_t)ESP_OPENCLAW_NODE_WIFI_ATTEMPT_TIMEOUT_MS * 1000;
+    check(poll_join(lease, id, true).state == ESP_OPENCLAW_NODE_WIFI_RECOVERY_REQUIRED,
+          "unprocessed barrier times out without releasing ownership");
+    assert(esp_openclaw_node_wifi_setup_join_retry_drain(lease, id) == ESP_OK);
+    dispatch_all();
+    advance_to_barrier(lease, id);
+    unsigned pending = queued;
+    drain_handler(NULL, drain_base, old_round.id, old_round.data);
+    drain_handler(NULL, drain_base, stale_marker.id, stale_marker.data);
+    poll_join(lease, id, true);
+    check(queued == pending, "old attempt and drain generation cannot advance the new barrier");
+    advance_join(lease, id, ESP_OPENCLAW_NODE_WIFI_FAILED, true);
+
+    esp_err_t *join_failures[] = {&config_result, &connect_result};
+    for (size_t i = 0; i < sizeof(join_failures) / sizeof(join_failures[0]); ++i) {
+        id = begin_join(lease);
+        *join_failures[i] = ESP_FAIL;
+        result = advance_join(lease, id, ESP_OPENCLAW_NODE_WIFI_FAILED, true);
+        check(result.error == ESP_FAIL && result.credentials_saved == (i == 1),
+              "write and connect failures drain and report whether credentials were saved");
+        *join_failures[i] = ESP_OK;
+    }
+
+    /* Revocation at the final write boundary is checked after the general poll
+     * check as well. A callback that changes its answer models a closing owner. */
+    id = begin_join(lease);
+    writes = config_writes;
+    advance_to_barrier(lease, id);
+    dispatch_all();
+    poll_join(lease, id, true);
+    dispatch_all();
+    poll_join(lease, id, true); /* restore station */
+    unsigned authorization_calls = 0;
+    assert(esp_openclaw_node_wifi_setup_join_poll(lease, id, revoke_before_write,
+        &authorization_calls, &result) == ESP_OK);
+    check(authorization_calls == 2 && result.state == ESP_OPENCLAW_NODE_WIFI_DRAINING,
+          "authority is rechecked immediately before credential commit");
+    advance_join(lease, id, ESP_OPENCLAW_NODE_WIFI_CANCELLED, false);
+    check(config_writes == writes, "revoked setup never writes credentials");
+    before = connects;
+    check(esp_openclaw_node_wifi_setup_release(lease, &resumed) == ESP_OK && connects == before,
+          "failed or cancelled setup does not restart automatic joining");
+    check(esp_openclaw_node_wifi_connect() == ESP_OK, "owner may explicitly reconnect after cleanup");
+#else
+    bool allowed = true;
+    esp_openclaw_node_wifi_attempt_t result = {0};
+    unsigned before = driver_mutations;
+    check(esp_openclaw_node_wifi_setup_join_begin(lease, "Setup network", NULL, &id) == ESP_ERR_NOT_SUPPORTED && id == 0,
+          "remote backend rejects native drain without accepting credentials");
+    check(esp_openclaw_node_wifi_setup_join_poll(lease, 1, authorized, &allowed, &result) == ESP_ERR_NOT_SUPPORTED &&
+          esp_openclaw_node_wifi_setup_join_cancel(lease, 1) == ESP_ERR_NOT_SUPPORTED &&
+          esp_openclaw_node_wifi_setup_join_retry_drain(lease, 1) == ESP_ERR_NOT_SUPPORTED && driver_mutations == before,
+          "remote lifecycle APIs remain side-effect free");
+    esp_err_t resumed;
+    assert(esp_openclaw_node_wifi_setup_release(lease, &resumed) == ESP_OK);
+#endif
+}
+
 int main(void)
 {
     assert(esp_openclaw_node_register_device_commands(NULL, NULL) == ESP_OK);
@@ -290,7 +564,7 @@ int main(void)
     cJSON_Delete(result);
 
     assert(esp_openclaw_node_wifi_start() == ESP_OK);
-    ip_event_got_ip_t event = {.ip_info.ip.addr = 0x010200c0};
+    ip_event_got_ip_t event = {.esp_netif = &station, .ip_info.ip.addr = 0x010200c0};
     assert(ip_handler != NULL);
     ip_handler(ip_context, IP_EVENT, IP_EVENT_STA_GOT_IP, &event);
     ap_result = ESP_FAIL;
@@ -325,6 +599,7 @@ int main(void)
     check_mutation_ownership();
     check_setup_ownership();
     check_late_ip_after_disconnect();
+    check_setup_attempts();
     printf("Wi-Fi status: %u failed checks\n", failures);
     return failures ? 1 : 0;
 }

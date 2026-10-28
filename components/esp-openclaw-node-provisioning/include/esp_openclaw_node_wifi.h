@@ -99,9 +99,9 @@ typedef uint64_t esp_openclaw_node_wifi_setup_lease_t;
 esp_err_t esp_openclaw_node_wifi_setup_acquire(esp_openclaw_node_wifi_setup_lease_t *lease);
 
 /**
- * @brief Release matching ownership after its blocking scan has returned.
+ * @brief Release matching ownership after its scan or setup attempt has finished.
  *
- * A stale lease returns ESP_ERR_INVALID_STATE; an active scan returns
+ * A stale lease returns ESP_ERR_INVALID_STATE; an active scan or nonterminal attempt returns
  * ESP_ERR_WIFI_STATE. Neither releases ownership nor changes @p reconnect_result.
  * Success releases ownership and replays at most one deferred reconnect when
  * still desired and disconnected. The return value describes lease release;
@@ -123,6 +123,62 @@ esp_err_t esp_openclaw_node_wifi_setup_release(
 esp_err_t esp_openclaw_node_wifi_setup_scan(
     esp_openclaw_node_wifi_setup_lease_t lease,
     wifi_ap_record_t *records, uint16_t *count, uint16_t *total);
+
+#define ESP_OPENCLAW_NODE_WIFI_ATTEMPT_TIMEOUT_MS UINT64_C(30000)
+
+typedef enum {
+    ESP_OPENCLAW_NODE_WIFI_PREPARING,
+    ESP_OPENCLAW_NODE_WIFI_JOINING,
+    ESP_OPENCLAW_NODE_WIFI_DRAINING,
+    ESP_OPENCLAW_NODE_WIFI_RECOVERY_REQUIRED,
+    ESP_OPENCLAW_NODE_WIFI_SUCCEEDED,
+    ESP_OPENCLAW_NODE_WIFI_FAILED,
+    ESP_OPENCLAW_NODE_WIFI_CANCELLED,
+} esp_openclaw_node_wifi_attempt_state_t;
+
+typedef struct {
+    uint64_t id;
+    esp_openclaw_node_wifi_attempt_state_t state;
+    esp_err_t error;
+    esp_err_t recovery_error;
+    uint8_t disconnect_reason;
+    bool credentials_saved;
+} esp_openclaw_node_wifi_attempt_t;
+
+/** Start one native-radio join under the lease; does not yet change the radio.
+ * Calls below belong to one serialized owner task, outside the default event
+ * loop. Poll regularly to progress. A successful begin means queued, not joined.
+ * Native stop/deinit plus two event-loop barriers fence older join/IP events
+ * before applying credentials. Remote Wi-Fi backends return NOT_SUPPORTED.
+ * IDs are boot-unique; old IDs cannot operate on a replacement attempt. */
+esp_err_t esp_openclaw_node_wifi_setup_join_begin(
+    esp_openclaw_node_wifi_setup_lease_t lease, const char *ssid,
+    const char *passphrase, uint64_t *attempt_id);
+
+/** Revalidate the live peer, setup generation and local confirmation. Called
+ * only on the owner task; must not reenter any Wi-Fi attempt API. */
+typedef bool (*esp_openclaw_node_wifi_authorize_t)(void *context);
+
+/** Progress one step and copy the result. Authorization is checked before
+ * teardown and immediately before credential/connection side effects.
+ * Loss of authority cancels and drains. Only SUCCEEDED/FAILED/CANCELLED are
+ * terminal; a timeout or driver/barrier failure is never proof of drain.
+ * RECOVERY_REQUIRED retains the lease until explicit retry succeeds.
+ * After a started failure/cancel, saved credentials remain but automatic
+ * reconnect stays disabled. A successful link transfers to ordinary ownership.
+ * Outputs are unchanged for an invalid lease/ID. */
+esp_err_t esp_openclaw_node_wifi_setup_join_poll(
+    esp_openclaw_node_wifi_setup_lease_t lease, uint64_t attempt_id,
+    esp_openclaw_node_wifi_authorize_t authorize, void *context,
+    esp_openclaw_node_wifi_attempt_t *result);
+
+/** Request cancellation. Keep polling until terminal; does not release lease. */
+esp_err_t esp_openclaw_node_wifi_setup_join_cancel(
+    esp_openclaw_node_wifi_setup_lease_t lease, uint64_t attempt_id);
+
+/** Retry a failed drain explicitly, with a fresh barrier generation. */
+esp_err_t esp_openclaw_node_wifi_setup_join_retry_drain(
+    esp_openclaw_node_wifi_setup_lease_t lease, uint64_t attempt_id);
 
 /**
  * @brief Wait for the station to connect.

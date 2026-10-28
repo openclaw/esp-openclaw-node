@@ -19,7 +19,7 @@ def main():
             "esp_err.h", "esp_wifi.h", "esp_check.h", "esp_event.h", "esp_log.h",
             "esp_netif.h", "esp_app_desc.h", "esp_system.h", "esp_timer.h",
             "esp_openclaw_node.h", "freertos/FreeRTOS.h", "freertos/event_groups.h",
-            "freertos/semphr.h",
+            "freertos/semphr.h", "soc/soc_caps.h",
         ):
             path = work / name
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -29,7 +29,7 @@ def main():
         subprocess.run(["cc", "-std=gnu11", "-g", "-fsanitize=address,undefined",
                         "-Wno-deprecated-declarations", "-c", str(args.cjson_dir / "cJSON.c"),
                         "-o", str(cjson_object)], check=True)
-        subprocess.run([
+        command = [
             "cc", "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-g",
             "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
             "-I", str(work), "-I", str(tests / "host"),
@@ -39,8 +39,12 @@ def main():
             str(component / "esp_openclaw_node_common_device_node_cmd.c"),
             str(component / "esp_openclaw_node_example_json.c"),
             str(cjson_object), "-lm", "-o", str(binary),
-        ], check=True)
-        subprocess.run([str(binary)], check=True)
+        ]
+        for flags in ([], ["-DSOC_WIFI_SUPPORTED=0"],
+                      ["-DCONFIG_ESP_WIFI_REMOTE_ENABLED=1"],
+                      ["-DCONFIG_ESP_HOST_WIFI_ENABLED=1"]):
+            subprocess.run(command + flags, check=True)
+            subprocess.run([str(binary)], check=True)
 
 
 if __name__ == "__main__":

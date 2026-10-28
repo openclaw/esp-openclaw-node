@@ -1,6 +1,7 @@
 #pragma once
 
 #include "dial_action.h"
+#include "openclaw_status_bar.h"
 #include "dial_directory.h"
 #include "dial_messaging.h"
 #include "dial_reply.h"
@@ -17,6 +18,7 @@ typedef void (*dial_navigation_handler_t)(dial_navigation_event_t event, size_t 
 typedef struct {
     lv_obj_t *root, *heading, *back, *rows[3], *icons[3], *names[3], *hint, *description;
     lv_obj_t *identity, *preview_body, *preview_text;
+    openclaw_status_bar_t status;
     lv_obj_t *avatars[3], *detail_avatar, *detail_initials;
     lv_obj_t *messaging_icon, *messaging_status, *messaging_detail;
     dial_navigation_view_t view;

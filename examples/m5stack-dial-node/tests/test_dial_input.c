@@ -299,11 +299,11 @@ static void check_reader_limits(lv_indev_t *encoder, const char *name)
     advance(40);
 }
 
-static unsigned active_pixels(int x1, int x2)
+static unsigned active_pixels(int x1, int x2, int top)
 {
     unsigned count = 0;
     const unsigned active = (0xbf >> 3) << 11 | (0xe5 >> 2) << 5 | (0xd9 >> 3);
-    for (int y = 20; y < 42; ++y)
+    for (int y = top; y < top + 22; ++y)
         for (int x = x1; x < x2; ++x)
             if (frame[y * 240 + x] == active) ++count;
     return count;
@@ -315,7 +315,7 @@ static unsigned paint_status(openclaw_status_facts_t facts, const char *name)
     lv_obj_invalidate(lv_screen_active());
     lv_refr_now(NULL);
     snapshot(name);
-    return active_pixels(73, 100);
+    return active_pixels(73, 100, 20);
 }
 
 static void check_status_bar(void)
@@ -338,11 +338,11 @@ static void check_status_bar(void)
     status.rssi = -60;
     unsigned strong = paint_status(status, "status-strong");
     assert(strong > medium && medium > weak && weak > unknown);
-    assert(active_pixels(109, 132) == 0);
+    assert(active_pixels(109, 132, 20) == 0);
     status.gateway_connected = true;
     status.rssi = 0;
     assert(paint_status(status, "status-online") == strong);
-    assert(active_pixels(109, 132) > 0);
+    assert(active_pixels(109, 132, 20) > 0);
     for (int y = 0; y < 22; ++y)
         assert(memcmp(&battery[y * 26], &frame[(20 + y) * 240 + 141], 26 * sizeof(uint16_t)) == 0);
     status.signal_known = false;
@@ -1061,6 +1061,13 @@ int main(int argc, char **argv)
     lv_obj_set_hidden(home.root, true);
     dial_navigation_open(&navigation, false);
     advance(40);
+    esp_openclaw_node_wifi_status_t status_wifi = {
+        .connected = true, .ap_info_valid = true, .rssi = -51,
+    };
+    dial_navigation_set_connection(&navigation, &status_wifi, true);
+    lv_refr_now(NULL);
+    assert(active_pixels(109, 132, 8) > 0);
+    snapshot("menu-status-online");
     encoder_diff = 1;
     lv_indev_read(encoder);
     advance(40);
@@ -1074,8 +1081,13 @@ int main(int argc, char **argv)
     touch(150, 95, false);
     assert(navigation.view == DIAL_NAV_MENU && refreshes == 0);
     touch(120, 82, true);
+    status_wifi.rssi = -85;
+    dial_navigation_set_connection(&navigation, &status_wifi, false);
+    lv_refr_now(NULL);
+    assert(active_pixels(109, 132, 20) == 0 && active_pixels(73, 100, 20) > 0);
     touch(120, 82, false);
     assert(navigation.view == DIAL_NAV_AGENTS && refreshes == 1);
+    dial_navigation_set_connection(&navigation, &status_wifi, true);
     roster = (dial_agents_snapshot_t){.state = DIAL_AGENTS_READY, .revision = 1,
         .page = {.count = 8, .total = 10}};
     for (unsigned i = 0; i < 8; ++i) {
@@ -1088,18 +1100,18 @@ int main(int argc, char **argv)
     advance(40);
     for (unsigned i = 0; i < lv_obj_get_child_count(navigation.root); ++i)
         check_home_bounds(lv_obj_get_child(navigation.root, i));
-    uint32_t fox = avatar_hash(46, 70, 24);
+    uint32_t fox = avatar_hash(46, 80, 24);
     snapshot("agents-fox");
     strcpy(roster.page.agents[0].emoji, "🦞");
     ++roster.revision;
     dial_navigation_update(&navigation, &roster);
-    assert(avatar_hash(46, 70, 24) != fox);
+    assert(avatar_hash(46, 80, 24) != fox);
     snapshot("agents-lobster");
     // The image must pass pointer input to its owning row.
     touch(58, 82, true);
     touch(58, 82, false);
     assert(navigation.view == DIAL_NAV_DETAIL);
-    uint32_t lobster = avatar_hash(100, 64, 40);
+    uint32_t lobster = avatar_hash(100, 72, 40);
     snapshot("agent-lobster");
     strcpy(roster.page.agents[0].emoji, "🦊");
     ++roster.revision;
@@ -1107,7 +1119,7 @@ int main(int argc, char **argv)
     assert(navigation.view == DIAL_NAV_AGENTS);
     touch(58, 82, true);
     touch(58, 82, false);
-    assert(avatar_hash(100, 64, 40) != lobster);
+    assert(avatar_hash(100, 72, 40) != lobster);
     snapshot("agent-fox");
     strcpy(roster.page.agents[0].emoji, "🔮");
     ++roster.revision;

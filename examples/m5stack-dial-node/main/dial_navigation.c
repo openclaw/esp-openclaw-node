@@ -86,17 +86,20 @@ static void list_row(dial_navigation_t *nav, unsigned row, const char *name)
 {
     int height = openclaw_density_row_height(false);
     bool compact = openclaw_density() == OPENCLAW_DENSITY_COMPACT;
-    lv_obj_set_pos(nav->rows[row], 38, (compact ? 58 : 66) + (int)row * (compact ? 46 : 68));
-    lv_obj_set_size(nav->rows[row], 164, height);
+    int width = compact ? (row == 2 ? 150 : 164) : (row == 1 ? 162 : 164);
+    int name_width = width - 52;
+    /* Edge rows narrow with the circular display below the status header. */
+    lv_obj_set_pos(nav->rows[row], (240 - width) / 2, (compact ? 68 : 72) + (int)row * (compact ? 46 : 66));
+    lv_obj_set_size(nav->rows[row], width, height);
     lv_obj_set_pos(nav->icons[row], 12, (height - 16) / 2);
     const lv_font_t *font = &lv_font_montserrat_16;
     lv_point_t measured;
     lv_text_get_size(&measured, name, &lv_font_montserrat_20, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-    if (nav->first + row == nav->focus && measured.x <= 112) font = &lv_font_montserrat_20;
+    if (nav->first + row == nav->focus && measured.x <= name_width) font = &lv_font_montserrat_20;
     lv_obj_set_style_text_font(nav->names[row], font, 0);
     lv_obj_set_height(nav->names[row], font->line_height);
     lv_obj_set_pos(nav->names[row], 40, (height - font->line_height) / 2);
-    lv_obj_set_width(nav->names[row], 112);
+    lv_obj_set_width(nav->names[row], name_width);
     lv_obj_set_y(nav->avatars[row], (height - 24) / 2);
 }
 
@@ -267,10 +270,12 @@ void dial_navigation_create(dial_navigation_t *nav, lv_obj_t *parent,
     lv_obj_set_size(nav->root, 240, 240);
     lv_obj_set_clickable(nav->root, false);
     lv_obj_set_scrollable(nav->root, false);
-    nav->back = button(nav, nav->root, 54, 30, 28, 28);
+    openclaw_status_bar_create(&nav->status, nav->root);
+    lv_obj_set_pos(nav->status.root, 73, 20);
+    nav->back = button(nav, nav->root, 54, 40, 28, 28);
     lv_obj_set_style_bg_color(nav->back, lv_color_hex(0x302535), 0);
     text(nav->back, LV_SYMBOL_LEFT, 9, 5, 14);
-    nav->heading = text(nav->root, "Menu", 88, 34, 96);
+    nav->heading = text(nav->root, "Menu", 88, 44, 96);
     lv_obj_set_style_text_font(nav->heading, &lv_font_montserrat_16, 0);
     for (unsigned i = 0; i < 3; ++i) {
         nav->rows[i] = button(nav, nav->root, 38, 64 + (int)i * 44, 164, 36);
@@ -280,7 +285,8 @@ void dial_navigation_create(dial_navigation_t *nav, lv_obj_t *parent,
         nav->avatars[i] = avatar_image(nav->rows[i], 8, 6, 24);
         nav->names[i] = text(nav->rows[i], "", 40, 9, 112);
     }
-    nav->hint = text(nav->root, "Turn + press", 68, 198, 104);
+    nav->hint = text(nav->root, "Turn + press", 72, 204, 96);
+    lv_obj_set_height(nav->hint, 18);
     lv_obj_set_style_text_align(nav->hint, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(nav->hint, lv_color_hex(0xb8b0bd), 0);
     nav->description = text(nav->root, "", 44, 80, 152);
@@ -290,8 +296,8 @@ void dial_navigation_create(dial_navigation_t *nav, lv_obj_t *parent,
     nav->identity = text(nav->root, "", 44, 142, 152);
     lv_obj_set_style_text_align(nav->identity, LV_TEXT_ALIGN_CENTER, 0);
     lv_label_set_long_mode(nav->identity, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    nav->detail_avatar = avatar_image(nav->root, 100, 64, 40);
-    nav->detail_initials = text(nav->root, "", 100, 64, 40);
+    nav->detail_avatar = avatar_image(nav->root, 100, 72, 40);
+    nav->detail_initials = text(nav->root, "", 100, 72, 40);
     lv_obj_set_height(nav->detail_initials, 40);
     lv_obj_set_style_text_align(nav->detail_initials, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_pad_top(nav->detail_initials, 8, 0);
@@ -302,7 +308,7 @@ void dial_navigation_create(dial_navigation_t *nav, lv_obj_t *parent,
     lv_obj_set_style_text_font(nav->detail_initials, &lv_font_montserrat_24, 0);
 #endif
     lv_obj_set_hidden(nav->detail_initials, true);
-    nav->messaging_icon = text(nav->root, LV_SYMBOL_ENVELOPE, 108, 68, 24);
+    nav->messaging_icon = text(nav->root, LV_SYMBOL_ENVELOPE, 108, 72, 24);
     nav->messaging_status = text(nav->root, "", 38, 96, 164);
     lv_obj_set_style_text_font(nav->messaging_status, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_align(nav->messaging_status, LV_TEXT_ALIGN_CENTER, 0);
@@ -312,8 +318,8 @@ void dial_navigation_create(dial_navigation_t *nav, lv_obj_t *parent,
     lv_obj_set_style_text_align(nav->messaging_detail, LV_TEXT_ALIGN_CENTER, 0);
     nav->preview_body = lv_obj_create(nav->root);
     lv_obj_remove_style_all(nav->preview_body);
-    lv_obj_set_pos(nav->preview_body, 44, 70);
-    lv_obj_set_size(nav->preview_body, 152, 112);
+    lv_obj_set_pos(nav->preview_body, 44, 76);
+    lv_obj_set_size(nav->preview_body, 152, 106);
     lv_obj_set_style_width(nav->preview_body, 2, LV_PART_SCROLLBAR);
     lv_obj_set_style_bg_color(nav->preview_body, lv_color_hex(0xb8b0bd), LV_PART_SCROLLBAR);
     lv_obj_set_style_bg_opa(nav->preview_body, LV_OPA_60, LV_PART_SCROLLBAR);
@@ -433,7 +439,7 @@ static void render_display(dial_navigation_t *nav)
     lv_obj_set_y(nav->identity, 116);
     lv_label_set_text_static(nav->identity, nav->brightness_failed ? "Couldn't change" : "Until restart");
     lv_obj_set_hidden(nav->hint, false);
-    lv_label_set_text_static(nav->hint, nav->brightness_failed ? "Turn to retry" : "Turn to adjust");
+    lv_label_set_text_static(nav->hint, nav->brightness_failed ? "Turn to retry" : "Turn to set");
     for (unsigned i = 0; i < 3; ++i) {
         lv_obj_set_hidden(nav->rows[i], i == 2);
         if (i == 2) continue;
@@ -564,8 +570,8 @@ static void render_creation(dial_navigation_t *nav)
     lv_obj_set_hidden(nav->hint, true);
     for (unsigned i = 0; i < 3; ++i) lv_obj_set_hidden(nav->rows[i], true);
     lv_obj_set_hidden(nav->preview_body, false);
-    lv_obj_set_pos(nav->preview_body, 44, 70);
-    lv_obj_set_height(nav->preview_body, 100);
+    lv_obj_set_pos(nav->preview_body, 44, 76);
+    lv_obj_set_height(nav->preview_body, 94);
     const char *detail = nav->creation_action_failed ? "Action unavailable. Go back and refresh the conversation list." :
         nav->creation.detail;
     char body[512];
@@ -600,8 +606,8 @@ static void render_reply(dial_navigation_t *nav)
         const char *titles[] = {"Reply", "Preparing", "Review", "Sending", "Accepted", "Sent", "Check reply", "Reply failed"};
         lv_label_set_text_static(nav->heading, titles[nav->reply.state]);
         lv_obj_set_hidden(nav->preview_body, false);
-        lv_obj_set_pos(nav->preview_body, 44, 70);
-        lv_obj_set_height(nav->preview_body, 100);
+        lv_obj_set_pos(nav->preview_body, 44, 76);
+        lv_obj_set_height(nav->preview_body, 94);
         char body[768];
         const char *detail = nav->reply_action_failed ? "Action unavailable. Go back to the conversation and try again." :
             nav->reply.state == DIAL_REPLY_UNKNOWN ? "Check this conversation before trying again." : nav->reply.detail;
@@ -671,8 +677,8 @@ static void render_devices(dial_navigation_t *nav)
     lv_obj_set_hidden(nav->description, true);
     lv_obj_set_hidden(nav->identity, true);
     lv_obj_set_hidden(nav->preview_body, !detail);
-    lv_obj_set_pos(nav->preview_body, 44, 70);
-    lv_obj_set_height(nav->preview_body, 112);
+    lv_obj_set_pos(nav->preview_body, 44, 76);
+    lv_obj_set_height(nav->preview_body, 106);
     lv_obj_set_hidden(nav->hint, false);
     lv_label_set_text_static(nav->heading, local ? "This Dial" : "Devices");
     const char *hint = "Turn + press";
@@ -767,7 +773,7 @@ static void render(dial_navigation_t *nav)
     if (nav->view == DIAL_NAV_ACTIVITY) {
         lv_label_set_text_static(nav->heading, "Activity");
         lv_obj_set_hidden(nav->description, false);
-        lv_obj_set_y(nav->description, 64);
+        lv_obj_set_y(nav->description, 76);
         lv_obj_set_height(nav->description, 20);
         lv_obj_set_style_text_font(nav->description, &lv_font_montserrat_14, 0);
         lv_label_set_long_mode(nav->description, LV_LABEL_LONG_DOT);
@@ -775,8 +781,8 @@ static void render(dial_navigation_t *nav)
         lv_obj_set_hidden(nav->identity, true);
         for (unsigned i = 0; i < 3; ++i) lv_obj_set_hidden(nav->rows[i], true);
         lv_obj_set_hidden(nav->preview_body, false);
-        lv_obj_set_pos(nav->preview_body, 44, 90);
-        lv_obj_set_height(nav->preview_body, 96);
+        lv_obj_set_pos(nav->preview_body, 44, 102);
+        lv_obj_set_height(nav->preview_body, 84);
         lv_obj_set_hidden(nav->hint, false);
         lv_label_set_text_static(nav->hint, "Turn to read");
         if (nav->activity.stage == DIAL_ACTIVITY_EMPTY)
@@ -795,8 +801,8 @@ static void render(dial_navigation_t *nav)
     if (nav->view == DIAL_NAV_CONNECTION) {
         lv_label_set_text_static(nav->heading, "Connection");
         lv_obj_set_hidden(nav->preview_body, false);
-        lv_obj_set_pos(nav->preview_body, 44, 70);
-        lv_obj_set_height(nav->preview_body, 116);
+        lv_obj_set_pos(nav->preview_body, 44, 76);
+        lv_obj_set_height(nav->preview_body, 110);
         lv_obj_set_hidden(nav->description, true);
         lv_obj_set_hidden(nav->identity, true);
         lv_obj_set_hidden(nav->hint, false);
@@ -832,8 +838,8 @@ static void render(dial_navigation_t *nav)
     else if (preview && nav->conversations != NULL && nav->conversations->selected < nav->conversations->page.count)
         lv_label_set_text(nav->heading, nav->conversations->page.sessions[nav->conversations->selected].title);
     lv_obj_set_hidden(nav->preview_body, !preview);
-    lv_obj_set_pos(nav->preview_body, 44, 70);
-    lv_obj_set_height(nav->preview_body, preview && reply_available(nav) ? 100 : 112);
+    lv_obj_set_pos(nav->preview_body, 44, 76);
+    lv_obj_set_height(nav->preview_body, preview && reply_available(nav) ? 94 : 106);
     lv_obj_set_hidden(nav->description, !detail && !message);
     lv_obj_set_hidden(nav->identity, !detail);
     lv_obj_set_hidden(nav->hint, message || (preview && reply_available(nav)));
@@ -866,8 +872,8 @@ static void render(dial_navigation_t *nav)
         lv_obj_scroll_to_y(nav->preview_body, 0, LV_ANIM_OFF);
     }
     if (detail) {
-        lv_obj_set_y(nav->description, 110);
-        lv_obj_set_y(nav->identity, 132);
+        lv_obj_set_y(nav->description, 116);
+        lv_obj_set_y(nav->identity, 138);
         lv_obj_set_height(nav->description, 20);
         lv_obj_set_style_text_font(nav->description, &lv_font_montserrat_16, 0);
         lv_label_set_long_mode(nav->description, LV_LABEL_LONG_SCROLL_CIRCULAR);
@@ -890,7 +896,7 @@ static void render(dial_navigation_t *nav)
         if (hidden) continue;
         bool reading = nav->view == DIAL_NAV_READING;
         lv_obj_set_pos(nav->rows[i], message ? 58 : reading ? 44 : 38,
-            detail ? 156 : message ? 150 + (int)i * 34 : reading ? 58 + (int)i * 46 : 64 + (int)i * 44);
+            detail ? 162 : message ? 150 + (int)i * 34 : reading ? 58 + (int)i * 46 : 64 + (int)i * 44);
         lv_obj_set_size(nav->rows[i], message ? 124 : reading ? 152 : 164,
             detail ? 32 : message ? 28 : reading ? 44 : 36);
         lv_obj_set_pos(nav->icons[i], 12, message ? 5 : 9);
@@ -905,7 +911,7 @@ static void render(dial_navigation_t *nav)
             lv_obj_set_style_text_font(nav->names[i], openclaw_reading_font(), 0);
             lv_obj_set_height(nav->names[i], LV_SIZE_CONTENT);
             lv_obj_set_y(nav->names[i], (openclaw_density_row_height(false) - openclaw_reading_font()->line_height) / 2);
-            lv_obj_set_width(nav->names[i], 100);
+            lv_obj_set_width(nav->names[i], lv_obj_get_width(nav->rows[i]) - 52);
         }
         if (nav->view == DIAL_NAV_AGENTS && index < agent_count(nav)) {
             render_avatar(nav->icons[i], nav->avatars[i], &nav->snapshot->page.agents[index]);
@@ -1260,6 +1266,11 @@ void dial_navigation_set_connection(dial_navigation_t *nav, const esp_openclaw_n
     nav->connection_known = true;
     nav->wifi = *wifi;
     nav->gateway_connected = gateway;
+    const openclaw_status_facts_t status = {
+        .wifi_connected = wifi->connected, .signal_known = wifi->ap_info_valid,
+        .rssi = wifi->rssi, .gateway_connected = gateway,
+    };
+    openclaw_status_bar_set(&nav->status, &status);
     if (nav->view == DIAL_NAV_CONNECTION) render(nav);
 }
 

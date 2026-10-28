@@ -510,7 +510,7 @@ static void refresh_ui(lv_timer_t *timer)
     xSemaphoreGive(action_lock);
     static uint32_t connection_sample_at;
     static bool connection_sampled;
-    bool connection_visible = ui.view == VIEW_NAVIGATION && ui.navigation.view == DIAL_NAV_CONNECTION;
+    bool connection_visible = ui.view == VIEW_NAVIGATION && ui.brightness > 0;
     if (!connection_visible) connection_sampled = false;
     if (connection_visible && (!connection_sampled || lv_tick_get() - connection_sample_at >= 1000)) {
         esp_openclaw_node_wifi_status_t wifi;

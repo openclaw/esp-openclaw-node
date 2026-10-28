@@ -66,7 +66,7 @@ static struct {
     const char *mood;
     uint32_t changes, presses, touches;
     int brightness;
-    lv_obj_t *arc, *title, *value, *message, *footer, *eyes[2], *mouth;
+    lv_obj_t *arc, *title, *value, *message, *footer;
     dial_home_t home;
     dial_home_context_t home_context;
     bool home_online, home_dirty;
@@ -150,8 +150,6 @@ static void show_view(dial_view_t view)
     lv_obj_set_flag(ui.arc, LV_OBJ_FLAG_HIDDEN, view != VIEW_CONTROL);
     lv_obj_set_flag(ui.value, LV_OBJ_FLAG_HIDDEN, view != VIEW_CONTROL);
     lv_obj_set_flag(ui.message, LV_OBJ_FLAG_HIDDEN, view != VIEW_MESSAGE);
-    for (int i = 0; i < 2; ++i) lv_obj_set_flag(ui.eyes[i], LV_OBJ_FLAG_HIDDEN, view != VIEW_FACE);
-    lv_obj_set_flag(ui.mouth, LV_OBJ_FLAG_HIDDEN, view != VIEW_FACE);
     lv_label_set_text(ui.title, view == VIEW_MESSAGE ? ui.heading : view == VIEW_CONTROL ? ui.label : "OpenClaw");
     lv_obj_set_width(ui.title, view == VIEW_CONTROL ? 108 : 158);
     lv_label_set_long_mode(ui.title, view == VIEW_CONTROL ? LV_LABEL_LONG_DOT : LV_LABEL_LONG_WRAP);
@@ -452,20 +450,7 @@ static void refresh_ui(lv_timer_t *timer)
         status_sampled = true;
         ui.home_dirty = false;
     }
-    uint32_t phase = lv_tick_get() % 4400;
-    int height = 28;
-    if (strcmp(ui.mood, "sleepy") == 0) height = 10;
-    else if (strcmp(ui.mood, "happy") == 0) height = 18;
-    else if (strcmp(ui.mood, "sad") == 0) height = 24;
-    else if (strcmp(ui.mood, "excited") == 0) height = 32;
-    int gaze = (int)((lv_tick_get() / 1800) % 3) * 4 - 4;
-    bool thinking = strcmp(ui.mood, "thinking") == 0;
-    for (int i = 0; i < 2; ++i) {
-        int eye_height = phase < 140 ? 4 : thinking && i == 0 ? 22 : height;
-        lv_obj_set_size(ui.eyes[i], 19, eye_height);
-        lv_obj_align(ui.eyes[i], LV_ALIGN_CENTER, (i == 0 ? -21 : 21) + gaze,
-                     thinking ? -17 : strcmp(ui.mood, "sad") == 0 ? -9 : -13);
-    }
+    dial_home_animate(&ui.home, ui.mood, now);
 }
 
 static lv_obj_t *label(lv_obj_t *parent, int width, int y, const lv_font_t *font)
@@ -519,15 +504,6 @@ static esp_err_t start_display(void)
     dial_home_create(&ui.home, screen);
     dial_navigation_create(&ui.navigation, screen, navigation_event, NULL);
     dial_navigation_set_brightness(&ui.navigation, ui.brightness, false);
-    for (int i = 0; i < 2; ++i) {
-        ui.eyes[i] = lv_obj_create(screen);
-        lv_obj_set_style_bg_color(ui.eyes[i], lv_color_hex(0x58d5c4), 0);
-        lv_obj_set_style_border_width(ui.eyes[i], 0, 0);
-        lv_obj_set_style_radius(ui.eyes[i], LV_RADIUS_CIRCLE, 0);
-        lv_obj_remove_flag(ui.eyes[i], LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
-    }
-    ui.mouth = label(screen, 60, 12, &lv_font_montserrat_24);
-    lv_label_set_text(ui.mouth, "~");
     update_value();
     show_view(VIEW_FACE);
     lv_timer_create(refresh_ui, 50, NULL);
@@ -740,7 +716,7 @@ static esp_err_t handle_command(esp_openclaw_node_handle_t client, void *context
         if (selected == NULL) err = invalid(error, "mood must be neutral, happy, excited, thinking, sleepy, or sad");
         else {
             ui.mood = selected;
-            lv_label_set_text(ui.mouth, strcmp(selected, "sad") == 0 ? "-" : strcmp(selected, "excited") == 0 ? "o" : "~");
+            dial_home_animate(&ui.home, selected, lv_tick_get());
             show_view(VIEW_FACE);
         }
     } else if (strcmp(command, "buzzer.play") == 0) {

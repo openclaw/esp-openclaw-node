@@ -10,6 +10,31 @@
 
 static void render(dial_navigation_t *nav);
 static lv_image_dsc_t avatar_sources[3];
+static const struct {
+    const char *name, *icon, *text;
+} help_topics[] = {
+    {"Navigation", LV_SYMBOL_HOME,
+        "Turn to choose a row. Press to open it.\n\n"
+        "In a reading page, turn to scroll and press to go back. Hold the button to return Home.\n\n"
+        "Tap a row to open it. Swipe longer reading pages.\n\n"
+        "Change text and spacing in Settings > Display."},
+    {"Messages", LV_SYMBOL_ENVELOPE,
+        "Choose an agent, then open Conversations. Select a thread to read it.\n\n"
+        "Reply offers short text to review before Send. If access is needed, open Settings > Messaging "
+        "and approve this Dial on your Gateway.\n\n"
+        "This Dial has no microphone or speech speaker. It works independently of the Watch."},
+    {"USB setup", LV_SYMBOL_USB,
+        "First setup uses USB and a computer. Open the device's serial console and enter:\n\n"
+        "wifi set \"<ssid>\" \"<password>\"\n"
+        "gateway setup-code <code>\n\n"
+        "Use a fresh device setup code from OpenClaw. Keep your password and code private.\n\n"
+        "After setup, the Dial connects over Wi-Fi without a phone or Watch."},
+    {"Status", LV_SYMBOL_WIFI,
+        "Wi-Fi and Gateway are separate connections. Wi-Fi alone does not mean OpenClaw is ready.\n\n"
+        "More Wi-Fi arcs mean a stronger measured signal. A broken link means the Gateway is disconnected. "
+        "A battery dash means the level is unknown.\n\n"
+        "Open Settings > Connection for network details. Devices > This Dial opens local controls."},
+};
 
 static bool reply_page(dial_navigation_view_t view)
 {
@@ -118,6 +143,18 @@ static void back(dial_navigation_t *nav)
     }
     if (nav->view == DIAL_NAV_MENU) nav->handler(DIAL_NAV_HOME, 0, nav->context);
     else {
+        if (nav->view == DIAL_NAV_HELP_TOPIC) {
+            nav->view = DIAL_NAV_HELP;
+            nav->focus = nav->help_topic;
+            changed(nav);
+            return;
+        }
+        if (nav->view == DIAL_NAV_HELP) {
+            nav->view = nav->settings_parent == DIAL_NAV_LOCAL_DEVICE ? DIAL_NAV_LOCAL_DEVICE : DIAL_NAV_SETTINGS;
+            nav->focus = 3;
+            changed(nav);
+            return;
+        }
         if (nav->view == DIAL_NAV_CREATION) {
             nav->handler(DIAL_NAV_CREATION_CLOSE, nav->creation.revision, nav->context);
             nav->view = DIAL_NAV_SESSIONS;
@@ -397,10 +434,15 @@ static void item(dial_navigation_t *nav, unsigned index, const char **name, cons
         return;
     }
     if (nav->view == DIAL_NAV_SETTINGS) {
-        const char *names[] = {"Display", "Connection", "Messaging", "Back"};
-        const char *icons[] = {LV_SYMBOL_IMAGE, LV_SYMBOL_WIFI, LV_SYMBOL_ENVELOPE, LV_SYMBOL_LEFT};
+        const char *names[] = {"Display", "Connection", "Messaging", "Help", "Back"};
+        const char *icons[] = {LV_SYMBOL_IMAGE, LV_SYMBOL_WIFI, LV_SYMBOL_ENVELOPE, "?", LV_SYMBOL_LEFT};
         *name = names[index];
         *icon = icons[index];
+        return;
+    }
+    if (nav->view == DIAL_NAV_HELP) {
+        *name = index < 4 ? help_topics[index].name : "Back";
+        *icon = index < 4 ? help_topics[index].icon : LV_SYMBOL_LEFT;
         return;
     }
     if (index < agent_count(nav)) {
@@ -670,7 +712,7 @@ static void render_devices(dial_navigation_t *nav)
     bool detail = nav->view == DIAL_NAV_DEVICE_DETAIL;
     bool local = nav->view == DIAL_NAV_LOCAL_DEVICE;
     unsigned count = device_count(nav);
-    nav->count = local ? 3 : count + 3;
+    nav->count = local ? 4 : count + 3;
     if (nav->focus >= nav->count) nav->focus = 0;
     unsigned visible = list_visible();
     nav->first = nav->focus / visible * visible;
@@ -711,8 +753,8 @@ static void render_devices(dial_navigation_t *nav)
         if (detail || i >= visible || index >= nav->count) continue;
         const char *name, *icon;
         if (local) {
-            const char *names[] = {"Control", "Display", "Connection"};
-            const char *icons[] = {LV_SYMBOL_SETTINGS, LV_SYMBOL_IMAGE, LV_SYMBOL_WIFI};
+            const char *names[] = {"Control", "Display", "Connection", "Help"};
+            const char *icons[] = {LV_SYMBOL_SETTINGS, LV_SYMBOL_IMAGE, LV_SYMBOL_WIFI, "?"};
             name = names[index]; icon = icons[index];
         } else if (index == 0) { name = "This Dial"; icon = LV_SYMBOL_HOME; }
         else if (index <= count) {
@@ -760,6 +802,19 @@ static void render(dial_navigation_t *nav)
     }
     if (nav->view == DIAL_NAV_MESSAGING) {
         render_messaging(nav);
+        return;
+    }
+    if (nav->view == DIAL_NAV_HELP_TOPIC) {
+        lv_label_set_text_static(nav->heading, help_topics[nav->help_topic].name);
+        lv_obj_set_hidden(nav->description, true);
+        lv_obj_set_hidden(nav->identity, true);
+        for (unsigned i = 0; i < 3; ++i) lv_obj_set_hidden(nav->rows[i], true);
+        lv_obj_set_hidden(nav->preview_body, false);
+        lv_obj_set_pos(nav->preview_body, 44, 76);
+        lv_obj_set_height(nav->preview_body, 110);
+        lv_label_set_text_static(nav->preview_text, help_topics[nav->help_topic].text);
+        lv_obj_set_hidden(nav->hint, false);
+        lv_label_set_text_static(nav->hint, "Turn to read");
         return;
     }
     if (nav->view == DIAL_NAV_CREATION) {
@@ -824,14 +879,14 @@ static void render(dial_navigation_t *nav)
     bool sessions = nav->view == DIAL_NAV_SESSIONS;
     bool preview = nav->view == DIAL_NAV_PREVIEW;
     bool message = (nav->view == DIAL_NAV_AGENTS || sessions) && agent_count(nav) == 0;
-    nav->count = detail || preview ? 1 : nav->view == DIAL_NAV_MENU ? 5 : nav->view == DIAL_NAV_SETTINGS ? 4 :
+    nav->count = detail || preview ? 1 : (nav->view == DIAL_NAV_MENU || nav->view == DIAL_NAV_SETTINGS || nav->view == DIAL_NAV_HELP) ? 5 :
         nav->view == DIAL_NAV_DISPLAY ? 4 : (nav->view == DIAL_NAV_READING || nav->view == DIAL_NAV_DENSITY) ? 3 : agent_count(nav) + creation_entry(nav) + has_next(nav) + has_previous(nav) + 2;
     if (!detail && !preview && nav->focus >= nav->count) nav->focus = 0;
     unsigned visible = message ? 2 : list_visible();
     nav->first = nav->focus / visible * visible;
-    if ((nav->view == DIAL_NAV_MENU || nav->view == DIAL_NAV_SETTINGS) && nav->first + visible > nav->count)
+    if ((nav->view == DIAL_NAV_MENU || nav->view == DIAL_NAV_SETTINGS || nav->view == DIAL_NAV_HELP) && nav->first + visible > nav->count)
         nav->first = nav->count - visible;
-    lv_label_set_text_static(nav->heading, preview ? "Preview" : sessions ? "Chats" : nav->view == DIAL_NAV_MENU ? "Menu" : nav->view == DIAL_NAV_SETTINGS ? "Settings" :
+    lv_label_set_text_static(nav->heading, preview ? "Preview" : sessions ? "Chats" : nav->view == DIAL_NAV_MENU ? "Menu" : nav->view == DIAL_NAV_SETTINGS ? "Settings" : nav->view == DIAL_NAV_HELP ? "Help" :
         nav->view == DIAL_NAV_DISPLAY ? "Display" : nav->view == DIAL_NAV_READING ? "Reading" : nav->view == DIAL_NAV_DENSITY ? "Spacing" : "Agents");
     if (sessions && nav->conversations != NULL && nav->conversations->agent.name[0] != '\0')
         lv_label_set_text(nav->heading, nav->conversations->agent.name);
@@ -1039,7 +1094,7 @@ void dial_navigation_move(dial_navigation_t *nav, int direction)
         return;
     }
     if (nav->view == DIAL_NAV_PREVIEW || nav->view == DIAL_NAV_ACTIVITY || nav->view == DIAL_NAV_REPLY_REVIEW || nav->view == DIAL_NAV_CREATION ||
-        nav->view == DIAL_NAV_DEVICE_DETAIL || nav->view == DIAL_NAV_CONNECTION) {
+        nav->view == DIAL_NAV_DEVICE_DETAIL || nav->view == DIAL_NAV_CONNECTION || nav->view == DIAL_NAV_HELP_TOPIC) {
         lv_obj_scroll_by_bounded(nav->preview_body, 0, direction > 0 ? -24 : 24, LV_ANIM_OFF);
         return;
     }
@@ -1051,6 +1106,16 @@ void dial_navigation_move(dial_navigation_t *nav, int direction)
 
 void dial_navigation_activate(dial_navigation_t *nav)
 {
+    if (nav->view == DIAL_NAV_HELP_TOPIC) { back(nav); return; }
+    if (nav->view == DIAL_NAV_HELP) {
+        if (nav->focus < 4) {
+            nav->help_topic = nav->focus;
+            nav->view = DIAL_NAV_HELP_TOPIC;
+            lv_obj_scroll_to_y(nav->preview_body, 0, LV_ANIM_OFF);
+            changed(nav);
+        } else back(nav);
+        return;
+    }
     if (nav->view == DIAL_NAV_CREATION) {
         switch (creation_action(nav)) {
         case CREATION_SUBMIT:
@@ -1123,7 +1188,8 @@ void dial_navigation_activate(dial_navigation_t *nav)
     if (nav->view == DIAL_NAV_DEVICE_DETAIL) { back(nav); return; }
     if (nav->view == DIAL_NAV_LOCAL_DEVICE) {
         if (nav->focus == 0) nav->handler(DIAL_NAV_CONTROL, 0, nav->context);
-        else dial_navigation_open_settings(nav, nav->focus == 1 ? DIAL_NAV_DISPLAY : DIAL_NAV_CONNECTION);
+        else dial_navigation_open_settings(nav, nav->focus == 1 ? DIAL_NAV_DISPLAY :
+            nav->focus == 2 ? DIAL_NAV_CONNECTION : DIAL_NAV_HELP);
         return;
     }
     if (nav->view == DIAL_NAV_DEVICES) {
@@ -1162,8 +1228,8 @@ void dial_navigation_activate(dial_navigation_t *nav)
     }
     if (nav->view == DIAL_NAV_BACKLIGHT || nav->view == DIAL_NAV_CONNECTION) { back(nav); return; }
     if (nav->view == DIAL_NAV_SETTINGS) {
-        if (nav->focus < 3) dial_navigation_open_settings(nav, nav->focus == 0 ? DIAL_NAV_DISPLAY :
-            nav->focus == 1 ? DIAL_NAV_CONNECTION : DIAL_NAV_MESSAGING);
+        if (nav->focus < 4) dial_navigation_open_settings(nav, nav->focus == 0 ? DIAL_NAV_DISPLAY :
+            nav->focus == 1 ? DIAL_NAV_CONNECTION : nav->focus == 2 ? DIAL_NAV_MESSAGING : DIAL_NAV_HELP);
         else back(nav);
         return;
     }
@@ -1236,7 +1302,7 @@ void dial_navigation_activate(dial_navigation_t *nav)
 
 void dial_navigation_open_settings(dial_navigation_t *nav, dial_navigation_view_t page)
 {
-    if (page != DIAL_NAV_SETTINGS && page != DIAL_NAV_DISPLAY && page != DIAL_NAV_CONNECTION && page != DIAL_NAV_MESSAGING) return;
+    if (page != DIAL_NAV_SETTINGS && page != DIAL_NAV_DISPLAY && page != DIAL_NAV_CONNECTION && page != DIAL_NAV_MESSAGING && page != DIAL_NAV_HELP) return;
     nav->connection_home = false;
     nav->settings_parent = reply_page(nav->view) || nav->view == DIAL_NAV_CREATION ? nav->view :
         nav->view == DIAL_NAV_LOCAL_DEVICE ? DIAL_NAV_LOCAL_DEVICE : DIAL_NAV_SETTINGS;

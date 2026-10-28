@@ -165,6 +165,14 @@ Display-state responses include `wifiConnected` alongside the existing Gateway
 `connected` flag. Phone pairing remains planned work; this page does not offer a
 nonfunctional pairing or retry button.
 
+**Settings → Help** and **This Dial → Help** offer Navigation, Messages, USB
+setup, and Status topics. Turn to choose a topic and press to open it; turn or
+swipe to read, then press or tap Back to return to the same topic. Help works
+offline, honors Reading text and List spacing, and never submits the assigned
+control or a message. USB setup describes the existing serial-console flow;
+phone pairing remains planned work. The USB command
+`local display.menu "{\"page\":\"help\"}"` opens the same topic list.
+
 Settings → Messaging shows this Dial's messaging permission. It starts off with
 read-only access. **Request** asks the Gateway for approval; the page
 then shows whether the request is being sent, waiting for approval, or reconnecting
@@ -289,7 +297,7 @@ visible. Settings → Connection keeps the text description of each connection.
 | --- | --- | --- |
 | `device.info`, `device.status`, `wifi.status` | `{}` | Shared device/network status |
 | `display.show` | `{"heading":"Hello","text":"A message"}` | Display state including `heading` and `text`; limits: 64/512 UTF-8 bytes |
-| `display.menu` | `{}` or `{"page":"devices"}` | Open `menu`, `agents`, `conversations`, `preview`, `devices`, `activity`, `settings`, `display`, or `connection` |
+| `display.menu` | `{}` or `{"page":"devices"}` | Open `menu`, `agents`, `conversations`, `preview`, `devices`, `activity`, `settings`, `display`, `connection`, `messaging`, or `help` |
 | `display.clear` | `{}` | Return to the face |
 | `display.status`, `dial.status`, `input.status` | `{}` | View, value/range, input counts, brightness, connection, action state |
 | `display.brightness` | `{"percent":65}` | Set backlight, integer 0–100 |
@@ -301,7 +309,7 @@ visible. Settings → Connection keeps the text description of each connection.
 Display-state responses include `heading` and `text` while `view` is `message`,
 so an agent can read back the displayed content. Menu responses include
 `view: "menu"` and `page: "menu"`, `"agents"`, `"agent"`, `"conversations"`,
-`"preview"`, `"activity"`, `"settings"`, `"display"`, or `"connection"`. Other views omit those fields;
+`"preview"`, `"activity"`, `"settings"`, `"display"`, `"connection"`, `"help"`, or `"help-topic"`. Other views omit those fields;
 `display.clear` returns to the face without reporting the hidden message.
 
 The buzzer stops asynchronously and rejects overlapping tones. It uses LEDC

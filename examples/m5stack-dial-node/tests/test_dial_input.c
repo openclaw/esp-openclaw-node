@@ -33,6 +33,10 @@ static dial_reply_snapshot_t reply;
 static unsigned reply_begins, reply_sends, reply_closes, reply_reads;
 static unsigned reply_requested_preview, reply_requested_revision;
 static bool reply_rejected;
+static dial_creation_snapshot_t creation;
+static unsigned creation_begins, creation_submits, creation_closes, creation_opens, creation_chats;
+static unsigned creation_requested_revision;
+static bool creation_rejected;
 static uint16_t pixels[240 * 240];
 
 static void flush(lv_display_t *display, const lv_area_t *area, uint8_t *data)
@@ -109,6 +113,49 @@ static void navigation_event(dial_navigation_event_t kind, size_t offset, void *
         else ++messaging_cancels;
         requested_offset = offset;
         dial_navigation_messaging_result(&navigation, !messaging_rejected);
+    }
+    else if (kind == DIAL_NAV_CREATION_BEGIN || kind == DIAL_NAV_CREATION_SUBMIT ||
+             kind == DIAL_NAV_CREATION_CLOSE || kind == DIAL_NAV_CREATION_OPEN || kind == DIAL_NAV_CREATION_CHATS) {
+        creation_requested_revision = offset;
+        if (kind == DIAL_NAV_CREATION_BEGIN) {
+            ++creation_begins;
+            if (!creation_rejected) {
+                creation = (dial_creation_snapshot_t){.state = DIAL_CREATION_REVIEW,
+                    .revision = creation.revision + 1, .conversation_revision = offset,
+                    .agent = conversations.agent, .can_create = navigation.messaging.state == DIAL_MESSAGING_READY};
+                strcpy(creation.detail, "Creates an empty chat. No message is sent.");
+            }
+        } else if (kind == DIAL_NAV_CREATION_SUBMIT) {
+            ++creation_submits;
+            if (!creation_rejected) {
+                creation.state = DIAL_CREATION_CREATING; creation.can_create = false; ++creation.revision;
+                strcpy(creation.detail, "Creating an empty conversation.");
+            }
+        } else if (kind == DIAL_NAV_CREATION_CLOSE) {
+            ++creation_closes;
+            if (creation.state == DIAL_CREATION_REVIEW)
+                creation = (dial_creation_snapshot_t){.revision = creation.revision + 1};
+        } else if (kind == DIAL_NAV_CREATION_OPEN) {
+            ++creation_opens;
+            if (!creation_rejected) {
+                conversations.state = conversations.preview_state = DIAL_AGENTS_READY;
+                conversations.page.count = 1; conversations.selected = 0;
+                conversations.preview.status = ESP_OPENCLAW_PREVIEW_EMPTY;
+                ++conversations.revision; ++conversations.preview_revision;
+                strcpy(conversations.page.sessions[0].title, "New conversation");
+                assert(dial_navigation_show_reader(&navigation, &roster, &conversations, true));
+            }
+        } else {
+            ++creation_chats;
+            if (!creation_rejected) {
+                conversations.state = DIAL_AGENTS_EMPTY; conversations.page.count = 0;
+                conversations.page.has_more = false; conversations.page.offset = 0;
+                ++conversations.revision;
+                assert(dial_navigation_show_reader(&navigation, &roster, &conversations, false));
+            }
+        }
+        dial_navigation_creation_update(&navigation, &creation);
+        dial_navigation_creation_result(&navigation, !creation_rejected);
     }
     else if (kind == DIAL_NAV_REPLY_BEGIN || kind == DIAL_NAV_REPLY_SEND ||
              kind == DIAL_NAV_REPLY_CLOSE || kind == DIAL_NAV_REPLY_READ) {
@@ -613,6 +660,172 @@ static void check_replies(lv_indev_t *encoder)
     for (unsigned child = 0; child < lv_obj_get_child_count(navigation.root); ++child)
         check_home_bounds(lv_obj_get_child(navigation.root, child));
     puts("Quick replies: empty preview, permission return, exact review, fenced Send, retained outcome and refreshed reader passed");
+}
+
+static void check_creation(lv_indev_t *encoder)
+{
+    unsigned confirms = confirmations;
+    navigating = true;
+    lv_obj_set_hidden(home.root, true);
+    lv_obj_set_hidden(input.arc, true);
+    lv_obj_set_hidden(navigation.root, false);
+    dial_input_set_control(&input, false);
+    roster = (dial_agents_snapshot_t){.state = DIAL_AGENTS_READY, .revision = roster.revision + 1,
+        .page = {.count = 1, .total = 1}};
+    strcpy(roster.page.agents[0].id, "beta");
+    strcpy(roster.page.agents[0].name, "Beta");
+    conversations = (dial_conversations_snapshot_t){.state = DIAL_AGENTS_EMPTY, .revision = 200,
+        .agent = roster.page.agents[0]};
+    assert(dial_navigation_show_reader(&navigation, &roster, &conversations, false));
+    dial_messaging_snapshot_t access = {.state = DIAL_MESSAGING_OFF, .revision = 300};
+    dial_navigation_messaging_update(&navigation, &access);
+    assert(strcmp(lv_label_get_text(navigation.names[0]), "New chat") == 0 && navigation.count == 3);
+    snapshot("creation-empty-list");
+    encoder_diff = 2; lv_indev_read(encoder); advance(40);
+    assert(strcmp(lv_label_get_text(navigation.names[0]), "Back") == 0);
+    encoder_diff = -2; lv_indev_read(encoder); advance(40);
+    assert(strcmp(lv_label_get_text(navigation.names[0]), "New chat") == 0);
+    touch(120, 164, true);
+    ++conversations.revision;
+    dial_navigation_conversations_update(&navigation, &conversations);
+    touch(120, 164, false);
+    assert(creation_begins == 0 && navigation.view == DIAL_NAV_SESSIONS);
+    press_encoder(encoder);
+    assert(creation_begins == 1 && creation_requested_revision == conversations.revision);
+    assert(creation_submits == 0 && navigation.view == DIAL_NAV_CREATION);
+    assert(strcmp(lv_label_get_text(navigation.names[0]), "Messaging") == 0);
+    assert(strstr(lv_label_get_text(navigation.preview_text), "Creates an empty chat") != NULL);
+    assert(strstr(lv_label_get_text(navigation.preview_text), "Agent: beta") != NULL);
+    snapshot("creation-access-needed");
+    press_encoder(encoder);
+    assert(navigation.view == DIAL_NAV_MESSAGING);
+    access.state = DIAL_MESSAGING_READY; ++access.revision;
+    dial_navigation_messaging_update(&navigation, &access);
+    touch(68, 44, true); touch(68, 44, false);
+    assert(navigation.view == DIAL_NAV_CREATION && creation_begins == 1);
+    assert(strcmp(lv_label_get_text(navigation.names[0]), "Chats") == 0);
+    snapshot("creation-stale-agent");
+    creation.can_create = true; ++creation.revision;
+    dial_navigation_creation_update(&navigation, &creation);
+    assert(strcmp(lv_label_get_text(navigation.names[0]), "Create") == 0);
+    snapshot("creation-review");
+    check_reader_limits(encoder, "creation-review-bottom");
+    touch(120, 190, true);
+    creation.can_create = false; ++creation.revision;
+    dial_navigation_creation_update(&navigation, &creation);
+    touch(120, 190, false);
+    assert(creation_submits == 0);
+    creation.can_create = true; ++creation.revision;
+    dial_navigation_creation_update(&navigation, &creation);
+    encoder_state = LV_INDEV_STATE_PRESSED; lv_indev_read(encoder); advance(40);
+    ++creation.revision;
+    dial_navigation_creation_update(&navigation, &creation);
+    encoder_state = LV_INDEV_STATE_RELEASED; lv_indev_read(encoder); advance(40);
+    assert(creation_submits == 0);
+    unsigned submitted_revision = creation.revision;
+    press_encoder(encoder);
+    assert(creation_submits == 1 && creation_requested_revision == submitted_revision);
+    assert(strcmp(lv_label_get_text(navigation.heading), "Creating") == 0);
+    snapshot("creation-pending");
+    press_encoder(encoder);
+    assert(creation_submits == 1);
+    touch(68, 44, true); touch(68, 44, false);
+    assert(navigation.view == DIAL_NAV_SESSIONS && creation.state == DIAL_CREATION_CREATING);
+    ++conversations.revision;
+    dial_navigation_conversations_update(&navigation, &conversations);
+    press_encoder(encoder);
+    assert(navigation.view == DIAL_NAV_CREATION && creation_begins == 1);
+    creation.state = DIAL_CREATION_CREATED; creation.can_open = true; ++creation.revision;
+    strcpy(creation.detail, "Created. Open it to choose a reply.");
+    dial_navigation_creation_update(&navigation, &creation);
+    assert(strcmp(lv_label_get_text(navigation.names[0]), "Open") == 0);
+    snapshot("creation-created");
+    touch(120, 190, true);
+    creation.can_open = false; ++creation.revision;
+    dial_navigation_creation_update(&navigation, &creation);
+    touch(120, 190, false);
+    assert(creation_opens == 0);
+    creation.can_open = true; ++creation.revision;
+    dial_navigation_creation_update(&navigation, &creation);
+    press_encoder(encoder);
+    assert(creation_opens == 1 && navigation.view == DIAL_NAV_PREVIEW);
+    assert(strcmp(lv_label_get_text(navigation.preview_text), "No messages yet") == 0);
+    assert(strcmp(lv_label_get_text(navigation.names[0]), "Reply") == 0);
+    snapshot("creation-opened");
+    touch(68, 44, true); touch(68, 44, false);
+    encoder_diff = 1; lv_indev_read(encoder); advance(40);
+    press_encoder(encoder);
+    assert(creation_begins == 2 && creation_submits == 1);
+    creation_rejected = true;
+    press_encoder(encoder);
+    assert(creation_submits == 2 && navigation.creation_action_failed);
+    assert(strstr(lv_label_get_text(navigation.preview_text), "Action unavailable") != NULL);
+    creation_rejected = false;
+    creation.state = DIAL_CREATION_FAILED; creation.can_create = false; ++creation.revision;
+    strcpy(creation.detail, "Could not queue. Review and try again.");
+    dial_navigation_creation_update(&navigation, &creation);
+    assert(strcmp(lv_label_get_text(navigation.names[0]), "Retry") == 0);
+    snapshot("creation-failed");
+    press_encoder(encoder);
+    assert(creation_begins == 3 && creation_submits == 2 && creation.state == DIAL_CREATION_REVIEW);
+    press_encoder(encoder);
+    assert(creation_submits == 3);
+    creation.state = DIAL_CREATION_UNKNOWN; ++creation.revision;
+    strcpy(creation.detail, "Outcome unknown. Check Chats before creating another.");
+    dial_navigation_creation_update(&navigation, &creation);
+    assert(strcmp(lv_label_get_text(navigation.names[0]), "Chats") == 0);
+    snapshot("creation-unknown");
+    press_encoder(encoder);
+    assert(creation_chats == 1 && navigation.view == DIAL_NAV_SESSIONS);
+    press_encoder(encoder);
+    assert(creation_begins == 4 && creation_submits == 3);
+    strcpy(creation.agent.name, "A thoughtful research assistant with a long display name");
+    strcpy(creation.agent.id, "research-and-planning-assistant-with-a-long-agent-identifier");
+    ++creation.revision;
+    dial_navigation_creation_update(&navigation, &creation);
+    check_reader_limits(encoder, "creation-long-agent-bottom");
+    unsigned closes = creation_closes;
+    touch(68, 44, true); touch(68, 44, false);
+    assert(creation_closes == closes + 1 && creation.state == DIAL_CREATION_IDLE);
+    assert(navigation.view == DIAL_NAV_SESSIONS && confirmations == confirms && reply_sends == 1);
+    conversations.state = DIAL_AGENTS_READY; conversations.page.count = 2;
+    conversations.page.has_more = true; conversations.page.next_offset = 17;
+    ++conversations.revision;
+    dial_navigation_conversations_update(&navigation, &conversations);
+    encoder_diff = 2; lv_indev_read(encoder); advance(40);
+    assert(strcmp(lv_label_get_text(navigation.names[2]), "New chat") == 0);
+    encoder_diff = 1; lv_indev_read(encoder); advance(40);
+    assert(strcmp(lv_label_get_text(navigation.names[0]), "Next page") == 0);
+    unsigned refresh = refreshes;
+    press_encoder(encoder);
+    assert(refreshes == refresh + 1 && requested_offset == 17 && creation_begins == 4);
+    creation = (dial_creation_snapshot_t){.state = DIAL_CREATION_CREATED,
+        .revision = creation.revision + 1, .conversation_revision = conversations.revision - 1};
+    strcpy(creation.agent.name, "Previous agent");
+    strcpy(creation.agent.id, "previous-agent");
+    dial_navigation_creation_update(&navigation, &creation);
+    creation_rejected = true;
+    encoder_diff = -1; lv_indev_read(encoder); advance(40);
+    press_encoder(encoder);
+    assert(creation_begins == 5 && navigation.view == DIAL_NAV_SESSIONS);
+    assert(strcmp(lv_label_get_text(navigation.hint), "Try Refresh") == 0);
+    assert(strcmp(lv_label_get_text(navigation.heading), "Beta") == 0);
+    snapshot("creation-prepare-failed");
+    creation.agent = conversations.agent;
+    creation.conversation_revision = conversations.revision;
+    creation.can_open = true; ++creation.revision;
+    dial_navigation_creation_update(&navigation, &creation);
+    press_encoder(encoder);
+    assert(navigation.view == DIAL_NAV_CREATION);
+    press_encoder(encoder); // A failed Open must still allow the stored status to reopen.
+    assert(navigation.creation_action_failed);
+    touch(68, 44, true); touch(68, 44, false);
+    press_encoder(encoder);
+    assert(navigation.view == DIAL_NAV_CREATION && creation_begins == 5);
+    creation_rejected = false;
+    for (unsigned child = 0; child < lv_obj_get_child_count(navigation.root); ++child)
+        check_home_bounds(lv_obj_get_child(navigation.root, child));
+    puts("New conversation: empty list, reviewed creation, permission recovery, stale presses, outcomes and safe retry passed");
 }
 
 int main(int argc, char **argv)
@@ -1253,6 +1466,7 @@ int main(int argc, char **argv)
     puts("local display and connection input, bounds, failures, offline focus and return: passed");
     check_messaging(encoder);
     check_replies(encoder);
+    check_creation(encoder);
 
     /* Read the latest request through real menu/encoder/touch input. Browsing
      * and result updates never confirm the numeric control. */

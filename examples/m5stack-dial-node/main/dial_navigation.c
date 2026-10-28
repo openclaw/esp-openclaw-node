@@ -14,6 +14,18 @@ static bool reply_page(dial_navigation_view_t view)
     return view == DIAL_NAV_REPLY_PICKER || view == DIAL_NAV_REPLY_REVIEW || view == DIAL_NAV_REPLY_ACTIONS;
 }
 
+static bool creation_available(const dial_navigation_t *nav)
+{
+    return nav->conversations != NULL && nav->conversations->agent.id[0] != '\0' &&
+        (nav->conversation_state == DIAL_AGENTS_READY || nav->conversation_state == DIAL_AGENTS_EMPTY);
+}
+
+static bool creation_entry(const dial_navigation_t *nav)
+{
+    return nav->view == DIAL_NAV_SESSIONS &&
+        (creation_available(nav) || nav->creation.state == DIAL_CREATION_CREATING);
+}
+
 static bool reply_busy(const dial_navigation_t *nav)
 {
     return nav->reply.state == DIAL_REPLY_SENDING || nav->reply.state == DIAL_REPLY_ACCEPTED;
@@ -73,6 +85,14 @@ static void back(dial_navigation_t *nav)
 {
     if (nav->view == DIAL_NAV_MENU) nav->handler(DIAL_NAV_HOME, 0, nav->context);
     else {
+        if (nav->view == DIAL_NAV_CREATION) {
+            nav->handler(DIAL_NAV_CREATION_CLOSE, nav->creation.revision, nav->context);
+            nav->view = DIAL_NAV_SESSIONS;
+            nav->focus = nav->conversations != NULL && nav->conversation_state == DIAL_AGENTS_READY ?
+                nav->conversations->page.count : 0;
+            changed(nav);
+            return;
+        }
         if (nav->view == DIAL_NAV_REPLY_ACTIONS) {
             nav->view = DIAL_NAV_REPLY_REVIEW;
             changed(nav);
@@ -92,9 +112,9 @@ static void back(dial_navigation_t *nav)
             return;
         }
         if (nav->view == DIAL_NAV_MESSAGING) {
-            bool reply = reply_page(nav->settings_parent);
-            nav->view = reply ? nav->settings_parent : DIAL_NAV_SETTINGS;
-            nav->focus = reply ? 0 : 2;
+            bool return_to_flow = reply_page(nav->settings_parent) || nav->settings_parent == DIAL_NAV_CREATION;
+            nav->view = return_to_flow ? nav->settings_parent : DIAL_NAV_SETTINGS;
+            nav->focus = return_to_flow ? 0 : 2;
             changed(nav);
             return;
         }
@@ -333,6 +353,10 @@ static void item(dial_navigation_t *nav, unsigned index, const char **name, cons
         return;
     }
     index -= agent_count(nav);
+    if (creation_entry(nav)) {
+        if (index == 0) { *name = "New chat"; *icon = LV_SYMBOL_PLUS; return; }
+        --index;
+    }
     if (has_next(nav)) {
         if (index == 0) { *name = nav->view == DIAL_NAV_SESSIONS ? "Next page" : "Next agents"; return; }
         --index;
@@ -464,6 +488,53 @@ static void reply_button(dial_navigation_t *nav, unsigned row, const char *name,
     lv_color_t color = lv_color_hex(focus ? 0x302131 : 0xf4efee);
     lv_obj_set_style_text_color(nav->names[row], color, 0);
     lv_obj_set_style_text_color(nav->icons[row], color, 0);
+}
+
+typedef enum { CREATION_SUBMIT, CREATION_ACCESS, CREATION_OPEN, CREATION_RETRY, CREATION_CHATS, CREATION_WAIT } creation_action_t;
+
+static creation_action_t creation_action(const dial_navigation_t *nav)
+{
+    if (nav->creation.state == DIAL_CREATION_REVIEW) {
+        if (nav->messaging.state != DIAL_MESSAGING_READY) return CREATION_ACCESS;
+        return nav->creation.can_create ? CREATION_SUBMIT : CREATION_CHATS;
+    }
+    if (nav->creation.state == DIAL_CREATION_CREATING) return CREATION_WAIT;
+    if (nav->creation.state == DIAL_CREATION_CREATED && nav->creation.can_open) return CREATION_OPEN;
+    if (nav->creation.state == DIAL_CREATION_FAILED && creation_available(nav)) return CREATION_RETRY;
+    return CREATION_CHATS;
+}
+
+static void render_creation(dial_navigation_t *nav)
+{
+    const char *titles[] = {"New chat", "New chat", "Creating", "Created", "Unknown", "Not created"};
+    lv_label_set_text_static(nav->heading, titles[nav->creation.state]);
+    lv_obj_set_hidden(nav->description, true);
+    lv_obj_set_hidden(nav->identity, true);
+    lv_obj_set_hidden(nav->hint, true);
+    for (unsigned i = 0; i < 3; ++i) lv_obj_set_hidden(nav->rows[i], true);
+    lv_obj_set_hidden(nav->preview_body, false);
+    lv_obj_set_pos(nav->preview_body, 44, 70);
+    lv_obj_set_height(nav->preview_body, 100);
+    const char *detail = nav->creation_action_failed ? "Action unavailable. Go back and refresh the conversation list." :
+        nav->creation.detail;
+    char body[512];
+    snprintf(body, sizeof(body), "%s\n\n%s\n\nAgent: %s\n\nA created chat stays if you leave.",
+        nav->creation.agent.name, detail, nav->creation.agent.id);
+    if (strcmp(lv_label_get_text(nav->preview_text), body) != 0) {
+        lv_label_set_text(nav->preview_text, body);
+        lv_obj_scroll_to_y(nav->preview_body, 0, LV_ANIM_OFF);
+    }
+    const char *names[] = {"Create", "Messaging", "Open", "Retry", "Chats", "Waiting"};
+    const char *icons[] = {LV_SYMBOL_PLUS, LV_SYMBOL_SETTINGS, LV_SYMBOL_RIGHT, LV_SYMBOL_REFRESH, LV_SYMBOL_LIST, LV_SYMBOL_REFRESH};
+    creation_action_t action = creation_action(nav);
+    nav->count = 1;
+    nav->focus = nav->first = 0;
+    reply_button(nav, 0, names[action], icons[action], true);
+    if (action == CREATION_WAIT) {
+        lv_obj_set_style_bg_color(nav->rows[0], lv_color_hex(0x302535), 0);
+        lv_obj_set_style_text_color(nav->names[0], lv_color_hex(0xb8b0bd), 0);
+        lv_obj_set_style_text_color(nav->icons[0], lv_color_hex(0xb8b0bd), 0);
+    }
 }
 
 static void render_reply(dial_navigation_t *nav)
@@ -629,6 +700,10 @@ static void render(dial_navigation_t *nav)
         render_messaging(nav);
         return;
     }
+    if (nav->view == DIAL_NAV_CREATION) {
+        render_creation(nav);
+        return;
+    }
     if (reply_page(nav->view)) {
         render_reply(nav);
         return;
@@ -688,7 +763,7 @@ static void render(dial_navigation_t *nav)
     bool preview = nav->view == DIAL_NAV_PREVIEW;
     bool message = (nav->view == DIAL_NAV_AGENTS || sessions) && agent_count(nav) == 0;
     nav->count = detail || preview ? 1 : nav->view == DIAL_NAV_MENU ? 5 : nav->view == DIAL_NAV_SETTINGS ? 4 :
-        agent_count(nav) + has_next(nav) + has_previous(nav) + 2;
+        agent_count(nav) + creation_entry(nav) + has_next(nav) + has_previous(nav) + 2;
     if (!detail && !preview && nav->focus >= nav->count) nav->focus = 0;
     unsigned visible = message ? 2 : 3;
     nav->first = nav->focus / visible * visible;
@@ -777,6 +852,10 @@ static void render(dial_navigation_t *nav)
         lv_obj_set_style_text_color(nav->names[i], color, 0);
         lv_obj_set_style_text_color(nav->icons[i], color, 0);
     }
+    if (sessions && nav->creation_action_failed) {
+        if (message) lv_label_set_text_static(nav->description, "Could not prepare.\nTry Refresh.");
+        else lv_label_set_text_static(nav->hint, "Try Refresh");
+    }
     if (preview && reply_available(nav)) reply_button(nav, 0, "Reply", LV_SYMBOL_UP, true);
 }
 
@@ -802,7 +881,7 @@ void dial_navigation_update(dial_navigation_t *nav, const dial_agents_snapshot_t
         nav->view = DIAL_NAV_AGENTS;
         nav->focus = 0;
         changed(nav);
-    } else if (reply_page(nav->view)) changed(nav);
+    } else if (reply_page(nav->view) || nav->view == DIAL_NAV_CREATION) changed(nav);
 }
 
 void dial_navigation_conversations_update(dial_navigation_t *nav, const dial_conversations_snapshot_t *snapshot)
@@ -818,7 +897,7 @@ void dial_navigation_conversations_update(dial_navigation_t *nav, const dial_con
     if (nav->view == DIAL_NAV_SESSIONS || nav->view == DIAL_NAV_PREVIEW) {
         if (replaced) { nav->view = DIAL_NAV_SESSIONS; nav->focus = 0; }
         changed(nav);
-    } else if (reply_page(nav->view)) changed(nav);
+    } else if (reply_page(nav->view) || nav->view == DIAL_NAV_CREATION) changed(nav);
 }
 
 void dial_navigation_devices_update(dial_navigation_t *nav, const esp_openclaw_devices_snapshot_t *snapshot)
@@ -885,7 +964,7 @@ void dial_navigation_move(dial_navigation_t *nav, int direction)
             nav->handler(DIAL_NAV_BRIGHTNESS, (size_t)percent, nav->context);
         return;
     }
-    if (nav->view == DIAL_NAV_PREVIEW || nav->view == DIAL_NAV_ACTIVITY || nav->view == DIAL_NAV_REPLY_REVIEW ||
+    if (nav->view == DIAL_NAV_PREVIEW || nav->view == DIAL_NAV_ACTIVITY || nav->view == DIAL_NAV_REPLY_REVIEW || nav->view == DIAL_NAV_CREATION ||
         nav->view == DIAL_NAV_DEVICE_DETAIL || nav->view == DIAL_NAV_CONNECTION) {
         lv_obj_scroll_by_bounded(nav->preview_body, 0, direction > 0 ? -24 : 24, LV_ANIM_OFF);
         return;
@@ -898,6 +977,19 @@ void dial_navigation_move(dial_navigation_t *nav, int direction)
 
 void dial_navigation_activate(dial_navigation_t *nav)
 {
+    if (nav->view == DIAL_NAV_CREATION) {
+        switch (creation_action(nav)) {
+        case CREATION_SUBMIT:
+            nav->handler(DIAL_NAV_CREATION_SUBMIT, nav->creation.revision, nav->context);
+            break;
+        case CREATION_ACCESS: dial_navigation_open_settings(nav, DIAL_NAV_MESSAGING); break;
+        case CREATION_OPEN: nav->handler(DIAL_NAV_CREATION_OPEN, nav->creation.revision, nav->context); break;
+        case CREATION_RETRY: nav->handler(DIAL_NAV_CREATION_BEGIN, nav->conversation_revision, nav->context); break;
+        case CREATION_CHATS: nav->handler(DIAL_NAV_CREATION_CHATS, nav->creation.revision, nav->context); break;
+        case CREATION_WAIT: break;
+        }
+        return;
+    }
     if (nav->view == DIAL_NAV_REPLY_REVIEW) {
         nav->view = DIAL_NAV_REPLY_ACTIONS;
         nav->focus = 0;
@@ -1006,6 +1098,24 @@ void dial_navigation_activate(dial_navigation_t *nav)
         return;
     }
     index -= agent_count(nav);
+    if (creation_entry(nav)) {
+        if (index == 0) {
+            if (nav->creation.state != DIAL_CREATION_CREATING &&
+                (nav->creation.state == DIAL_CREATION_IDLE ||
+                 nav->creation.conversation_revision != nav->conversation_revision)) {
+                nav->handler(DIAL_NAV_CREATION_BEGIN, nav->conversation_revision, nav->context);
+                if (nav->creation_action_failed) {
+                    changed(nav);
+                    return;
+                }
+            }
+            nav->view = DIAL_NAV_CREATION;
+            nav->focus = 0;
+            changed(nav);
+            return;
+        }
+        --index;
+    }
     if (has_next(nav)) {
         if (index == 0) {
             if (nav->view == DIAL_NAV_SESSIONS)
@@ -1030,7 +1140,7 @@ void dial_navigation_activate(dial_navigation_t *nav)
 void dial_navigation_open_settings(dial_navigation_t *nav, dial_navigation_view_t page)
 {
     if (page != DIAL_NAV_SETTINGS && page != DIAL_NAV_DISPLAY && page != DIAL_NAV_CONNECTION && page != DIAL_NAV_MESSAGING) return;
-    nav->settings_parent = reply_page(nav->view) ? nav->view :
+    nav->settings_parent = reply_page(nav->view) || nav->view == DIAL_NAV_CREATION ? nav->view :
         nav->view == DIAL_NAV_LOCAL_DEVICE ? DIAL_NAV_LOCAL_DEVICE : DIAL_NAV_SETTINGS;
     nav->view = page;
     nav->focus = 0;
@@ -1062,7 +1172,7 @@ void dial_navigation_messaging_update(dial_navigation_t *nav, const dial_messagi
     nav->messaging = *snapshot;
     nav->messaging_action_failed = false;
     /* A held Request or Cancel belongs to the exact permission observation. */
-    if (nav->view == DIAL_NAV_MESSAGING || reply_page(nav->view)) changed(nav);
+    if (nav->view == DIAL_NAV_MESSAGING || reply_page(nav->view) || nav->view == DIAL_NAV_CREATION) changed(nav);
 }
 
 void dial_navigation_messaging_result(dial_navigation_t *nav, bool accepted)
@@ -1083,6 +1193,20 @@ void dial_navigation_reply_result(dial_navigation_t *nav, bool accepted)
 {
     nav->reply_action_failed = !accepted;
     if (reply_page(nav->view)) render(nav);
+}
+
+void dial_navigation_creation_update(dial_navigation_t *nav, const dial_creation_snapshot_t *snapshot)
+{
+    if (memcmp(&nav->creation, snapshot, sizeof(*snapshot)) == 0) return;
+    nav->creation = *snapshot;
+    nav->creation_action_failed = false;
+    if (nav->view == DIAL_NAV_CREATION || nav->view == DIAL_NAV_SESSIONS) changed(nav);
+}
+
+void dial_navigation_creation_result(dial_navigation_t *nav, bool accepted)
+{
+    nav->creation_action_failed = !accepted;
+    if (nav->view == DIAL_NAV_CREATION) render(nav);
 }
 
 void dial_navigation_open_activity(dial_navigation_t *nav)

@@ -282,3 +282,44 @@ esp_openclaw_directory_result_t esp_openclaw_preview_parse(
     }
     return ESP_OPENCLAW_DIRECTORY_OK;
 }
+
+/* Duplicate routing fields are ambiguous even if one occurrence looks valid. */
+static const cJSON *single_field(const cJSON *object, const char *name)
+{
+    const cJSON *found = NULL, *field;
+    cJSON_ArrayForEach(field, object) {
+        if (field->string != NULL && strcmp(field->string, name) == 0) {
+            if (found != NULL) return NULL;
+            found = field;
+        }
+    }
+    return found;
+}
+
+esp_openclaw_directory_result_t esp_openclaw_session_created_parse(
+    const char *json, size_t length, const char *agent_id,
+    esp_openclaw_session_created_t *created)
+{
+    if (created == NULL) return ESP_OPENCLAW_DIRECTORY_INVALID;
+    memset(created, 0, sizeof(*created));
+    if (!valid_id(agent_id)) return ESP_OPENCLAW_DIRECTORY_INVALID;
+    esp_openclaw_directory_result_t result;
+    cJSON *root = parse_payload(json, length, &result);
+    if (root == NULL) return result;
+    const cJSON *key = single_field(root, "key");
+    const cJSON *id = single_field(root, "sessionId");
+    bool valid = cJSON_IsTrue(single_field(root, "ok")) &&
+        cJSON_IsFalse(single_field(root, "runStarted")) &&
+        cJSON_IsString(key) && session_key(key->valuestring, agent_id) &&
+        cJSON_IsString(id) && id->valuestring[0] != '\0';
+    result = valid ? ESP_OPENCLAW_DIRECTORY_OK : ESP_OPENCLAW_DIRECTORY_INVALID;
+    if (valid && (strlen(key->valuestring) >= sizeof(created->key) ||
+                  strlen(id->valuestring) >= sizeof(created->session_id)))
+        result = ESP_OPENCLAW_DIRECTORY_TOO_LARGE;
+    if (result == ESP_OPENCLAW_DIRECTORY_OK) {
+        strcpy(created->key, key->valuestring);
+        strcpy(created->session_id, id->valuestring);
+    }
+    cJSON_Delete(root);
+    return result;
+}

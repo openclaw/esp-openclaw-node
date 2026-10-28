@@ -235,6 +235,15 @@ esp_err_t esp_openclaw_node_start_transport_for_active_source(
         return err;
     }
 
+    esp_openclaw_node_lock_state(node);
+    bool allowed = node->state == ESP_OPENCLAW_NODE_INTERNAL_CONNECTING &&
+        !esp_openclaw_node_active_connect_cancelled_locked(node);
+    esp_openclaw_node_unlock_state(node);
+    if (!allowed) {
+        esp_openclaw_node_cleanup_transport_instance(node, false);
+        return ESP_ERR_INVALID_STATE;
+    }
+
     esp_openclaw_node_transport_start_begin(node->config.role);
     err = node->websocket_client_ops->client_start(ws);
     esp_openclaw_node_transport_start_end(node->config.role, err);

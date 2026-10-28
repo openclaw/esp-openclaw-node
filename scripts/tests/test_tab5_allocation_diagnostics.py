@@ -77,6 +77,10 @@ class AllocationDiagnosticsTests(unittest.TestCase):
             path = directory / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content)
+        control = (NODE / "src/esp_openclaw_node.c").read_text()
+        start = control.index("bool esp_openclaw_node_connect_cancel_pending_locked(")
+        end = control.index("esp_err_t esp_openclaw_node_connect_cancel(", start)
+        (directory / "cancel_predicates.inc").write_text(control[start:end])
         transport = (NODE / "src/esp_openclaw_node_transport.c").read_text()
         start = transport.index("esp_err_t esp_openclaw_node_start_transport_for_active_source(")
         end = transport.index("\nvoid esp_openclaw_node_send_challenge_kick_ping(", start)

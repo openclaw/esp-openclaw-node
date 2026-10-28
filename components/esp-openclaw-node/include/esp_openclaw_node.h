@@ -482,6 +482,37 @@ esp_err_t esp_openclaw_node_connect_begin(
     const esp_openclaw_node_connect_request_t *request,
     esp_openclaw_node_connect_attempt_id_t *out_attempt);
 
+/** @brief Check current authority on the node worker, under its state mutex.
+ * Must be bounded, thread-safe, and must not call node or serialized UI/setup
+ * APIs. Read current revocation/deadline state, not a cached admission result.
+ * Context must remain alive until the tracked attempt is terminal or the node
+ * is destroyed. No callback runs after that attempt becomes terminal.
+ */
+typedef bool (*esp_openclaw_node_connect_authorize_t)(void *context);
+
+/**
+ * @brief Begin a tracked request with live authorization at each side effect.
+ *
+ * Checks authority before replacing the old link, starting the transport,
+ * sending the connect handshake, and saving role tokens. Rechecks after
+ * blocking preparation. A false result latches cancellation; later true
+ * results cannot revive the attempt. Completion uses FAILED/CANCELED after
+ * cleanup, preserving any earlier credential writes. An operation already
+ * started may finish before revocation is observed; there is no rollback.
+ *
+ * Until terminal completion, new connect requests are rejected so the active
+ * authorizer cannot be displaced. Cancel/disconnect can still stop the request.
+ * Admission copies the callback/context but does not invoke it. All other
+ * admission and snapshot rules match connect_begin(). authorize is required.
+ */
+esp_err_t esp_openclaw_node_connect_begin_authorized(
+    esp_openclaw_node_handle_t node,
+    esp_openclaw_node_connect_lease_t lease,
+    const esp_openclaw_node_connect_request_t *request,
+    esp_openclaw_node_connect_authorize_t authorize,
+    void *context,
+    esp_openclaw_node_connect_attempt_id_t *out_attempt);
+
 /**
  * @brief Copy the latest tracked result without polling or changing the link.
  *

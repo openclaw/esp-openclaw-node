@@ -78,7 +78,8 @@ static void log_invoke_reply(
 static bool websocket_send_json(
     esp_openclaw_node_handle_t node,
     cJSON *root,
-    invoke_reply_diagnostic_t *diagnostic)
+    invoke_reply_diagnostic_t *diagnostic,
+    bool connecting)
 {
     int64_t started_us = diagnostic != NULL ? esp_timer_get_time() : 0;
     log_invoke_reply(diagnostic, REPLY_SERIALIZE_BEGIN, 0);
@@ -98,6 +99,16 @@ static bool websocket_send_json(
     }
     started_us = diagnostic != NULL ? esp_timer_get_time() : 0;
     log_invoke_reply(diagnostic, REPLY_SEND_BEGIN, 0);
+    if (connecting) {
+        esp_openclaw_node_lock_state(node);
+        bool allowed = node->state == ESP_OPENCLAW_NODE_INTERNAL_CONNECTING &&
+            !esp_openclaw_node_active_connect_cancelled_locked(node);
+        esp_openclaw_node_unlock_state(node);
+        if (!allowed) {
+            free(json);
+            return false;
+        }
+    }
     int written = node->websocket_client_ops->send_text(
         node->ws,
         json,
@@ -211,7 +222,7 @@ void esp_openclaw_node_send_gateway_request(
     cJSON_AddStringToObject(root, "id", request_id);
     cJSON_AddStringToObject(root, "method", method);
     cJSON_AddItemToObject(root, "params", params);
-    if (!websocket_send_json(node, root, NULL)) {
+    if (!websocket_send_json(node, root, NULL, false)) {
         esp_openclaw_node_lock_state(node);
         memset(&node->pending_requests[slot_index], 0, sizeof(node->pending_requests[slot_index]));
         esp_openclaw_node_unlock_state(node);
@@ -466,7 +477,7 @@ static bool send_connect_request(
         return false;
     }
 
-    bool ok = websocket_send_json(node, root, NULL);
+    bool ok = websocket_send_json(node, root, NULL, true);
     cJSON_Delete(root);
     if (!ok) {
         esp_openclaw_node_lock_state(node);
@@ -532,7 +543,7 @@ static void send_invoke_result(
 
     cJSON_AddItemToObject(root, "params", params);
     log_invoke_reply(diagnostic, REPLY_ENVELOPE_END, started_us);
-    if (!websocket_send_json(node, root, diagnostic)) {
+    if (!websocket_send_json(node, root, diagnostic, false)) {
         ESP_LOGW(ESP_OPENCLAW_NODE_TAG, "failed sending invoke result");
     }
     cJSON_Delete(root);

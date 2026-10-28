@@ -2,6 +2,7 @@
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
+typedef uint64_t esp_openclaw_node_connect_attempt_id_t;
 #include <stdio.h>
 #include <string.h>
 
@@ -21,6 +22,8 @@ enum { ESP_OK, ESP_OPENCLAW_NODE_CONNECT_FAILURE_CANCELED,
 typedef struct {
     esp_openclaw_node_internal_state_t state;
     uint64_t active_connect_attempt_id;
+    bool (*connect_authorize)(void *);
+    void *connect_authorize_context;
     struct { uint64_t id; int state, failure_reason; esp_err_t local_err; bool cancel_requested; } connect_attempt;
     struct { const char *role; } config;
 } test_node_t;

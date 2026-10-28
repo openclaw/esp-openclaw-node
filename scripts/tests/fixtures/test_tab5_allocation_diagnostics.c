@@ -126,8 +126,19 @@ typedef struct {
     esp_err_t (*register_events)(void *, int, void (*)(void *, int, int32_t, void *), void *);
     esp_err_t (*client_start)(void *);
 } ops_t;
+typedef uint64_t esp_openclaw_node_connect_attempt_id_t;
+enum { ESP_OPENCLAW_NODE_INTERNAL_IDLE, ESP_OPENCLAW_NODE_INTERNAL_CONNECTING,
+       ESP_OPENCLAW_NODE_INTERNAL_READY, ESP_OPENCLAW_NODE_INTERNAL_DESTROYING,
+       ESP_OPENCLAW_NODE_INTERNAL_CLOSED };
+enum { ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_QUEUED,
+       ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_CONNECTING };
 typedef struct node {
     config_t config;
+    int state;
+    uint64_t active_connect_attempt_id;
+    struct { uint64_t id; int state; bool cancel_requested; } connect_attempt;
+    bool (*connect_authorize)(void *);
+    void *connect_authorize_context;
     struct { int kind; char *gateway_uri; } active_connect_source;
     struct { char *gateway_uri; } persisted_session;
     const ops_t *websocket_client_ops;
@@ -181,6 +192,7 @@ static void esp_openclaw_node_cleanup_transport_instance(esp_openclaw_node_handl
     node->transport_ctx = NULL;
 }
 
+#include "cancel_predicates.inc"
 #include "transport_start_under_test.inc"
 
 static void *client_init(const esp_websocket_client_config_t *config)
@@ -238,6 +250,7 @@ static void run_start(const char *role)
     const ops_t ops = {client_init, register_events, client_start};
     struct node node = {
         .config.role = role, .websocket_client_ops = &ops,
+        .state = ESP_OPENCLAW_NODE_INTERNAL_CONNECTING,
         .active_connect_source = {
             .kind = ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_DEVICE_TOKEN,
             .gateway_uri = "ws://private-token-canary.invalid",

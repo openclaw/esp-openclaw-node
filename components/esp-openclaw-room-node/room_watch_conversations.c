@@ -179,11 +179,18 @@ void room_watch_conversations_render(const room_conversations_snapshot_t *snapsh
     lv_obj_set_y(next, content_bottom - 44);
     lv_obj_set_y(creation_button, content_bottom - 44);
     int row_height = openclaw_density_row_height(true);
+    const lv_font_t *reading_font = openclaw_reading_font();
+    int line_height = reading_font->line_height;
     for (unsigned i = 0; i < ESP_OPENCLAW_DIRECTORY_PAGE_SIZE; ++i) {
         lv_obj_set_y(rows[i], (int)i * (row_height + 8));
         lv_obj_set_height(rows[i], row_height);
-        lv_obj_set_y(titles[i], (row_height - 40) / 2);
-        lv_obj_set_y(summaries[i], (row_height - 40) / 2 + 24);
+        lv_obj_set_style_text_font(titles[i], reading_font, 0);
+        lv_obj_set_style_text_font(summaries[i], reading_font, 0);
+        lv_obj_set_height(titles[i], line_height);
+        lv_obj_set_height(summaries[i], line_height);
+        int title_y = (row_height - 2 * line_height - 4) / 2;
+        lv_obj_set_y(titles[i], title_y);
+        lv_obj_set_y(summaries[i], title_y + line_height + 4);
     }
     lv_obj_set_style_text_font(body_text, openclaw_reading_font(), 0);
     if (snapshot == NULL) {

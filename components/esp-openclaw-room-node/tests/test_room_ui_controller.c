@@ -2687,6 +2687,104 @@ static void check_watch_density(const char *path)
     puts("watch list spacing: touch choices, scroll reachability, fixed typography and no Talk/send passed");
 }
 
+static void check_watch_help(const char *path)
+{
+    unsigned starts = talk_starts, stops = talk_stops, sends = voice_sends, begins = voice_begins;
+    unsigned selections = agent_selections;
+    room_ui_facts_t facts = {.wifi = ROOM_UI_WIFI_CONNECTED,
+        .gateway = ROOM_UI_GATEWAY_CONNECTED, .talk = ROOM_UI_TALK_READY};
+    room_ui_store_facts(&facts);
+    assert(room_ui_watch_menu("help") == ESP_OK);
+    assert(visible_watch_text("Help"));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " Settings")));
+    lv_obj_t *entry = lv_obj_get_parent(find_text(lv_layer_top(), "?  Help"));
+    lv_obj_scroll_to_view(entry, LV_ANIM_OFF);
+    lv_obj_update_layout(entry);
+    click_talk(entry);
+    assert(visible_watch_text("Help") && watch_status_pixels(284, 307) > 0);
+    if (path) { char output[1024]; snprintf(output, sizeof(output), "%s-help.ppm", path); write_frame(output); }
+    const char *topics[] = {LV_SYMBOL_HOME "  Navigation", LV_SYMBOL_ENVELOPE "  Messages",
+        LV_SYMBOL_USB "  USB setup", LV_SYMBOL_WIFI "  Status"};
+    const char *content[] = {"Tap Menu", "Hold to record", "gateway setup-code", "Wi-Fi and Gateway"};
+    for (unsigned i = 0; i < 4; ++i) {
+        lv_obj_t *topic = lv_obj_get_parent(find_visible_text(lv_layer_top(), topics[i]));
+        lv_obj_scroll_to_view(topic, LV_ANIM_OFF);
+        click_talk(topic);
+        lv_obj_t *body = find_visible_fragment(lv_layer_top(), content[i]);
+        assert(body != NULL && lv_obj_get_style_text_font(body, 0) == &lv_font_montserrat_14);
+        lv_area_t bounds;
+        lv_obj_get_coords(lv_obj_get_parent(body), &bounds);
+        assert(bounds.x1 >= 26 && bounds.x2 < 342 && bounds.y1 >= 120 && bounds.y2 < 432);
+        if (path) { char output[1024]; snprintf(output, sizeof(output), "%s-help-%u.ppm", path, i); write_frame(output); }
+        click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " Help")));
+        assert(visible_watch_text("Help"));
+    }
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " Settings")));
+    assert(visible_watch_text("Settings"));
+    assert(room_ui_watch_menu("device") == ESP_OK);
+    entry = lv_obj_get_parent(find_text(lv_layer_top(), "?  Help"));
+    lv_obj_scroll_to_view(entry, LV_ANIM_OFF); click_talk(entry);
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " This Watch")));
+    assert(visible_watch_text("This Watch"));
+    touch_talk(entry, true);
+    assert(room_ui_watch_menu("home") == ESP_OK);
+    touch_talk(entry, false);
+    assert(lv_obj_is_visible(watch_menu_button) && !visible_watch_text("Help"));
+
+    facts = (room_ui_facts_t){.wifi = ROOM_UI_WIFI_UNCONFIGURED,
+        .gateway = ROOM_UI_GATEWAY_NO_SESSION, .talk = ROOM_UI_TALK_NO_SESSION};
+    room_ui_store_facts(&facts); room_ui_set(ROOM_UI_SETUP, NULL);
+    assert(room_ui_watch_menu("help") == ESP_OK);
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_USB "  USB setup")));
+    assert(find_visible_fragment(lv_layer_top(), "gateway setup-code") != NULL);
+    assert(watch_status_pixels(284, 307) == 0);
+    if (path) { char output[1024]; snprintf(output, sizeof(output), "%s-help-offline.ppm", path); write_frame(output); }
+    facts = (room_ui_facts_t){.wifi = ROOM_UI_WIFI_CONNECTED,
+        .gateway = ROOM_UI_GATEWAY_CONNECTED, .talk = ROOM_UI_TALK_READY};
+    room_ui_store_facts(&facts); room_ui_set(ROOM_UI_IDLE, NULL);
+
+    assert(room_ui_watch_menu("reading") == ESP_OK);
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), "Larger")));
+    assert(room_ui_watch_menu("density") == ESP_OK);
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), "Comfortable")));
+    facts.talk = ROOM_UI_TALK_ACTIVE;
+    room_ui_store_facts(&facts);
+    assert(room_ui_watch_menu("help") == ESP_OK);
+    lv_obj_t *status = lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_WIFI "  Status"));
+    lv_obj_scroll_to_view(status, LV_ANIM_OFF); lv_obj_update_layout(status);
+    assert(lv_obj_get_height(status) == 60 && lv_obj_get_scroll_y(lv_obj_get_parent(status)) > 0);
+    if (path) { char output[1024]; snprintf(output, sizeof(output), "%s-help-comfortable-call.ppm", path); write_frame(output); }
+    click_talk(status);
+    assert(find_visible_fragment(lv_layer_top(), "Wi-Fi and Gateway") != NULL);
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " Help")));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_ENVELOPE "  Messages")));
+    lv_obj_t *body = find_visible_fragment(lv_layer_top(), "Hold to record");
+    lv_obj_t *viewport = lv_obj_get_parent(body);
+    lv_obj_update_layout(viewport);
+    assert(lv_obj_get_style_text_font(body, 0) == &lv_font_montserrat_20);
+    assert(lv_obj_get_scroll_bottom(viewport) > 0);
+    lv_area_t bounds; lv_obj_get_coords(viewport, &bounds);
+    assert(bounds.y2 < 370 && visible_watch_text("Return to call"));
+    lv_obj_scroll_to_y(viewport, lv_obj_get_scroll_bottom(viewport), LV_ANIM_OFF);
+    int32_t scroll = lv_obj_get_scroll_y(viewport);
+    status_tick(); room_ui_refresh();
+    assert(scroll > 0 && lv_obj_get_scroll_y(viewport) == scroll);
+    if (path) { char output[1024]; snprintf(output, sizeof(output), "%s-help-large-call.ppm", path); write_frame(output); }
+    assert(room_ui_watch_menu("home") == ESP_OK);
+    assert(room_ui_watch_menu("help") == ESP_OK);
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_ENVELOPE "  Messages")));
+    assert(lv_obj_get_scroll_y(viewport) == 0);
+    assert(room_ui_watch_menu("reading") == ESP_OK);
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), "Standard")));
+    assert(room_ui_watch_menu("density") == ESP_OK);
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), "Compact")));
+    facts.talk = ROOM_UI_TALK_READY; room_ui_store_facts(&facts);
+    assert(room_ui_watch_menu("home") == ESP_OK);
+    assert(talk_starts == starts && talk_stops == stops && voice_sends == sends && voice_begins == begins);
+    assert(agent_selections == selections);
+    puts("watch Help: touch entry, topics, Back, larger reading, retained scrolling and call safety passed");
+}
+
 int main(int argc, char **argv)
 {
     assert(argc >= 2);
@@ -2849,6 +2947,7 @@ int main(int argc, char **argv)
         check_watch_voice(argc == 3 ? argv[2] : NULL);
         check_watch_reading_size(argc == 3 ? argv[2] : NULL);
         check_watch_density(argc == 3 ? argv[2] : NULL);
+        check_watch_help(argc == 3 ? argv[2] : NULL);
         // This isolated fixture replaces and destroys the mascot singleton.
         check_watch_repaint();
     }

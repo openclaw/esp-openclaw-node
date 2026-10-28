@@ -84,6 +84,7 @@ static room_watch_page_t watch_page = ROOM_WATCH_HOME;
 static room_watch_page_t watch_display_parent = ROOM_WATCH_SETTINGS;
 static room_watch_page_t watch_connection_parent = ROOM_WATCH_MENU;
 static room_watch_page_t watch_messaging_parent = ROOM_WATCH_SETTINGS;
+static room_watch_page_t watch_help_parent = ROOM_WATCH_SETTINGS;
 static room_messaging_snapshot_t current_messaging, painted_messaging;
 static void (*messaging_handler)(unsigned revision);
 static bool messaging_held, messaging_pending;
@@ -94,6 +95,8 @@ static room_watch_page_t watch_parent(room_watch_page_t page)
     if (page == ROOM_WATCH_DISPLAY) return watch_display_parent;
     if (page == ROOM_WATCH_BRIGHTNESS || page == ROOM_WATCH_READING || page == ROOM_WATCH_DENSITY) return ROOM_WATCH_DISPLAY;
     if (page == ROOM_WATCH_MESSAGING) return watch_messaging_parent;
+    if (page == ROOM_WATCH_HELP) return watch_help_parent;
+    if (page >= ROOM_WATCH_HELP_NAVIGATION && page <= ROOM_WATCH_HELP_STATUS) return ROOM_WATCH_HELP;
     if (page == ROOM_WATCH_CONNECTION) return watch_connection_parent;
     if (page == ROOM_WATCH_LOCAL_DEVICE) return ROOM_WATCH_DEVICES;
     if (page == ROOM_WATCH_DEVICES || page == ROOM_WATCH_SETTINGS || page == ROOM_WATCH_CALL) return ROOM_WATCH_MENU;
@@ -414,6 +417,8 @@ static esp_err_t watch_navigation_show_context(room_watch_page_t page, unsigned 
         watch_display_parent = watch_page == ROOM_WATCH_LOCAL_DEVICE ? ROOM_WATCH_LOCAL_DEVICE : ROOM_WATCH_SETTINGS;
     if (page == ROOM_WATCH_MESSAGING && watch_page != ROOM_WATCH_MESSAGING)
         watch_messaging_parent = watch_page == ROOM_WATCH_LOCAL_DEVICE ? ROOM_WATCH_LOCAL_DEVICE : ROOM_WATCH_SETTINGS;
+    if (page == ROOM_WATCH_HELP && (watch_page < ROOM_WATCH_HELP || watch_page > ROOM_WATCH_HELP_STATUS))
+        watch_help_parent = watch_page == ROOM_WATCH_LOCAL_DEVICE ? ROOM_WATCH_LOCAL_DEVICE : ROOM_WATCH_SETTINGS;
     messaging_held = false;
     if (page == ROOM_WATCH_CONNECTION && watch_page != ROOM_WATCH_CONNECTION)
         watch_connection_parent = watch_page == ROOM_WATCH_LOCAL_DEVICE ? ROOM_WATCH_LOCAL_DEVICE :
@@ -471,6 +476,7 @@ esp_err_t room_ui_watch_menu(const char *page)
     else if (strcmp(page, "reading") == 0) requested = ROOM_WATCH_READING;
     else if (strcmp(page, "density") == 0) requested = ROOM_WATCH_DENSITY;
     else if (strcmp(page, "messaging") == 0) requested = ROOM_WATCH_MESSAGING;
+    else if (strcmp(page, "help") == 0) requested = ROOM_WATCH_HELP;
     else if (strcmp(page, "connection") == 0) requested = ROOM_WATCH_CONNECTION;
     else if (strcmp(page, "call") == 0) requested = ROOM_WATCH_CALL;
     else if (strcmp(page, "canvas") == 0) requested = ROOM_WATCH_CANVAS;
@@ -1535,7 +1541,8 @@ static bool room_ui_render_locked(void)
         painted_reader_epoch = home_action == ROOM_HOME_CONTINUE ? reader_context.epoch : 0;
         if (pressed_reader_epoch != painted_reader_epoch) pressed_reader_epoch = 0;
         taskEXIT_CRITICAL(&state_mux);
-        bool settings = page == ROOM_WATCH_SETTINGS || page == ROOM_WATCH_LOCAL_DEVICE || page == ROOM_WATCH_DISPLAY || page == ROOM_WATCH_BRIGHTNESS || page == ROOM_WATCH_READING || page == ROOM_WATCH_DENSITY || page == ROOM_WATCH_MESSAGING;
+        bool settings = page == ROOM_WATCH_SETTINGS || page == ROOM_WATCH_LOCAL_DEVICE || page == ROOM_WATCH_DISPLAY || page == ROOM_WATCH_BRIGHTNESS || page == ROOM_WATCH_READING || page == ROOM_WATCH_DENSITY || page == ROOM_WATCH_MESSAGING ||
+            (page >= ROOM_WATCH_HELP && page <= ROOM_WATCH_HELP_STATUS);
         room_watch_navigation_render(page, &facts, !navigation || overlay || page == ROOM_WATCH_AGENTS ||
             page == ROOM_WATCH_DEVICES || settings, resume_failed, parent, content_bottom);
         room_watch_devices_render(painted_devices, !navigation || overlay || page != ROOM_WATCH_DEVICES, content_bottom);

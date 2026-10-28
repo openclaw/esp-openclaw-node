@@ -52,6 +52,13 @@ font size stays separate. Longer lists scroll within their content area, keeping
 Back and the Talk control available. Compact is the default. The choice is local
 to this Watch and lasts until restart; USB `menu density` opens the same control.
 
+**Settings → Help** and **This Watch → Help** contain Navigation, Messages,
+USB setup, and Status topics. Each opens a scrollable reading page that follows
+the text-size preference and keeps **Return to call** available during a call.
+Back returns to the topic list, then to the page that opened Help. USB `menu help`
+opens the same guide. Setup instructions describe the current USB console flow;
+they do not advertise QR or Bluetooth provisioning.
+
 On the 1.8-inch Watch, **Menu → Agents** opens the agent directory.
 Swipe the list to browse up to eight agents per page; use the arrows for more
 pages, and tap a row to inspect its name and exact ID. Initials replace emoji

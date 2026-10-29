@@ -208,6 +208,95 @@
     .t5-home .t5-btn.primary{border:1px solid #fff8;background:linear-gradient(170deg,#fffaf5,#ded8d2);color:#282227;box-shadow:inset 0 1px #fff,0 7px 20px #0004}
     .guides .t5-top,.guides .t5-body,.guides .t5-bar{outline:1px dashed #e8ba6570;outline-offset:-1px}
     .guides .t5 button{outline:1px dashed #e8ba6545;outline-offset:-1px}
+    /* Tab5 hierarchy pass. Geometry is unchanged — the header is still 112 px, rows are still 112 px
+       and nothing drops below the 96 px floor. What changes is weight, tone and rhythm: a quiet crumb
+       under a loud title, an agent who reads as a presence rather than a chip, and one primary that
+       cannot be mistaken for a secondary. */
+    .t5-top{background:linear-gradient(180deg,#0f1c17,#0a1211);border-bottom-color:#21342b}
+    .t5-crumb{font-size:20px;color:#7b958a}
+    .t5-title{font-size:38px;letter-spacing:-1px;font-weight:650}
+    .t5-back{background:linear-gradient(160deg,#152620,#0e1a15);border-color:#30473c}
+    .t5-presence{gap:15px;border-color:#2f4c3b;background:linear-gradient(145deg,#ffffff16,#ffffff05);box-shadow:inset 0 1px #ffffff12}
+    .t5-presence .avatar{box-shadow:0 0 0 2px #0a1211,0 0 0 4px var(--tone,#35563f)}
+    .t5-presence strong{letter-spacing:-.3px}
+    .t5-presence small{font-size:20px;letter-spacing:0;margin-top:5px}
+    .t5-dot{width:14px;height:14px;border-radius:50%;flex:none;background:var(--tone,#7fab91);box-shadow:0 0 0 5px #ffffff12}
+    .t5-sys{letter-spacing:.03em}
+    .t5-bubble{border-radius:26px 26px 26px 10px;padding:19px 26px;box-shadow:0 6px 18px #00000026}
+    .t5-bubble.me{border-radius:26px 26px 10px 26px}
+    .t5-bubble .who{letter-spacing:.01em}
+    .t5-bubble .who .avatar{box-shadow:0 0 0 2px #0e1b15,0 0 0 3px #2f5340}
+    .t5-row strong{letter-spacing:-.2px}
+    .t5-row.current{box-shadow:inset 3px 0 0 var(--mint)}
+    .t5-bar{background:linear-gradient(180deg,#0a1211,#0e1b16)}
+    .t5-btn{border-radius:22px;letter-spacing:-.2px}
+    .t5-btn.primary{background:linear-gradient(170deg,#d3f0e0,#9fd3bc);border-color:#b7e3cf;box-shadow:0 8px 22px #0000003d,inset 0 1px #ffffffb3}
+    .t5-navbar button[aria-current=page]{box-shadow:inset 0 -3px 0 #7fcfa6}
+    /* ── Live conversation ────────────────────────────────────────────────────
+       Talking to an agent is a live turn, not record → transcribe → review → Send.
+       Recognised words appear while you speak, the turn finalises itself, and the
+       reply streams back beside a simulated audio indicator. Partial text is dim,
+       dotted and carries its own NOT FINAL label, so the difference between heard
+       and confirmed never rests on colour alone. Every animation here decorates a
+       state that is also written in words, and all of it stops under reduced motion. */
+    .live-tone{--tone:#b7e3cf;--tone-dim:#8cc1a8;--tone-ink:#e1f1e8}
+    .ph-connecting{--tone:#9fc4b2;--tone-dim:#7fa390;--tone-ink:#dceade}
+    .ph-thinking{--tone:#c6bef5;--tone-dim:#9b93d2;--tone-ink:#e8e4fc}
+    .ph-speaking{--tone:#f3bd96;--tone-dim:#c89672;--tone-ink:#fbe5d4}
+    .ph-ready{--tone:#a9cdba;--tone-dim:#86ab97;--tone-ink:#dfece2}
+    .ph-error{--tone:#f0a88c;--tone-dim:#c58067;--tone-ink:#fbdccf}
+    .is-muted{--tone:#9cada4;--tone-dim:#7f8e86;--tone-ink:#dae1db}
+    .live-meter{display:inline-flex;align-items:center;gap:4px;height:30px;flex:none}
+    .live-meter i{width:4px;height:var(--h);border-radius:3px;background:var(--tone);opacity:.9}
+    .live-active .live-meter i{animation:live-bar 900ms ease-in-out alternate infinite;animation-delay:var(--d)}
+    /* Idle, muted, thinking and dead sessions flatten the indicator: no bar may imply audio that is not there. */
+    .is-muted .live-meter i,.ph-ready .live-meter i,.ph-error .live-meter i,.ph-thinking .live-meter i,.ph-connecting .live-meter i,
+    .t5-live.is-muted .live-meter i,.t5-live.ph-ready .live-meter i,.t5-live.ph-error .live-meter i,.t5-live.ph-thinking .live-meter i,.t5-live.ph-connecting .live-meter i,
+    .w-live.is-muted .live-meter i,.w-live.ph-ready .live-meter i,.w-live.ph-error .live-meter i,.w-live.ph-thinking .live-meter i,.w-live.ph-connecting .live-meter i{height:5px;opacity:.5;animation:none}
+    @keyframes live-bar{to{transform:scaleY(.28)}}
+    .live-caret{display:inline-block;width:2px;height:1em;margin-left:4px;background:var(--tone);vertical-align:-.1em}
+    .live-active .live-caret{animation:live-blink 1.1s steps(1) infinite}
+    @keyframes live-blink{50%{opacity:.12}}
+    .reduced .live-meter i,.reduced .live-caret{animation:none!important}
+    @media(prefers-reduced-motion:reduce){.live-meter i,.live-caret{animation:none!important}}
+    .partial-text{color:#9db3a7;text-decoration:underline dotted #6c8779;text-underline-offset:6px}
+    /* Watch: a presence line, a short feed, one sentence of guidance. */
+    .w-live{height:100%;display:flex;flex-direction:column;gap:9px}
+    .w-livehead{flex:none;display:flex;align-items:center;gap:10px}
+    .w-livehead .avatar{width:38px;height:38px;flex:none;box-shadow:0 0 0 2px #0a1211,0 0 0 3px var(--tone-dim)}
+    .w-livehead .row-text{flex:1;min-width:0}
+    .w-livehead strong{display:block;font-size:19px;font-weight:600;line-height:1.15;color:var(--tone-ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .w-livehead small{display:block;font:10px var(--mono);letter-spacing:.09em;color:var(--tone-dim);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .w-live .live-meter{height:24px;gap:3px}
+    .w-live .live-meter i{width:3px;height:calc(var(--h) * .6)}
+    .w-livefeed{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:8px;scrollbar-width:thin;scrollbar-color:#51665a transparent}
+    .live-turn{flex:none;border-radius:14px;padding:9px 12px;background:#14231c;border:1px solid #22362c}
+    .live-turn.me{background:#1b3328;border-color:#2b4b3a}
+    .live-turn.now{border-color:var(--tone-dim);background:#16271f}
+    .live-turn.me.now{background:#1d382b}
+    .live-turn .live-label{display:block;font:10px var(--mono);letter-spacing:.1em;color:var(--tone-dim);margin-bottom:5px}
+    .live-turn p{margin:0;line-height:1.35;overflow-wrap:anywhere}
+    .live-turn.cut p{opacity:.74}
+    .w-livefoot{flex:none;font-size:12px;line-height:1.35;color:var(--dim);margin:0}
+    .w-footer button.live-end{background:#5f3730;color:#ffe9e1}
+    /* Tab5 keeps presence in the header so the transcript has room to breathe. */
+    .t5-live{flex:1;min-height:0;display:flex;flex-direction:column;gap:16px}
+    .t5-livehead{flex:none;display:flex;align-items:center;gap:18px;height:38px}
+    .t5-livehead strong{display:block;font-size:38px;font-weight:650;letter-spacing:-.9px;line-height:1.1;color:var(--tone-ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .t5-livehead small{display:block;font:20px var(--mono);letter-spacing:.08em;color:var(--tone-dim);margin-top:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .t5-live .live-meter{height:34px;gap:6px}
+    .t5-live .live-meter i{width:6px;height:var(--h)}
+    .t5-livetag{flex:none;font:19px var(--mono);letter-spacing:.09em;color:#0c1812;background:var(--tone);border-radius:15px;padding:8px 15px;white-space:nowrap}
+    .is-muted .t5-livetag,.ph-error .t5-livetag,.ph-ready .t5-livetag{background:transparent;border:1px solid var(--tone);color:var(--tone)}
+    .t5-bubble.now{border-color:var(--tone-dim);box-shadow:0 8px 24px #00000033}
+    .t5-bubble.partial{border-style:dashed}
+    .t5-bubble.cut p{opacity:.74}
+    .t5-bubble .who em.flag{color:var(--tone-dim)}
+    .t5-bubble .who .live-meter{height:26px;margin-left:auto}
+    .t5-bubble .who .live-meter+em{margin-left:14px}
+    .t5-livehint{flex:none;margin:0;font-size:23px;line-height:1.35;color:#93aa9d}
+    .cancel-armed .w-live,.cancel-armed .t5-live{--tone:#f0a88c;--tone-dim:#c58067;--tone-ink:#fbdccf}
+    .voice-log{min-height:20px;font:12px var(--mono);letter-spacing:.04em;color:#4d6a56;margin:10px 0 0}
     .catalog-card.tab5-card .tab5-wrap{width:294.4px;height:165.6px;aspect-ratio:auto}
     .catalog-card .t5{transform:scale(.23)}
     .catalog-card .t5 button{pointer-events:none}
@@ -270,9 +359,9 @@
 </head>
 <body><main>
   <header>
-    <div class="eyebrow">OPENCLAW / REVISION 10 / INTERACTIVE DESIGN PROPOSAL</div>
+    <div class="eyebrow">OPENCLAW / REVISION 11 / INTERACTIVE DESIGN PROPOSAL</div>
     <h1>A little presence.<br>A clear next step.</h1>
-    <p>Scan the device with OpenClaw mobile. Pair over Bluetooth, then let it run independently. A quiet Home leads into the same agents, conversations and controls on watch, Dial and Tab5 — a glance, a knob and a five-inch touch panel reading from one set of scenes.</p>
+    <p>Scan the device with OpenClaw mobile. Pair over Bluetooth, then let it run independently. A quiet Home leads into the same agents, conversations and controls on watch, Dial and Tab5 — a glance, a knob and a five-inch touch panel reading from one set of scenes. Talking is a live conversation: your words appear as they are recognised, the turn ends itself, and the reply streams back. Typing, handwriting and dictating into a draft stay available as the deliberate, reviewable alternatives.</p>
     <nav><a href="watch-dial-ux-plan.html">Layout overview</a><a href="watch-dial-interaction-plan.md">Interaction plan</a><a href="#catalog">Screen sheets</a><a href="#review=sizing" id="review-link">Sizing &amp; calibration review</a></nav>
   </header>
   <div class="controls">
@@ -284,18 +373,18 @@
     <button id="open-review">Sizing &amp; calibration review</button>
     <button id="reset-preview">Reset preview</button>
   </div>
-  <p class="facts">Browser simulation only. Agents, transcripts, networks and outcomes are fixtures. No microphone, network, device or storage access. The 9:41 clock is a fixed design fixture. PTT, handwriting recognition, consumer pairing and settings persistence still need firmware work. Tab5 microphone, speaker and camera behaviour is disclosed as hardware-dependent and simulated here.</p>
+  <p class="facts">Browser simulation only. Agents, transcripts, networks and outcomes are fixtures. No microphone, audio output, network, device or storage access. Live conversation is a scripted <code>setTimeout</code> demonstration of a proposed streaming contract — recognised words, reply text and the audio indicator are all synthetic, and nothing here reads a microphone or plays sound. The 9:41 clock is a fixed design fixture. Live turn-taking, handwriting recognition, consumer pairing and settings persistence still need firmware work. Tab5 microphone, speaker and camera behaviour is disclosed as hardware-dependent and simulated here. The Dial has no microphone and no speech speaker at all.</p>
   <div class="layout">
     <aside><label for="search" class="eyebrow">FIND A SCREEN</label><input class="search" id="search" type="search" placeholder="Agent, pairing, sound…"><div id="screen-list" class="screen-list"></div></aside>
     <section aria-label="Selected screen">
       <h2 class="preview-title" id="scene-title"></h2><p class="scene-note" id="scene-note"></p>
       <div class="devices" id="device-pair">
-        <div><div class="device-label">WATCH / 368 × 448</div><div id="watch-preview"></div><p class="input-note">Tap a row or action. Back returns to the actual parent. Hold the Talk action for a simulated recording.</p></div>
-        <div><div class="device-label">DIAL / 240 × 240</div><div id="dial-preview"></div><div class="device-tools"><button data-turn="-1" aria-label="Turn Dial left">↶ Turn</button><button id="dial-press">Press</button><button data-turn="1" aria-label="Turn Dial right">Turn ↷</button><button data-home>Home</button></div><p class="input-note">From Home, turn opens Menu; press activates the visible action. In lists, turn focuses a row; press selects. Touch selects the named item. Audio is unavailable on this Dial; conversations and touch input remain available.</p></div>
+        <div><div class="device-label">WATCH / 368 × 448</div><div id="watch-preview"></div><p class="input-note">Tap a row or action. Back returns to the actual parent. Tap the Talk action to open a live conversation hands-free, or hold it to take one turn — releasing submits that turn, with no review step. Sliding up before you release cancels it.</p></div>
+        <div><div class="device-label">DIAL / 240 × 240</div><div id="dial-preview"></div><div class="device-tools"><button data-turn="-1" aria-label="Turn Dial left">↶ Turn</button><button id="dial-press">Press</button><button data-turn="1" aria-label="Turn Dial right">Turn ↷</button><button data-home>Home</button></div><p class="input-note">From Home, turn opens Menu; press activates the visible action. In lists, turn focuses a row; press selects. Touch selects the named item. This Dial has no microphone and no speech speaker, so every voice scene resolves to its text alternative — nothing here simulates a Dial microphone.</p></div>
       </div>
-      <div class="tab5-panel" id="tab5-panel"><div class="device-label">TAB5 / 1280 × 720 / 5-INCH CAPACITIVE TOUCH / LANDSCAPE</div><div id="tab5-stage"><div id="tab5-preview"></div></div><p class="input-note">One task per screen: a header that says where you are, one reading zone and one action zone. Four destinations — Home, Conversations, Devices, Menu — sit in the bar only on destination screens; everywhere else that bar carries the actions and Back lives in the header. Typing and handwriting are deliberate full-screen modes. Hold the mint Talk action for a simulated recording. Responsive fit scales 1280 × 720 to the page, native renders 1:1 for pixel inspection, and calibrated physical size uses the scale you set in the sizing review.</p><p class="input-note" id="tab5-physnote" hidden>Physical size is <b>uncalibrated</b>. Browser CSS millimetres are not physical millimetres — open the sizing review and align a real ruler or bank card first.</p></div>
+      <div class="tab5-panel" id="tab5-panel"><div class="device-label">TAB5 / 1280 × 720 / 5-INCH CAPACITIVE TOUCH / LANDSCAPE</div><div id="tab5-stage"><div id="tab5-preview"></div></div><p class="input-note">One task per screen: a header that says where you are, one reading zone and one action zone. Four destinations — Home, Conversations, Devices, Menu — sit in the bar only on destination screens; everywhere else that bar carries the actions and Back lives in the header. Typing and handwriting are deliberate full-screen modes. Tap the mint Talk action to open a simulated live conversation, or hold it to take a single turn. Responsive fit scales 1280 × 720 to the page, native renders 1:1 for pixel inspection, and calibrated physical size uses the scale you set in the sizing review.</p><p class="input-note" id="tab5-physnote" hidden>Physical size is <b>uncalibrated</b>. Browser CSS millimetres are not physical millimetres — open the sizing review and align a real ruler or bank card first.</p></div>
       <section id="phone-companion" class="phone-companion hidden" aria-label="Mobile pairing companion"></section>
-      <div class="flow-actions"><h3>Related states and recovery</h3><div id="related"></div><p class="facts" id="implementation-note"></p><div class="toast" id="toast" role="status" aria-live="polite"></div></div>
+      <div class="flow-actions"><h3>Related states and recovery</h3><div id="related"></div><p class="facts" id="implementation-note"></p><div class="toast" id="toast" role="status" aria-live="polite"></div><p class="voice-log" id="voice-announce" role="status" aria-live="polite"></p></div>
     </section>
   </div>
   <section class="catalog" id="catalog"><div class="catalog-bar"><div><h2>Screen sheets</h2><p id="catalog-count"></p></div><div><button id="all-settings">All settings screens</button> <button data-sheet="watch">Watch sheet</button> <button data-sheet="dial">Dial sheet</button> <button data-sheet="tab5">Tab5 sheet</button></div></div><p>Choose a journey above to review its complete sheet. These are the same screens as the clickable preview, at fixed native proportions. Use the sidebar to inspect a state at full size.</p><div class="catalog-grid" id="catalog-grid"></div></section>
@@ -396,11 +485,11 @@
   function hero(id,group,title,headline,text,action,note='',extra={}){add(id,group,title,{kind:'hero',headline,text,actions:action?[action]:[]},note,extra)}
   function slider(id,group,title,value,unit,note,extra={}){add(id,group,title,{kind:'slider',value,unit,actions:[R('Done',extra.parent||'settings')]},note,extra)}
 
-  add('home','Daily','Home',{kind:'home'},'Agent and Menu above a shaded OpenClaw mascot, a sculpted color field, one headline and one floating action. Hold on the watch starts capture here. Turn the Dial to open Menu; press its button to continue.',{parent:null,related:['home-empty','home-working','home-reply','home-offline','home-live']});
-  for(const [id,title,variant] of [['home-empty','Home · first conversation','empty'],['home-working','Home · working','working'],['home-reply','Home · reply ready','reply'],['home-offline','Home · offline','offline'],['home-live','Home · live conversation','live']])add(id,'Daily',title,{kind:'home',variant},'Home reflects one real state. Only the status line and primary action adapt; the layout stays still. Status alone does not claim a successful result.',{parent:null,related:['home','input','connection'],dialView:variant==='live'?'home':undefined});
+  add('home','Daily','Home',{kind:'home'},'Agent and Menu above a shaded OpenClaw mascot, a sculpted color field, one headline and one primary action. On the watch and Tab5 that action opens a live conversation — tap for hands-free, hold for a single turn. The Dial has no microphone, so its action continues the conversation in text instead.',{parent:null,related:['home-empty','home-working','home-reply','home-offline','home-live']});
+  for(const [id,title,variant] of [['home-empty','Home · first conversation','empty'],['home-working','Home · working','working'],['home-reply','Home · reply ready','reply'],['home-offline','Home · offline','offline'],['home-live','Home · live conversation','live']])add(id,'Daily',title,{kind:'home',variant},variant==='live'?'A live conversation is open but paused while you are on Home: no timer is running and nothing is being captured. The action returns you to it rather than starting a second session.':'Home reflects one real state. Only the status line and primary action adapt; the layout stays still. Status alone does not claim a successful result.',{parent:null,related:variant==='live'?['home','live-talk','live-ended']:['home','input','connection'],dialView:variant==='live'?'home':undefined});
   list('menu','Daily','Menu',[R('Agents','agents','Kitsune selected','agents'),R('Conversations','threads','Project plan','chat'),R('Devices','devices','Local and permitted targets','devices'),R('Activity','activity','Results and pending work','activity'),R('Settings','settings','Display, input, connection…','settings')],'The same five destinations and icons everywhere: five watch rows, one focused Dial entry, five large Tab5 rows. Tab5 also keeps Home, Conversations and Devices in its bottom bar, so Menu is a hub rather than the only way in.',{parent:'home'});
   list('threads','Daily','Conversations',[R('Project plan','conversation','Current · today','chat'),R('Shopping list','conversation','Yesterday','chat'),R('New conversation','new-thread','Start with selected agent','chat'),R('Change agent','agents','Kitsune · fox','agents')],'Each conversation belongs to its agent. Choosing New must create a thread, never reset an old one.');
-  add('conversation','Daily','Project plan',{kind:'message',eyebrow:'Kitsune · recent reply',text:'The outline is ready. Which section should we tackle next?',actions:[R('Hold to reply','ptt-ready'),R('More','input')]},'The selected agent avatar stays with the conversation. Long messages scroll on the watch and paginate on the Dial.',{parent:'threads',dialText:'The outline is ready. Which part is next?',dialActions:[R('Reply','input')]});
+  add('conversation','Daily','Project plan',{kind:'message',eyebrow:'Kitsune · recent reply',text:'The outline is ready. Which section should we tackle next?',actions:[R('Talk','live-talk'),R('More','input')]},'The selected agent avatar stays with the conversation. Talk opens a live conversation in this thread; More keeps the text routes. Long messages scroll on the watch and paginate on the Dial, which has no microphone.',{parent:'threads',dialText:'The outline is ready. Which part is next?',dialActions:[R('Reply','input')]});
   hero('new-thread','Daily','New conversation','Start a new thread?','Your current conversation stays available.',R('Create','thread-created'),'Creation is a server result; a failed request retains the prior selection.',{parent:'threads',related:['thread-failed']});
   hero('thread-created','Daily','Conversation ready','A fresh start','Kitsune · new conversation',R('Reply','input'),'Success fixture: only activate the new thread after the server response.',{parent:'threads'});
   hero('thread-failed','Daily','Could not create','Keep your current thread','Check your connection or permissions.',R('Back to threads','threads'),'Failure fixture: no fabricated empty thread and no lost current conversation.',{parent:'threads'});
@@ -418,26 +507,39 @@
   hero('agent-memo','Agents','Memo','Memo','Text conversations · initials identity',R('Use Memo','agent-switch'),'A missing or failed image falls back to readable initials. No blank face, broken-image icon or guessed account image.',{parent:'agents',avatar:'initials'});
   hero('agent-switch','Agents','Change agent','Start new work here?','Existing controls and pending results keep their owner.',R('Confirm','agent-selected'),'Changing an agent stages the choice. An active call requires an explicit end-and-switch decision.',{parent:'agents',dialText:'Old controls keep their owner.',related:['agent-call-switch']});
   hero('agent-selected','Agents','Agent selected','Ready for new work','Choose an existing conversation or start one.',R('Conversations','threads'),'Success fixture: only change selection after the required Gateway operation succeeds.',{parent:'agents'});
-  hero('agent-call-switch','Agents','Call in progress','End before switching?','Your current call stays active until you choose End and switch.',R('End & switch','agent-selected'),'Back keeps the call. The new agent must never silently take over an open microphone or call.',{parent:'agents',dialText:'A live call owns the old context.'});
+  hero('agent-call-switch','Agents','Live conversation open','End before switching?','Your live conversation stays open until you choose End and switch.',R('End & switch','agent-selected'),'Back keeps the session. Switching ends it first and releases its timers, so a reply already in flight for the old agent can never arrive in the new agent’s transcript.',{parent:'agents',dialText:'A live session owns the old context.'});
   hero('agents-empty','Agents','No agents available','Ask for access','No permitted agents were returned.',R('Connection','connection'),'Distinguish denied/empty from loading and from a stale cached roster.',{parent:'agents'});
   hero('agents-loading','Agents','Loading agents','Getting your agents','Keeping the current selection while this loads.',R('Cancel','home'),'A transient refresh must not replace Kitsune with the first returned entry.',{parent:'agents'});
   hero('agent-unavailable','Agents','Agent unavailable','Keep your conversation','The agent cannot accept new work right now.',R('Other agents','agents'),'Unavailable is a live capability/reachability fact, not inferred from an avatar or roster presence.',{parent:'agents'});
-  hero('agent-text-only','Agents','Text-only agent','Use a text reply','This agent does not offer voice. Your conversation stays selected.',R('Reply options','input'),'Agent voice readiness is separate from microphone hardware. Do not switch to a different agent without a deliberate selection.',{parent:'input',dialText:'This agent offers text replies.'});
+  hero('agent-text-only','Agents','Text-only agent','Use a text reply','This agent does not offer live conversation. Your conversation stays selected.',R('Reply options','input'),'Agent voice readiness is separate from microphone hardware: a live session must not open for an agent that does not offer one, and the device must not switch to a different agent to find voice.',{parent:'input',dialText:'This agent offers text replies.'});
 
-  list('input','Talk & input','Reply',[R('Hold to talk','ptt-ready','Review before sending','mic'),R('Quick replies','quick-replies','Short, deliberate responses','chat'),R('Write with finger','scribble','Optional handwriting mode','pen'),R('Touch keyboard','keyboard','Optional short text entry','display'),R('Live conversation','live-talk','Separate continuous mode','mic')],'Voice is first on the watch. Dial shows Quick replies, Finger input and Keyboard; unavailable audio has an explanation.',{parent:'conversation',dialRows:[R('Quick replies','quick-replies','No microphone needed','chat'),R('Write with finger','scribble','Experimental recognition','pen'),R('Touch keyboard','keyboard','Short text only','display'),R('About voice','voice-unavailable','No microphone on this Dial','mic')]});
-  hero('ptt-ready','Talk & input','Talk to Kitsune','Hold to talk','Release to review. Nothing sends until you confirm.',R('Hold to talk','ptt-capture'),'The browser simulates capture and never requests microphone access. Real PTT needs a bounded recording/transcription contract; current firmware has Start/Stop Talk.',{parent:'input',avatar:'kitsune',ptt:true,related:['mic-blocked','voice-unavailable'],dialView:'voice-unavailable'});
-  add('ptt-capture','Talk & input','Listening',{kind:'capture',headline:'Listening…',text:'Release to review · slide away to cancel',actions:[R('Release to review','ptt-transcribe')]},'Capture is visibly active. Pointer loss, app blur, Home or Cancel discards this draft; no hidden send. Proposed maximum: 30 seconds. A tap under 250 ms cancels; one owner releases capture and prevents a late event from reviving it.',{parent:'input',dialView:'voice-unavailable',related:['ptt-ready','ptt-transcribe']});
-  hero('ptt-transcribe','Talk & input','Transcribing','Turning speech into text','Your message has not been sent.',R('Cancel','ptt-ready'),'A transcription operation is distinct from submitting a turn to the selected agent.',{parent:'input',dialView:'voice-unavailable',related:['ptt-review','ptt-empty']});
-  add('ptt-review','Talk & input','Review message',{kind:'message',eyebrow:'To Kitsune · Project plan',text:'Set the desk lamp to fifty percent.',actions:[R('Edit','input'),R('Send','turn-sending')]},'Confirm the recognized text and recipient before send. Editing can use quick replacements, handwriting or the touch keyboard.',{parent:'input',related:['ptt-ready','scribble','keyboard','ptt-empty']});
-  hero('ptt-empty','Talk & input','Nothing captured','Try a little closer','No message was sent.',R('Try again','ptt-ready'),'Silence, cancellation and failed transcription must not create empty conversation turns.',{parent:'input',dialView:'voice-unavailable'});
+  list('input','Talk & input','Reply',[R('Talk live','live-talk','Default · no Send step','mic'),R('Quick replies','quick-replies','Short, deliberate responses','chat'),R('Touch keyboard','keyboard','Write and review before sending','display'),R('Write with finger','scribble','Optional handwriting mode','pen'),R('Dictate into a draft','ptt-ready','Secondary · review before sending','mic')],'Live talk is first on the watch and Tab5; everything below it is a text route that still ends in a review step. The Dial has no microphone, so it lists only text routes and an explanation.',{parent:'conversation',dialRows:[R('Quick replies','quick-replies','No microphone needed','chat'),R('Write with finger','scribble','Experimental recognition','pen'),R('Touch keyboard','keyboard','Short text only','display'),R('About voice','voice-unavailable','No microphone on this Dial','mic')]});
+  hero('ptt-ready','Talk & input','Dictate into a draft','Hold to dictate','Release to review. Nothing sends until you confirm.',R('Hold to dictate','ptt-capture'),'The secondary voice route, for when you want to read your words before they go. Live conversation — not this — is the default way to talk. The browser simulates capture and never requests microphone access; a real dictation mode needs its own bounded recording and transcription contract.',{parent:'input',avatar:'kitsune',ptt:true,related:['live-talk','mic-blocked','voice-unavailable'],dialView:'voice-unavailable'});
+  add('ptt-capture','Talk & input','Dictating',{kind:'capture',headline:'Dictating…',text:'Release to review · slide away to cancel',actions:[R('Release to review','ptt-transcribe')]},'Dictation capture is visibly active. Pointer loss, app blur, Home or Cancel discards this draft; no hidden send. Proposed maximum: 30 seconds. A tap under 250 ms cancels; one owner releases capture and prevents a late event from reviving it. A live turn behaves differently — it submits itself on release.',{parent:'input',dialView:'voice-unavailable',related:['ptt-ready','ptt-transcribe','live-talk']});
+  hero('ptt-transcribe','Talk & input','Transcribing','Turning speech into text','Your message has not been sent.',R('Cancel','ptt-ready'),'A transcription operation is distinct from submitting a turn to the selected agent. This step exists only in the dictation route; a live turn has no transcription gate.',{parent:'input',dialView:'voice-unavailable',related:['ptt-review','ptt-empty']});
+  add('ptt-review','Talk & input','Review dictated message',{kind:'message',eyebrow:'To Kitsune · Project plan',text:'Set the desk lamp to fifty percent.',actions:[R('Edit','input'),R('Send','turn-sending')]},'Confirm the recognized text and recipient before send. Editing can use quick replacements, handwriting or the touch keyboard. This review belongs to dictation and typing only.',{parent:'input',related:['ptt-ready','scribble','keyboard','ptt-empty']});
+  hero('ptt-empty','Talk & input','Nothing captured','Try a little closer','No message was sent.',R('Try again','ptt-ready'),'Silence, cancellation and failed transcription must not create empty conversation turns, in either the dictation route or a live turn.',{parent:'input',dialView:'voice-unavailable'});
   hero('turn-sending','Talk & input','Sending message','Sending to Kitsune','Project plan · your message is pending.',R('Conversation','conversation'),'Once accepted, Home does not promise cancellation. Keep one request identity and distinguish sending from processing.',{parent:'conversation',related:['turn-thinking','turn-failed']});
   hero('turn-thinking','Talk & input','Kitsune is working','Working on it','Your message was accepted. You can keep browsing.',R('Home','home'),'Processing is based on the actual turn lifecycle, never inferred merely from an open WebSocket.',{parent:'conversation',avatar:'kitsune',dialText:'Message accepted. Working on it.',related:['turn-reply']});
-  add('turn-reply','Talk & input','Kitsune replied',{kind:'message',eyebrow:'Kitsune · Project plan',text:'The desk lamp reported fifty percent. Anything else?',actions:[R('Hold to reply','ptt-ready'),R('More','input')]},'Watch may play speech when enabled. Dial reads the same reply. Neither device claims the physical lamp was independently checked.',{parent:'conversation',dialText:'The lamp reported 50%. Anything else?',dialActions:[R('Reply','input')]});
+  add('turn-reply','Talk & input','Kitsune replied',{kind:'message',eyebrow:'Kitsune · Project plan',text:'The desk lamp reported fifty percent. Anything else?',actions:[R('Talk','live-talk'),R('More','input')]},'The reply to a text turn is read, not spoken: this is the typed route, so Talk starts a fresh live conversation rather than continuing a stream. Dial reads the same reply. Neither device claims the physical lamp was independently checked.',{parent:'conversation',dialText:'The lamp reported 50%. Anything else?',dialActions:[R('Reply','input')]});
   hero('turn-failed','Talk & input','Message not sent','Keep your draft','Reconnect, then choose Send again.',R('Connection','connection'),'Only say Not sent when non-acceptance is known. An ambiguous submission needs an outcome check, not automatic retry.',{parent:'input',dialText:'Draft kept. Reconnect to retry.'});
-  hero('live-talk','Talk & input','Live conversation','Talk is open','Kitsune · microphone active. End closes this conversation.',R('End','conversation'),'Live streaming is a separate mode from hold/review/send. On current watch hardware, capture pauses during reply playback; do not promise barge-in.',{parent:'input',avatar:'kitsune',dialView:'voice-unavailable',dialText:'Continuous voice mode.',related:['live-speaking']});
-  hero('live-speaking','Talk & input','Kitsune is speaking','Listen, then reply','Microphone capture pauses while the watch plays audio.',R('End','conversation'),'A genuine playback event must drive this state. The existing generic SPEAKING connection state is insufficient.',{parent:'input',dialView:'voice-unavailable',dialText:'Capture paused during playback.'});
-  hero('mic-blocked','Talk & input','Microphone off','Turn on the microphone?','You can keep using quick replies or finger input.',R('Input settings','input-settings'),'A privacy switch must close admitted capture and wake listening, not merely hide a recording indicator.',{parent:'input',dialView:'voice-unavailable',dialText:'Use text input or enable the mic.'});
-  hero('voice-unavailable','Talk & input','Voice unavailable','No microphone here','Use quick replies, handwriting or the touch keyboard.',R('Reply options','input'),'M5Dial has a buzzer but no microphone or speech speaker. This is a hardware explanation, not a prompt to pair with the watch.',{parent:'input',dialText:'No microphone. Text input still works.'});
+  // Live conversation. One session object owns the agent, the thread, the transcript and every timer it
+  // starts, so nothing from an ended or re-owned session can append to a later one. Each scene below seeds
+  // that session into one phase; the phase then advances on its own schedule until it reaches Your turn,
+  // where it stops and waits for a deliberate choice. No demo turn ever loops.
+  const liveRelated=['live-connecting','live-thinking','live-speaking','live-your-turn','live-muted','live-interrupt','live-failed','live-ended'];
+  const liveSafety=' No microphone, audio output or network is used; the words, the reply and the audio indicator are a scripted simulation.';
+  add('live-talk','Talk & input','Live conversation',{kind:'live',phase:'listening',connect:true},'The normal way to talk. Recognised words appear while you speak and are labelled NOT FINAL until the turn closes; a pause — or releasing a hardware hold — ends the turn and submits it. There is no Send step and no transcription review.'+liveSafety,{parent:'conversation',avatar:'kitsune',dialView:'voice-unavailable',related:liveRelated.slice(0,6)});
+  add('live-connecting','Talk & input','Opening live talk',{kind:'live',phase:'connecting'},'Opening the session is its own visible state, so a failure here is never mistaken for silence. The agent and thread are captured now and stay fixed for the whole session.'+liveSafety,{parent:'conversation',dialView:'voice-unavailable',related:['live-talk','live-failed','mic-blocked']});
+  add('live-thinking','Talk & input','Kitsune is thinking',{kind:'live',phase:'thinking'},'Your turn is final and accepted; nothing is listening. Interrupt cancels the pending reply and hands the turn straight back to you, which is a real turn-taking control rather than a cosmetic one.'+liveSafety,{parent:'conversation',dialView:'voice-unavailable',related:['live-talk','live-speaking','live-failed']});
+  add('live-speaking','Talk & input','Kitsune is speaking',{kind:'live',phase:'speaking'},'Reply text arrives progressively beside a simulated audio indicator, so the words and the sound describe one event. Interrupt — or starting to speak — stops playback, keeps what was already said and marks it INTERRUPTED.'+liveSafety,{parent:'conversation',dialView:'voice-unavailable',related:['live-interrupt','live-your-turn','live-talk']});
+  add('live-your-turn','Talk & input','Your turn',{kind:'live',phase:'ready'},'The reply finished and the session is idle on purpose: nothing is captured and no next turn starts by itself. Speak takes the microphone again, Write switches to text, End closes the session.'+liveSafety,{parent:'conversation',dialView:'voice-unavailable',related:['live-talk','live-muted','live-ended']});
+  add('live-muted','Talk & input','Microphone muted',{kind:'live',phase:'listening',muted:true},'Mute pauses capture inside this session and freezes the partial text exactly where it stopped; it submits nothing. Unmute cannot re-enable a microphone that is switched off in Settings — that route leads to the Microphone off screen instead.'+liveSafety,{parent:'conversation',dialView:'voice-unavailable',related:['live-talk','mic-blocked','microphone']});
+  add('live-interrupt','Talk & input','You interrupted',{kind:'live',phase:'listening',cut:true},'Barge-in result: the reply stops mid-sentence, what was already spoken stays in the transcript marked INTERRUPTED, and your new turn starts immediately. The cut reply is never silently completed afterwards.'+liveSafety,{parent:'conversation',dialView:'voice-unavailable',related:['live-speaking','live-talk','live-your-turn']});
+  add('live-failed','Talk & input','Live connection lost',{kind:'live',phase:'error'},'A dropped session stops every timer at once. The partial turn is discarded rather than guessed at, finished turns stay readable, and recovery is an explicit Reconnect or a switch to text. Reconnecting returns to Your turn, never straight into an open microphone.'+liveSafety,{parent:'conversation',dialView:'voice-unavailable',related:['live-talk','connection','input']});
+  hero('live-ended','Talk & input','Live conversation ended','Talk closed','Every turn that finished is in this conversation. Nothing is listening now.',R('Back to the conversation','conversation'),'End stops all timers and the audio indicator and releases the session. A partial turn in flight at that moment is discarded, not submitted.',{parent:'conversation',dialView:'voice-unavailable',related:['conversation','live-talk']});
+  hero('mic-blocked','Talk & input','Microphone off','Turn on the microphone?','You can keep using quick replies, the keyboard or finger input.',R('Input settings','input-settings'),'A privacy switch must close admitted capture and wake listening, not merely hide a recording indicator. It also ends any live session; unmuting inside a session cannot override it.',{parent:'input',dialView:'voice-unavailable',dialText:'Use text input or enable the mic.',related:['live-talk','input']});
+  hero('voice-unavailable','Talk & input','Voice unavailable','No microphone here','Use quick replies, handwriting or the touch keyboard.',R('Reply options','input'),'M5Dial has a buzzer but no microphone and no speech speaker, so live conversation is not offered on it at all and no Dial microphone is ever drawn. This is a hardware explanation, not a prompt to pair with the watch.',{parent:'input',dialText:'No microphone on this Dial. Text input still works.'});
 
   list('quick-replies','Finger input','Quick replies',[R('Yes, continue','text-review','Review before sending','chat'),R('Tell me more','text-review','Review before sending','chat'),R('Stop here','text-review','Review before sending','chat'),R('Write something…','scribble','Use your finger','pen')],'The same safe replies on every device. Selecting a phrase opens review; it never triggers an implicit send.',{parent:'input'});
   add('scribble','Finger input','Write with finger',{kind:'scribble',actions:[R('Sample result','scribble-result')]},'Draw on the pad; Undo and Clear work in this browser. Sample result is a labeled fixture, not handwriting recognition. A recognizer, language coverage and hardware latency must be qualified before shipping.',{parent:'input',related:['scribble-result','scribble-uncertain','keyboard']});
@@ -478,17 +580,17 @@
     ['setup-qr-expired','QR code expired','Start a fresh session','The old QR no longer opens this setup session.','setup-qr']
   ])hero(id,'Setup & pairing',title,headline,text,R('Try again',target),'Recovery resumes only the missing step. Cancellation, timeout and background loss close or suspend the setup session without erasing established credentials.',{parent:'setup-method',dialText:text});
 
-  list('settings','Settings','Settings',[R('Display','display','Layout, text, brightness, motion','display'),R('Talk & input','input-settings','PTT, microphone, finger input','mic'),R('Sound','sound','Speech and device feedback','speaker'),R('Privacy & alerts','privacy','Previews and notifications','lock'),R('Agent & context','context-settings','Default agent and resume','agents'),R('Connection','connection','Wi-Fi, OpenClaw, mobile setup','wifi'),R('Power','power','Battery and source','power'),R('About this device','about','Identity and firmware','devices'),R('Help & diagnostics','help','Learn and test','help'),R('Recovery','recovery','Reconnect, restart, reset','activity')],'All ten settings groups are reachable everywhere. Long watch lists scroll; the Dial exposes one focused entry and neighbors; Tab5 scrolls the same list at 112 px rows and carries each current value in the row itself, so no second column is needed.');
+  list('settings','Settings','Settings',[R('Display','display','Layout, text, brightness, motion','display'),R('Talk & input','input-settings','Live talk, microphone, finger input','mic'),R('Sound','sound','Speech and device feedback','speaker'),R('Privacy & alerts','privacy','Previews and notifications','lock'),R('Agent & context','context-settings','Default agent and resume','agents'),R('Connection','connection','Wi-Fi, OpenClaw, mobile setup','wifi'),R('Power','power','Battery and source','power'),R('About this device','about','Identity and firmware','devices'),R('Help & diagnostics','help','Learn and test','help'),R('Recovery','recovery','Reconnect, restart, reset','activity')],'All ten settings groups are reachable everywhere. Long watch lists scroll; the Dial exposes one focused entry and neighbors; Tab5 scrolls the same list at 112 px rows and carries each current value in the row itself, so no second column is needed.');
   list('display','Display','Display',[R('Layout','layout','Compact','display'),R('Text size','text-size','Standard','display'),R('Brightness','brightness','65%','display'),R('Motion','motion','Normal','activity'),R('Display sleep','sleep','30 seconds','power')],'No hidden second display store: Devices → This device opens these same controls.',{parent:'settings'});
   list('layout','Display','Layout',[R('Compact','layout','Selected · denser spacing','check'),R('Comfortable','layout','More space between rows','display')],'This browser choice updates spacing on the watch. Font size is a separate setting; no persistent firmware preference is implied.',{parent:'display',setting:'layout'});
   list('text-size','Display','Text size',[R('Standard','text-size','Selected · 19 px reading','check'),R('Larger','text-size','21 px reading','display'),R('Largest','text-size','23 px reading','display')],'Choose a real reading size, allow scroll or fewer visible items, and never shrink a long name to make it fit.',{parent:'display',setting:'text'});
   slider('brightness','Display','Brightness',65,'%', 'Preview immediately. Done commits through the future settings owner; Back restores the prior setting.',{parent:'display'});
   list('motion','Display','Motion',[R('Normal','motion','Quiet lobster animation','activity'),R('Reduced','motion','Static, clear state changes','activity')],'Reduced motion does not remove capture, waiting or failure indicators. Honor the browser’s reduced-motion setting too.',{parent:'display',setting:'motion'});
   list('sleep','Display','Display sleep',[R('15 seconds','sleep','Short idle delay','power'),R('30 seconds','sleep','Selected','check'),R('1 minute','sleep','Longer idle delay','power')],'Proposal only: actual board wake sources and safe capture behavior need qualification. A wake gesture cannot also start capture.',{parent:'display'});
-  list('input-settings','Audio & input settings','Talk & input',[R('Talk mode','talk-mode','Hold, review, send','mic'),R('Microphone','microphone','On while deliberately capturing','mic'),R('Wake word','wake-word','Off by default in PTT mode','mic'),R('Finger input','finger-settings','Language and methods','pen')],'The Dial shows its microphone as Unavailable, with working text alternatives. Capability facts control the options.',{parent:'settings',dialRows:[R('Talk mode','talk-mode','Text input on this hardware','chat'),R('Microphone','microphone','Unavailable','mic'),R('Finger input','finger-settings','Language and methods','pen')]});
-  list('talk-mode','Audio & input settings','Talk mode',[R('Hold, review, send','ptt-ready','Recommended default','mic'),R('Live conversation','live-talk','Continuous session','mic'),R('Text only','input','No capture','chat')],'PTT and Live are distinct modes. Picking one changes input behavior, not selected agent or conversation.',{parent:'input-settings',dialRows:[R('Text only','input','Available','chat'),R('Why no voice?','voice-unavailable','Hardware has no microphone','help')]});
-  list('microphone','Audio & input settings','Microphone',[R('Enabled','microphone','Deliberate capture allowed','mic'),R('Disabled','mic-blocked','Stop capture and wake listening','lock')],'This switch must own the actual capture lifecycle. There is no decorative microphone mute.',{parent:'input-settings',dialView:'voice-unavailable'});
-  list('wake-word','Audio & input settings','Wake word',[R('Off','wake-word','Recommended for PTT','check'),R('On','wake-word','Explain background listening','mic')],'Enabling a wake word is a separate explicit choice. Background mic state stays visible and is disabled when microphone access is off.',{parent:'input-settings',dialView:'voice-unavailable'});
+  list('input-settings','Audio & input settings','Talk & input',[R('Talk mode','talk-mode','Live conversation','mic'),R('Microphone','microphone','On while a session is open','mic'),R('Wake word','wake-word','Off by default','mic'),R('Finger input','finger-settings','Language and methods','pen')],'The Dial shows its microphone as Unavailable, with working text alternatives. Capability facts control the options.',{parent:'settings',dialRows:[R('Talk mode','talk-mode','Text only on this hardware','chat'),R('Microphone','microphone','Unavailable','mic'),R('Finger input','finger-settings','Language and methods','pen')]});
+  list('talk-mode','Audio & input settings','Talk mode',[R('Live conversation','live-talk','Default · turns end by themselves','mic'),R('Dictate into a draft','ptt-ready','Review before sending','mic'),R('Text only','input','No capture','chat')],'Live conversation is the default. Dictation keeps the review step for people who want to read their words first, and Text only disables capture entirely. Picking one changes input behaviour, not the selected agent or conversation.',{parent:'input-settings',dialRows:[R('Text only','input','Available','chat'),R('Why no voice?','voice-unavailable','Hardware has no microphone','help')]});
+  list('microphone','Audio & input settings','Microphone',[R('Enabled','microphone','Live conversation and dictation allowed','mic'),R('Disabled','mic-blocked','End sessions, stop capture and wake listening','lock')],'This switch must own the actual capture lifecycle: disabling it ends any open live session rather than hiding its indicator, and the in-session Mute control can never switch it back on.',{parent:'input-settings',dialView:'voice-unavailable'});
+  list('wake-word','Audio & input settings','Wake word',[R('Off','wake-word','Recommended · sessions start deliberately','check'),R('On','wake-word','Explain background listening','mic')],'Enabling a wake word is a separate explicit choice; a live conversation still has to be opened on purpose. Background mic state stays visible and is disabled when microphone access is off.',{parent:'input-settings',dialView:'voice-unavailable'});
   list('finger-settings','Audio & input settings','Finger input',[R('Handwriting','scribble','Experimental recognizer','pen'),R('Touch keyboard','keyboard','Character picker','display'),R('Language','input-language','English · example','chat')],'Keep handwriting separate from touch hardware support. All three devices have touch; none currently supplies this recognizer.',{parent:'input-settings'});
   list('input-language','Audio & input settings','Input language',[R('English','finger-settings','Qualified language example','check'),R('Other languages','language-unavailable','Show real supported coverage','chat')],'Do not list unsupported recognizer languages or assume ASCII-only messages.',{parent:'finger-settings'});
   hero('language-unavailable','Audio & input settings','Language support','Use the keyboard','Handwriting is unavailable for this language.',R('Keyboard','keyboard'),'Fallback keeps the draft and permits full Unicode through an approved input source.',{parent:'finger-settings',dialText:'Use another supported input method.'});
@@ -559,41 +661,349 @@
     return r.sub;
   }
   function responseAgent(s){return state.pendingTurn&&['turn-sending','turn-thinking','turn-reply','turn-failed'].includes(s.id)?state.pendingTurn.agent:state.agent}
-  function contextText(s,text){if(profileAgents[s.id]&&s.view.text===text)return (profileAgents[s.id]===state.agent?'Selected agent':'Available to select')+' · '+agentName(profileAgents[s.id]);text=text.replaceAll('Project plan',state.pendingTurn&&['turn-sending','turn-thinking','turn-reply','turn-failed'].includes(s.id)?state.pendingTurn.thread:state.thread);const named=['Daily','Talk & input','Finger input'].includes(s.group)?text.replaceAll('Kitsune',agentName(responseAgent(s))):text;return ['control-wait','control-result'].includes(s.id)?named.replaceAll('57%',String(state.sliders.control??42)+'%'):named}
+  function contextText(s,text){
+    if(s.id==='conversation'&&!staticRender){const history=liveHistory();if(history.length)return history.map(t=>(t.who==='you'?'You':agentName())+(t.cut?' (interrupted)':'')+': '+t.text).join('\n\n')}
+    if(profileAgents[s.id]&&s.view.text===text)return (profileAgents[s.id]===state.agent?'Selected agent':'Available to select')+' · '+agentName(profileAgents[s.id]);text=text.replaceAll('Project plan',state.pendingTurn&&['turn-sending','turn-thinking','turn-reply','turn-failed'].includes(s.id)?state.pendingTurn.thread:state.thread);const named=['Daily','Talk & input','Finger input'].includes(s.group)?text.replaceAll('Kitsune',agentName(responseAgent(s))):text;return ['control-wait','control-result'].includes(s.id)?named.replaceAll('57%',String(state.sliders.control??42)+'%'):named;
+  }
   const brokenLink='<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m5 5 5 5m4 4 5 5M9 15l-4 4M15 9l4-4"/></svg>';
-  function linkState(s){return {setup:s.group==='Setup & pairing'&&!['setup-ready','setup-usb'].includes(s.id),offline:['home-offline','gateway-offline','gateway-reconnect','setup-rejected','setup-expired'].includes(s.id)}}
+  function linkState(s){return {setup:s.group==='Setup & pairing'&&!['setup-ready','setup-usb'].includes(s.id),offline:['home-offline','gateway-offline','gateway-reconnect','setup-rejected','setup-expired','live-failed'].includes(s.id)||(s.view.kind==='live'&&!staticRender&&live?.phase==='error')}}
   function status(s){const {setup,offline}=linkState(s);const link=offline?brokenLink:icon('link');return '<div class="status" aria-label="Synthetic status: '+(setup?'setup in progress; connection not ready':offline?'Wi-Fi connected, OpenClaw unavailable':'Wi-Fi connected, OpenClaw connected')+', battery unknown"'+(setup?' style="opacity:.45"':'')+'>'+icon('wifi')+link+icon('battery')+'</div>'}
   function act(a,cls=''){return '<button class="'+cls+(a.label==='Cancel'?' secondary':'')+(/Forget|Erase|Restart|End/.test(a.label)?' danger':'')+'" data-go="'+esc(a.to)+'">'+esc(a.label)+'</button>'}
   function wave(){return '<div class="wave" aria-hidden="true">'+[16,27,38,23,44,30,18,34,24].map((n,i)=>'<i style="--h:'+n+'px;--delay:'+i*60+'ms"></i>').join('')+'</div>'}
   function agentName(id=state.agent){return {kitsune:'Kitsune',builder:'Builder',guide:'Guide',initials:'Memo'}[id]}
   function canUseVoice(){return state.agent!=='initials'&&state.micEnabled}
   function dialReadingStyle(){return 'font-size:'+({19:16,21:17,23:18}[state.textSize])+'px;line-height:1.3'}
+
+  /* ── Live conversation: one canonical session owner ──────────────────────────
+     `live` is the only place a voice session exists. It captures the agent and the
+     thread when it opens and never re-reads them, it owns the transcript, and every
+     timer it starts is registered in `liveTimers` and checked against the session id
+     before it runs. That gives three guarantees the fixtures below rely on:
+       · a timer from an ended session cannot revive it or append to a new one;
+       · a reply in flight for Kitsune can never land in Builder's transcript;
+       · End, a connection failure, an agent switch, a thread switch, a reset and
+         navigating away all stop every timer at once.
+     Nothing loops: the schedule always terminates at Your turn and waits for a
+     deliberate Speak, Interrupt or End. There is no microphone, no audio output and
+     no network anywhere in this file — the words below are a fixed script. */
+  const liveScripts=[
+    {you:['Set the desk lamp','to fifty percent','and tell me what is left','on the project plan.'],
+     agent:['Desk lamp set to fifty percent','— the lamp reported that back.','Two things are still open on the project plan:','the risks section and the timeline.','Which one first?']},
+    {you:['Let’s do the risks','section first.'],
+     agent:['Risks first, then.','Three items are open there,','and the oldest one is the supplier dependency.']}
+  ];
+  const LIVE_MS={connect:700,word:520,endpoint:900,think:1100,say:620};
+  const liveTimers=new Set();
+  // In-memory demo history is bounded and keyed by its original conversation owner.
+  const liveTranscripts=new Map();
+  let live=null,liveSeq=0,pendingHold=false,staticRender=false;
+  const liveKey=(agent,thread)=>JSON.stringify([agent,thread]);
+  function liveRemember(s){
+    if(!s?.turns.length)return;
+    const key=liveKey(s.agent,s.thread);
+    liveTranscripts.delete(key);liveTranscripts.set(key,s.turns.slice(-8));
+    if(liveTranscripts.size>8)liveTranscripts.delete(liveTranscripts.keys().next().value);
+  }
+  function liveHistory(agent=state.agent,thread=state.thread){
+    return live&&live.agent===agent&&live.thread===thread?live.turns:liveTranscripts.get(liveKey(agent,thread))||[];
+  }
+  const isLive=s=>s.view.kind==='live';
+  const liveWords=s=>liveScripts[Math.min(s.turnIndex,liveScripts.length-1)];
+  function liveClearTimers(){for(const t of liveTimers)clearTimeout(t);liveTimers.clear()}
+  // Every scheduled step re-checks that its own session is still the current, open one.
+  function liveLater(session,ms,run){
+    const t=setTimeout(()=>{liveTimers.delete(t);if(live===session&&live.id===session.id&&!session.closed)run()},ms);
+    liveTimers.add(t);return t;
+  }
+  function liveAnnounce(text){const n=document.getElementById('voice-announce');if(n)n.textContent=text}
+  function liveStart(view){
+    liveRemember(live);
+    const keep=liveHistory().slice(-6);
+    liveClearTimers();
+    if(live)live.closed=true;
+    live={id:++liveSeq,agent:state.agent,thread:state.thread,phase:'connecting',next:'listening',
+      muted:!!view.muted,hold:pendingHold,partial:'',spoken:'',index:0,turnIndex:0,turns:keep,closed:false,paused:false};
+    pendingHold=false;state.live=true;
+    if(view.cut){ // barge-in fixture: a reply that was cut off, then your new turn
+      live.turns.push({who:'you',text:liveScripts[0].you.join(' ')});
+      live.turns.push({who:'agent',text:liveScripts[0].agent.slice(0,2).join(' '),cut:true});
+      live.turnIndex=1;
+    }
+    if(view.phase==='ready'){liveEnsureYou();liveEnsureAgent()}
+    liveSeed(view.connect?'connecting':view.phase||'listening',view.connect?view.phase||'listening':'listening');
+    if(view.muted)live.partial=liveWords(live).you.slice(0,2).join(' ');
+    return live;
+  }
+  function liveSeed(phase,next){
+    const s=live;if(!s)return;
+    liveClearTimers();
+    s.phase=phase;s.partial='';s.spoken='';s.index=0;s.paused=false;
+    if(next)s.next=next;
+    if(phase==='connecting')liveLater(s,LIVE_MS.connect,()=>liveGo(s.next||'listening'));
+    else if(phase==='listening')liveTick();
+    else if(phase==='thinking'){liveEnsureYou();liveLater(s,LIVE_MS.think,()=>liveGo('speaking'))}
+    else if(phase==='speaking'){liveEnsureYou();liveSay()}
+    else if(phase==='error')liveEnsureYou();
+  }
+  function liveGo(phase){liveSeed(phase);liveAnnounce(liveHeadline(liveModelOf(live)));liveRepaint()}
+  function liveEnsureYou(){const s=live;if(s.turns.at(-1)?.who==='you'&&!s.turns.at(-1).cut)return;s.turns.push({who:'you',text:liveWords(s).you.join(' ')})}
+  function liveEnsureAgent(){const s=live;if(s.turns.at(-1)?.who==='agent')return;s.turns.push({who:'agent',text:liveWords(s).agent.join(' ')});s.turnIndex=Math.min(s.turnIndex+1,liveScripts.length-1)}
+  // Recognised words arrive one at a time. In hold mode the turn waits for the release;
+  // otherwise a simulated pause closes it. Either way the turn submits itself.
+  function liveTick(){
+    const s=live;if(!s||s.phase!=='listening'||s.muted)return;
+    const words=liveWords(s).you;
+    if(s.index<words.length)liveLater(s,LIVE_MS.word,()=>{s.partial=(s.partial?s.partial+' ':'')+words[s.index++];livePaint();liveTick()});
+    else if(!s.hold)liveLater(s,LIVE_MS.endpoint,()=>liveFinishTurn('pause'));
+  }
+  function liveFinishTurn(){
+    const s=live;if(!s||s.phase!=='listening')return;
+    liveClearTimers();
+    const text=s.partial.trim();s.partial='';s.hold=false;
+    if(!text){s.phase='ready';liveAnnounce('Nothing was recognised, so no turn was created.');setToast('Nothing recognised — no turn was created and nothing was sent.');liveRepaint();return}
+    s.turns.push({who:'you',text});
+    s.phase='thinking';
+    liveAnnounce('You said: '+text+'. '+agentName(s.agent)+' is thinking.');
+    liveRepaint();
+    liveLater(s,LIVE_MS.think,()=>liveGo('speaking'));
+  }
+  function liveSay(){
+    const s=live,words=liveWords(s).agent;
+    s.spoken='';s.index=0;
+    const step=()=>liveLater(s,LIVE_MS.say,()=>{
+      s.spoken=(s.spoken?s.spoken+' ':'')+words[s.index++];
+      if(s.index<words.length){livePaint();step();return}
+      const said=s.spoken;s.spoken='';
+      s.turns.push({who:'agent',text:said});
+      s.turnIndex=Math.min(s.turnIndex+1,liveScripts.length-1);
+      s.phase='ready';
+      liveAnnounce(agentName(s.agent)+' said: '+said+'. Your turn.');
+      liveRepaint();
+    });
+    step();
+  }
+  function liveInterrupt(){
+    const s=live;if(!s)return;
+    if(s.phase==='speaking'){
+      liveClearTimers();
+      const said=s.spoken.trim();s.spoken='';
+      if(said)s.turns.push({who:'agent',text:said,cut:true});
+      s.turnIndex=Math.min(s.turnIndex+1,liveScripts.length-1);
+      liveAnnounce('You interrupted '+agentName(s.agent)+'. Listening.');
+    }else if(s.phase==='thinking'){
+      liveClearTimers();
+      liveAnnounce('Reply cancelled before it arrived. Listening.');
+      setToast('Reply cancelled. The agent keeps the turn you already sent.');
+    }else return;
+    liveSeed('listening');liveRepaint();
+  }
+  // Mute owns capture inside the session only. It can never switch a disabled microphone back on.
+  function liveMute(on){
+    const s=live;if(!s)return;
+    if(!on&&!state.micEnabled){setToast('The microphone is switched off in Settings. Unmute cannot turn it back on.');enter('mic-blocked');return}
+    s.muted=on;
+    if(on){if(s.phase==='listening')liveClearTimers();liveAnnounce('Microphone muted. Capture is paused; nothing was sent.')}
+    else{liveAnnounce('Microphone live again.');if(s.phase==='listening')liveTick()}
+    liveRepaint();
+  }
+  function liveFail(){
+    const s=live;if(!s)return;
+    liveClearTimers();s.partial='';s.spoken='';s.hold=false;s.phase='error';
+    liveAnnounce('The live connection dropped. The unfinished turn was discarded.');
+    liveRepaint();
+  }
+  function liveReconnect(){
+    const s=live;if(!s)return;
+    if(!state.micEnabled){enter('mic-blocked');return}
+    liveSeed('connecting','ready');liveAnnounce('Reconnecting. You will get the turn back, not an open microphone.');liveRepaint();
+  }
+  // Leaving the live screen stops the clockwork without discarding what finished.
+  function liveSuspend(){
+    const s=live;if(!s)return;
+    liveClearTimers();
+    if(s.phase==='speaking'&&s.spoken.trim())s.turns.push({who:'agent',text:s.spoken.trim(),cut:true});
+    s.spoken='';s.partial='';s.hold=false;
+    if(['connecting','listening','thinking','speaking'].includes(s.phase))s.phase='ready';
+    s.paused=true;
+    liveAnnounce('Live conversation paused. Finished turns are kept; unfinished speech has stopped.');
+  }
+  function liveEnd(){
+    const s=live;if(!s)return;
+    if(s.phase==='speaking'&&s.spoken.trim())s.turns.push({who:'agent',text:s.spoken.trim(),cut:true});
+    liveRemember(s);
+    liveClearTimers();s.closed=true;live=null;state.live=false;pendingHold=false;holdPointer=null;
+    liveAnnounce('Live conversation ended. All timers and the audio indicator stopped.');
+  }
+  function liveModelOf(s){return s&&{fixture:false,agent:s.agent,thread:s.thread,phase:s.phase,muted:s.muted,hold:s.hold,paused:s.paused,partial:s.partial,spoken:s.spoken,turns:s.turns}}
+  // Catalogue sheets must never read the running session, or every card would show it.
+  function liveModel(scene){
+    if(!staticRender&&live)return liveModelOf(live);
+    const v=scene.view,script=liveScripts[0],turns=[];
+    if(v.cut){turns.push({who:'you',text:script.you.join(' ')});turns.push({who:'agent',text:script.agent.slice(0,2).join(' '),cut:true})}
+    if(['thinking','speaking','ready','error'].includes(v.phase))turns.push({who:'you',text:script.you.join(' ')});
+    if(v.phase==='ready')turns.push({who:'agent',text:script.agent.join(' ')});
+    return {fixture:true,agent:state.agent,thread:state.thread,phase:v.phase,muted:!!v.muted,hold:false,paused:false,
+      partial:v.phase==='listening'?script.you.slice(0,v.muted?2:1).join(' '):'',
+      spoken:v.phase==='speaking'?script.agent.slice(0,2).join(' '):'',turns};
+  }
+  // Mute silences capture, not the reply: the indicator keeps moving while the agent speaks.
+  const liveBusy=m=>m.phase==='speaking'||(m.phase==='listening'&&!m.muted);
+  function liveTone(m){return 'live-tone ph-'+m.phase+(m.muted&&m.phase!=='speaking'?' is-muted':'')+(liveBusy(m)?' live-active':'')}
+  function liveHeadline(m){
+    if(!m)return '';
+    if(m.phase==='error')return 'Connection lost';
+    if(m.phase==='connecting')return 'Opening live talk';
+    if(m.phase==='listening')return m.muted?'Muted':'Listening';
+    if(m.phase==='thinking')return agentName(m.agent)+' is thinking';
+    if(m.phase==='speaking')return agentName(m.agent)+' is speaking';
+    return m.paused?'Paused':'Your turn';
+  }
+  function liveTag(m){
+    if(m.fixture)return 'SAMPLE STATE';
+    if(m.phase==='error')return 'NO CONNECTION';
+    if(m.phase==='speaking')return m.muted?'AUDIO · SIMULATED · MIC MUTED':'AUDIO · SIMULATED';
+    if(m.muted)return 'MIC MUTED';
+    if(m.paused)return 'PAUSED';
+    if(m.phase==='listening')return 'LIVE · SIMULATED';
+    return 'LIVE SESSION';
+  }
+  // One line each: the reading zone is worth more than a paragraph of reassurance.
+  function liveHint(m){
+    const mic=m.muted?' Your microphone stays muted.':'';
+    if(m.phase==='error')return 'Unfinished words were discarded. Reconnect, or switch to text — finished turns stay here.';
+    if(m.phase==='connecting')return 'Capturing this agent and thread for the session. Nothing is listening yet.';
+    if(m.phase==='speaking')return 'Interrupt stops the reply and keeps whatever was already said.'+mic;
+    if(m.phase==='thinking')return 'Your turn is final and nothing is listening. Interrupt hands the turn back.';
+    if(m.muted)return 'Capture is paused and the words below are frozen. Unmute to carry on.';
+    if(m.phase==='listening')return m.hold?'Keep holding. Releasing ends your turn and submits it — no review step.':'Your turn ends by itself when you stop speaking. There is no Send.';
+    return 'Nothing is being captured. Choose Speak when you want the next turn.';
+  }
+  function liveMeter(count){return '<span class="live-meter" aria-hidden="true">'+[18,27,34,22,30,16,26].slice(0,count).map((h,i)=>'<i style="--h:'+h+'px;--d:'+i*110+'ms"></i>').join('')+'</span>'}
+  function liveActions(m){
+    const end={key:'end',label:'End',short:'End',danger:true};
+    const mic=m.muted?{key:'unmute',label:'Unmute',short:'Unmute'}:{key:'mute',label:'Mute mic',short:'Mute'};
+    if(m.phase==='error')return [{key:'text',label:'Use text instead',short:'Text',go:'input'},{key:'reconnect',label:'Reconnect',short:'Reconnect',primary:true},end];
+    if(m.phase==='connecting')return [{key:'end',label:'Cancel',short:'Cancel',danger:true}];
+    if(m.phase==='listening')return m.muted?[{...mic,primary:true},end]:[mic,{key:'finish',label:'End my turn',short:'Done',primary:true},end];
+    if(m.phase==='thinking'||m.phase==='speaking')return [mic,{key:'interrupt',label:'Interrupt',short:'Interrupt',primary:true},end];
+    return [{key:'write',label:'Write instead',short:'Write',go:'keyboard'},{key:'speak',label:'Speak',short:'Speak',primary:true},end];
+  }
+  function liveBtn(a,device){
+    const target=(a.go?'data-go="'+esc(a.go)+'"':'data-act="'+esc(a.key)+'"')+' aria-label="'+esc(a.label)+'"';
+    return device==='tab5'
+      ?'<button class="t5-btn '+(a.primary?'primary':a.danger?'danger':'')+'" '+target+'>'+esc(a.label)+'</button>'
+      :'<button class="'+(a.danger?'danger live-end':a.primary?'':'secondary')+'" '+target+'>'+esc(a.short||a.label)+'</button>';
+  }
+  function liveWatchFeed(m){
+    const size=state.textSize,who=agentName(m.agent).toUpperCase(),out=[];
+    for(const t of m.turns.slice(-2))out.push('<div class="live-turn '+(t.who==='you'?'me':'them')+(t.cut?' cut':'')+'"><span class="live-label">'+esc(t.who==='you'?'YOU · FINAL':who+(t.cut?' · INTERRUPTED':' · SPOKEN'))+'</span><p style="font-size:'+size+'px">'+esc(t.text)+'</p></div>');
+    if(m.phase==='listening')out.push('<div class="live-turn me now"><span class="live-label">'+(m.muted?'YOU · MUTED, CAPTURE PAUSED':'YOU · HEARING, NOT FINAL YET')+'</span><p style="font-size:'+size+'px"><span class="partial-text" data-live-partial>'+esc(m.partial||'…')+'</span><i class="live-caret" aria-hidden="true"></i></p></div>');
+    if(m.phase==='speaking')out.push('<div class="live-turn them now"><span class="live-label">'+esc(who)+' · SPEAKING, SIMULATED AUDIO</span><p style="font-size:'+size+'px"><span data-live-spoken>'+esc(m.spoken||'…')+'</span><i class="live-caret" aria-hidden="true"></i></p></div>');
+    if(m.phase==='error')out.push('<div class="live-turn now"><span class="live-label">SESSION · STOPPED</span><p style="font-size:'+size+'px">The unfinished turn was discarded.</p></div>');
+    return out.join('');
+  }
+  function liveWatch(scene){
+    const m=liveModel(scene);
+    return '<div class="w-live '+liveTone(m)+'">'
+      +'<div class="w-livehead">'+avatar(m.agent)+'<span class="row-text"><strong>'+esc(liveHeadline(m))+'</strong><small>'+esc((agentName(m.agent)+' · '+m.thread).toUpperCase())+'</small></span>'+liveMeter(5)+'</div>'
+      +'<div class="w-livefeed">'+liveWatchFeed(m)+'</div>'
+      +'<p class="w-livefoot" data-live-hint>'+esc(liveHint(m))+'</p></div>';
+  }
+  function liveT5Feed(m){
+    const r=t5Reading(),out=[];
+    for(const t of m.turns.slice(-4))out.push(t.who==='you'
+      ?'<div class="t5-bubble me'+(t.cut?' cut':'')+'"><div class="who"><span>You</span><em class="flag">'+(t.cut?'STOPPED':'FINAL')+'</em></div><p style="font-size:'+r+'px">'+esc(t.text)+'</p></div>'
+      :'<div class="t5-bubble'+(t.cut?' cut':'')+'"><div class="who">'+avatar(m.agent)+'<span>'+esc(agentName(m.agent))+'</span><em class="flag">'+(t.cut?'INTERRUPTED':'SPOKEN')+'</em></div><p style="font-size:'+r+'px">'+esc(t.text)+'</p></div>');
+    if(m.phase==='listening')out.push('<div class="t5-bubble me now partial"><div class="who"><span>You</span><em class="flag">'+(m.muted?'MUTED · CAPTURE PAUSED':'HEARING · NOT FINAL YET')+'</em></div><p style="font-size:'+r+'px"><span class="partial-text" data-live-partial>'+esc(m.partial||'…')+'</span><i class="live-caret" aria-hidden="true"></i></p></div>');
+    if(m.phase==='speaking')out.push('<div class="t5-bubble now"><div class="who">'+avatar(m.agent)+'<span>'+esc(agentName(m.agent))+'</span>'+liveMeter(5)+'<em class="flag">SPEAKING · SIMULATED AUDIO</em></div><p style="font-size:'+r+'px"><span data-live-spoken>'+esc(m.spoken||'…')+'</span><i class="live-caret" aria-hidden="true"></i></p></div>');
+    if(m.phase==='thinking')out.push('<div class="t5-thinking">'+avatar(m.agent)+'<span>'+esc(agentName(m.agent))+' is working on that turn. Nothing is being captured.</span></div>');
+    if(m.phase==='error')out.push('<p class="t5-alert">The live connection dropped. The unfinished turn was discarded rather than guessed at.</p>');
+    return out.join('');
+  }
+  function t5Live(scene){
+    const m=liveModel(scene);
+    return '<div class="t5-live '+liveTone(m)+'">'
+      +'<div class="t5-livehead">'+liveMeter(7)+'<span class="t5-livetag">'+esc(liveTag(m))+'</span></div>'
+      +'<div class="t5-scroll"><div class="t5-thread">'+liveT5Feed(m)+'</div></div>'
+      +'<p class="t5-livehint" data-live-hint>'+esc(liveHint(m))+'</p></div>';
+  }
+  // Streaming must not replace the control the user is standing on, so tokens are written
+  // straight into the existing text nodes; only a phase change re-renders the frame.
+  function livePaint(){
+    const scene=byId.get(state.screen);if(!isLive(scene))return;
+    const m=liveModel(scene);
+    document.querySelectorAll('#watch-preview [data-live-partial],#tab5-preview [data-live-partial]').forEach(n=>{n.textContent=m.partial||'…'});
+    document.querySelectorAll('#watch-preview [data-live-spoken],#tab5-preview [data-live-spoken]').forEach(n=>{n.textContent=m.spoken||'…'});
+    liveScrollEnd();
+  }
+  function liveRepaint(){renderDevices()}
+  function liveScrollEnd(){document.querySelectorAll('#tab5-preview .t5-live .t5-scroll,#watch-preview .w-livefeed').forEach(n=>{n.scrollTop=n.scrollHeight})}
+  function liveAct(key){
+    switch(key){
+      case 'mute':liveMute(true);break;
+      case 'unmute':liveMute(false);break;
+      case 'finish':liveFinishTurn();break;
+      case 'interrupt':liveInterrupt();break;
+      case 'speak':if(live){if(!state.micEnabled){enter('mic-blocked');break}live.muted=false;liveSeed('listening');liveAnnounce('Listening.');liveRepaint()}break;
+      case 'reconnect':liveReconnect();break;
+      case 'fail':liveFail();break;
+      case 'end':enter('live-ended');break;
+    }
+  }
+  // Hardware hold: press starts a live turn, release submits it. There is no review gate.
+  let holdPointer=null;
+  function beginLiveHold(input){
+    if(holdPointer||capturePointer)return;
+    if(state.agent==='initials'){enter('agent-text-only');return}
+    if(!state.micEnabled){enter('mic-blocked');return}
+    holdPointer={...input,started:performance.now()};
+    if(live&&state.screen==='live-talk'){
+      live.hold=true;live.muted=false;
+      if(['speaking','thinking'].includes(live.phase))liveInterrupt();
+      else if(live.phase!=='listening'){liveSeed('listening');liveRepaint()}
+      else liveRepaint();
+    }else{pendingHold=true;enter('live-talk')}
+  }
+  function releaseLiveHold(cancelled){
+    if(!holdPointer)return;
+    const quick=performance.now()-holdPointer.started<250;
+    holdPointer=null;pendingHold=false;
+    document.querySelectorAll('.cancel-armed').forEach(n=>n.classList.remove('cancel-armed'));
+    if(!live)return;
+    if(cancelled){live.hold=false;live.partial='';liveClearTimers();live.phase='ready';liveAnnounce('Turn cancelled. Nothing was sent.');setToast('Turn cancelled before it closed. Nothing was sent.');liveRepaint();return}
+    if(quick){live.hold=false;setToast('Tap opens live talk hands-free; your turn then ends by itself when you stop speaking.');if(live.phase==='listening')liveTick();liveRepaint();return}
+    if(live.phase==='connecting'){live.hold=false;liveSeed('ready');liveAnnounce('Released before capture started. No turn was sent.');liveRepaint();return}
+    liveFinishTurn();
+  }
+
   function homeInfo(s,device='watch'){
     const variant=s.view.variant||(device!=='dial'&&state.live?'live':null);
     return variant==='offline'?{status:'OpenClaw offline',action:R('Connection','connection')}:
       variant==='working'?{status:'Working on your request',action:R('View progress','turn-thinking')}:
       variant==='reply'?{status:state.choices.previews===1?'Your outline is ready':'Reply ready',action:R('Read reply','turn-reply')}:
       variant==='empty'?{status:'Ready when you are',action:device==='dial'?R('Start','new-thread'):null}:
-      variant==='live'?{status:'Microphone active',action:R('Return to call','live-talk')}:
+      variant==='live'?{status:'Live conversation',action:device==='dial'?R('Read the thread','conversation'):R('Back to live talk','live-talk')}:
       {status:device==='dial'||canUseVoice()?'Ready':state.micEnabled?'Text ready':'Mic off',action:null};
   }
-  function homeAction(s,device){return homeInfo(s,device).action||(device!=='dial'&&canUseVoice()?R('Hold to talk','ptt-ready'):R('Continue',device==='watch'?'input':'conversation'))}
+  function homeAction(s,device){return homeInfo(s,device).action||(device!=='dial'&&canUseVoice()?R('Talk to '+agentName(),'live-talk'):R('Continue',device==='watch'?'input':'conversation'))}
   function homeAgent(){return '<button class="plain home-agent" data-go="agents" aria-label="Change agent, '+esc(agentName())+' selected">'+avatar(state.agent)+'<strong>'+esc(agentName())+'</strong>'+icon('next','end')+'</button>'}
   function homeBody(s,device){const info=homeInfo(s,device),titles=homeTitles(info,device);return '<div class="home-mascot"><div class="presence-orb" aria-hidden="true">'+lobsterMark(device+'-'+s.id)+'</div><p class="home-state">'+esc(titles[info.status]||info.status)+'</p></div>'}
-  function homeTitles(info,device){const wide=device!=='dial';return {'Ready':wide?'Ready when you are.':'Ready for you.','Ready when you are':'Say hello.','Working on your request':'On it.','Reply ready':wide?'Your reply is ready.':'Reply ready.','OpenClaw offline':wide?'Let’s reconnect.':'Offline.','Microphone active':wide?'I’m listening.':'Microphone active'}}
+  function homeTitles(info,device){const wide=device!=='dial';return {'Ready':wide?'Ready when you are.':'Ready for you.','Ready when you are':'Say hello.','Working on your request':'On it.','Reply ready':wide?'Your reply is ready.':'Reply ready.','OpenClaw offline':wide?'Let’s reconnect.':'Offline.','Live conversation':wide?'We’re still talking.':'Talk is open','Text ready':wide?'Ready when you are.':'Ready for you.','Mic off':wide?'Text only for now.':'Mic off'}}
   function homeTheme(s,device){return ' home-'+(s.view.variant||(device!=='dial'&&state.live?'live':'ready'))}
   function homeTime(){return '<time class="home-time" aria-label="Sample time 9:41">9:41</time>'}
-  function homeButton(s,device){const a=homeAction(s,device),symbol=a.to==='ptt-ready'?'mic':a.to==='connection'?'link':a.to==='live-talk'?'speaker':a.to==='turn-thinking'?'activity':'chat';return '<button class="'+(a.to==='ptt-ready'&&canUseVoice()?'capture':'')+'" data-go="'+esc(a.to)+'"><span class="home-action-icon" aria-hidden="true">'+icon(symbol)+'</span><span>'+esc(a.label)+'</span></button>'}
+  const actionIcon=to=>to==='live-talk'||to==='ptt-ready'?'mic':to==='connection'?'link':to==='turn-thinking'?'activity':'chat';
+  function homeButton(s,device){const a=homeAction(s,device);return '<button class="'+(a.to==='live-talk'&&device!=='dial'&&canUseVoice()?'livehold':'')+'" data-go="'+esc(a.to)+'"><span class="home-action-icon" aria-hidden="true">'+icon(actionIcon(a.to))+'</span><span>'+esc(a.label)+'</span></button>'}
   function matchPattern(){return '<div class="match-pattern" aria-hidden="true"><i></i><i></i><i></i></div><div class="compare" aria-label="Sample comparison code 582 014">582 014</div>'}
   function watchBody(s){
     const v=s.view;
     if(v.kind==='home')return homeBody(s,'watch');
     if(v.kind==='qr')return '<p class="qr-heading">Add device in the mobile app</p><div class="qr-tile">'+pairingQR+'</div><p class="qr-caption">OpenClaw DEMO · Bluetooth setup</p><p class="qr-caption">DEMO QR — not a pairing credential</p>';
     if(s.comparison)return '<div class="hero"><p class="w-copy">Compare with your phone</p>'+matchPattern()+'<p class="w-small">Same device. Same pattern.</p></div>';
-    if(s.id==='ptt-ready')return '<div class="capture-stage">'+avatar(state.agent)+'<p class="capture-agent">To '+agentName()+'</p>'+wave()+'<h3>Hold. Speak. Release.</h3><p class="capture-hint">Review your words before sending.</p></div>';
+    if(v.kind==='live')return liveWatch(s);
+    if(s.id==='ptt-ready')return '<div class="capture-stage">'+avatar(state.agent)+'<p class="capture-agent">Dictating to '+agentName()+'</p>'+wave()+'<h3>Hold. Speak. Release.</h3><p class="capture-hint">Read your words before sending. Talk live instead for no review step.</p></div>';
     if(v.kind==='list')return rowsFor(s,'watch').map((r,i)=>'<button class="w-row'+(selectedRow(s,i)?' current':'')+'" data-row="'+i+'" data-device="watch">'+(r.avatar?avatar(r.avatar):icon(r.icon))+'<span class="row-text"><strong>'+esc(r.label)+'</strong>'+ (r.sub?'<small>'+esc(rowSummary(s,r,i))+'</small>':'')+'</span>'+icon(selectedRow(s,i)?'check':'next','end')+'</button>').join('');
     if(v.kind==='hero')return '<div class="hero">'+(s.avatar?avatar(s.group==='Talk & input'?responseAgent(s):s.avatar):icon(/failed|unknown|unavailable|rejected|expired/.test(s.id)?'help':s.group==='Setup & pairing'?'link':'activity'))+'<h3>'+esc(contextText(s,v.headline))+'</h3><p class="w-copy">'+esc(contextText(s,v.text))+'</p></div>';
-    if(v.kind==='capture')return '<div class="capture-stage capturing">'+avatar(state.agent)+'<p class="capture-agent">To '+agentName()+'</p>'+wave()+'<h3 data-capture-label>Listening</h3><div class="capture-time" data-capture-time>00:00 / 00:30</div><p class="capture-hint" data-capture-hint>Slide up to cancel</p></div>';
+    if(v.kind==='capture')return '<div class="capture-stage capturing">'+avatar(state.agent)+'<p class="capture-agent">Dictating to '+agentName()+'</p>'+wave()+'<h3 data-capture-label>Dictating</h3><div class="capture-time" data-capture-time>00:00 / 00:30</div><p class="capture-hint" data-capture-hint>Slide up to cancel</p></div>';
     if(v.kind==='message')return '<div class="transcript-to">'+avatar(responseAgent(s))+'<span>'+(/review/.test(s.id)?'To ':'From ')+agentName(responseAgent(s))+' · '+esc(state.pendingTurn&&['turn-reply'].includes(s.id)?state.pendingTurn.thread:state.thread)+'</span></div><div class="transcript-message">'+(/review/.test(s.id)?'<div class="transcript-label">NOT SENT</div>':'')+'<p style="font-size:'+state.textSize+'px">'+esc(/review/.test(s.id)?(state.draft||v.text):contextText(s,v.text))+'</p></div>'+(/review/.test(s.id)?'<p class="muted-note">Edit the words or send when ready.</p>':'');
     if(v.kind==='slider')return '<p class="w-small" style="text-align:center">'+(s.id==='control'?'Draft · reported 42%':'Preview')+'</p><div class="value"><span class="slider-value">'+(state.sliders[s.id]??v.value)+'</span><span class="unit">'+esc(v.unit)+'</span></div><input class="setting-range" aria-label="'+esc(s.title)+'" data-slider="'+s.id+'" type="range" min="0" max="100" value="'+(state.sliders[s.id]??v.value)+'"><p class="w-small" style="text-align:center">'+(s.id==='control'?'Not sent until Apply.':'Back cancels this preview.')+'</p>';
     if(v.kind==='scribble')return '<div class="draft-line">'+esc(state.draft||'Write one word')+'</div><canvas class="draw-pad" data-pad="watch" width="660" height="288" aria-label="Finger drawing demonstration"></canvas><div class="pad-tools"><button data-undo="watch">Undo</button><button data-clear="watch">Clear</button></div><p class="w-small">Recognition is a sample fixture.</p>';
@@ -619,8 +1029,13 @@
     return '';
   }
   function watchFrame(s,interactive=true){
-    const actions=isHome(s)?[homeAction(s,'watch')]:actionsFor(s);
-    return '<div class="watch-wrap"><div class="device watch'+(actions.length?' has-action':'')+(isHome(s)?' home-variant'+homeTheme(s,'watch'):'')+'" data-kind="watch">'+(isHome(s)?homeTime():'')+status(s)+'<div class="w-head">'+(s.parent?'<button class="plain w-back" data-back aria-label="Back">'+icon('back')+'</button>':'')+(isHome(s)?homeAgent():'<span>'+esc(contextText(s,s.title))+'</span>')+'<button class="plain w-menu" data-go="menu" aria-label="Menu">'+icon('menu')+'</button></div><div class="w-body">'+watchBody(s)+'</div>'+(actions.length?'<div class="w-footer">'+(isHome(s)?homeButton(s,'watch'):actions.map(a=>act(a,s.ptt||['home','home-empty','home-working','conversation','turn-reply'].includes(s.id)&&a.to==='ptt-ready'&&canUseVoice()?'capture':'')).join(''))+'</div>':'')+'</div></div>';
+    const liveM=isLive(s)?liveModel(s):null;
+    const actions=liveM?liveActions(liveM):isHome(s)?[homeAction(s,'watch')]:actionsFor(s);
+    const footer=liveM
+      ?actions.map(a=>liveBtn(a,'watch')).join('')
+      :isHome(s)?homeButton(s,'watch')
+      :actions.map(a=>act(a,a.to==='live-talk'&&canUseVoice()?'livehold':s.ptt?'capture':'')).join('');
+    return '<div class="watch-wrap"><div class="device watch'+(actions.length?' has-action':'')+(isHome(s)?' home-variant'+homeTheme(s,'watch'):'')+'" data-kind="watch">'+(isHome(s)?homeTime():'')+status(s)+'<div class="w-head">'+(s.parent?'<button class="plain w-back" data-back aria-label="Back">'+icon('back')+'</button>':'')+(isHome(s)?homeAgent():'<span>'+esc(liveM?'Talk to '+agentName(liveM.agent):contextText(s,s.title))+'</span>')+'<button class="plain w-menu" data-go="menu" aria-label="Menu">'+icon('menu')+'</button></div><div class="w-body">'+watchBody(s)+'</div>'+(actions.length?'<div class="w-footer">'+footer+'</div>':'')+'</div></div>';
   }
   function dialFrame(original){
     const s=resolve(original,'dial'),actions=isHome(s)?[homeAction(s,'dial')]:(s.dialActions||actionsFor(s));
@@ -648,15 +1063,16 @@
   function t5Tool(label,attr,cls='',disabled=false){return '<button class="t5-btn '+cls+'" '+attr+(disabled?' disabled':'')+'>'+esc(label)+'</button>'}
   function t5IsLive(s){return state.live||s.view.variant==='live'}
   function t5Turn(s){return ['turn-sending','turn-thinking','turn-reply','turn-failed'].includes(s.id)?state.pendingTurn||{agent:state.agent,thread:state.thread,text:byId.get('ptt-review').view.text}:null}
-  function t5Availability(s){return s.id==='agent-unavailable'?'Unavailable for new work':state.agent==='initials'?'Text only · no voice':t5IsLive(s)?'In a live conversation':state.micEnabled?'Voice and text':'Microphone off'}
+  function t5Availability(s){return s.id==='agent-unavailable'?'Unavailable':state.agent==='initials'?'Text only':t5IsLive(s)?'Live talk':state.micEnabled?'Voice ready':'Mic off'}
   function t5SetupStep(s){const at=t5SetupSteps.findIndex(([,ids])=>ids.includes(s.id));return at<0?null:{at,label:t5SetupSteps[at][0]}}
   // One line of stable context above the title. Setup counts its steps here instead of standing in a side panel.
   function t5Crumb(s){
     const step=s.group==='Setup & pairing'?t5SetupStep(s):null;
     if(step)return 'SETUP · STEP '+(step.at+1)+' OF '+t5SetupSteps.length+' · '+step.label;
+    if(isLive(s)){const m=liveModel(s);return agentName(m.agent)+' · '+m.thread+' · LIVE'}
     const turn=t5Turn(s)||state.editingTurn;
     if(turn)return agentName(turn.agent)+' · '+turn.thread;
-    if(s.view.kind==='message'||['input','quick-replies','scribble','scribble-result','scribble-uncertain','keyboard','ptt-ready','ptt-capture','ptt-transcribe','ptt-empty','live-talk','live-speaking'].includes(s.id))return agentName(responseAgent(s))+' · '+state.thread;
+    if(s.view.kind==='message'||['input','quick-replies','scribble','scribble-result','scribble-uncertain','keyboard','ptt-ready','ptt-capture','ptt-transcribe','ptt-empty','live-ended'].includes(s.id))return agentName(responseAgent(s))+' · '+state.thread;
     if(isHome(s))return 'OpenClaw';
     return String(s.parent?contextText(byId.get(s.parent),byId.get(s.parent).title):s.group);
   }
@@ -667,27 +1083,29 @@
   function t5Draft(s){const turn=t5Turn(s);return s.id==='turn-failed'?(turn?.text||''):/review/.test(s.id)?(state.draft||s.view.text):state.draft}
   function t5Transcript(s){
     const conv=byId.get('conversation'),turn=t5Turn(s),agent=turn?.agent||state.editingTurn?.agent||responseAgent(s),out=[];
-    out.push(t5Bubble('them',agent,contextText(conv,conv.view.text),'Earlier today'));
+    const history=staticRender?[]:liveHistory(agent,turn?.thread||state.editingTurn?.thread||state.thread);
+    if(history.length)for(const t of history)out.push(t5Bubble(t.who==='you'?'me':'them',t.who==='you'?null:agent,t.text,t.cut?'Interrupted':t.who==='you'?'Final':'Spoken'));
+    else out.push(t5Bubble('them',agent,conv.view.text.replaceAll('Kitsune',agentName(agent)),'Earlier today'));
     if(turn)out.push(t5Bubble('me',null,turn.text||'(no text captured)',s.id==='turn-failed'?'Not sent':s.id==='turn-reply'?'Sent':'Sending…'));
     if(s.id==='turn-reply')out.push(t5Bubble('them',agent,contextText(s,s.view.text),'Just now'));
     if(s.id==='turn-thinking')out.push('<div class="t5-thinking">'+avatar(agent)+'<span>'+esc(agentName(agent))+' is working on it. You can keep browsing.</span></div>');
     if(s.id==='turn-failed')out.push('<p class="t5-alert">'+esc(contextText(s,s.view.text))+'</p>');
     const draft=t5Draft(s),pending=['turn-sending','turn-thinking'].includes(s.id);
-    const note=pending?'Sent. You can keep browsing while the reply arrives.':'Nothing sends until you choose Send.';
+    const note=pending?'Sent. You can keep browsing while the reply arrives.':'Talk to speak, or write a message.';
     return '<div class="t5-scroll"><div class="t5-thread">'+out.join('')+'</div></div>'
       +(draft?'<div class="t5-draftcard"><span class="row-text"><span class="t5-fact-label">'+(s.id==='turn-failed'?'NOT SENT · DRAFT KEPT':'NOT SENT · YOUR DRAFT')+'</span><p style="font-size:'+t5Reading()+'px">'+esc(draft)+'</p></span><button class="t5-discard" data-draft-clear>Discard</button></div>'
              :'<p class="t5-note">'+esc(note)+'</p>');
   }
+  // Voice is the natural primary here; the text routes stay beside it, never behind a menu.
   function t5ConvActions(s){
     const pending=['turn-sending','turn-thinking'].includes(s.id),failed=s.id==='turn-failed',draft=t5Draft(s);
-    const noVoice=()=>t5Button(R(state.micEnabled?'Why no voice?':'Microphone is off',state.micEnabled?'agent-text-only':'mic-blocked'));
-    const talk=label=>canUseVoice()?'<button class="t5-btn capture" data-go="ptt-ready">'+icon('mic')+esc(label)+'</button>':noVoice();
+    const noVoice=cls=>t5Button(R(state.micEnabled?'Why no voice?':'Microphone is off',state.micEnabled?'agent-text-only':'mic-blocked'),cls||'');
+    const talk=(label,cls)=>canUseVoice()?'<button class="t5-btn '+(cls?cls+' ':'')+'livehold" data-go="live-talk">'+icon('mic')+esc(label)+'</button>':noVoice(cls);
     const write=t5Tool(draft?'Edit text':'Write','data-edit-draft data-go="'+(draft?'keyboard':'input')+'"');
-    if(failed)return talk('Talk again')+write+'<button class="t5-btn primary" data-retry-turn'+(draft?'':' disabled')+'>'+icon('next')+'Retry send</button>';
+    if(failed)return talk('Talk live')+write+'<button class="t5-btn primary" data-retry-turn'+(draft?'':' disabled')+'>'+icon('next')+'Retry send</button>';
     if(pending)return t5Button(R('Activity','activity'))+write+'<button class="t5-btn primary" disabled>'+icon('activity')+'Sending…</button>';
-    if(draft)return talk('Talk again')+write+'<button class="t5-btn primary" data-go="turn-sending">'+icon('check')+'Send</button>';
-    return write+t5Button(R('Quick replies','quick-replies'))+'<span class="spacer"></span>'
-      +(canUseVoice()?'<button class="t5-btn primary capture" data-go="ptt-ready">'+icon('mic')+'Hold to talk</button>':t5Button(R(state.micEnabled?'Why no voice?':'Microphone is off',state.micEnabled?'agent-text-only':'mic-blocked'),'primary'));
+    if(draft)return talk('Talk live')+write+'<button class="t5-btn primary" data-go="turn-sending">'+icon('check')+'Send</button>';
+    return write+t5Button(R('Quick replies','quick-replies'))+'<span class="spacer"></span>'+talk(state.live?'Back to live talk':'Talk to '+agentName(),'primary');
   }
   function t5Row(s,r,i){const sel=selectedRow(s,i);return '<button class="t5-row'+(sel?' current':'')+'" data-row="'+i+'" data-device="tab5" data-screen="'+esc(s.id)+'">'+(r.avatar?avatar(r.avatar):icon(r.icon))+'<span class="row-text"><strong>'+esc(r.label)+'</strong>'+(r.sub?'<small>'+esc(rowSummary(s,r,i))+'</small>':'')+'</span>'+icon(sel?'check':'next','end')+'</button>'}
   function t5List(s){const rows=rowsFor(s,'tab5');
@@ -702,11 +1120,9 @@
   function t5Hero(s){const v=s.view,text=s.id==='control-result'?'Desk lamp reported '+state.reportedControl+'%.':s.id==='control-wait'?'Desk lamp · requested '+(state.controlRequest?.value??byId.get('control').view.value)+'%. You can leave this screen.':v.text,meta=t5HeroMeta(s);
     return '<div class="t5-hero">'+(s.avatar?avatar(s.group==='Talk & input'?responseAgent(s):s.avatar):icon(/failed|unknown|unavailable|rejected|expired|mismatch|empty|denied|not-found/.test(s.id)?'help':s.group==='Setup & pairing'?'link':'activity','t5-hero-icon'))+'<h3>'+esc(contextText(s,v.headline))+'</h3><p>'+esc(contextText(s,text))+'</p>'+(meta?'<p class="t5-meta">'+esc(meta)+'</p>':'')+'</div>'}
   function t5CaptureStage(s,listening){
-    return '<div class="capture-stage t5-capture'+(listening?' capturing':'')+'">'+avatar(state.agent)+'<p class="capture-agent">To '+esc(agentName())+' · '+esc(state.thread)+'</p>'+wave()
-      +(listening?'<h3 data-capture-label>Listening</h3><div class="capture-time" data-capture-time>00:00 / 00:30</div><p class="capture-hint" data-capture-hint>Release to review · slide up to cancel</p>'
-                 :'<h3>Hold. Speak. Release.</h3><p class="capture-hint">Release to review. Nothing sends until you confirm.</p>')+'</div>'}
-  function t5Live(s){const speaking=s.id==='live-speaking';
-    return '<div class="capture-stage t5-capture'+(speaking?'':' capturing')+'">'+avatar(responseAgent(s))+'<p class="capture-agent">'+esc(agentName(responseAgent(s)))+' · live conversation</p>'+wave()+'<h3>'+esc(contextText(s,s.view.headline))+'</h3><p class="capture-hint">'+esc(contextText(s,s.view.text))+'</p></div>'}
+    return '<div class="capture-stage t5-capture'+(listening?' capturing':'')+'">'+avatar(state.agent)+'<p class="capture-agent">Dictating to '+esc(agentName())+' · '+esc(state.thread)+'</p>'+wave()
+      +(listening?'<h3 data-capture-label>Dictating</h3><div class="capture-time" data-capture-time>00:00 / 00:30</div><p class="capture-hint" data-capture-hint>Release to review · slide up to cancel</p>'
+                 :'<h3>Hold. Speak. Release.</h3><p class="capture-hint">This route keeps a review step. Talk live instead if you would rather the turn submit itself.</p>')+'</div>'}
   function t5Qr(){return '<div class="t5-qr"><div class="t5-qr-copy"><h3>Add this device in OpenClaw mobile</h3><ol class="t5-steps"><li><i></i><span>Open OpenClaw on your phone.</span></li><li><i></i><span>Devices → Add device → Scan.</span></li><li><i></i><span>Point the camera at this code.</span></li></ol><p class="t5-note">Then confirm the matching code on this device.</p></div><div><div class="qr-tile">'+pairingQR+'</div><p class="qr-caption">DEMO QR — not a pairing credential</p></div></div>'}
   function t5Confirm(s){return '<div class="t5-hero"><h3>'+esc(contextText(s,s.view.headline))+'</h3><p>'+esc(contextText(s,s.view.text))+'</p>'+matchPattern()+'<p class="t5-note">Confirm only when your phone shows the same shapes and digits.</p></div>'}
   function t5Editor(s){const v=s.view,val=state.sliders[s.id]??v.value,lamp=s.id==='control';
@@ -727,14 +1143,15 @@
       +'<div class="t5-krow"><button class="act" data-back>Back</button><button class="wide" data-char=" " aria-label="Space">Space</button><button class="act" data-char="⌫" aria-label="Delete">⌫</button><button class="done" data-go="text-review">Done</button></div>'
       +'</div></div>'}
   function t5Home(s){const info=homeInfo(s,'tab5'),a=homeAction(s,'tab5'),titles=homeTitles(info,'tab5');
-    const symbol=a.to==='ptt-ready'?'mic':a.to==='connection'?'link':a.to==='live-talk'?'speaker':a.to==='turn-thinking'?'activity':'chat';
-    const button=a.to==='ptt-ready'&&canUseVoice()?'<button class="t5-btn primary capture" data-go="ptt-ready">'+icon('mic')+esc(a.label)+'</button>':'<button class="t5-btn primary" data-go="'+esc(a.to)+'">'+icon(symbol)+esc(a.label)+'</button>';
-    return '<div class="t5-homestage"><div class="home-mascot"><div class="presence-orb" aria-hidden="true">'+lobsterMark('t5-'+s.id)+'</div><p class="home-state">'+esc(titles[info.status]||info.status)+'</p></div><p class="t5-home-sub">'+esc((info.status+' · '+agentName()+' · '+state.thread).toUpperCase())+'</p><div class="t5-homeact">'+button+'</div></div>'}
+    const isTalk=a.to==='live-talk'&&canUseVoice();
+    const button='<button class="t5-btn primary'+(isTalk?' livehold':'')+'" data-go="'+esc(a.to)+'">'+icon(actionIcon(a.to))+esc(a.label)+'</button>';
+    const secondary=isTalk?'<button class="t5-btn" data-go="input">'+icon('chat')+'Write instead</button>':'';
+    return '<div class="t5-homestage"><div class="home-mascot"><div class="presence-orb" aria-hidden="true">'+lobsterMark('t5-'+s.id)+'</div><p class="home-state">'+esc(titles[info.status]||info.status)+'</p></div><p class="t5-home-sub">'+esc((info.status+' · '+agentName()+' · '+state.thread).toUpperCase())+'</p><div class="t5-homeact">'+secondary+button+'</div></div>'}
   function t5Body(s){const v=s.view;
     if(v.kind==='home')return t5Home(s);
+    if(v.kind==='live')return t5Live(s);
     if(v.kind==='capture')return t5CaptureStage(s,true);
     if(s.id==='ptt-ready')return t5CaptureStage(s,false);
-    if(['live-talk','live-speaking'].includes(s.id))return t5Live(s);
     if(v.kind==='message'||t5Turn(s))return t5Transcript(s);
     if(v.kind==='qr')return t5Qr();
     if(s.comparison)return t5Confirm(s);
@@ -746,9 +1163,12 @@
   }
   // The action zone. One row, one obvious primary, Back in the header. Destination screens trade it for the nav bar.
   function t5ActionBar(s){const v=s.view;
+    // Live conversation owns its own bar: one turn-taking primary, Mute beside it, End at the end.
+    if(v.kind==='live'){const acts=liveActions(liveModel(s));
+      if(acts.length===1)return '<span class="spacer"></span>'+liveBtn(acts[0],'tab5')+'<span class="spacer"></span>';
+      return acts.map((a,i)=>(a.danger&&i?'<span class="spacer"></span>':'')+liveBtn(a,'tab5')).join('')}
     if(v.kind==='capture')return '<span class="spacer"></span>'+t5Button(R('Cancel','ptt-ready'),'danger grow')+'<span class="spacer"></span>';
-    if(s.id==='ptt-ready')return t5Button(R('Quick replies','quick-replies'))+t5Button(R('Type instead','keyboard'))+'<span class="spacer"></span><button class="t5-btn primary capture" data-go="ptt-capture">'+icon('mic')+'Hold to talk</button>';
-    if(['live-talk','live-speaking'].includes(s.id))return (s.id==='live-speaking'?t5Button(R('Back to listening','live-talk')):'')+t5Tool('Mute microphone','data-mic="off"')+'<span class="spacer"></span>'+t5Button(R('End','conversation'),'danger grow');
+    if(s.id==='ptt-ready')return t5Button(R('Talk live instead','live-talk'))+t5Button(R('Type instead','keyboard'))+'<span class="spacer"></span><button class="t5-btn primary capture" data-go="ptt-capture">'+icon('mic')+'Hold to dictate</button>';
     if(v.kind==='message'||t5Turn(s))return t5ConvActions(s);
     if(v.kind==='keyboard')return '';
     if(v.kind==='scribble')return t5Tool('Undo','data-undo="tab5"')+t5Tool('Clear','data-clear="tab5"')+'<span class="spacer"></span>'+t5Tool('Clear draft','data-draft-clear','ghost',!state.draft)+t5Button(R('Sample result','scribble-result'),'primary');
@@ -764,12 +1184,18 @@
     return t5Nav.map(([id,label,ico])=>'<button data-go="'+id+'"'+(cur===id?' aria-current="page"':'')+'>'+icon(ico)+'<span>'+label+'</span></button>').join('')}
   function t5Frame(s){
     const nav=t5ShowNav(s),bar=nav?t5NavBar(s):t5ActionBar(s);
+    // When a session is open the whole frame adopts its phase tone, so the agent in the header
+    // and the stage below it read as one presence rather than two unrelated widgets.
+    const session=!staticRender&&live?liveModelOf(live):isLive(s)?liveModel(s):null;
+    const presence=session
+      ?'<span class="t5-dot" aria-hidden="true"></span><small>'+esc((session.paused?'Paused':session.muted?'Mic muted':'Live talk').toUpperCase())+'</small>'
+      :'<small>'+esc(t5Availability(s))+'</small>';
     const top='<div class="t5-top">'+(s.parent?'<button class="t5-back" data-back aria-label="Back">'+icon('back')+'</button>':'')
-      +'<div class="t5-heads"><div class="t5-crumb">'+esc(String(t5Crumb(s)).toUpperCase())+'</div><h2 class="t5-title">'+esc(contextText(s,s.title))+'</h2></div>'
+      +'<div class="t5-heads"><div class="t5-crumb">'+esc(String(t5Crumb(s)).toUpperCase())+'</div><h2 class="t5-title">'+esc(isLive(s)&&session?liveHeadline(session):contextText(s,s.title))+'</h2></div>'
       +t5Sys(s)
-      +(s.group==='Setup & pairing'?'':'<button class="t5-presence" data-go="agents" aria-label="Change agent, '+esc(agentName())+' selected">'+avatar(state.agent)+'<span class="row-text"><strong>'+esc(agentName())+'</strong><small>'+esc(t5Availability(s))+'</small></span>'+icon('next','end')+'</button>')
+      +(s.group==='Setup & pairing'?'':'<button class="t5-presence" data-go="agents" aria-label="Change agent, '+esc(agentName())+' selected'+(session?', '+esc(liveHeadline(session)):'')+'">'+avatar(state.agent)+'<span class="row-text"><strong>'+esc(agentName())+'</strong>'+presence+'</span>'+icon('next','end')+'</button>')
       +'</div>';
-    return '<div class="tab5-wrap"><div class="t5'+(isHome(s)?' t5-home'+homeTheme(s,'tab5'):'')+'" data-kind="tab5">'+top
+    return '<div class="tab5-wrap"><div class="t5'+(isHome(s)?' t5-home'+homeTheme(s,'tab5'):'')+(session?' '+liveTone(session):'')+'" data-kind="tab5">'+top
       +'<div class="t5-body">'+t5Body(s)+'</div>'
       +(bar?nav?'<nav class="t5-bar t5-navbar" aria-label="Destinations">'+bar+'</nav>':'<div class="t5-bar" role="group" aria-label="Actions">'+bar+'</div>':'')+'</div></div>';
   }
@@ -783,7 +1209,7 @@
     if(destination.group!=='Setup & pairing'||id==='welcome'||id==='setup-ready')state.setupPurpose='initial';
     if(id==='setup-wifi'&&state.setupPurpose==='gateway')id='setup-gateway';
     if(id==='setup-gateway'&&state.screen==='setup-wifi-joining'&&state.setupPurpose==='wifi')id='setup-wifi-ready';
-    if(['ptt-ready','ptt-capture','live-talk'].includes(id)){if(state.agent==='initials')id='agent-text-only';else if(!state.micEnabled)id='mic-blocked'}
+    if(['ptt-ready','ptt-capture'].includes(id)||byId.get(id).view.kind==='live'){if(state.agent==='initials')id='agent-text-only';else if(!state.micEnabled)id='mic-blocked'}
     if(id!=='ptt-capture'){capturePointer=null;clearTimeout(captureTimer);clearInterval(captureTick);captureTimer=null;captureTick=null}
     clearTimeout(flowTimer);flowTimer=null;
     if(id==='ptt-capture'){state.draft='';state.editingTurn=null}
@@ -792,10 +1218,14 @@
     if(transient.includes(state.screen)&&id==='ptt-ready')while(state.history.at(-1)===id||transient.includes(state.history.at(-1)))state.history.pop();
     if(history&&state.screen!==id&&!transient.includes(state.screen)&&state.history.at(-1)!==state.screen)state.history.push(state.screen);
     if(id==='agent-switch'){state.pendingAgent=profileAgents[state.screen]||state.pendingAgent||'builder';if(state.live)id='agent-call-switch'}
-    if(id==='agent-selected'&&state.screen==='agent-call-switch')state.live=false;
-    if(['live-talk','live-speaking'].includes(id))state.live=true;
-    if(id==='thread-created'){state.thread='New conversation';state.editingTurn=null}
-    if(id==='agent-selected'&&state.pendingAgent&&state.pendingAgent!==state.agent){state.agent=state.pendingAgent;state.draft='';state.strokes=blankStrokes();state.editingTurn=null}
+    if(id==='agent-selected'&&state.screen==='agent-call-switch')liveEnd();
+    if(id==='thread-created'){liveEnd();state.thread='New conversation';state.editingTurn=null}
+    if(id==='agent-selected'&&state.pendingAgent&&state.pendingAgent!==state.agent){liveEnd();state.agent=state.pendingAgent;state.draft='';state.strokes=blankStrokes();state.editingTurn=null}
+    // The session owner. A live destination seeds or keeps exactly one session; anything else
+    // stops its clockwork. Entering live-ended releases it outright.
+    const target=byId.get(id);
+    if(target.view.kind==='live'){if(!live||state.screen!==id||live.agent!==state.agent||live.thread!==state.thread)liveStart(target.view)}
+    else if(live){if(id==='live-ended'||id==='mic-blocked'||id==='agent-text-only')liveEnd();else if(!live.paused)liveSuspend()}
     if(id==='turn-sending'){const edit=state.editingTurn,retry=source.id==='turn-failed'?state.pendingTurn:null;state.pendingTurn={agent:edit?.agent||retry?.agent||state.agent,thread:edit?.thread||retry?.thread||state.thread,text:edit?state.draft:retry?.text||state.draft||state.pendingTurn?.text||source.view.text||'',phase:'sending'};state.editingTurn=null}
     if(state.pendingTurn&&['turn-thinking','turn-reply','turn-failed'].includes(id))state.pendingTurn.phase={'turn-thinking':'thinking','turn-reply':'replied','turn-failed':'failed'}[id];
     if(id==='control-wait'&&source.id==='control')state.controlRequest={value:state.sliders.control??source.view.value,agent:state.agent,status:'pending'};
@@ -810,11 +1240,12 @@
     if(id==='turn-sending')flowTimer=setTimeout(()=>{if(state.screen===id)enter('turn-thinking')},800);
   }
   function back(){const current=byId.get(state.screen);if(current.view.kind==='slider')state.sliders[current.id]=state.savedSliders[current.id]??current.view.value;enter(state.history.pop()||current.parent||'home',false)}
-  function runAction(id){const current=byId.get(state.screen);if(['live-talk','live-speaking'].includes(current.id)&&id==='conversation')state.live=false;if(current.view.kind==='slider'&&id===current.parent)state.savedSliders[current.id]=state.sliders[current.id]??current.view.value;enter(id)}
+  function runAction(id){const current=byId.get(state.screen);if(current.view.kind==='slider'&&id===current.parent)state.savedSliders[current.id]=state.sliders[current.id]??current.view.value;enter(id)}
   function chooseRow(index,device,screenId){
     const s=resolve(byId.get(screenId&&byId.has(screenId)?screenId:state.screen),device),r=rowsFor(s,device)[index];if(!r)return;if(r.to==='@back'){back();return}
-    if(s.id==='microphone'){state.micEnabled=index===0;if(!state.micEnabled)state.live=false;state.choices[s.id]=index}
-    if(s.id==='threads'&&index<2)state.thread=r.label;
+    // Switching the microphone off or changing thread ends the session outright; neither may leave a timer behind.
+    if(s.id==='microphone'){state.micEnabled=index===0;if(!state.micEnabled)liveEnd();state.choices[s.id]=index}
+    if(s.id==='threads'&&index<2){if(r.label!==state.thread)liveEnd();state.thread=r.label}
     if(s.id==='quick-replies'&&index<3)state.draft=r.label==='Yes, continue'?'Yes, continue.':r.label+'.';
     if(s.id==='scribble-result'&&index<2)state.draft=r.label;
     if(s.id==='layout'){const roomy=index===1;document.body.classList.toggle('roomy',roomy);document.getElementById('roomy').checked=roomy;setToast('Preview spacing changed; no device setting saved.');renderDevices();return}
@@ -825,7 +1256,17 @@
   }
   function turn(step){const s=resolve(byId.get(state.screen),'dial');if(isHome(s)){enter('menu')}else if(s.view.kind==='list'){state.focus=Math.max(0,Math.min(rowsFor(s,'dial').length-1,state.focus+step));renderDevices()}else if(s.view.kind==='slider'){state.sliders[s.id]=Math.max(0,Math.min(100,(state.sliders[s.id]??s.view.value)+step));renderDevices()}else if(s.view.kind==='keyboard'){state.keyPage=Math.max(0,Math.min(keyPages.length-1,state.keyPage+step));renderDevices()}else if(dialPages.length>1){state.page=Math.max(0,Math.min(dialPages.length-1,state.page+step));renderDevices()}}
   function press(){const s=resolve(byId.get(state.screen),'dial');if(s.view.kind==='list')chooseRow(state.focus,'dial');else if(dialPages.length>1&&state.page<dialPages.length-1){state.page++;renderDevices()}else{const a=isHome(s)?homeAction(s,'dial'):(s.dialActions||actionsFor(s)).at(-1);if(a)runAction(a.to)}}
+  // A phase change has to redraw the controls, so remember which live control had focus and
+  // hand it back afterwards. Individual tokens never come through here — they go to livePaint.
+  function liveFocusKey(){const a=document.activeElement;if(!live||!a||!a.closest)return null;const host=a.closest('#watch-preview,#dial-preview,#tab5-preview');return host?{host:host.id,act:a.getAttribute('data-act'),go:a.getAttribute('data-go')}:null}
+  function liveRestoreFocus(key){
+    if(!key||!(key.act||key.go))return;
+    const host=document.getElementById(key.host);if(!host)return;
+    const node=host.querySelector(key.act?'[data-act="'+key.act+'"]':'[data-go="'+key.go+'"]');
+    if(node)node.focus();
+  }
   function renderDevices(){
+    const focusKey=liveFocusKey();
     observer.disconnect();t5Observer.disconnect();
     const s=byId.get(state.screen),pair=state.preview!=='tab5',tab5=state.preview!=='watch-dial';
     document.getElementById('device-pair').classList.toggle('hidden',!pair);
@@ -842,6 +1283,7 @@
     document.querySelectorAll('#tab5-preview .tab5-wrap').forEach(e=>t5Observer.observe(e));
     document.querySelectorAll('canvas[data-pad]').forEach(setupPad);
     settleFocusedRows(document.getElementById('dial-preview'));
+    liveScrollEnd();liveRestoreFocus(focusKey);
     renderReview();
   }
   function settleFocusedRows(root){root.querySelectorAll('.d-focus').forEach(f=>{const next=f.parentElement.querySelector('.d-next');if(next&&f.getBoundingClientRect().bottom>next.getBoundingClientRect().top-3)next.style.visibility='hidden'})}
@@ -870,8 +1312,10 @@
     document.getElementById('scene-title').textContent=s.title;
     document.getElementById('scene-note').textContent=s.note;
     const related=s.related||[];
-    document.getElementById('related').innerHTML=(s.parent?act(R('Back','@back')):'')+act(R('Home','home'))+related.map(id=>act(R(byId.get(id).title,id))).join('');
-    document.getElementById('implementation-note').textContent=s.group==='Setup & pairing'?'Proposed consumer setup; existing USB provisioning remains the fallback.':s.group==='Talk & input'?'Fixture states for the future turn/capture contract; no live transcription or audio.':'Design fixture; capability and permission facts must come from their real owners.';
+    // Explorer chrome, not device UX: drop the running session so its timers can be watched stopping.
+    const dropLink=isLive(s)?'<button data-act="fail">Simulate a dropped connection</button>':'';
+    document.getElementById('related').innerHTML=(s.parent?act(R('Back','@back')):'')+act(R('Home','home'))+related.map(id=>act(R(byId.get(id).title,id))).join('')+dropLink;
+    document.getElementById('implementation-note').textContent=s.group==='Setup & pairing'?'Proposed consumer setup; existing USB provisioning remains the fallback.':s.group==='Talk & input'?'Fixture states for the proposed live-turn contract: one session owns the agent, the thread, the transcript and every timer. No microphone, audio output, transcription or network is involved.':'Design fixture; capability and permission facts must come from their real owners.';
     setToast('');renderList();renderDevices();renderCatalog();renderPhone(s);
   }
   const phoneScenes={
@@ -914,7 +1358,10 @@
   function renderCatalog(){
     const selected=screens.filter(s=>state.group==='All settings'?settingsGroups.has(s.group):s.group===state.group);
     document.getElementById('catalog-count').textContent=state.group+' · '+selected.length+' states · '+screens.length+' total scenes, each shown on watch, Dial and Tab5';
+    // Sheets are still pictures: they read each scene's own fixture, never the running session.
+    staticRender=true;
     document.getElementById('catalog-grid').innerHTML=selected.map(s=>'<article class="catalog-card'+(state.sheet==='tab5'?' tab5-card':'')+'" data-scene="'+s.id+'">'+(state.sheet==='watch'?watchFrame(s,false):state.sheet==='dial'?dialFrame(s):t5Frame(s))+'<h3>'+esc(s.title)+'</h3><p>'+esc(s.note)+'</p></article>').join('');
+    staticRender=false;
     document.querySelectorAll('#catalog-grid .dial').forEach(f=>paginateDial(f,0));
     settleFocusedRows(document.getElementById('catalog-grid'));
     document.querySelectorAll('#catalog-grid canvas[data-pad]').forEach(setupPad);
@@ -1034,9 +1481,11 @@
   document.getElementById('dial-press').addEventListener('click',press);
   document.getElementById('preview-mode').addEventListener('change',e=>{state.preview=e.target.value;document.getElementById('tab5-size').disabled=state.preview==='watch-dial';renderDevices()});
   document.getElementById('tab5-size').addEventListener('change',e=>{state.t5Size=e.target.value;renderDevices()});
-  document.getElementById('reset-preview').addEventListener('click',()=>{cancelCapture();state={screen:'home',focus:0,page:0,group:'Daily',sheet:'watch',preview:state.preview,t5Size:state.t5Size,agent:'kitsune',micEnabled:true,pendingTurn:null,reportedControl:42,reportedControlAgent:'kitsune',controlRequest:null,thread:'Project plan',live:false,setupPurpose:'initial',history:[],draft:'',keyPage:0,textSize:19,choices:{...initialChoices},sliders:{},savedSliders:{},strokes:blankStrokes()};document.getElementById('search').value='';document.getElementById('roomy').checked=false;document.getElementById('guides').checked=false;document.body.classList.remove('roomy','guides','reduced');render()});
+  document.getElementById('reset-preview').addEventListener('click',()=>{cancelCapture();liveEnd();liveTranscripts.clear();liveClearTimers();liveAnnounce('');state={screen:'home',focus:0,page:0,group:'Daily',sheet:'watch',preview:state.preview,t5Size:state.t5Size,agent:'kitsune',micEnabled:true,pendingTurn:null,reportedControl:42,reportedControlAgent:'kitsune',controlRequest:null,thread:'Project plan',live:false,setupPurpose:'initial',history:[],draft:'',keyPage:0,textSize:19,choices:{...initialChoices},sliders:{},savedSliders:{},strokes:blankStrokes()};document.getElementById('search').value='';document.getElementById('roomy').checked=false;document.getElementById('guides').checked=false;document.body.classList.remove('roomy','guides','reduced');render()});
   document.addEventListener('click',e=>{
     const b=e.target.closest('button');if(!b||b.closest('#catalog-grid,#sizing-review'))return;
+    // Hold buttons are driven by pointer events; a detail-0 click is an assistive activation.
+    if(b.classList.contains('livehold')){if(e.detail===0)enter('live-talk');return;}
     if(b.classList.contains('capture')){if(e.detail===0)beginCapture({id:'assistive'});return;}
     if(b.hasAttribute('data-edit-draft')){const s=byId.get(state.screen);state.draft=t5Draft(s)||'';if(s.id==='turn-failed'){const turn=t5Turn(s);state.editingTurn={agent:turn.agent,thread:turn.thread}}enter(b.dataset.go)}
     else if(b.hasAttribute('data-retry-turn')){state.pendingTurn={...t5Turn(byId.get(state.screen))};enter('turn-sending')}
@@ -1044,7 +1493,8 @@
     else if(b.hasAttribute('data-back'))back();else if(b.hasAttribute('data-home'))enter('home');
     else if(b.dataset.row!==undefined)chooseRow(Number(b.dataset.row),b.dataset.device,b.dataset.screen);
     else if(b.hasAttribute('data-draft-clear')){if(state.screen==='turn-failed')state.pendingTurn={...t5Turn(byId.get(state.screen)),text:''};state.draft='';state.editingTurn=null;state.strokes=blankStrokes();setToast('Draft cleared in this preview. Nothing was sent.');renderDevices()}
-    else if(b.dataset.mic){const on=b.dataset.mic==='on';state.micEnabled=on;state.choices.microphone=on?0:1;if(!on)state.live=false;enter(on?'ptt-ready':'mic-blocked');setToast(on?'Microphone enabled in this preview.':'Microphone disabled; capture and wake listening stop.')}
+    else if(b.dataset.act){liveAct(b.dataset.act)}
+    else if(b.dataset.mic){const on=b.dataset.mic==='on';state.micEnabled=on;state.choices.microphone=on?0:1;if(!on)liveEnd();enter(on?'live-talk':'mic-blocked');setToast(on?'Microphone enabled in this preview.':'Microphone disabled; the live session, capture and wake listening all stop.')}
     else if(b.dataset.turn)turn(Number(b.dataset.turn));else if(b.hasAttribute('data-press'))press();
     else if(b.dataset.sheet){state.sheet=b.dataset.sheet;renderCatalog()}
     else if(b.dataset.keypage){state.keyPage=Math.max(0,Math.min(keyPages.length-1,state.keyPage+Number(b.dataset.keypage)));renderDevices()}
@@ -1065,12 +1515,22 @@
   }
   function captureFrames(){return [...document.querySelectorAll('#watch-preview .watch,#tab5-preview .t5')]}
   document.addEventListener('pointerdown',e=>{
+    const hold=e.target.closest('#watch-preview .livehold,#tab5-preview .livehold');
+    if(hold){e.preventDefault();beginLiveHold({id:e.pointerId,startX:e.clientX,startY:e.clientY});return}
     const target=e.target.closest('#watch-preview .capture,#tab5-preview .capture');if(!target)return;
     e.preventDefault();beginCapture({id:e.pointerId,startX:e.clientX,startY:e.clientY});
   });
-  document.addEventListener('pointermove',e=>{if(!capturePointer||e.pointerId!==capturePointer.id)return;const cancelled=e.clientY<capturePointer.startY-70;captureFrames().forEach(frame=>{frame.classList.toggle('cancel-armed',cancelled);const label=frame.querySelector('[data-capture-label]'),hint=frame.querySelector('[data-capture-hint]');if(label)label.textContent=cancelled?'Release to cancel':'Listening';if(hint)hint.textContent=cancelled?'Your recording will be discarded':'Slide up to cancel'})});
-  document.addEventListener('pointerup',e=>{if(!capturePointer||e.pointerId!==capturePointer.id)return;const quick=performance.now()-capturePointer.started<250,cancelled=e.clientY<capturePointer.startY-70;capturePointer=null;enter(cancelled||quick?'ptt-ready':'ptt-transcribe');if(quick)setToast('Hold while speaking; a tap records nothing.')});
-  function cancelCapture(){if(capturePointer){capturePointer=null;enter('ptt-ready')}}
+  document.addEventListener('pointermove',e=>{
+    if(holdPointer&&e.pointerId===holdPointer.id){
+      const cancelled=e.clientY<holdPointer.startY-70;
+      captureFrames().forEach(frame=>{frame.classList.toggle('cancel-armed',cancelled);const hint=frame.querySelector('[data-live-hint]');if(hint)hint.textContent=cancelled?'Release here and the turn is discarded. Nothing is sent.':'Keep holding. Releasing ends your turn and submits it — there is no review step.'});
+      return;
+    }
+    if(!capturePointer||e.pointerId!==capturePointer.id)return;const cancelled=e.clientY<capturePointer.startY-70;captureFrames().forEach(frame=>{frame.classList.toggle('cancel-armed',cancelled);const label=frame.querySelector('[data-capture-label]'),hint=frame.querySelector('[data-capture-hint]');if(label)label.textContent=cancelled?'Release to cancel':'Dictating';if(hint)hint.textContent=cancelled?'Your recording will be discarded':'Slide up to cancel'})});
+  document.addEventListener('pointerup',e=>{
+    if(holdPointer&&e.pointerId===holdPointer.id){releaseLiveHold(e.clientY<holdPointer.startY-70);return}
+    if(!capturePointer||e.pointerId!==capturePointer.id)return;const quick=performance.now()-capturePointer.started<250,cancelled=e.clientY<capturePointer.startY-70;capturePointer=null;enter(cancelled||quick?'ptt-ready':'ptt-transcribe');if(quick)setToast('Hold while dictating; a tap records nothing.')});
+  function cancelCapture(){if(holdPointer)releaseLiveHold(true);if(capturePointer){capturePointer=null;enter('ptt-ready')}}
   document.addEventListener('pointercancel',cancelCapture);window.addEventListener('blur',cancelCapture);
   document.addEventListener('visibilitychange',()=>{if(document.hidden)cancelCapture()});
   // Deep links from the plan: #preview=tab5&size=physical&scene=keyboard&review=sizing. Reading only;
@@ -1083,9 +1543,15 @@
     document.getElementById('preview-mode').value=state.preview;
     document.getElementById('tab5-size').value=state.t5Size;
     document.getElementById('tab5-size').disabled=state.preview==='watch-dial';
+    // A deep link into a live scene opens a real session rather than a dead still.
+    const landed=byId.get(state.screen);
+    if(landed.view.kind==='live'){
+      if(state.agent==='initials'||!state.micEnabled){state.screen=state.micEnabled?'agent-text-only':'mic-blocked';state.group=byId.get(state.screen).group}
+      else liveStart(landed.view);
+    }
     if(q.get('review')==='sizing')openReview(null);else if(q.has('review'))closeReview();
   }
-  window.addEventListener('hashchange',()=>{cancelCapture();applyHash();render()});
+  window.addEventListener('hashchange',()=>{cancelCapture();liveEnd();applyHash();render()});
   document.addEventListener('keyup',e=>{if(capturePointer?.id==='keyboard'&&[' ','Enter'].includes(e.key)){e.preventDefault();const quick=performance.now()-capturePointer.started<250;enter(quick?'ptt-ready':'ptt-transcribe')}});
   // The review layer is review-only and always escapable; it takes Escape before the device shortcuts do.
   document.addEventListener('keydown',e=>{if(isReviewOpen()){

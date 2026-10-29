@@ -60,178 +60,228 @@
     @keyframes presence-blink{0%,43%,47%,100%{transform:scaleY(1)}45%{transform:scaleY(.1)}}
     @keyframes presence-orbit{to{transform:rotate(332deg)}}
     @media(prefers-reduced-motion:reduce){.home-mascot *,.presence-orb:before,.home-variant .w-footer button,.dial-home .d-footer button{animation:none!important;transition:none!important}.home-variant .w-footer button:active,.dial-home .d-footer button:active{transform:none}}
-    /* Tab5 / 1280 × 720 landscape on a 5-inch capacitive panel. Same palette, icons, scenes and ownership rules as watch and Dial.
-       Nominal geometry: a 127 mm diagonal at 16:9 gives 110.69 × 62.26 mm, so 1280 / 110.69 = 11.564 native px per mm (~293.7 ppi).
-       That makes this a large-touch surface, not a desktop. One header (where am I), one reading zone, one action zone, one task.
-       Primary touch surfaces ≥ 104 px (9 mm); ordinary controls ≥ 96 px (8.3 mm); gutters 24 px; gaps 18 px; reading text 32–36 px.
-       Nothing below assumes hover, pen precision, a multitouch gesture, pressure or a physical key. */
+    /* ── Tab5 / 1280 × 720 on a five-inch capacitive panel ────────────────────
+       Nominal geometry: a 127 mm diagonal at 16:9 gives 110.69 × 62.26 mm, so
+       1280 / 110.69 = 11.564 native px per mm (≈ 293.7 ppi). The whole active
+       area is about a bank card and a half. It is an appliance face held at
+       arm's length, not a page — so this revision spends its budget on one
+       surface, hairlines instead of cards, and open space instead of containers.
+       Colour: a warm ink surface, warm light text, and exactly one accent — the
+       OpenClaw lobster red — which marks only the live thing or the one action
+       worth taking. Amber is reserved for a stated caution: offline, not sent,
+       outcome unknown. There is no third hue, no gradient and no glow.
+       Touch: primary surfaces ≥ 104 px (9 mm), every control ≥ 96 px (8.3 mm),
+       32 px gutters, reading text 32–36 px. No hover, pen, multitouch or key. */
     .layout>section{min-width:0}.tab5-panel{margin-top:34px}#tab5-stage{overflow-x:auto;padding-bottom:6px}#tab5-stage.native .tab5-wrap{width:1280px;max-width:none}
     #tab5-stage.physical .tab5-wrap{width:calc(1280px * var(--phys,.32683));max-width:none}
     .tab5-wrap{width:100%;max-width:1280px;aspect-ratio:1280/720;position:relative;margin:0 auto}
     .tab5-wrap .t5{position:absolute;top:0;left:0;transform:scale(var(--t5,1));transform-origin:top left}
-    .t5{width:1280px;height:720px;border-radius:22px;display:flex;flex-direction:column;overflow:hidden;background:#0a1211;color:var(--ink);box-shadow:0 14px 40px #1c2d2014}
+    /* Two reds, one hue. --claw is the fill: #fff6f3 on it measures 4.66:1, so a 31 px
+       button label clears 4.5:1 at this density. --claw-text is the lighter tint used when
+       the accent has to be *text* on the ink surface (5.8:1); the fill itself is 3.8:1
+       against that surface, which is the non-text floor it actually needs to meet.
+       Every other colour is neutral warm ink. --caution is amber and means exactly one
+       thing: this is not finished — offline, not sent, outcome unknown. */
+    .t5{--sur:#15120f;--sur-up:#201b16;--line:#2e2820;--fg:#f7f0e7;--fg2:#b5aba0;--fg3:#8b8178;
+        --claw:#c93f2e;--claw-text:#e8694f;--claw-ink:#fff6f3;--caution:#e0a35a;--t5-tone:var(--fg3);
+        --t5-tone-text:var(--fg3);
+        width:1280px;height:720px;border-radius:22px;display:flex;flex-direction:column;overflow:hidden;
+        background:var(--sur);color:var(--fg);box-shadow:0 14px 40px #1c2d2014}
     .t5 button{color:inherit;font-family:inherit}
+    .t5 .icon{stroke-width:1.6}
+    .t5-sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
     .tab5-panel:has(#tab5-stage.native){min-width:1280px}
-    /* Header. Back, one title, the selected agent and an ambient system reading. 112 px ≈ 9.7 mm. */
-    .t5-top{flex:none;height:112px;display:flex;align-items:center;gap:20px;padding:0 24px;border-bottom:1px solid #1b2a23}
-    .t5-back{width:120px;height:96px;flex:none;display:grid;place-items:center;border:1px solid #2c4037;border-radius:18px;background:#101d18}
-    .t5-back .icon{width:38px;height:38px}
+    /* Header: where you are, how the box is doing, and who handles new work. One of each. */
+    .t5-top{flex:none;height:112px;display:flex;align-items:center;gap:22px;padding:0 32px;border-bottom:1px solid var(--line)}
+    .t5-back{width:104px;height:96px;flex:none;display:grid;place-items:center;margin-left:-20px;border:0;border-radius:16px;background:transparent;color:var(--fg2)}
+    .t5-back .icon{width:36px;height:36px}
+    .t5-back:active{background:var(--sur-up)}
+    /* Home does not need a header that says "Home". The mark and the name identify the
+       product; the stage below says what is actually going on. */
+    .t5-brand{display:flex;align-items:center;gap:16px;flex:1;min-width:0}
+    .t5-brand>span{flex:none;display:block}
+    .t5-brand .mascot-mark{width:48px;height:48px;margin:0;filter:none;animation:none}
+    .t5-brand .mascot-eye{animation:none}
+    .t5-brand b{font-size:27px;font-weight:600;letter-spacing:-.3px;color:var(--fg2)}
     .t5-heads{flex:1;min-width:0}
-    .t5-crumb{font:22px/1.2 var(--mono);letter-spacing:.07em;color:#8aa396;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .t5-title{font-size:36px;line-height:1.12;letter-spacing:-.8px;font-weight:600;margin:5px 0 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .t5-presence{display:flex;align-items:center;gap:13px;flex:none;height:96px;min-width:104px;max-width:300px;padding:0 16px 0 12px;border:1px solid #28402f;border-radius:22px;background:linear-gradient(145deg,#ffffff10,#ffffff04);text-align:left}
-    .t5-presence .avatar{width:56px;height:56px}
-    .t5-presence .row-text{min-width:0}
-    .t5-presence strong{display:block;font-size:28px;font-weight:550;line-height:1.15;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
-    .t5-presence small{display:block;font-size:20px;line-height:1.2;color:var(--dim);margin-top:3px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
-    .t5-presence .end{width:22px;height:22px;color:#9fb4a7;flex:none}
-    .t5-sys{display:flex;align-items:center;gap:9px;flex:none;font:22px var(--mono);color:#9bb3a5}
-    .t5-sys .icon{width:28px;height:28px}
-    .t5-sys.warn{color:#efbf9d}
-    /* Reading zone. */
-    .t5-body{flex:1;min-height:0;display:flex;flex-direction:column;gap:18px;padding:22px 24px}
-    .t5-scroll{flex:1;min-height:0;overflow:auto;scrollbar-width:thin;scrollbar-color:#51665a transparent}
-    .t5-row{display:flex;align-items:center;gap:20px;width:100%;text-align:left;border:0;border-bottom:1px solid #1e2d26;background:transparent;padding:12px 16px;min-height:112px}
+    .t5-crumb{font:22px/1.2 var(--mono);letter-spacing:.13em;color:var(--fg3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .t5-title{font-size:40px;line-height:1.1;letter-spacing:-1.2px;font-weight:600;margin:6px 0 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .t5-sys{display:flex;align-items:center;gap:11px;flex:none;font:21px var(--mono);letter-spacing:.05em;color:var(--fg3)}
+    .t5-sys .icon{width:26px;height:26px}
+    .t5-sys time{color:var(--fg2)}
+    .t5-sys.warn{color:var(--caution)}
+    .t5-presence{display:flex;align-items:center;gap:16px;flex:none;min-width:104px;max-width:330px;height:96px;margin-left:2px;padding:0 0 0 26px;border:0;border-left:1px solid var(--line);border-radius:0;background:transparent;text-align:left;color:inherit}
+    .t5-presence .avatar{width:54px;height:54px;box-shadow:none}
+    .t5-presence .row-text{flex:1;min-width:0}
+    .t5-presence strong{display:block;font-size:26px;font-weight:600;letter-spacing:-.3px;line-height:1.15;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+    .t5-presence small{display:flex;align-items:center;gap:9px;font:20px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--fg3);margin-top:7px;overflow:hidden;white-space:nowrap}
+    .t5-presence .end{width:22px;height:22px;color:var(--fg3);flex:none}
+    /* In a live session the agent is already named by the title and by every turn it takes,
+       so the header keeps only its face — a 96 px target that still changes the agent. */
+    .t5-presence.face{max-width:none;min-width:96px;width:96px;height:96px;gap:0;padding:0;margin-left:22px;border-left:0;justify-content:center;border-radius:50%}
+    .t5-presence.face .avatar{width:72px;height:72px;box-shadow:0 0 0 3px var(--sur),0 0 0 6px var(--t5-tone)}
+    /* Reading zone. A list is the one case where the gutter costs a whole row: 112 px rows
+       against a 487 px body need the padding back, so list screens trade it for a fourth
+       row and let the fifth peek above the bar as its own scroll affordance. */
+    .t5-body{flex:1;min-height:0;display:flex;flex-direction:column;gap:20px;padding:26px 32px 22px}
+    .t5-body.rows{gap:0;padding:10px 32px 8px}
+    .t5-scroll{flex:1;min-height:0;overflow:auto;scrollbar-width:thin;scrollbar-color:#4a4139 transparent}
+    /* One row shape for settings, devices, agents, activity and every recovery list.
+       The leading glyph always occupies 56 px, so icon rows and avatar rows share a baseline. */
+    .t5-row{display:flex;align-items:center;gap:24px;width:100%;text-align:left;border:0;border-bottom:1px solid var(--line);background:transparent;color:var(--fg);padding:14px 10px;min-height:112px}
     .roomy .t5-row{min-height:122px}
+    .t5-row:last-child{border-bottom:0}
     .t5-row .row-text{flex:1;min-width:0}
-    .t5-row strong{display:block;font-size:30px;font-weight:500;line-height:1.2}
-    .t5-row small{display:block;font-size:24px;line-height:1.25;color:var(--dim);margin-top:5px}
-    .t5-row .end{width:28px;height:28px;color:#9fc0ad;flex:none}
+    .t5-row strong{display:block;font-size:30px;font-weight:500;letter-spacing:-.25px;line-height:1.2}
+    .t5-row small{display:block;font-size:24px;line-height:1.25;color:var(--fg2);margin-top:6px}
+    .t5-row .end{width:26px;height:26px;color:var(--fg3);flex:none}
     .t5-row .avatar{width:56px;height:56px}
-    .t5-row .icon{width:36px;height:36px;color:#9dbfab;flex:none}
-    .t5-row.current{background:#18302a;border-radius:18px;border-bottom-color:transparent}
-    .t5-listnote{flex:none;font:21px var(--mono);letter-spacing:.06em;color:#7f968a;margin:0}
-    /* Action zone: one obvious primary, generous secondaries, nothing smaller than 96 px. */
-    .t5-bar{flex:none;display:flex;align-items:center;gap:18px;padding:16px 24px;border-top:1px solid #1b2a23;background:#0c1714}
+    .t5-row>.icon:not(.end){width:34px;height:34px;flex:none;margin:0 11px;color:var(--fg3)}
+    .t5-row.current{background:transparent;border-radius:0;box-shadow:inset 4px 0 0 var(--claw);padding-left:22px}
+    .t5-row.current strong{font-weight:600}
+    .t5-row.current .end{color:var(--claw-text)}
+    /* Action zone: one row, one unmistakable primary, everything else quiet. */
+    .t5-bar{flex:none;display:flex;align-items:center;gap:16px;padding:14px 32px 18px;border-top:1px solid var(--line)}
     .t5-bar .spacer{flex:1}
-    .t5-btn{display:inline-flex;align-items:center;justify-content:center;gap:13px;min-width:104px;min-height:112px;padding:0 26px;border:1px solid #2d4337;border-radius:20px;background:#15241d;font-size:30px;color:#dceae1}
-    .t5-btn .icon{width:32px;height:32px;flex:none}
-    .t5-btn.primary{flex:1;min-height:120px;font-size:32px;font-weight:600;background:var(--mint);border-color:var(--mint);color:#123125}
-    .t5-btn.danger{background:#361f1a;border-color:#5d352a;color:#f6c6ae}
-    .t5-btn.ghost{background:transparent;border-color:#2a3b33;color:#b9cdc1}
+    .t5-btn{display:inline-flex;align-items:center;justify-content:center;gap:14px;min-width:104px;min-height:112px;padding:0 28px;border:0;border-radius:16px;background:var(--sur-up);font-size:29px;letter-spacing:-.2px;color:var(--fg)}
+    .t5-btn .icon{width:30px;height:30px;flex:none;color:var(--fg3)}
+    .t5-btn.primary{min-height:120px;padding:0 34px;background:var(--claw);color:var(--claw-ink);font-size:31px;font-weight:600}
+    .t5-btn.primary .icon{color:var(--claw-ink)}
+    .t5-btn.danger{background:transparent;color:#eb9b86}
+    .t5-btn.ghost{background:transparent;color:var(--fg2)}
     .t5-btn.grow{flex:1}
-    .t5-navbar button{flex:1;min-width:0;height:120px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;border:1px solid #233930;border-radius:20px;background:#101c17;font-size:28px;color:#cadbd1}
-    .t5-navbar .icon{width:38px;height:38px;color:#9dbfab}
-    .t5-navbar button[aria-current=page]{background:#1b3328;border-color:#31543f;color:#eef7f1;font-weight:600}
-    .t5-navbar button[aria-current=page] .icon{color:#bfe3cd}
-    /* Transcript: the reading surface comes first, the voice action second. */
-    .t5-thread{display:flex;flex-direction:column;gap:18px;padding:2px 2px 6px}
-    .t5-bubble{max-width:880px;border:1px solid #1f3328;background:#132019;border-radius:22px;padding:18px 24px}
-    .t5-bubble.me{align-self:flex-end;background:#1b3328;border-color:#2a4a39}
-    .t5-bubble p{margin:0;line-height:1.45}
-    .t5-bubble .who{display:flex;align-items:center;gap:12px;font-size:22px;color:#a9c3b3;margin-bottom:9px}
-    .t5-bubble .who .avatar{width:40px;height:40px}
-    .t5-bubble .who em{margin-left:auto;font:20px var(--mono);font-style:normal;color:#8aa396}
-    .t5-thinking{display:flex;align-items:center;gap:13px;font-size:26px;color:#a9c3b3}
-    .t5-thinking .avatar{width:44px;height:44px}
-    .t5-alert{font-size:26px;line-height:1.4;color:#f0c09e;margin:0}
-    .t5-note{font-size:24px;line-height:1.4;color:#8ea79a;margin:0;flex:none}
-    .t5-meta{font:22px var(--mono);letter-spacing:.05em;color:#8ea79a;margin:0}
-    .t5-draftcard{flex:none;display:flex;align-items:center;gap:18px;border:1px dashed #3a5a46;border-radius:20px;background:#101d17;padding:16px 20px}
+    .t5-btn:disabled{opacity:.45}
+    /* Destinations are a tab strip, not four boxes: one accent rule says where you are. */
+    .t5-navbar{gap:0;padding:0 18px}
+    .t5-navbar button{flex:1;min-width:0;height:120px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;border:0;border-radius:0;background:transparent;font-size:25px;letter-spacing:-.1px;color:var(--fg3)}
+    .t5-navbar .icon{width:32px;height:32px;color:inherit}
+    .t5-navbar button[aria-current=page]{color:var(--fg);font-weight:600;box-shadow:inset 0 4px 0 var(--claw)}
+    /* Transcript: who spoke and what state the words are in, then the words at full width.
+       It should read as a conversation, not a two-column table — so the speaker line is a
+       caption above its own paragraph, and turns are separated by space, not by a frame.
+       No repeated avatar: the agent wears its face in the header and its name per turn. */
+    .t5-thread{display:flex;flex-direction:column;padding:0}
+    .t5-turn{padding:20px 24px 22px;border-left:4px solid transparent;border-bottom:1px solid var(--line)}
+    .t5-turn:last-child{border-bottom:0}
+    .t5-turn.me{background:#1a1612}
+    .t5-turn .said{display:flex;align-items:baseline;gap:14px;margin:0 0 11px}
+    .t5-turn .said b{flex:none;font-size:24px;font-weight:600;letter-spacing:-.2px;line-height:1.2}
+    .t5-turn .said em{font:21px/1.2 var(--mono);font-style:normal;letter-spacing:.1em;text-transform:uppercase;color:var(--fg3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .t5-turn .what{margin:0;line-height:1.42}
+    .t5-turn.now{border-left-color:var(--t5-tone)}
+    .t5-turn.now .said em{color:var(--t5-tone-text)}
+    .t5-turn.cut .what{color:var(--fg2)}
+    .t5-thinking{display:flex;align-items:center;gap:14px;font-size:26px;line-height:1.35;color:var(--fg2);margin:0;padding:20px 22px}
+    .t5-alert{font-size:26px;line-height:1.4;color:var(--caution);margin:0;padding:20px 22px}
+    .t5-note{font-size:24px;line-height:1.4;color:var(--fg2);margin:0;flex:none}
+    .t5-meta{font:22px var(--mono);letter-spacing:.1em;color:var(--fg3);margin:0}
+    /* A draft is not a card. It is text under a caution rule, with its own discard. */
+    .t5-draftcard{flex:none;display:flex;align-items:center;gap:22px;border:0;border-left:4px solid var(--caution);border-radius:0;background:transparent;padding:4px 0 4px 22px}
     .t5-draftcard .row-text{flex:1;min-width:0}
     .t5-draftcard p{margin:0;line-height:1.35}
-    .t5-fact-label{display:block;font:20px var(--mono);letter-spacing:.08em;color:#8fab9c;margin-bottom:7px}
-    .t5-discard{flex:none;min-width:104px;min-height:96px;padding:0 24px;border:1px solid #2a3b33;border-radius:16px;background:transparent;color:#b9cdc1;font-size:28px}
-    /* Focused cards: hero decisions, capture, pairing. */
-    .t5-hero{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:18px;padding:4px 36px;overflow:auto}
-    .t5-hero .avatar{width:88px;height:88px}
-    .t5-hero-icon{width:62px;height:62px;color:#bdd7c7}
-    .t5-hero h3{font-size:46px;line-height:1.08;letter-spacing:-1.3px;margin:0;max-width:940px;text-wrap:balance}
-    .t5-hero p{font-size:30px;line-height:1.4;color:#c6d8cc;margin:0;max-width:860px}
+    .t5-fact-label{display:block;font:21px var(--mono);letter-spacing:.12em;color:var(--caution);margin-bottom:9px}
+    .t5-discard{flex:none;min-width:104px;min-height:96px;padding:0 26px;border:0;border-radius:16px;background:transparent;color:var(--fg2);font-size:27px}
+    /* Live talk tones. Only the live thing is coloured: listening and speaking take the
+       accent, a dropped session takes caution, everything else stays neutral ink. --t5-tone
+       paints graphics (rules, meter, ring), --t5-tone-text paints the accent where it has to
+       be read as small type. The partial/final distinction never rests on either — it is
+       dotted and labelled in words as well. */
+    .t5.ph-connecting,.t5.ph-thinking,.t5.ph-ready{--t5-tone:var(--fg3);--t5-tone-text:var(--fg3)}
+    .t5.ph-listening,.t5.ph-speaking{--t5-tone:var(--claw);--t5-tone-text:var(--claw-text)}
+    .t5.ph-error{--t5-tone:var(--caution);--t5-tone-text:var(--caution)}
+    .t5.is-muted{--t5-tone:var(--fg3);--t5-tone-text:var(--fg3)}
+    .t5.cancel-armed{--t5-tone:var(--caution);--t5-tone-text:var(--caution)}
+    .t5 .live-meter i{background:var(--t5-tone)}
+    .t5 .live-caret{background:var(--t5-tone)}
+    .t5 .partial-text{color:var(--fg2);text-decoration:underline dotted var(--fg3);text-underline-offset:8px}
+    .t5-live{flex:1;min-height:0;display:flex;flex-direction:column;gap:14px}
+    /* The one simulation disclosure on the screen. Nothing below it repeats "simulated". */
+    .t5-livebar{flex:none;display:flex;align-items:center;gap:16px;height:32px}
+    .t5-live .live-meter{height:30px;gap:6px}
+    .t5-live .live-meter i{width:6px;height:var(--h)}
+    .t5-livetag{flex:none;font:22px var(--mono);letter-spacing:.13em;color:var(--t5-tone-text);background:none;border:0;padding:0;white-space:nowrap}
+    .t5-liverule{flex:1;height:1px;background:var(--line)}
+    .t5-livehint{flex:none;margin:0;font-size:23px;line-height:1.35;color:var(--fg2)}
+    /* Focused screens read left-aligned against the body gutter, like the header above them. */
+    .t5-hero{flex:1;min-height:0;display:flex;flex-direction:column;align-items:flex-start;justify-content:center;text-align:left;gap:18px;padding:4px 2px;overflow:auto}
+    .t5-hero .avatar{width:104px;height:104px}
+    .t5-hero-icon{width:40px;height:40px;color:var(--fg3)}
+    .t5-hero-icon.caution{color:var(--caution)}
+    .t5-hero h3{font-size:50px;line-height:1.06;letter-spacing:-1.7px;font-weight:600;margin:0;max-width:1000px;text-wrap:balance}
+    .t5-hero p{font-size:30px;line-height:1.38;color:var(--fg2);margin:0;max-width:900px}
     .t5-capture{flex:1;min-height:0;height:auto;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
-    .t5-capture .avatar{width:80px;height:80px}
-    .t5-capture .capture-agent{font-size:24px;color:var(--dim);margin:12px 0 0}
-    .t5-capture .wave{height:84px;margin:14px 0 6px}.t5-capture .wave i{width:10px}
-    .t5-capture h3{font-size:42px;letter-spacing:-1px;margin:4px 0}
-    .t5-capture .capture-time{font:30px var(--mono);color:#c3d9cc;margin:8px 0}
-    .t5-capture .capture-hint{font-size:24px;color:var(--dim);margin:0}
-    .t5-qr{flex:1;min-height:0;display:flex;flex-direction:row;align-items:center;justify-content:center;gap:48px;text-align:left}
-    .t5-qr-copy{max-width:640px}
-    .t5-qr h3{font-size:36px;margin:0 0 14px;letter-spacing:-.8px}
-    .t5-qr .qr-tile{width:262px;height:262px;padding:10px;margin:0}
-    .t5 .qr-caption{font-size:20px;margin:12px 0 0}
-    .t5 .compare{font-size:62px;letter-spacing:8px;margin:10px 0}
-    .t5 .match-pattern{gap:14px;margin:12px}
-    .t5 .match-pattern i{width:30px;height:30px}
-    .t5-steps{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:13px;font-size:24px;color:#cadbd0}
-    .t5-steps li{display:flex;align-items:center;gap:13px}
-    .t5-steps li i{width:13px;height:13px;border-radius:50%;border:1px solid #4d6758;flex:none}
-    .t5-steps li.at i{background:var(--mint);border-color:var(--mint)}
-    .t5-steps li.at{color:#eaf4ed;font-weight:600}
-    .t5-steps li.done{color:#8fa89a}
-    .t5-steps li .icon{width:20px;height:20px;color:#8fc4a6;flex:none}
-    /* Device and setting editor: a huge value, a thumb you can actually hit, and ± for precision without a pen. */
-    .t5-editor{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
-    .t5-value{font:104px/1 var(--mono);letter-spacing:-4px}
-    .t5-value .unit{font-size:40px;letter-spacing:0;margin-left:4px}
-    .t5-sliderrow{display:flex;align-items:center;gap:20px;width:100%;max-width:1040px}
-    .t5-nudge{width:112px;height:112px;flex:none;border:1px solid #2d4337;border-radius:20px;background:#15241d;font-size:40px;line-height:1;color:#dceae1}
+    .t5-capture .capture-agent{font:22px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--fg3);margin:0}
+    .t5-capture .wave{height:80px;margin:22px 0 10px}
+    .t5-capture .wave i{width:9px;background:var(--claw)}
+    .t5-capture h3{font-size:44px;letter-spacing:-1.4px;font-weight:600;margin:6px 0}
+    .t5-capture .capture-time{font:30px var(--mono);color:var(--fg2);margin:10px 0}
+    .t5-capture .capture-hint{font-size:24px;color:var(--fg2);margin:0}
+    .t5.cancel-armed .t5-capture .wave i{background:var(--caution)}
+    .t5-qr{flex:1;min-height:0;display:flex;flex-direction:row;align-items:center;justify-content:space-between;gap:48px;text-align:left}
+    .t5-qr-copy{max-width:660px}
+    .t5-qr h3{font-size:38px;line-height:1.1;letter-spacing:-1px;font-weight:600;margin:0 0 18px}
+    .t5-qr .qr-tile{width:252px;height:252px;padding:10px;margin:0;border-radius:8px}
+    .t5 .qr-caption{font:21px var(--mono);letter-spacing:.1em;color:var(--fg3);margin:14px 0 0;text-align:center}
+    .t5 .compare{font:60px var(--mono);letter-spacing:8px;text-align:left;margin:14px 0;color:var(--fg)}
+    /* The pairing pattern is matched by shape, so on Tab5 it does not need three hues. */
+    .t5 .match-pattern{gap:16px;margin:14px 0;justify-content:flex-start}
+    .t5 .match-pattern i,.t5 .match-pattern i:nth-child(2),.t5 .match-pattern i:nth-child(3){width:28px;height:28px;background:var(--fg)}
+    .t5-steps{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:14px;font-size:25px;color:var(--fg2)}
+    .t5-steps li{display:flex;align-items:center;gap:14px}
+    .t5-steps li i{width:12px;height:12px;border-radius:50%;border:1px solid var(--fg3);flex:none}
+    .t5-steps li.at i{background:var(--claw);border-color:var(--claw)}
+    .t5-steps li.at{color:var(--fg);font-weight:600}
+    .t5-steps li.done{color:var(--fg3)}
+    .t5-steps li .icon{width:22px;height:22px;color:var(--fg3);flex:none}
+    /* A setting is a value you can read across the room and a thumb you can actually hit. */
+    .t5-editor{flex:1;min-height:0;display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:14px}
+    .t5-value{font:112px/1 var(--mono);letter-spacing:-5px;margin:4px 0}
+    .t5-value .unit{font-size:38px;letter-spacing:0;margin-left:6px;color:var(--fg2)}
+    .t5-sliderrow{display:flex;align-items:center;gap:22px;width:100%}
+    .t5-nudge{width:112px;height:112px;flex:none;border:0;border-radius:16px;background:var(--sur-up);font-size:40px;line-height:1;color:var(--fg)}
     .t5 input.setting-range{-webkit-appearance:none;appearance:none;flex:1;width:auto;height:96px;margin:0;background:transparent}
-    .t5 input.setting-range::-webkit-slider-runnable-track{height:18px;border-radius:9px;background:#2a4336}
-    .t5 input.setting-range::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:72px;height:72px;margin-top:-27px;border:0;border-radius:50%;background:var(--mint)}
-    .t5 input.setting-range::-moz-range-track{height:18px;border-radius:9px;background:#2a4336}
-    .t5 input.setting-range::-moz-range-thumb{width:72px;height:72px;border:0;border-radius:50%;background:var(--mint)}
-    /* Typing is its own full-screen task: a readable preview plus four rows of ~114 × 104 px keys. */
-    .t5-entry{flex:1;min-height:0;display:flex;flex-direction:column;gap:14px;justify-content:flex-end}
-    .t5-preview{flex:none;min-height:96px;display:flex;align-items:center;border:1px solid #2b4436;border-radius:18px;background:#101d17;padding:0 22px;overflow:hidden;white-space:nowrap}
+    .t5 input.setting-range::-webkit-slider-runnable-track{height:14px;border-radius:7px;background:#332c25}
+    .t5 input.setting-range::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:72px;height:72px;margin-top:-29px;border:0;border-radius:50%;background:var(--claw)}
+    .t5 input.setting-range::-moz-range-track{height:14px;border-radius:7px;background:#332c25}
+    .t5 input.setting-range::-moz-range-thumb{width:72px;height:72px;border:0;border-radius:50%;background:var(--claw)}
+    /* Typing owns the whole screen: one preview line and four rows of ~114 × 104 px keys. */
+    .t5-entry{flex:1;min-height:0;display:flex;flex-direction:column;gap:16px;justify-content:flex-end}
+    .t5-preview{flex:none;min-height:96px;display:flex;align-items:center;border:0;border-bottom:2px solid var(--line);border-radius:0;background:transparent;padding:0 6px;overflow:hidden;white-space:nowrap}
     .t5-preview>span{overflow:hidden;text-overflow:ellipsis}
-    .t5-preview.empty{color:#7e9389}
-    .t5-caret{display:inline-block;width:3px;height:36px;background:var(--mint);margin-left:5px;flex:none}
+    .t5-preview.empty{color:var(--fg3)}
+    .t5-caret{display:inline-block;width:3px;height:36px;background:var(--claw);margin-left:6px;flex:none}
     .t5-keys{display:flex;flex-direction:column;gap:10px;flex:none}
     .t5-krow{display:flex;gap:10px}
     .t5-krow.inset-1{padding-inline:62px}
     .t5-krow.inset-2{padding-inline:186px}
-    .t5-krow button{flex:1;min-width:0;height:104px;border:0;border-radius:16px;background:#1b2f26;font-size:34px;color:var(--ink)}
+    .t5-krow button{flex:1;min-width:0;height:104px;border:0;border-radius:14px;background:var(--sur-up);font-size:34px;color:var(--fg)}
     .t5-krow button.wide{flex:4}
-    .t5-krow button.act{flex:2;background:#223a2e;font-size:30px}
-    .t5-krow button.done{flex:2.4;background:var(--mint);color:#123125;font-weight:600;font-size:30px}
-    .t5-draftline{flex:none;font-size:30px;min-height:62px;border-bottom:1px solid #4a6253;padding-bottom:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .t5-pad{flex:1;min-height:230px;width:100%;height:auto;margin:0;border-radius:18px}
-    /* Home keeps presence and one floating action; the four destinations stay in the bar below it. */
-    .t5-home{--aura:224,102,77;background:radial-gradient(ellipse at 50% 46%,rgba(var(--aura),.2),transparent 62%),radial-gradient(ellipse at 97% 0%,#313044 0%,transparent 62%),#101116;color:#faf6f2}
-    .t5-home .t5-top,.t5-home .t5-bar{border-color:#ffffff14}
-    .t5-home .t5-bar{background:#ffffff08}
-    .t5-home .t5-back,.t5-home .t5-presence{border-color:#ffffff22;background:#ffffff10;color:#f4eeea}
-    .t5-home .t5-presence small{color:#c9c2c6}
-    .t5-home .t5-sys{color:#cbc5cb}
-    .t5-home .t5-navbar button{border-color:#ffffff1a;background:#ffffff0c;color:#efe9e6}
-    .t5-home .t5-navbar .icon{color:#d7cac5}
-    .t5-home .t5-navbar button[aria-current=page]{background:#ffffff1c;border-color:#ffffff38;color:#fff8f3}
-    .t5-homestage{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}
-    .t5-home .home-mascot{gap:12px;height:auto}
-    .t5-home .presence-orb{width:186px;height:186px}
-    .t5-home .home-mascot .mascot-mark{width:154px;height:154px}
-    .t5-home .home-state{font-size:50px;max-width:880px;min-height:0;letter-spacing:-1.5px}
-    .t5-home-sub{font:22px var(--mono);letter-spacing:.05em;color:#cfc8c6;margin:0;text-align:center}
-    .t5-homeact{display:flex;gap:18px;justify-content:center;width:100%;max-width:780px}
-    .t5-home .t5-btn{border-color:#ffffff22;background:#ffffff10;color:#f4eeea}
-    .t5-home .t5-btn.primary{border:1px solid #fff8;background:linear-gradient(170deg,#fffaf5,#ded8d2);color:#282227;box-shadow:inset 0 1px #fff,0 7px 20px #0004}
+    .t5-krow button.act{flex:2;background:transparent;color:var(--fg2);font-size:29px}
+    .t5-krow button.done{flex:2.4;background:var(--claw);color:var(--claw-ink);font-weight:600;font-size:29px}
+    .t5-draftline{flex:none;font-size:30px;min-height:62px;border-bottom:1px solid var(--line);padding-bottom:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .t5-pad{flex:1;min-height:230px;width:100%;height:auto;margin:0;border:1px dashed #413930;border-radius:16px;background:#1a1612}
+    /* Home. There is no screen called Home here — the heading is the conversation you are
+       actually in, under it the last thing that was said, and beside it the agent who will
+       handle the next turn. The product mark and name live in the header; the one status
+       word only appears when the state is not the ordinary one. */
+    .t5-homestage{flex:1;min-height:0;display:flex;align-items:stretch;gap:40px}
+    .t5-homecopy{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center}
+    .t5-homestatus{font:22px var(--mono);letter-spacing:.16em;color:var(--fg3);margin:0 0 18px}
+    .t5-homestatus.flag{color:var(--caution)}
+    .t5-homestate{font-size:54px;line-height:1.04;letter-spacing:-2px;font-weight:600;margin:0;max-width:620px;text-wrap:balance}
+    .t5-homequote{font-size:29px;line-height:1.36;color:var(--fg);margin:20px 0 0;max-width:640px;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+    .t5-homecontext{font-size:26px;line-height:1.35;color:var(--fg2);margin:20px 0 0;max-width:620px}
+    .t5-homeact{display:flex;align-items:center;gap:16px;margin-top:30px}
+    .t5-homeact .t5-btn.primary{min-width:396px}
+    .t5-homeagent{flex:none;width:330px;display:flex;flex-direction:column;align-items:flex-start;justify-content:center;padding-left:40px;border-left:1px solid var(--line)}
+    .t5-homeagent .avatar{width:124px;height:124px}
+    .t5-homeagent strong{display:block;font-size:34px;font-weight:600;letter-spacing:-.6px;margin-top:20px}
+    .t5-homeagent small{display:block;font:20px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--fg3);margin-top:9px}
+    .t5-homechange{display:inline-flex;align-items:center;gap:12px;min-height:96px;margin:14px 0 0 -20px;padding:0 20px;border:0;border-radius:16px;background:transparent;color:var(--fg2);font-size:26px}
+    .t5-homechange .icon{width:24px;height:24px;color:var(--fg3)}
+    .t5.home-offline .t5-homestatus{color:var(--caution)}
     .guides .t5-top,.guides .t5-body,.guides .t5-bar{outline:1px dashed #e8ba6570;outline-offset:-1px}
     .guides .t5 button{outline:1px dashed #e8ba6545;outline-offset:-1px}
-    /* Tab5 hierarchy pass. Geometry is unchanged — the header is still 112 px, rows are still 112 px
-       and nothing drops below the 96 px floor. What changes is weight, tone and rhythm: a quiet crumb
-       under a loud title, an agent who reads as a presence rather than a chip, and one primary that
-       cannot be mistaken for a secondary. */
-    .t5-top{background:linear-gradient(180deg,#0f1c17,#0a1211);border-bottom-color:#21342b}
-    .t5-crumb{font-size:20px;color:#7b958a}
-    .t5-title{font-size:38px;letter-spacing:-1px;font-weight:650}
-    .t5-back{background:linear-gradient(160deg,#152620,#0e1a15);border-color:#30473c}
-    .t5-presence{gap:15px;border-color:#2f4c3b;background:linear-gradient(145deg,#ffffff16,#ffffff05);box-shadow:inset 0 1px #ffffff12}
-    .t5-presence .avatar{box-shadow:0 0 0 2px #0a1211,0 0 0 4px var(--tone,#35563f)}
-    .t5-presence strong{letter-spacing:-.3px}
-    .t5-presence small{font-size:20px;letter-spacing:0;margin-top:5px}
-    .t5-dot{width:14px;height:14px;border-radius:50%;flex:none;background:var(--tone,#7fab91);box-shadow:0 0 0 5px #ffffff12}
-    .t5-sys{letter-spacing:.03em}
-    .t5-bubble{border-radius:26px 26px 26px 10px;padding:19px 26px;box-shadow:0 6px 18px #00000026}
-    .t5-bubble.me{border-radius:26px 26px 10px 26px}
-    .t5-bubble .who{letter-spacing:.01em}
-    .t5-bubble .who .avatar{box-shadow:0 0 0 2px #0e1b15,0 0 0 3px #2f5340}
-    .t5-row strong{letter-spacing:-.2px}
-    .t5-row.current{box-shadow:inset 3px 0 0 var(--mint)}
-    .t5-bar{background:linear-gradient(180deg,#0a1211,#0e1b16)}
-    .t5-btn{border-radius:22px;letter-spacing:-.2px}
-    .t5-btn.primary{background:linear-gradient(170deg,#d3f0e0,#9fd3bc);border-color:#b7e3cf;box-shadow:0 8px 22px #0000003d,inset 0 1px #ffffffb3}
-    .t5-navbar button[aria-current=page]{box-shadow:inset 0 -3px 0 #7fcfa6}
     /* ── Live conversation ────────────────────────────────────────────────────
        Talking to an agent is a live turn, not record → transcribe → review → Send.
        Recognised words appear while you speak, the turn finalises itself, and the
@@ -279,23 +329,7 @@
     .live-turn.cut p{opacity:.74}
     .w-livefoot{flex:none;font-size:12px;line-height:1.35;color:var(--dim);margin:0}
     .w-footer button.live-end{background:#5f3730;color:#ffe9e1}
-    /* Tab5 keeps presence in the header so the transcript has room to breathe. */
-    .t5-live{flex:1;min-height:0;display:flex;flex-direction:column;gap:16px}
-    .t5-livehead{flex:none;display:flex;align-items:center;gap:18px;height:38px}
-    .t5-livehead strong{display:block;font-size:38px;font-weight:650;letter-spacing:-.9px;line-height:1.1;color:var(--tone-ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .t5-livehead small{display:block;font:20px var(--mono);letter-spacing:.08em;color:var(--tone-dim);margin-top:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-    .t5-live .live-meter{height:34px;gap:6px}
-    .t5-live .live-meter i{width:6px;height:var(--h)}
-    .t5-livetag{flex:none;font:19px var(--mono);letter-spacing:.09em;color:#0c1812;background:var(--tone);border-radius:15px;padding:8px 15px;white-space:nowrap}
-    .is-muted .t5-livetag,.ph-error .t5-livetag,.ph-ready .t5-livetag{background:transparent;border:1px solid var(--tone);color:var(--tone)}
-    .t5-bubble.now{border-color:var(--tone-dim);box-shadow:0 8px 24px #00000033}
-    .t5-bubble.partial{border-style:dashed}
-    .t5-bubble.cut p{opacity:.74}
-    .t5-bubble .who em.flag{color:var(--tone-dim)}
-    .t5-bubble .who .live-meter{height:26px;margin-left:auto}
-    .t5-bubble .who .live-meter+em{margin-left:14px}
-    .t5-livehint{flex:none;margin:0;font-size:23px;line-height:1.35;color:#93aa9d}
-    .cancel-armed .w-live,.cancel-armed .t5-live{--tone:#f0a88c;--tone-dim:#c58067;--tone-ink:#fbdccf}
+    .cancel-armed .w-live{--tone:#f0a88c;--tone-dim:#c58067;--tone-ink:#fbdccf}
     .voice-log{min-height:20px;font:12px var(--mono);letter-spacing:.04em;color:#4d6a56;margin:10px 0 0}
     .catalog-card.tab5-card .tab5-wrap{width:294.4px;height:165.6px;aspect-ratio:auto}
     .catalog-card .t5{transform:scale(.23)}
@@ -382,7 +416,7 @@
         <div><div class="device-label">WATCH / 368 × 448</div><div id="watch-preview"></div><p class="input-note">Tap a row or action. Back returns to the actual parent. Tap the Talk action to open a live conversation hands-free, or hold it to take one turn — releasing submits that turn, with no review step. Sliding up before you release cancels it.</p></div>
         <div><div class="device-label">DIAL / 240 × 240</div><div id="dial-preview"></div><div class="device-tools"><button data-turn="-1" aria-label="Turn Dial left">↶ Turn</button><button id="dial-press">Press</button><button data-turn="1" aria-label="Turn Dial right">Turn ↷</button><button data-home>Home</button></div><p class="input-note">From Home, turn opens Menu; press activates the visible action. In lists, turn focuses a row; press selects. Touch selects the named item. This Dial has no microphone and no speech speaker, so every voice scene resolves to its text alternative — nothing here simulates a Dial microphone.</p></div>
       </div>
-      <div class="tab5-panel" id="tab5-panel"><div class="device-label">TAB5 / 1280 × 720 / 5-INCH CAPACITIVE TOUCH / LANDSCAPE</div><div id="tab5-stage"><div id="tab5-preview"></div></div><p class="input-note">One task per screen: a header that says where you are, one reading zone and one action zone. Four destinations — Home, Conversations, Devices, Menu — sit in the bar only on destination screens; everywhere else that bar carries the actions and Back lives in the header. Typing and handwriting are deliberate full-screen modes. Tap the mint Talk action to open a simulated live conversation, or hold it to take a single turn. Responsive fit scales 1280 × 720 to the page, native renders 1:1 for pixel inspection, and calibrated physical size uses the scale you set in the sizing review.</p><p class="input-note" id="tab5-physnote" hidden>Physical size is <b>uncalibrated</b>. Browser CSS millimetres are not physical millimetres — open the sizing review and align a real ruler or bank card first.</p></div>
+      <div class="tab5-panel" id="tab5-panel"><div class="device-label">TAB5 / 1280 × 720 / 5-INCH CAPACITIVE TOUCH / LANDSCAPE</div><div id="tab5-stage"><div id="tab5-preview"></div></div><p class="input-note">One task per screen on a warm ink surface with a single accent — the OpenClaw lobster red — reserved for the live thing and the one action worth taking. Home is the conversation you are in rather than a screen called Home; everywhere else the header says where you are, with one reading zone and one action zone below it. Four destinations — Home, Conversations, Devices, Menu — sit in the bar only on destination screens; everywhere else that bar carries the actions and Back lives in the header. Typing and handwriting are deliberate full-screen modes. Tap the red Talk action to open a simulated live conversation, or hold it to take a single turn. Responsive fit scales 1280 × 720 to the page, native renders 1:1 for pixel inspection, and calibrated physical size uses the scale you set in the sizing review.</p><p class="input-note" id="tab5-physnote" hidden>Physical size is <b>uncalibrated</b>. Browser CSS millimetres are not physical millimetres — open the sizing review and align a real ruler or bank card first.</p></div>
       <section id="phone-companion" class="phone-companion hidden" aria-label="Mobile pairing companion"></section>
       <div class="flow-actions"><h3>Related states and recovery</h3><div id="related"></div><p class="facts" id="implementation-note"></p><div class="toast" id="toast" role="status" aria-live="polite"></div><p class="voice-log" id="voice-announce" role="status" aria-live="polite"></p></div>
     </section>
@@ -910,20 +944,38 @@
       +'<p class="w-livefoot" data-live-hint>'+esc(liveHint(m))+'</p></div>';
   }
   function liveT5Feed(m){
-    const r=t5Reading(),out=[];
+    const who=agentName(m.agent),out=[];
     for(const t of m.turns.slice(-4))out.push(t.who==='you'
-      ?'<div class="t5-bubble me'+(t.cut?' cut':'')+'"><div class="who"><span>You</span><em class="flag">'+(t.cut?'STOPPED':'FINAL')+'</em></div><p style="font-size:'+r+'px">'+esc(t.text)+'</p></div>'
-      :'<div class="t5-bubble'+(t.cut?' cut':'')+'"><div class="who">'+avatar(m.agent)+'<span>'+esc(agentName(m.agent))+'</span><em class="flag">'+(t.cut?'INTERRUPTED':'SPOKEN')+'</em></div><p style="font-size:'+r+'px">'+esc(t.text)+'</p></div>');
-    if(m.phase==='listening')out.push('<div class="t5-bubble me now partial"><div class="who"><span>You</span><em class="flag">'+(m.muted?'MUTED · CAPTURE PAUSED':'HEARING · NOT FINAL YET')+'</em></div><p style="font-size:'+r+'px"><span class="partial-text" data-live-partial>'+esc(m.partial||'…')+'</span><i class="live-caret" aria-hidden="true"></i></p></div>');
-    if(m.phase==='speaking')out.push('<div class="t5-bubble now"><div class="who">'+avatar(m.agent)+'<span>'+esc(agentName(m.agent))+'</span>'+liveMeter(5)+'<em class="flag">SPEAKING · SIMULATED AUDIO</em></div><p style="font-size:'+r+'px"><span data-live-spoken>'+esc(m.spoken||'…')+'</span><i class="live-caret" aria-hidden="true"></i></p></div>');
-    if(m.phase==='thinking')out.push('<div class="t5-thinking">'+avatar(m.agent)+'<span>'+esc(agentName(m.agent))+' is working on that turn. Nothing is being captured.</span></div>');
+      ?t5Say('me'+(t.cut?' cut':''),'You',t.cut?'Stopped':'Final',esc(t.text))
+      :t5Say('them'+(t.cut?' cut':''),who,t.cut?'Interrupted':'Spoken',esc(t.text)));
+    if(m.phase==='listening')out.push(t5Say('me now','You',m.muted?'Muted · capture paused':'Hearing · not final yet',
+      '<span class="partial-text" data-live-partial>'+esc(m.partial||'…')+'</span><i class="live-caret" aria-hidden="true"></i>'));
+    // "Simulated" is disclosed once, on the strip above the transcript; the turn flag only
+    // has to say which turn is still open and whether its words are final.
+    if(m.phase==='speaking')out.push(t5Say('them now',who,'Speaking',
+      '<span data-live-spoken>'+esc(m.spoken||'…')+'</span><i class="live-caret" aria-hidden="true"></i>'));
+    if(m.phase==='thinking')out.push('<p class="t5-thinking">'+esc(who)+' is working on that turn. Nothing is being captured.</p>');
     if(m.phase==='error')out.push('<p class="t5-alert">The live connection dropped. The unfinished turn was discarded rather than guessed at.</p>');
     return out.join('');
   }
+  // Tab5 title for a live session. The crumb beside it already says who and which thread,
+  // so the title is the phase alone and the agent name is not repeated a third time.
+  // liveHeadline() stays untouched: the watch and the live region still announce with it.
+  function t5LivePhase(m){
+    if(!m)return '';
+    if(m.phase==='error')return 'Connection lost';
+    if(m.phase==='connecting')return 'Opening live talk';
+    if(m.phase==='listening')return m.muted?'Muted':'Listening';
+    if(m.phase==='thinking')return 'Thinking';
+    if(m.phase==='speaking')return 'Speaking';
+    return m.paused?'Paused':'Your turn';
+  }
+  // The session states itself once, on one typographic line: an indicator that only moves
+  // when there is something to indicate, the state in words, and a rule to close the row.
   function t5Live(scene){
     const m=liveModel(scene);
     return '<div class="t5-live '+liveTone(m)+'">'
-      +'<div class="t5-livehead">'+liveMeter(7)+'<span class="t5-livetag">'+esc(liveTag(m))+'</span></div>'
+      +'<div class="t5-livebar">'+liveMeter(7)+'<span class="t5-livetag">'+esc(liveTag(m))+'</span><span class="t5-liverule" aria-hidden="true"></span></div>'
       +'<div class="t5-scroll"><div class="t5-thread">'+liveT5Feed(m)+'</div></div>'
       +'<p class="t5-livehint" data-live-hint>'+esc(liveHint(m))+'</p></div>';
   }
@@ -1063,22 +1115,33 @@
   function t5Tool(label,attr,cls='',disabled=false){return '<button class="t5-btn '+cls+'" '+attr+(disabled?' disabled':'')+'>'+esc(label)+'</button>'}
   function t5IsLive(s){return state.live||s.view.variant==='live'}
   function t5Turn(s){return ['turn-sending','turn-thinking','turn-reply','turn-failed'].includes(s.id)?state.pendingTurn||{agent:state.agent,thread:state.thread,text:byId.get('ptt-review').view.text}:null}
-  function t5Availability(s){return s.id==='agent-unavailable'?'Unavailable':state.agent==='initials'?'Text only':t5IsLive(s)?'Live talk':state.micEnabled?'Voice ready':'Mic off'}
+  function t5Availability(s){return s.id==='agent-unavailable'?'Unavailable':s.id==='mic-blocked'?'Mic off':state.agent==='initials'?'Text only':t5IsLive(s)?'Live talk':state.micEnabled?'Voice ready':'Mic off'}
   function t5SetupStep(s){const at=t5SetupSteps.findIndex(([,ids])=>ids.includes(s.id));return at<0?null:{at,label:t5SetupSteps[at][0]}}
   // One line of stable context above the title. Setup counts its steps here instead of standing in a side panel.
   function t5Crumb(s){
     const step=s.group==='Setup & pairing'?t5SetupStep(s):null;
     if(step)return 'SETUP · STEP '+(step.at+1)+' OF '+t5SetupSteps.length+' · '+step.label;
-    if(isLive(s)){const m=liveModel(s);return agentName(m.agent)+' · '+m.thread+' · LIVE'}
+    // A live session names its agent and thread once, here. The title carries the phase,
+    // the strip carries the disclosure, and the header face carries the identity.
+    if(isLive(s)){const m=liveModel(s);return agentName(m.agent)+' · '+m.thread}
     const turn=t5Turn(s)||state.editingTurn;
     if(turn)return agentName(turn.agent)+' · '+turn.thread;
-    if(s.view.kind==='message'||['input','quick-replies','scribble','scribble-result','scribble-uncertain','keyboard','ptt-ready','ptt-capture','ptt-transcribe','ptt-empty','live-ended'].includes(s.id))return agentName(responseAgent(s))+' · '+state.thread;
+    // Naming the thread here is worth a line only when the title is not already the thread
+    // and the agent is not already sitting in the chip to the right of it.
+    if(s.view.kind==='message'||['input','quick-replies','scribble','scribble-result','scribble-uncertain','keyboard','ptt-ready','ptt-capture','ptt-transcribe','ptt-empty','live-ended'].includes(s.id))
+      return s.title===state.thread?String(s.parent?byId.get(s.parent).title:s.group):agentName(responseAgent(s))+' · '+state.thread;
     if(isHome(s))return 'OpenClaw';
     return String(s.parent?contextText(byId.get(s.parent),byId.get(s.parent).title):s.group);
   }
   function t5Sys(s){const l=linkState(s),label=l.setup?'Not connected':l.offline?'Offline':'';
     return '<div class="t5-sys'+(l.offline||l.setup?' warn':'')+'" aria-label="Synthetic status: '+(l.setup?'setup in progress, connection not ready':l.offline?'Wi-Fi connected, OpenClaw unavailable':'Wi-Fi connected, OpenClaw connected')+', battery unknown">'+icon('wifi')+(l.offline?brokenLink:icon('link'))+(label?'<span>'+label+'</span>':'')+icon('battery')+'<span>—</span><time>9:41</time></div>'}
-  function t5Bubble(side,who,text,meta){return '<div class="t5-bubble '+side+'">'+(who?'<div class="who">'+avatar(who)+'<span>'+esc(agentName(who))+'</span><em>'+esc(meta)+'</em></div>':'<div class="who"><span>You</span><em>'+esc(meta)+'</em></div>')+'<p style="font-size:'+t5Reading()+'px">'+esc(text)+'</p></div>'}
+  // One turn: who said it and what state the words are in, then the words at full width.
+  // The agent is named rather than re-badged — its face is already in the header.
+  function t5Say(side,name,flag,inner){
+    return '<div class="t5-turn '+side+'"><p class="said"><b>'+esc(name)+'</b><em>'+esc(flag)+'</em></p>'
+      +'<p class="what" style="font-size:'+t5Reading()+'px">'+inner+'</p></div>';
+  }
+  function t5Bubble(side,who,text,meta){return t5Say(side,who?agentName(who):'You',meta,esc(text))}
   // Conversation: the transcript owns the reading zone, the draft sits under it, and the action zone stays one row.
   function t5Draft(s){const turn=t5Turn(s);return s.id==='turn-failed'?(turn?.text||''):/review/.test(s.id)?(state.draft||s.view.text):state.draft}
   function t5Transcript(s){
@@ -1088,7 +1151,7 @@
     else out.push(t5Bubble('them',agent,conv.view.text.replaceAll('Kitsune',agentName(agent)),'Earlier today'));
     if(turn)out.push(t5Bubble('me',null,turn.text||'(no text captured)',s.id==='turn-failed'?'Not sent':s.id==='turn-reply'?'Sent':'Sending…'));
     if(s.id==='turn-reply')out.push(t5Bubble('them',agent,contextText(s,s.view.text),'Just now'));
-    if(s.id==='turn-thinking')out.push('<div class="t5-thinking">'+avatar(agent)+'<span>'+esc(agentName(agent))+' is working on it. You can keep browsing.</span></div>');
+    if(s.id==='turn-thinking')out.push('<p class="t5-thinking">'+esc(agentName(agent))+' is working on it. You can keep browsing.</p>');
     if(s.id==='turn-failed')out.push('<p class="t5-alert">'+esc(contextText(s,s.view.text))+'</p>');
     const draft=t5Draft(s),pending=['turn-sending','turn-thinking'].includes(s.id);
     const note=pending?'Sent. You can keep browsing while the reply arrives.':'Talk to speak, or write a message.';
@@ -1107,9 +1170,12 @@
     if(draft)return talk('Talk live')+write+'<button class="t5-btn primary" data-go="turn-sending">'+icon('check')+'Send</button>';
     return write+t5Button(R('Quick replies','quick-replies'))+'<span class="spacer"></span>'+talk(state.live?'Back to live talk':'Talk to '+agentName(),'primary');
   }
-  function t5Row(s,r,i){const sel=selectedRow(s,i);return '<button class="t5-row'+(sel?' current':'')+'" data-row="'+i+'" data-device="tab5" data-screen="'+esc(s.id)+'">'+(r.avatar?avatar(r.avatar):icon(r.icon))+'<span class="row-text"><strong>'+esc(r.label)+'</strong>'+(r.sub?'<small>'+esc(rowSummary(s,r,i))+'</small>':'')+'</span>'+icon(sel?'check':'next','end')+'</button>'}
+  function t5Row(s,r,i){const sel=selectedRow(s,i);return '<button class="t5-row'+(sel?' current':'')+'" data-row="'+i+'" data-device="tab5" data-screen="'+esc(s.id)+'">'+(r.avatar?avatar(r.avatar):icon(r.icon))+'<span class="row-text"><strong>'+esc(r.label)+'</strong>'+(r.sub?'<small>'+esc(r.avatar==='initials'?'Text only':rowSummary(s,r,i))+'</small>':'')+'</span>'+icon(sel?'check':'next','end')+'</button>'}
+  // The count used to be printed under the list, where it cost a whole 112 px row to say
+  // something the partly visible next row already says. It is now announced, not drawn.
   function t5List(s){const rows=rowsFor(s,'tab5');
-    return '<div class="t5-scroll">'+rows.map((r,i)=>t5Row(s,r,i)).join('')+'</div>'+(rows.length>4?'<p class="t5-listnote">'+rows.length+' ITEMS · SCROLL FOR THE REST</p>':'')}
+    return '<div class="t5-scroll">'+rows.map((r,i)=>t5Row(s,r,i)).join('')+'</div>'
+      +(rows.length>4?'<p class="t5-sr">'+rows.length+' items. Scroll for the rest.</p>':'')}
   // The facts the old side panel carried now travel with the thing they describe, as one mono line.
   function t5HeroMeta(s){
     if(['control-wait','control-result','control-unknown'].includes(s.id))return 'OWNER '+agentName(s.id==='control-result'?state.reportedControlAgent:state.controlRequest?.agent||state.agent)+' · LAST REPORTED '+state.reportedControl+'% · '+(s.id==='control-wait'?'WAITING FOR A RESULT':s.id==='control-unknown'?'OUTCOME UNKNOWN':'RESULT RECEIVED');
@@ -1118,9 +1184,10 @@
     return '';
   }
   function t5Hero(s){const v=s.view,text=s.id==='control-result'?'Desk lamp reported '+state.reportedControl+'%.':s.id==='control-wait'?'Desk lamp · requested '+(state.controlRequest?.value??byId.get('control').view.value)+'%. You can leave this screen.':v.text,meta=t5HeroMeta(s);
-    return '<div class="t5-hero">'+(s.avatar?avatar(s.group==='Talk & input'?responseAgent(s):s.avatar):icon(/failed|unknown|unavailable|rejected|expired|mismatch|empty|denied|not-found/.test(s.id)?'help':s.group==='Setup & pairing'?'link':'activity','t5-hero-icon'))+'<h3>'+esc(contextText(s,v.headline))+'</h3><p>'+esc(contextText(s,text))+'</p>'+(meta?'<p class="t5-meta">'+esc(meta)+'</p>':'')+'</div>'}
+    const bad=/failed|unknown|unavailable|rejected|expired|mismatch|empty|denied|not-found/.test(s.id);
+    return '<div class="t5-hero">'+(s.avatar?avatar(s.group==='Talk & input'?responseAgent(s):s.avatar):icon(s.id==='mic-blocked'?'mic':bad?'help':s.group==='Setup & pairing'?'link':'activity','t5-hero-icon'+(bad?' caution':'')))+'<h3>'+esc(contextText(s,v.headline))+'</h3><p>'+esc(contextText(s,text))+'</p>'+(meta?'<p class="t5-meta">'+esc(meta)+'</p>':'')+'</div>'}
   function t5CaptureStage(s,listening){
-    return '<div class="capture-stage t5-capture'+(listening?' capturing':'')+'">'+avatar(state.agent)+'<p class="capture-agent">Dictating to '+esc(agentName())+' · '+esc(state.thread)+'</p>'+wave()
+    return '<div class="capture-stage t5-capture'+(listening?' capturing':'')+'"><p class="capture-agent">Dictating to '+esc(agentName())+' · '+esc(state.thread)+'</p>'+wave()
       +(listening?'<h3 data-capture-label>Dictating</h3><div class="capture-time" data-capture-time>00:00 / 00:30</div><p class="capture-hint" data-capture-hint>Release to review · slide up to cancel</p>'
                  :'<h3>Hold. Speak. Release.</h3><p class="capture-hint">This route keeps a review step. Talk live instead if you would rather the turn submit itself.</p>')+'</div>'}
   function t5Qr(){return '<div class="t5-qr"><div class="t5-qr-copy"><h3>Add this device in OpenClaw mobile</h3><ol class="t5-steps"><li><i></i><span>Open OpenClaw on your phone.</span></li><li><i></i><span>Devices → Add device → Scan.</span></li><li><i></i><span>Point the camera at this code.</span></li></ol><p class="t5-note">Then confirm the matching code on this device.</p></div><div><div class="qr-tile">'+pairingQR+'</div><p class="qr-caption">DEMO QR — not a pairing credential</p></div></div>'}
@@ -1129,8 +1196,8 @@
     return '<div class="t5-editor"><p class="t5-note">'+(lamp?'Desk lamp · last reported '+state.reportedControl+'%':'Preview for this device')+'</p>'
       +'<div class="t5-value"><span class="slider-value">'+val+'</span><span class="unit">'+esc(v.unit)+'</span></div>'
       +'<div class="t5-sliderrow"><button class="t5-nudge" data-nudge="-5" aria-label="Lower by 5">−</button><input class="setting-range" aria-label="'+esc(s.title)+'" data-slider="'+s.id+'" type="range" min="0" max="100" step="1" value="'+val+'"><button class="t5-nudge" data-nudge="5" aria-label="Raise by 5">+</button></div>'
-      +'<p class="t5-meta">'+(lamp?'DRAFT ONLY · OWNER '+agentName(state.controlRequest?.agent||state.agent)+' · REPORTED '+state.reportedControl+'%':'PREVIEW ONLY · NO DEVICE SETTING IS SAVED')+'</p>'
-      +'<p class="t5-note">'+(lamp?'Nothing is sent until you choose Apply, and an acknowledgment is not a result.':'Back restores the previous setting.')+'</p></div>'}
+      +'<p class="t5-meta">'+(lamp?'DRAFT · '+agentName(state.controlRequest?.agent||state.agent):'PREVIEW ONLY · NO DEVICE SETTING IS SAVED')+'</p>'
+      +'<p class="t5-note">'+(lamp?'Apply sends the request. Wait for the lamp to report its new brightness.':'Back restores the previous setting.')+'</p></div>'}
   function t5Scribble(){return '<div class="draft-line t5-draftline">'+esc(state.draft||'Write one word')+'</div><canvas class="draw-pad t5-pad" data-pad="tab5" width="1600" height="600" aria-label="Finger drawing demonstration"></canvas><p class="t5-note">Write one word at a time, then review it. Recognition here is a labelled fixture, not a recognizer.</p>'}
   // Typing is a deliberate full-screen mode: 10-column QWERTY, ~114 × 104 px keys, four rows, one preview line.
   function t5Entry(){
@@ -1142,11 +1209,45 @@
       +'<div class="t5-krow inset-2">'+rows[2].map(key).join('')+'</div>'
       +'<div class="t5-krow"><button class="act" data-back>Back</button><button class="wide" data-char=" " aria-label="Space">Space</button><button class="act" data-char="⌫" aria-label="Delete">⌫</button><button class="done" data-go="text-review">Done</button></div>'
       +'</div></div>'}
-  function t5Home(s){const info=homeInfo(s,'tab5'),a=homeAction(s,'tab5'),titles=homeTitles(info,'tab5');
+  // Home is not a screen about being home. In the ordinary state the heading is the
+  // conversation you are in and the body is the last thing that was actually said; the
+  // mono eyebrow stays empty, because "READY" under a Talk button says nothing. Every
+  // other state replaces all three lines with something a person can act on, and the
+  // ones that mean unfinished work take the caution colour rather than a new one.
+  function t5HomeLead(info){
+    const name=agentName(),last=byId.get('conversation').view.text.replaceAll('Kitsune',name);
+    switch(info.status){
+      case 'Ready when you are':
+        return {flag:'',heading:'Start a conversation.',quote:'',line:'Nothing has been said on this device yet. The first thing you say opens a thread with '+name+'.'};
+      case 'Working on your request':
+        return {flag:name+' IS WORKING',heading:state.thread,quote:'',line:'Your turn is with '+name+'. You can leave this screen — the reply waits in Activity, and nothing is sent on your behalf.'};
+      case 'Reply ready':case 'Your outline is ready':
+        return {flag:name+' REPLIED',heading:state.thread,quote:'“'+last+'”',line:''};
+      case 'OpenClaw offline':
+        return {flag:'OFFLINE',warn:true,heading:'OpenClaw is not answering.',quote:'',line:'Wi-Fi is fine; the Gateway is not. Finished work stays here and nothing new is sent.'};
+      case 'Live conversation':
+        return {flag:'LIVE TALK PAUSED',heading:state.thread,quote:'',line:'The session is still open and nothing is being captured while you are here. Going back picks the same turn up rather than starting a second one.'};
+      case 'Mic off':
+        return {flag:'MICROPHONE OFF',warn:true,heading:state.thread,quote:'“'+last+'”',line:''};
+      default:
+        return {flag:'',heading:state.thread,quote:'“'+last+'”',line:''};
+    }
+  }
+  function t5Home(s){const info=homeInfo(s,'tab5'),a=homeAction(s,'tab5'),lead=t5HomeLead(info);
     const isTalk=a.to==='live-talk'&&canUseVoice();
-    const button='<button class="t5-btn primary'+(isTalk?' livehold':'')+'" data-go="'+esc(a.to)+'">'+icon(actionIcon(a.to))+esc(a.label)+'</button>';
-    const secondary=isTalk?'<button class="t5-btn" data-go="input">'+icon('chat')+'Write instead</button>':'';
-    return '<div class="t5-homestage"><div class="home-mascot"><div class="presence-orb" aria-hidden="true">'+lobsterMark('t5-'+s.id)+'</div><p class="home-state">'+esc(titles[info.status]||info.status)+'</p></div><p class="t5-home-sub">'+esc((info.status+' · '+agentName()+' · '+state.thread).toUpperCase())+'</p><div class="t5-homeact">'+secondary+button+'</div></div>'}
+    const primary='<button class="t5-btn primary'+(isTalk?' livehold':'')+'" data-go="'+esc(a.to)+'">'+icon(actionIcon(a.to))+esc(a.label)+'</button>';
+    const secondary=a.to==='input'?'':'<button class="t5-btn ghost" data-go="input">'+icon('chat')+'Write instead</button>';
+    const voice=state.agent==='initials'?'Text only':state.micEnabled?'Voice and text':'Microphone off';
+    return '<div class="t5-homestage">'
+      +'<div class="t5-homecopy">'
+      +(lead.flag?'<p class="t5-homestatus'+(lead.warn?' flag':'')+'">'+esc(lead.flag)+'</p>':'')
+      +'<h3 class="t5-homestate">'+esc(lead.heading)+'</h3>'
+      +(lead.quote?'<p class="t5-homequote">'+esc(lead.quote)+'</p>':'')
+      +(lead.line?'<p class="t5-homecontext">'+esc(lead.line)+'</p>':'')
+      +'<div class="t5-homeact">'+primary+secondary+'</div></div>'
+      +'<div class="t5-homeagent">'+avatar(state.agent)+'<strong>'+esc(agentName())+'</strong><small>'+esc(voice)+'</small>'
+      +'<button class="t5-homechange" data-go="agents" aria-label="Change agent, '+esc(agentName())+' selected">Change agent'+icon('next')+'</button>'
+      +'</div></div>'}
   function t5Body(s){const v=s.view;
     if(v.kind==='home')return t5Home(s);
     if(v.kind==='live')return t5Live(s);
@@ -1187,16 +1288,29 @@
     // When a session is open the whole frame adopts its phase tone, so the agent in the header
     // and the stage below it read as one presence rather than two unrelated widgets.
     const session=!staticRender&&live?liveModelOf(live):isLive(s)?liveModel(s):null;
-    const presence=session
-      ?'<span class="t5-dot" aria-hidden="true"></span><small>'+esc((session.paused?'Paused':session.muted?'Mic muted':'Live talk').toUpperCase())+'</small>'
-      :'<small>'+esc(t5Availability(s))+'</small>';
-    const top='<div class="t5-top">'+(s.parent?'<button class="t5-back" data-back aria-label="Back">'+icon('back')+'</button>':'')
-      +'<div class="t5-heads"><div class="t5-crumb">'+esc(String(t5Crumb(s)).toUpperCase())+'</div><h2 class="t5-title">'+esc(isLive(s)&&session?liveHeadline(session):contextText(s,s.title))+'</h2></div>'
-      +t5Sys(s)
-      +(s.group==='Setup & pairing'?'':'<button class="t5-presence" data-go="agents" aria-label="Change agent, '+esc(agentName())+' selected'+(session?', '+esc(liveHeadline(session)):'')+'">'+avatar(state.agent)+'<span class="row-text"><strong>'+esc(agentName())+'</strong>'+presence+'</span>'+icon('next','end')+'</button>')
+    const home=isHome(s),onLive=isLive(s)&&!!session;
+    // Three different headers, because three different questions are being answered.
+    // Home: what is this box, and is it well? The stage below says what is going on.
+    // A live session: what phase are we in? Who and which thread is the crumb's job, the
+    // face on the right is the agent and the only way to change it — no second name badge.
+    // Everywhere else: Back, where you are, and the agent as a labelled chip.
+    const lead=home
+      ?'<span class="t5-brand"><span aria-hidden="true">'+lobsterMark('t5-brand-'+s.id)+'</span><b>OpenClaw</b></span>'
+      :(s.parent?'<button class="t5-back" data-back aria-label="Back">'+icon('back')+'</button>':'');
+    const agentLabel='Change agent, '+agentName()+' selected'+(session?', '+liveHeadline(session):'');
+    const presence=home||s.group==='Setup & pairing'?''
+      :onLive
+        ?'<button class="t5-presence face" data-go="agents" aria-label="'+esc(agentLabel)+'">'+avatar(state.agent)+'</button>'
+        :'<button class="t5-presence" data-go="agents" aria-label="'+esc(agentLabel)+'">'+avatar(state.agent)
+          +'<span class="row-text"><strong>'+esc(agentName())+'</strong><small>'+esc(t5Availability(s))+'</small></span>'+icon('next','end')+'</button>';
+    const top='<div class="t5-top">'+lead
+      +(home?'':'<div class="t5-heads"><div class="t5-crumb">'+esc(String(t5Crumb(s)).toUpperCase())+'</div><h2 class="t5-title">'+esc(onLive?t5LivePhase(session):contextText(s,s.title))+'</h2></div>')
+      +t5Sys(s)+presence
       +'</div>';
-    return '<div class="tab5-wrap"><div class="t5'+(isHome(s)?' t5-home'+homeTheme(s,'tab5'):'')+(session?' '+liveTone(session):'')+'" data-kind="tab5">'+top
-      +'<div class="t5-body">'+t5Body(s)+'</div>'
+    // Lists give their gutter back so a fourth row fits above the destination bar.
+    const rows=s.view.kind==='list'?' rows':'';
+    return '<div class="tab5-wrap"><div class="t5'+(home?' t5-home'+homeTheme(s,'tab5'):'')+(session?' '+liveTone(session):'')+'" data-kind="tab5">'+top
+      +'<div class="t5-body'+rows+'">'+t5Body(s)+'</div>'
       +(bar?nav?'<nav class="t5-bar t5-navbar" aria-label="Destinations">'+bar+'</nav>':'<div class="t5-bar" role="group" aria-label="Actions">'+bar+'</div>':'')+'</div></div>';
   }
   const observer=new ResizeObserver(entries=>{for(const entry of entries)entry.target.style.setProperty('--scale',entry.contentRect.width/368)});

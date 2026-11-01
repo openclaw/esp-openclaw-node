@@ -1215,22 +1215,26 @@
   // other state replaces all three lines with something a person can act on, and the
   // ones that mean unfinished work take the caution colour rather than a new one.
   function t5HomeLead(info){
-    const name=agentName(),last=byId.get('conversation').view.text.replaceAll('Kitsune',name);
+    const name=agentName(),history=staticRender?[]:liveHistory();
+    const last=history.at(-1)?.text||byId.get('conversation').view.text.replaceAll('Kitsune',name);
+    const preview=state.choices.previews===1
+      ?{quote:'“'+last+'”',line:''}
+      :{quote:'',line:'Open the conversation to read your messages.'};
     switch(info.status){
       case 'Ready when you are':
         return {flag:'',heading:'Start a conversation.',quote:'',line:'Nothing has been said on this device yet. The first thing you say opens a thread with '+name+'.'};
       case 'Working on your request':
         return {flag:name+' IS WORKING',heading:state.thread,quote:'',line:'Your turn is with '+name+'. You can leave this screen — the reply waits in Activity, and nothing is sent on your behalf.'};
       case 'Reply ready':case 'Your outline is ready':
-        return {flag:name+' REPLIED',heading:state.thread,quote:'“'+last+'”',line:''};
+        return {flag:name+' REPLIED',heading:state.thread,...preview};
       case 'OpenClaw offline':
         return {flag:'OFFLINE',warn:true,heading:'OpenClaw is not answering.',quote:'',line:'Wi-Fi is fine; the Gateway is not. Finished work stays here and nothing new is sent.'};
       case 'Live conversation':
         return {flag:'LIVE TALK PAUSED',heading:state.thread,quote:'',line:'The session is still open and nothing is being captured while you are here. Going back picks the same turn up rather than starting a second one.'};
       case 'Mic off':
-        return {flag:'MICROPHONE OFF',warn:true,heading:state.thread,quote:'“'+last+'”',line:''};
+        return {flag:'MICROPHONE OFF',warn:true,heading:state.thread,...preview};
       default:
-        return {flag:'',heading:state.thread,quote:'“'+last+'”',line:''};
+        return {flag:'',heading:state.thread,...preview};
     }
   }
   function t5Home(s){const info=homeInfo(s,'tab5'),a=homeAction(s,'tab5'),lead=t5HomeLead(info);

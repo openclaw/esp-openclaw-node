@@ -1,5 +1,6 @@
 #include "openclaw_density.h"
 #include "room_watch_conversations.h"
+#include "room_tab5_layout.h"
 #include "openclaw_reading.h"
 
 #include <stdint.h>
@@ -113,6 +114,29 @@ void room_watch_conversations_create(lv_obj_t *parent, lv_event_cb_t handler)
     creation_caption = label(creation_button, "", 12, 14, 292);
     lv_obj_set_style_text_align(creation_caption, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_add_flag(creation_button, LV_OBJ_FLAG_HIDDEN);
+    if (room_tab5_layout()) {
+        room_tab5_header(root, heading, back);
+        room_tab5_button(new_chat, 944, 80, 272);
+        lv_obj_set_pos(list, 160, 208);
+        lv_obj_set_width(list, 960);
+        lv_obj_set_pos(message, 160, 240);
+        lv_obj_set_width(message, 960);
+        lv_obj_set_style_text_font(message, room_page_font(), 0);
+        room_tab5_button(previous, 160, 552, 128);
+        room_tab5_button(refresh, 304, 552, 672);
+        room_tab5_button(next, 992, 552, 128);
+        room_tab5_button(creation_button, 160, 552, 960);
+        lv_obj_set_pos(body, 160, 208);
+        lv_obj_set_width(body, 960);
+        lv_obj_set_width(body_text, 948);
+        for (unsigned i = 0; i < ESP_OPENCLAW_DIRECTORY_PAGE_SIZE; ++i) {
+            lv_obj_set_width(rows[i], 948);
+            lv_obj_set_style_bg_color(rows[i], lv_color_hex(0x292723), 0);
+            lv_obj_set_width(titles[i], 900);
+            lv_obj_set_width(summaries[i], 900);
+            lv_obj_set_style_text_color(summaries[i], lv_color_hex(0xb1aaa0), 0);
+        }
+    }
     lv_obj_add_flag(root, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -174,7 +198,7 @@ static void style_heading(bool reader)
 #if LV_FONT_MONTSERRAT_20
     font = &lv_font_montserrat_20;
 #endif
-    if (reader) font = openclaw_reading_font();
+    if (reader || room_tab5_layout()) font = room_page_font();
     lv_obj_set_style_text_font(heading, font, 0);
     lv_obj_set_height(heading, font->line_height);
     lv_label_set_long_mode(heading, reader ? LV_LABEL_LONG_SCROLL_CIRCULAR : LV_LABEL_LONG_DOT);
@@ -185,13 +209,15 @@ void room_watch_conversations_render(const room_conversations_snapshot_t *snapsh
     if (root == NULL) return;
     lv_obj_set_hidden(root, hidden);
     if (hidden) { current = NULL; return; }
-    lv_obj_set_height(list, content_bottom - 168);
-    lv_obj_set_y(previous, content_bottom - 44);
-    lv_obj_set_y(refresh, content_bottom - 44);
-    lv_obj_set_y(next, content_bottom - 44);
-    lv_obj_set_y(creation_button, content_bottom - 44);
-    int row_height = openclaw_density_row_height(true);
-    const lv_font_t *reading_font = openclaw_reading_font();
+    bool wide = room_tab5_layout();
+    int footer = wide ? 96 : 44;
+    lv_obj_set_height(list, content_bottom - (wide ? 320 : 168));
+    lv_obj_set_y(previous, content_bottom - footer);
+    lv_obj_set_y(refresh, content_bottom - footer);
+    lv_obj_set_y(next, content_bottom - footer);
+    lv_obj_set_y(creation_button, content_bottom - footer);
+    int row_height = room_page_row(true);
+    const lv_font_t *reading_font = room_page_font();
     int line_height = reading_font->line_height;
     for (unsigned i = 0; i < ESP_OPENCLAW_DIRECTORY_PAGE_SIZE; ++i) {
         lv_obj_set_y(rows[i], (int)i * (row_height + 8));
@@ -204,14 +230,14 @@ void room_watch_conversations_render(const room_conversations_snapshot_t *snapsh
         lv_obj_set_y(titles[i], title_y);
         lv_obj_set_y(summaries[i], title_y + line_height + 4);
     }
-    lv_obj_set_style_text_font(body_text, openclaw_reading_font(), 0);
+    lv_obj_set_style_text_font(body_text, room_page_font(), 0);
     if (snapshot == NULL) {
         style_heading(false);
         painted_preview = preview;
         painted_creation = creation;
         lv_label_set_text_static(back_text, LV_SYMBOL_LEFT " Agent");
         lv_label_set_text_static(heading, "Conversations");
-        lv_obj_set_width(heading, 316);
+        lv_obj_set_width(heading, wide ? 544 : 316);
         lv_label_set_text_static(message, "Reader unavailable.\n\nGo back and try again.");
         lv_obj_set_hidden(message, false);
         lv_obj_set_hidden(list, true);
@@ -259,9 +285,9 @@ void room_watch_conversations_render(const room_conversations_snapshot_t *snapsh
     bool show_new = !preview && !creation &&
         (state == ROOM_AGENTS_READY || state == ROOM_AGENTS_EMPTY);
     lv_obj_set_hidden(new_chat, !show_new);
-    lv_obj_set_width(heading, show_new ? 184 : 316);
+    lv_obj_set_width(heading, wide ? 544 : show_new ? 184 : 316);
     lv_obj_set_hidden(creation_button, !creation);
-    lv_obj_set_height(body, content_bottom - (creation ? 168 : 112));
+    lv_obj_set_height(body, content_bottom - (wide ? (creation ? 320 : 208) : creation ? 168 : 112));
     if (creation) {
         const room_creation_snapshot_t *draft = &snapshot->creation;
         const char *caption = "Create empty conversation";

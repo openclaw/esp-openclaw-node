@@ -1,6 +1,7 @@
 #include "openclaw_density.h"
 #include "openclaw_reading.h"
 #include "room_watch_agents.h"
+#include "room_tab5_layout.h"
 #include "esp_openclaw_avatar.h"
 
 #include <stdint.h>
@@ -151,6 +152,43 @@ void room_watch_agents_create(lv_obj_t *parent, lv_event_cb_t handler)
     detail_note = label(detail_body, "Applies to your next call.\nThe current call stays with its agent.", 6, 136, 304);
     lv_label_set_long_mode(detail_note, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_color(detail_note, lv_color_hex(0xb9aabe), 0);
+    if (room_tab5_layout()) {
+        room_tab5_header(root, heading, back);
+        room_tab5_button(use_default, 944, 80, 272);
+        lv_obj_set_pos(counter, 944, 40);
+        lv_obj_set_width(counter, 272);
+        lv_obj_set_style_text_font(counter, room_page_font(), 0);
+        lv_obj_set_pos(list, 160, 208);
+        lv_obj_set_width(list, 960);
+        lv_obj_set_pos(message, 160, 240);
+        lv_obj_set_width(message, 960);
+        room_tab5_button(previous, 160, 552, 128);
+        room_tab5_button(refresh, 304, 552, 672);
+        room_tab5_button(next, 992, 552, 128);
+        for (unsigned i = 0; i < ESP_OPENCLAW_DIRECTORY_PAGE_SIZE; ++i) {
+            lv_obj_set_width(rows[i], 948);
+            lv_obj_set_style_bg_color(rows[i], lv_color_hex(0x292723), 0);
+            lv_obj_set_size(avatars[i], 64, 64);
+            lv_obj_set_style_pad_top(avatars[i], 16, 0);
+            lv_obj_set_size(avatar_images[i], 64, 64);
+            lv_obj_set_x(names[i], 104);
+            lv_obj_set_x(ids[i], 104);
+            lv_obj_set_width(names[i], 820);
+            lv_obj_set_width(ids[i], 820);
+            lv_obj_set_style_text_color(ids[i], lv_color_hex(0xb1aaa0), 0);
+        }
+        lv_obj_set_pos(detail_body, 160, 208);
+        lv_obj_set_width(detail_body, 960);
+        lv_obj_set_size(detail_avatar, 96, 96);
+        lv_obj_set_size(detail_image, 96, 96);
+        lv_obj_set_pos(detail_name, 128, 16);
+        lv_obj_set_width(detail_name, 820);
+        lv_obj_set_width(detail_id, 948);
+        lv_obj_set_width(detail_note, 948);
+        lv_obj_set_style_text_color(detail_note, lv_color_hex(0xb1aaa0), 0);
+        room_tab5_button(choose, 160, 552, 464);
+        room_tab5_button(conversations, 656, 552, 464);
+    }
     lv_obj_add_flag(root, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -178,19 +216,25 @@ void room_watch_agents_render(const room_agents_snapshot_t *snapshot, bool hidde
     if (root == NULL) return;
     lv_obj_set_hidden(root, hidden);
     if (hidden) return;
-    lv_obj_set_height(list, content_bottom - 172);
-    lv_obj_set_y(previous, content_bottom - 44);
-    lv_obj_set_y(refresh, content_bottom - 44);
-    lv_obj_set_y(next, content_bottom - 44);
-    int row_height = openclaw_density_row_height(true);
-    const lv_font_t *reading_font = openclaw_reading_font();
+    bool wide = room_tab5_layout();
+    int footer = wide ? 96 : 44;
+    lv_obj_set_height(list, content_bottom - (wide ? 320 : 172));
+    lv_obj_set_y(previous, content_bottom - footer);
+    lv_obj_set_y(refresh, content_bottom - footer);
+    lv_obj_set_y(next, content_bottom - footer);
+    int row_height = room_page_row(true);
+    const lv_font_t *reading_font = room_page_font();
     int line_height = reading_font->line_height;
     lv_obj_set_style_text_font(message, reading_font, 0);
     for (unsigned i = 0; i < ESP_OPENCLAW_DIRECTORY_PAGE_SIZE; ++i) {
         lv_obj_set_y(rows[i], (int)i * (row_height + 8));
         lv_obj_set_height(rows[i], row_height);
-        lv_obj_set_y(avatars[i], (row_height - 36) / 2);
-        lv_obj_set_y(avatar_images[i], (row_height - 36) / 2);
+        lv_obj_set_y(avatars[i], (row_height - (wide ? 64 : 36)) / 2);
+        lv_obj_set_y(avatar_images[i], (row_height - (wide ? 64 : 36)) / 2);
+        if (wide) {
+            lv_obj_set_style_text_font(avatars[i], reading_font, 0);
+            lv_obj_set_style_pad_top(avatars[i], (64 - line_height) / 2, 0);
+        }
         lv_obj_set_style_text_font(names[i], reading_font, 0);
         lv_obj_set_style_text_font(ids[i], reading_font, 0);
         int name_y = (row_height - 2 * line_height - 4) / 2;
@@ -224,9 +268,9 @@ void room_watch_agents_render(const room_agents_snapshot_t *snapshot, bool hidde
     lv_obj_set_hidden(choose, !detail);
     lv_obj_set_hidden(conversations, !detail);
     if (detail) {
-        lv_obj_set_height(detail_body, content_bottom - 220);
-        lv_obj_set_y(choose, content_bottom - 98);
-        lv_obj_set_y(conversations, content_bottom - 44);
+        lv_obj_set_height(detail_body, content_bottom - (wide ? 320 : 220));
+        lv_obj_set_y(choose, content_bottom - (wide ? 96 : 98));
+        lv_obj_set_y(conversations, content_bottom - footer);
         lv_obj_set_style_text_font(detail_name, reading_font, 0);
         lv_obj_set_style_text_font(detail_id, reading_font, 0);
         lv_obj_set_style_text_font(detail_note, reading_font, 0);
@@ -242,7 +286,7 @@ void room_watch_agents_render(const room_agents_snapshot_t *snapshot, bool hidde
             : "Applies to your next call.\nThe current call stays with its agent.");
         lv_obj_update_layout(detail_body);
         int identity_y = lv_obj_get_y(detail_name) + lv_obj_get_height(detail_name);
-        if (identity_y < 64) identity_y = 64;
+        if (identity_y < (wide ? 96 : 64)) identity_y = wide ? 96 : 64;
         lv_obj_set_y(detail_id, identity_y + 12);
         lv_obj_set_y(detail_note, identity_y + 12 + lv_obj_get_height(detail_id) + 16);
         lv_obj_update_layout(detail_body);

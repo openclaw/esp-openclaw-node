@@ -498,7 +498,7 @@ esp_err_t room_ui_watch_reader(const room_conversations_snapshot_t *snapshot, bo
                      snapshot->preview_state == ROOM_AGENTS_IDLE))) return ESP_ERR_INVALID_STATE;
     if (!room_board_display_lock(150)) return ESP_ERR_TIMEOUT;
     taskENTER_CRITICAL(&state_mux);
-    bool valid = watch_home_enabled && !diagnostics_open && watch_page == ROOM_WATCH_AGENTS &&
+    bool valid = (watch_home_enabled || tab5_home_enabled) && !diagnostics_open && watch_page == ROOM_WATCH_AGENTS &&
         current_agents.state == ROOM_AGENTS_READY && painted_agents.state == ROOM_AGENTS_READY &&
         current_agents.revision == painted_agents.revision;
     bool member = false;
@@ -529,7 +529,7 @@ esp_err_t room_ui_watch_reader(const room_conversations_snapshot_t *snapshot, bo
 bool room_ui_wants_conversation_resume(unsigned generation)
 {
     taskENTER_CRITICAL(&state_mux);
-    bool wanted = watch_home_enabled && watch_page == ROOM_WATCH_CONVERSATIONS &&
+    bool wanted = (watch_home_enabled || tab5_home_enabled) && watch_page == ROOM_WATCH_CONVERSATIONS &&
         !diagnostics_open && conversation_generation == generation;
     taskEXIT_CRITICAL(&state_mux);
     return wanted;
@@ -1299,7 +1299,11 @@ void room_ui_init(void)
     tab5_home_enabled = board != NULL && board->model_identifier != NULL &&
         strcmp(board->model_identifier, "m5stack-tab5") == 0 &&
         lv_display_get_horizontal_resolution(display) == 1280 && lv_display_get_vertical_resolution(display) == 720;
-    if (tab5_home_enabled) room_tab5_ui_create(lv_layer_top(), watch_navigation_clicked);
+    if (tab5_home_enabled) {
+        room_tab5_ui_create(lv_layer_top(), watch_navigation_clicked);
+        room_watch_agents_create(lv_layer_top(), watch_agents_clicked);
+        room_watch_conversations_create(lv_layer_top(), watch_conversations_clicked);
+    }
     if (watch_home_enabled) {
         lv_obj_set_style_bg_color(lv_screen_active(), lv_color_hex(0x15101b), 0);
         lv_obj_set_style_bg_grad_color(lv_screen_active(), lv_color_hex(0x362031), 0);
@@ -1527,7 +1531,8 @@ static bool room_ui_render_locked(void)
     bool call_page = (watch_home_enabled || tab5_home_enabled) && page == ROOM_WATCH_CALL;
     bool call_in_progress = facts.talk == ROOM_UI_TALK_CONNECTING || facts.talk == ROOM_UI_TALK_ACTIVE;
     // The call page keeps its control; other pages reserve space only during a call.
-    int content_bottom = call_in_progress || call_page ? 370 : 432;
+    int content_bottom = tab5_home_enabled ? (call_in_progress || call_page ? 536 : 656) :
+        call_in_progress || call_page ? 370 : 432;
     bool voice_home = watch_home_enabled && voice_action_handler != NULL &&
         facts.talk != ROOM_UI_TALK_CONNECTING && facts.talk != ROOM_UI_TALK_ACTIVE &&
         facts.talk != ROOM_UI_TALK_STOPPING;
@@ -1563,7 +1568,14 @@ static bool room_ui_render_locked(void)
             page == ROOM_WATCH_AGENTS || page == ROOM_WATCH_DEVICES || settings;
         room_watch_status_render(&facts, !status_page || canvas_active || overlay || camera_active);
     }
-    if (tab5_home_enabled) room_tab5_ui_render(page, &facts, &target, state, detail, canvas_active || overlay);
+    if (tab5_home_enabled) {
+        room_tab5_ui_render(page, &facts, &target, state, detail,
+            canvas_active || overlay);
+        room_watch_agents_render(&painted_agents, canvas_active || overlay || page != ROOM_WATCH_AGENTS || chats,
+            target.selected ? target.id : "", target.expired, selecting, selection_error, content_bottom);
+        room_watch_conversations_render(painted_conversations,
+            canvas_active || overlay || page != ROOM_WATCH_AGENTS || !chats, content_bottom);
+    }
     if (talk_pill != NULL) {
         if (watch_home_enabled) {
             /* Retained Canvas content keeps its existing top action clearance. */

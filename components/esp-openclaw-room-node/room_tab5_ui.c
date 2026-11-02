@@ -4,8 +4,9 @@
 
 enum { INK = 0xf1ede5, MUTED = 0xb1aaa0, BACKGROUND = 0x1c1b19, SURFACE = 0x292723 };
 static lv_obj_t *root, *heading, *status, *body, *back, *identity, *avatar, *reconnect;
-static lv_obj_t *menu_rows[3];
+static lv_obj_t *menu_rows[5];
 static lv_image_dsc_t avatar_sources[3];
+static lv_obj_t *menu_list;
 
 static const lv_font_t *body_font(void)
 {
@@ -57,7 +58,7 @@ void room_tab5_ui_create(lv_obj_t *parent, lv_event_cb_t navigation)
     lv_obj_set_style_bg_color(root, lv_color_hex(BACKGROUND), 0);
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
     lv_obj_remove_flag(root, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
-    status = label(root, "", 64, 24, 1152);
+    status = label(parent, "", 64, 24, 1152);
     lv_obj_set_style_text_color(status, lv_color_hex(MUTED), 0);
     back = button(LV_SYMBOL_LEFT " Home", 64, 80, 256, ROOM_WATCH_HOME, navigation);
     button(LV_SYMBOL_BARS " Menu", 944, 80, 272, ROOM_WATCH_MENU, navigation);
@@ -83,23 +84,38 @@ void room_tab5_ui_create(lv_obj_t *parent, lv_event_cb_t navigation)
     body = label(root, "", 160, 424, 960);
     lv_obj_set_style_text_color(body, lv_color_hex(MUTED), 0);
     lv_obj_set_style_text_align(body, LV_TEXT_ALIGN_CENTER, 0);
+    menu_list = lv_obj_create(root);
+    lv_obj_remove_style_all(menu_list);
+    lv_obj_set_pos(menu_list, 160, 208);
+    lv_obj_set_size(menu_list, 960, 448);
+    lv_obj_set_scroll_dir(menu_list, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(menu_list, LV_SCROLLBAR_MODE_AUTO);
     menu_rows[0] = button(LV_SYMBOL_CALL "  Talk to agent", 160, 208, 960, ROOM_WATCH_CALL, navigation);
     menu_rows[1] = button(LV_SYMBOL_WIFI "  Connection", 160, 320, 960, ROOM_WATCH_CONNECTION, navigation);
     menu_rows[2] = button(LV_SYMBOL_IMAGE "  Canvas", 160, 432, 960, ROOM_WATCH_CANVAS, navigation);
+    menu_rows[3] = button(LV_SYMBOL_LIST "  Agents", 160, 544, 960, ROOM_WATCH_AGENTS, navigation);
+    menu_rows[4] = button(LV_SYMBOL_ENVELOPE "  Conversations", 160, 656, 960, ROOM_WATCH_CONVERSATIONS, navigation);
+    for (unsigned i = 0; i < 5; ++i) {
+        lv_obj_set_parent(menu_rows[i], menu_list);
+        lv_obj_set_pos(menu_rows[i], 0, (int)i * 112);
+    }
 }
 
 bool room_tab5_ui_supports(room_watch_page_t page)
 {
     return page == ROOM_WATCH_HOME || page == ROOM_WATCH_MENU || page == ROOM_WATCH_CALL ||
-        page == ROOM_WATCH_CONNECTION || page == ROOM_WATCH_CANVAS;
+        page == ROOM_WATCH_CONNECTION || page == ROOM_WATCH_CANVAS ||
+        page == ROOM_WATCH_AGENTS || page == ROOM_WATCH_CONVERSATIONS;
 }
 
 void room_tab5_ui_render(room_watch_page_t page, const room_ui_facts_t *facts,
     const room_ui_talk_target_t *target, room_ui_state_t state, const char *detail, bool hidden)
 {
     if (root == NULL) return;
-    lv_obj_set_hidden(root, hidden);
+    lv_obj_set_hidden(root, hidden || page == ROOM_WATCH_AGENTS);
+    lv_obj_set_hidden(status, hidden);
     if (hidden) return;
+    lv_obj_move_foreground(status);
     bool home = page == ROOM_WATCH_HOME;
     bool menu = page == ROOM_WATCH_MENU;
     bool call = page == ROOM_WATCH_CALL;
@@ -123,12 +139,13 @@ void room_tab5_ui_render(room_watch_page_t page, const room_ui_facts_t *facts,
     bool picture = kind == ESP_OPENCLAW_AVATAR_FOX || kind == ESP_OPENCLAW_AVATAR_LOBSTER;
     lv_obj_set_hidden(avatar, !(home || call) || !picture);
     if (picture) lv_image_set_src(avatar, &avatar_sources[kind]);
-    for (unsigned i = 0; i < 3; ++i) lv_obj_set_hidden(menu_rows[i], !menu);
+    lv_obj_set_hidden(menu_list, !menu);
+    lv_obj_set_height(menu_list, active || facts->talk == ROOM_UI_TALK_CONNECTING ? 312 : 448);
     lv_obj_set_hidden(heading, menu);
     lv_obj_set_hidden(body, menu);
     lv_obj_set_y(heading, home || call ? 368 : 220);
     lv_obj_set_y(body, home || call ? 424 : 284);
-    const char *title = connection ? "Connection" : page == ROOM_WATCH_CANVAS ? "No canvas yet" :
+    const char *title = page == ROOM_WATCH_CONVERSATIONS ? "Opening your conversation..." : connection ? "Connection" : page == ROOM_WATCH_CANVAS ? "No canvas yet" :
         facts->talk == ROOM_UI_TALK_CONNECTING ? "Connecting your call..." :
         facts->talk == ROOM_UI_TALK_STOPPING ? "Ending your call..." : active ? "Your call is open." :
         state == ROOM_UI_ERROR ? "Something needs attention." : state == ROOM_UI_SETUP ? "Let's get connected." :

@@ -226,7 +226,10 @@ void room_watch_settings_render(room_watch_page_t page, room_watch_page_t parent
     if (tab5) {
         room_tab5_header(root, heading, back);
         lv_obj_set_height(native_detail, content_bottom - content_top);
-        if (native_page != page) lv_obj_scroll_to_y(native_detail, 0, LV_ANIM_OFF);
+        if (native_page != page) {
+            lv_obj_scroll_to_y(native_detail, 0, LV_ANIM_OFF);
+            lv_obj_scroll_to_y(list, 0, LV_ANIM_OFF);
+        }
         native_page = page;
     }
     bool display = page == ROOM_WATCH_DISPLAY;
@@ -248,8 +251,8 @@ void room_watch_settings_render(room_watch_page_t page, room_watch_page_t parent
         lv_obj_readjust_scroll(help_body, LV_ANIM_OFF);
         if (entering_topic) lv_obj_scroll_to_y(help_body, 0, LV_ANIM_OFF);
     }
-    lv_label_set_text_static(heading, topic != NULL ? topic->title : help ? "Help" : display ? "Display" : brightness_page ? "Brightness" : reading ? "Reading text" : density ? "List spacing" : permissions ? "Messaging" : page == ROOM_WATCH_LOCAL_DEVICE ? "This Watch" : "Settings");
-    lv_label_set_text_static(lv_obj_get_child(back, 0), parent == ROOM_WATCH_LOCAL_DEVICE ? LV_SYMBOL_LEFT " This Watch" :
+    lv_label_set_text_static(heading, topic != NULL ? topic->title : help ? "Help" : display ? "Display" : brightness_page ? "Brightness" : reading ? "Reading text" : density ? "List spacing" : permissions ? "Messaging" : page == ROOM_WATCH_LOCAL_DEVICE ? (tab5 ? "This Tab5" : "This Watch") : "Settings");
+    lv_label_set_text_static(lv_obj_get_child(back, 0), parent == ROOM_WATCH_LOCAL_DEVICE ? (tab5 ? LV_SYMBOL_LEFT " This Tab5" : LV_SYMBOL_LEFT " This Watch") :
         parent == ROOM_WATCH_SETTINGS ? LV_SYMBOL_LEFT " Settings" :
         parent == ROOM_WATCH_HELP ? LV_SYMBOL_LEFT " Help" :
         parent == ROOM_WATCH_DISPLAY ? LV_SYMBOL_LEFT " Display" :

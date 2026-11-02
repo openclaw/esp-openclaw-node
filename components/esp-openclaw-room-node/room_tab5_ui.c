@@ -6,7 +6,7 @@
 
 enum { INK = 0xf1ede5, MUTED = 0xb1aaa0, BACKGROUND = 0x1c1b19, SURFACE = 0x292723 };
 static lv_obj_t *root, *heading, *status, *body, *back, *identity, *avatar, *reconnect;
-static lv_obj_t *menu_rows[6];
+static lv_obj_t *menu_rows[7];
 static lv_image_dsc_t avatar_sources[3];
 static lv_obj_t *menu_list;
 static lv_obj_t *connection_body, *connection_text, *connection_status, *connection_setup;
@@ -78,7 +78,7 @@ void room_tab5_ui_create(lv_obj_t *parent, lv_event_cb_t navigation)
     lv_obj_remove_flag(root, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
     status = label(parent, "", 64, 24, 1152);
     lv_obj_set_style_text_color(status, lv_color_hex(MUTED), 0);
-    back = button(LV_SYMBOL_LEFT " Home", 64, 80, 256, ROOM_WATCH_HOME, navigation);
+    back = button(LV_SYMBOL_LEFT " Home", 64, 80, 256, ROOM_WATCH_BACK, navigation);
     button(LV_SYMBOL_BARS " Menu", 944, 80, 272, ROOM_WATCH_MENU, navigation);
     reconnect = button(LV_SYMBOL_WIFI "  Connection", 320, 552, 640, ROOM_WATCH_CONNECTION, navigation);
     lv_obj_set_height(reconnect, 104);
@@ -113,8 +113,9 @@ void room_tab5_ui_create(lv_obj_t *parent, lv_event_cb_t navigation)
     menu_rows[2] = button(LV_SYMBOL_IMAGE "  Canvas", 160, 432, 960, ROOM_WATCH_CANVAS, navigation);
     menu_rows[3] = button(LV_SYMBOL_LIST "  Agents", 160, 544, 960, ROOM_WATCH_AGENTS, navigation);
     menu_rows[4] = button(LV_SYMBOL_ENVELOPE "  Conversations", 160, 656, 960, ROOM_WATCH_CONVERSATIONS, navigation);
-    menu_rows[5] = button(LV_SYMBOL_SETTINGS "  Settings", 160, 768, 960, ROOM_WATCH_SETTINGS, navigation);
-    for (unsigned i = 0; i < 6; ++i) {
+    menu_rows[5] = button(LV_SYMBOL_CHARGE "  Devices", 160, 768, 960, ROOM_WATCH_DEVICES, navigation);
+    menu_rows[6] = button(LV_SYMBOL_SETTINGS "  Settings", 160, 880, 960, ROOM_WATCH_SETTINGS, navigation);
+    for (unsigned i = 0; i < 7; ++i) {
         lv_obj_set_parent(menu_rows[i], menu_list);
         lv_obj_set_pos(menu_rows[i], 0, (int)i * 112);
     }
@@ -133,7 +134,7 @@ void room_tab5_ui_create(lv_obj_t *parent, lv_event_cb_t navigation)
 
 bool room_tab5_settings_page(room_watch_page_t page)
 {
-    return page == ROOM_WATCH_SETTINGS || page == ROOM_WATCH_DISPLAY || page == ROOM_WATCH_BRIGHTNESS ||
+    return page == ROOM_WATCH_SETTINGS || page == ROOM_WATCH_LOCAL_DEVICE || page == ROOM_WATCH_DISPLAY || page == ROOM_WATCH_BRIGHTNESS ||
         page == ROOM_WATCH_READING || page == ROOM_WATCH_DENSITY || page == ROOM_WATCH_MESSAGING ||
         (page >= ROOM_WATCH_HELP && page <= ROOM_WATCH_HELP_STATUS);
 }
@@ -142,16 +143,16 @@ bool room_tab5_ui_supports(room_watch_page_t page)
 {
     return page == ROOM_WATCH_HOME || page == ROOM_WATCH_MENU || page == ROOM_WATCH_CALL ||
         page == ROOM_WATCH_CONNECTION || page == ROOM_WATCH_CANVAS ||
-        page == ROOM_WATCH_AGENTS || page == ROOM_WATCH_CONVERSATIONS || room_tab5_settings_page(page);
+        page == ROOM_WATCH_AGENTS || page == ROOM_WATCH_CONVERSATIONS || page == ROOM_WATCH_DEVICES || room_tab5_settings_page(page);
 }
 
-void room_tab5_ui_render(room_watch_page_t page, const room_ui_facts_t *facts,
+void room_tab5_ui_render(room_watch_page_t page, room_watch_page_t parent, const room_ui_facts_t *facts,
     const room_ui_talk_target_t *target, room_ui_state_t state, const char *detail, bool hidden)
 {
     if (root == NULL) return;
     bool entering_connection = !connection_active && !hidden && page == ROOM_WATCH_CONNECTION;
     connection_active = !hidden && page == ROOM_WATCH_CONNECTION;
-    lv_obj_set_hidden(root, hidden || page == ROOM_WATCH_AGENTS || room_tab5_settings_page(page));
+    lv_obj_set_hidden(root, hidden || page == ROOM_WATCH_AGENTS || page == ROOM_WATCH_DEVICES || room_tab5_settings_page(page));
     lv_obj_set_hidden(status, hidden);
     if (hidden) return;
     lv_obj_move_foreground(status);
@@ -183,6 +184,10 @@ void room_tab5_ui_render(room_watch_page_t page, const room_ui_facts_t *facts,
         }
     }
     lv_obj_set_hidden(back, home);
+    const char *back_label = parent == ROOM_WATCH_LOCAL_DEVICE ? LV_SYMBOL_LEFT " This Tab5" :
+        parent == ROOM_WATCH_SETTINGS ? LV_SYMBOL_LEFT " Settings" :
+        parent == ROOM_WATCH_MENU ? LV_SYMBOL_LEFT " Menu" : LV_SYMBOL_LEFT " Home";
+    lv_label_set_text_static(lv_obj_get_child(back, 0), back_label);
     lv_obj_set_hidden(identity, !home || active || facts->talk == ROOM_UI_TALK_CONNECTING || facts->talk == ROOM_UI_TALK_STOPPING);
     bool unavailable = facts->talk != ROOM_UI_TALK_READY && facts->talk != ROOM_UI_TALK_ACTIVE &&
         facts->talk != ROOM_UI_TALK_CONNECTING && facts->talk != ROOM_UI_TALK_STOPPING;

@@ -1314,6 +1314,7 @@ void room_ui_init(void)
         room_tab5_ui_create(lv_layer_top(), watch_navigation_clicked);
         room_watch_settings_create(lv_layer_top(), watch_navigation_clicked, watch_messaging_clicked);
         room_watch_agents_create(lv_layer_top(), watch_agents_clicked);
+        room_watch_devices_create(lv_layer_top(), watch_devices_clicked);
         room_watch_conversations_create(lv_layer_top(), watch_conversations_clicked);
     }
     if (watch_home_enabled) {
@@ -1584,7 +1585,7 @@ static bool room_ui_render_locked(void)
         room_watch_status_render(&facts, !status_page || canvas_active || overlay || camera_active);
     }
     if (tab5_home_enabled) {
-        room_tab5_ui_render(page, &facts, &target, state, detail,
+        room_tab5_ui_render(page, parent, &facts, &target, state, detail,
             canvas_active || overlay);
         room_watch_agents_render(&painted_agents, canvas_active || overlay || page != ROOM_WATCH_AGENTS || chats,
             target.selected ? target.id : "", target.expired, selecting, selection_error, content_bottom);
@@ -1592,6 +1593,7 @@ static bool room_ui_render_locked(void)
             canvas_active || overlay || page != ROOM_WATCH_AGENTS || !chats, content_bottom);
         room_watch_settings_render(page, parent, brightness, brightness_failed, camera_minimum, &messaging,
             canvas_active || overlay || !room_tab5_settings_page(page), content_bottom);
+        room_watch_devices_render(painted_devices, canvas_active || overlay || page != ROOM_WATCH_DEVICES, content_bottom);
     }
     bool live_visible = (watch_home_enabled || tab5_home_enabled) && !canvas_active && !overlay &&
         facts.talk == ROOM_UI_TALK_ACTIVE && painted_live_talk.sequence != 0 &&

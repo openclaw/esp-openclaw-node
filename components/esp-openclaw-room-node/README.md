@@ -288,7 +288,8 @@ hardware behavior.
 ## Tab5 Home and navigation
 
 The 1280 × 720 landscape Tab5 uses a dedicated Home with agent identity, live
-connection facts and **Talk to agent**. **Menu** opens Talk, Connection and Canvas.
+connection facts and **Talk to agent**. **Menu** opens Talk, Connection, Canvas,
+Agents, Conversations, Devices, and Settings.
 Connection explains the existing USB setup route; QR and Bluetooth pairing are
 not implemented. The next Talk recipient stays fenced through touch admission;
 an active call keeps its own recipient. **Return to call** opens its End control
@@ -443,6 +444,13 @@ until completion without disconnecting the shared Talk socket.
 Each refresh has its own 15-second deadline, including when it waits behind
 an invalidated request. Expiry reports a timeout and requires an explicit
 retry; the old callback cannot keep a reopened view loading indefinitely.
+
+On the Tab5, **Menu → Devices** uses the same inventory and refresh lifecycle,
+with 96-pixel minimum controls and scrollable device details. **This Tab5**
+remains available offline and opens local Display, Connection, USB setup,
+Messaging, and Help. Returning to an active call preserves its owner and does
+not start or stop Talk. Device discovery is read-only; these pages do not invoke
+remote devices.
 
 On the Watch, **Menu → Devices** keeps **This Watch** available offline and
 shows three Gateway devices per page. Tap a remote device for its model,

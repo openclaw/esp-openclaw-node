@@ -2051,6 +2051,54 @@ static void check_devices(const char *path, bool tab5)
         snprintf(output, sizeof(output), "%s-device-detail.ppm", path);
         write_frame(output);
     }
+    if (!tab5) {
+        strcpy(view.devices[0].name, "Workshop controller with a long name that must remain readable");
+        strcpy(view.devices[0].model, "WWWW WWWW WWWW WWWW WWWW WWWW WWWW WWWW WWWW WWWW WWWW WWWW WWWW");
+        room_ui_facts_t facts = {.wifi = ROOM_UI_WIFI_CONNECTED,
+            .gateway = ROOM_UI_GATEWAY_CONNECTED, .talk = ROOM_UI_TALK_ACTIVE};
+        room_ui_store_facts(&facts);
+        openclaw_reading_set_size(OPENCLAW_READING_LARGE);
+        ++view.revision;
+        room_ui_store_devices(&view, device_generation);
+        lv_obj_t *name = find_visible_text(lv_layer_top(), view.devices[0].name);
+        char model_text[96];
+        snprintf(model_text, sizeof(model_text), "Model: %s", view.devices[0].model);
+        lv_obj_t *model = find_visible_text(lv_layer_top(), model_text);
+        assert(name && model);
+        if (path) {
+            char output[1024];
+            snprintf(output, sizeof(output), "%s-device-long-detail.ppm", path);
+            write_frame(output);
+        }
+        lv_point_t last;
+        lv_label_get_letter_pos(name, strlen(view.devices[0].name) - 1, &last);
+        assert(last.y + openclaw_reading_font()->line_height <= lv_obj_get_height(name));
+        assert(lv_obj_get_style_text_font(model, 0) == openclaw_reading_font());
+        assert(lv_label_get_long_mode(model) == LV_LABEL_LONG_WRAP);
+        lv_obj_t *body = lv_obj_get_parent(name);
+        assert(lv_obj_is_scrollable(body));
+        assert(lv_obj_get_scroll_bottom(body) > 0 && lv_obj_get_scroll_top(body) == 0);
+        lv_obj_t *pairing = find_visible_text(lv_layer_top(), "Pairing: Paired");
+        lv_obj_scroll_to_view(pairing, LV_ANIM_OFF);
+        lv_obj_update_layout(body);
+        assert(lv_obj_get_scroll_top(body) > 0);
+        lv_area_t viewport, bounds;
+        lv_obj_get_coords(body, &viewport);
+        lv_obj_get_coords(pairing, &bounds);
+        assert(bounds.y1 >= viewport.y1 && bounds.y2 <= viewport.y2);
+        lv_obj_t *call = find_visible_text(lv_layer_top(), "Return to call");
+        assert(call);
+        lv_obj_get_coords(lv_obj_get_parent(call), &bounds);
+        assert(viewport.y2 < bounds.y1);
+        if (path) {
+            char output[1024];
+            snprintf(output, sizeof(output), "%s-device-long-detail-scrolled.ppm", path);
+            write_frame(output);
+        }
+        openclaw_reading_set_size(OPENCLAW_READING_STANDARD);
+        facts.talk = ROOM_UI_TALK_READY;
+        room_ui_store_facts(&facts);
+    }
     click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " Devices")));
     click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_RIGHT)));
     assert(visible_watch_text("4-4 / 4") && visible_watch_text("Pocket node"));

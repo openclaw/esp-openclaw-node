@@ -439,12 +439,15 @@ browser prototype simulates these boundaries without recording audio.
 Production must not route an unreviewed recording straight to the agent while
 calling the UI a review-before-send flow.
 
-Current watch firmware provides
+Current Watch firmware provides
 [Start/Stop Talk](../../components/esp-openclaw-room-node/room_ui_controller.c)
-and [WebRTC media startup](../../components/esp-openclaw-room-node/esp_openclaw_room_node.c).
-It does **not** already provide this bounded PTT/transcription/review contract.
-A transcription operation and a conversational submission need distinct
-capability and permission checks.
+and [reviewed voice drafts](../../components/esp-openclaw-room-node/room_voice_draft.c).
+Hold Record for 250 ms, then release to transcribe or slide up to cancel.
+The 30-second cap ends capture automatically. The completed transcript requires
+an explicit Send action. Transcription and chat submission use separate permission
+checks. See the [current firmware behavior](../../components/esp-openclaw-room-node/README.md#voice-agent-actions)
+for approval requirements and unknown-delivery handling. Physical capture,
+gesture timing, transcription and audible output still need device verification.
 
 The [watch audio topology](../../examples/waveshare-esp32-s3-touch-amoled-1.8-room-node/README.md)
 suppresses capture during playback; no interruption or acoustic echo

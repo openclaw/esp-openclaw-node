@@ -28,6 +28,15 @@ display unavailable RSSI as `unknown`.
 
 ## Shared setup session owner
 
+`esp_openclaw_node_wifi_setup_seed()` fills 32 bytes for native setup bootstrap
+under the existing station mutex. It requires a running driver, no active radio
+operation and a current `WIFI_PS_NONE` result. It preserves the link, configuration
+and reconnect policy, and acquires no setup lease. Down, busy, sleeping or remote
+radios fail without changing the output. The caller must wipe this seed after
+deriving its ephemeral secret; this API does not start BLE or provide pairing.
+The RF requirement follows the pinned
+[ESP-IDF RNG contract](https://github.com/espressif/esp-idf/blob/b774170ff46c393eeb5e495ea37936038d3f4f4f/docs/en/api-reference/system/random.rst).
+
 `esp_openclaw_setup_frame.h` provides the allocation-free
 [setup frame codec](../../docs/design/mobile-setup-frames.md). It validates the
 shared byte envelope and bounded fragment sizes; it does not authenticate a

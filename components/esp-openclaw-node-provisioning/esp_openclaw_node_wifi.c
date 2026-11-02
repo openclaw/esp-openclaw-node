@@ -6,6 +6,8 @@
 
 #include "esp_openclaw_node_wifi.h"
 
+#include "esp_random.h"
+
 #include <stdbool.h>
 #include <string.h>
 
@@ -678,6 +680,28 @@ esp_err_t esp_openclaw_node_wifi_start(void)
 
     s_started = true;
     return ESP_OK;
+}
+
+esp_err_t esp_openclaw_node_wifi_setup_seed(uint8_t seed[32])
+{
+#if NATIVE_WIFI_SETUP
+    if (!seed) return ESP_ERR_INVALID_ARG;
+    if (!s_started || !s_wifi_lock) return ESP_ERR_INVALID_STATE;
+    xSemaphoreTake(s_wifi_lock, portMAX_DELAY);
+    esp_err_t error = !s_driver_initialized || !s_driver_running ? ESP_ERR_INVALID_STATE :
+        s_operation_in_progress ? ESP_ERR_WIFI_STATE : ESP_OK;
+    if (error == ESP_OK) {
+        wifi_ps_type_t mode;
+        error = esp_wifi_get_ps(&mode);
+        if (error == ESP_OK && mode != WIFI_PS_NONE) error = ESP_ERR_WIFI_STATE;
+    }
+    if (error == ESP_OK) esp_fill_random(seed, 32);
+    xSemaphoreGive(s_wifi_lock);
+    return error;
+#else
+    (void)seed;
+    return ESP_ERR_NOT_SUPPORTED;
+#endif
 }
 
 esp_err_t esp_openclaw_node_wifi_set_credentials(const char *ssid, const char *passphrase)

@@ -28,6 +28,7 @@ const char *esp_err_to_name(esp_err_t);
 #define ESP_LOG_NONE 0
 void esp_log_level_set(const char *, int);
 int esp_log_level_get(const char *);
+void esp_fill_random(void *, size_t);
 
 typedef uint32_t TickType_t;
 typedef uint32_t EventBits_t;
@@ -89,6 +90,8 @@ esp_err_t esp_wifi_start(void);
 esp_err_t esp_wifi_stop(void);
 esp_err_t esp_wifi_restore(void);
 esp_err_t esp_wifi_set_ps(int);
+typedef int wifi_ps_type_t;
+esp_err_t esp_wifi_get_ps(wifi_ps_type_t *);
 esp_err_t esp_wifi_connect(void);
 esp_err_t esp_wifi_disconnect(void);
 esp_err_t esp_wifi_sta_get_ap_info(wifi_ap_record_t *);

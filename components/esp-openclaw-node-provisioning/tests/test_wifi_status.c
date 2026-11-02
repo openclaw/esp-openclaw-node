@@ -11,6 +11,8 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
+#include <pthread.h>
 
 const char *WIFI_EVENT = "wifi", *IP_EVENT = "ip";
 static esp_event_handler_t ip_handler, wifi_handler;
@@ -44,6 +46,21 @@ static bool disconnect_on_unlock;
 static esp_openclaw_node_wifi_setup_lease_t scan_lease;
 static uint16_t scan_found;
 static void (*during_scan)(void);
+static pthread_mutex_t wifi_mutex = PTHREAD_MUTEX_INITIALIZER;
+static unsigned random_calls;
+static bool seed_expected;
+static esp_err_t get_ps_result;
+static wifi_ps_type_t power_save = WIFI_PS_NONE;
+static unsigned power_reads;
+
+void esp_fill_random(void *output, size_t size)
+{
+    if (seed_expected) {
+        assert(size == 32 && initialized && running);
+        assert(pthread_mutex_trylock(&wifi_mutex) == EBUSY);
+    }
+    memset(output, (int)++random_calls, size);
+}
 
 static void check(bool condition, const char *message);
 
@@ -54,12 +71,12 @@ EventBits_t xEventGroupSetBits(EventGroupHandle_t group, EventBits_t bits) { (vo
 EventBits_t xEventGroupWaitBits(EventGroupHandle_t group, EventBits_t bits, int clear, int all, TickType_t timeout)
 { (void)group; (void)bits; (void)clear; (void)all; (void)timeout; return event_bits; }
 SemaphoreHandle_t xSemaphoreCreateMutex(void)
-{ static bool locks[4]; static unsigned count; assert(count < 4); return &locks[count++]; }
+{ return &wifi_mutex; }
 int xSemaphoreTake(SemaphoreHandle_t lock, TickType_t timeout)
-{ assert(lock && !*(bool *)lock); (void)timeout; *(bool *)lock = true; return 1; }
+{ (void)timeout; assert(pthread_mutex_lock(lock) == 0); return 1; }
 int xSemaphoreGive(SemaphoreHandle_t lock)
 {
-    assert(lock && *(bool *)lock); *(bool *)lock = false;
+    assert(pthread_mutex_unlock(lock) == 0);
     if (probe_reconnect_unlock) {
         probe_reconnect_unlock = false;
         esp_openclaw_node_wifi_setup_lease_t lease = 0;
@@ -134,6 +151,7 @@ esp_err_t esp_wifi_start(void) { assert(initialized); ++driver_mutations; if (st
 esp_err_t esp_wifi_stop(void) { assert(initialized); ++driver_mutations; if (stop_result == ESP_OK) running = false; return stop_result; }
 esp_err_t esp_wifi_restore(void) { ++driver_mutations; return ESP_OK; }
 esp_err_t esp_wifi_set_ps(int mode) { (void)mode; ++driver_mutations; return ps_result; }
+esp_err_t esp_wifi_get_ps(wifi_ps_type_t *mode) { ++power_reads; *mode = power_save; return get_ps_result; }
 esp_err_t esp_wifi_connect(void) { ++driver_mutations; ++connects; return connect_result; }
 esp_err_t esp_wifi_disconnect(void) { ++driver_mutations; return ESP_OK; }
 esp_err_t esp_wifi_sta_get_ap_info(wifi_ap_record_t *record) { ++ap_reads; *record = ap; return ap_result; }
@@ -154,6 +172,11 @@ esp_err_t esp_wifi_scan_start(const wifi_scan_config_t *config, bool block)
         esp_openclaw_node_wifi_setup_lease_t lease = 0;
         check(esp_openclaw_node_wifi_setup_acquire(&lease) == ESP_ERR_WIFI_STATE,
               "setup cannot replace an active scan");
+        uint8_t seed[32] = {0x72}; unsigned reads = power_reads, calls = random_calls;
+        esp_err_t seed_result = esp_openclaw_node_wifi_setup_seed(seed);
+        check((seed_result == ESP_ERR_WIFI_STATE || seed_result == ESP_ERR_NOT_SUPPORTED) &&
+              reads == power_reads && calls == random_calls && seed[0] == 0x72,
+              "busy/unsupported entropy reads neither SDK nor output");
     }
     if (scan_lease != 0) {
         esp_err_t resumed = ESP_FAIL;
@@ -416,6 +439,9 @@ static void check_setup_attempts(void)
           "stale attempt cannot cancel its replacement");
     unsigned writes = config_writes;
     advance_to_barrier(lease, id);
+    uint8_t seed[32] = {0x72}; unsigned reads = power_reads, calls = random_calls;
+    assert(esp_openclaw_node_wifi_setup_seed(seed) == ESP_ERR_INVALID_STATE &&
+        reads == power_reads && calls == random_calls && seed[0] == 0x72);
     struct queued_event stale_marker = queue[0];
     /* A prior connection's queued events, including IP queued by another event,
      * must drain before a new configuration is committed. */
@@ -1268,6 +1294,9 @@ static void check_setup_mailbox(void) { assert(!esp_openclaw_setup_security2());
 
 int main(void)
 {
+    uint8_t seed[32] = {0x72}; unsigned random_before = random_calls;
+    esp_err_t seed_error = esp_openclaw_node_wifi_setup_seed(seed);
+    assert((seed_error == ESP_ERR_INVALID_STATE || seed_error == ESP_ERR_NOT_SUPPORTED) && seed[0] == 0x72 && random_calls == random_before);
     assert(esp_openclaw_node_register_device_commands(NULL, NULL) == ESP_OK);
     cJSON *result = status();
     check(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(result, "connected")), "uninitialized Wi-Fi is disconnected");
@@ -1275,6 +1304,20 @@ int main(void)
     cJSON_Delete(result);
 
     assert(esp_openclaw_node_wifi_start() == ESP_OK);
+#if SOC_WIFI_SUPPORTED && !CONFIG_ESP_WIFI_REMOTE_ENABLED && !CONFIG_ESP_HOST_WIFI_ENABLED
+    unsigned mutations_before_seed = driver_mutations;
+    seed_expected = true;
+    assert(esp_openclaw_node_wifi_setup_seed(seed) == ESP_OK && random_calls == random_before + 1);
+    seed_expected = false;
+    assert(driver_mutations == mutations_before_seed);
+    get_ps_result = ESP_FAIL;
+    assert(esp_openclaw_node_wifi_setup_seed(seed) == ESP_FAIL && random_calls == random_before + 1);
+    get_ps_result = ESP_OK; power_save = 1;
+    assert(esp_openclaw_node_wifi_setup_seed(seed) == ESP_ERR_WIFI_STATE && random_calls == random_before + 1);
+    power_save = WIFI_PS_NONE;
+#else
+    assert(esp_openclaw_node_wifi_setup_seed(seed) == ESP_ERR_NOT_SUPPORTED && random_calls == random_before && seed[0] == 0x72);
+#endif
     ip_event_got_ip_t event = {.esp_netif = &station, .ip_info.ip.addr = 0x010200c0};
     assert(ip_handler != NULL);
     ip_handler(ip_context, IP_EVENT, IP_EVENT_STA_GOT_IP, &event);

@@ -42,6 +42,13 @@ typedef struct {
  */
 esp_err_t esp_openclaw_node_wifi_start(void);
 
+/* Native setup bootstrap only: fill exactly 32 bytes while the canonical
+ * running, nonsleeping station cannot be stopped by another owner operation.
+ * No link/config/policy change and no setup lease. NOT_SUPPORTED on remote
+ * radios; INVALID_STATE/WIFI_STATE when RF is unavailable/busy. Output stays
+ * unchanged on failure. Caller must wipe the seed after deriving its PoP. */
+esp_err_t esp_openclaw_node_wifi_setup_seed(uint8_t seed[32]);
+
 /**
  * @brief Persist Wi-Fi station credentials and start connecting immediately.
  *

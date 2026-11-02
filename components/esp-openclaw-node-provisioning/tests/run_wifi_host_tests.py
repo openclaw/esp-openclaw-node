@@ -18,7 +18,7 @@ def main():
         for name in (
             "esp_err.h", "esp_wifi.h", "esp_check.h", "esp_event.h", "esp_log.h",
             "esp_netif.h", "esp_app_desc.h", "esp_system.h", "esp_timer.h",
-            "esp_openclaw_node.h", "freertos/FreeRTOS.h", "freertos/event_groups.h",
+            "freertos/FreeRTOS.h", "freertos/event_groups.h",
             "freertos/semphr.h", "soc/soc_caps.h",
         ):
             path = work / name
@@ -34,10 +34,17 @@ def main():
             "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
             "-I", str(work), "-I", str(tests / "host"),
             "-I", str(component / "include"), "-I", str(args.cjson_dir),
+            "-I", str(component.parent / "esp-openclaw-node/include"),
             str(tests / "test_wifi_status.c"),
             str(component / "esp_openclaw_node_wifi.c"),
             str(component / "esp_openclaw_setup_session.c"),
             str(component / "esp_openclaw_setup_wifi.c"),
+            str(component / "esp_openclaw_setup_gateway.c"),
+            str(component / "esp_openclaw_setup_frame.c"),
+            str(component / "esp_openclaw_setup_transfer.c"),
+            str(component / "esp_openclaw_setup_request.c"),
+            str(component / "esp_openclaw_setup_response.c"),
+            str(component / "esp_openclaw_setup_dispatcher.c"),
             str(component / "esp_openclaw_node_common_device_node_cmd.c"),
             str(component / "esp_openclaw_node_example_json.c"),
             str(cjson_object), "-lm", "-o", str(binary),

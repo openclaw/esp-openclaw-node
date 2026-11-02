@@ -42,6 +42,7 @@ def main():
             "-I", directory,
             "-I", str(root / "components/esp-openclaw-node-provisioning/tests/host"),
             "-I", str(root / "components/esp-openclaw-node-provisioning/include"),
+            "-I", str(root / "components/esp-openclaw-node/include"),
             "-I", str(tests.parent / "main"), "-I", str(lvgl),
             "-I", str(root / "components/esp-openclaw-directory/include"),
             "-I", str(root / "components/esp-openclaw-ui/include"),

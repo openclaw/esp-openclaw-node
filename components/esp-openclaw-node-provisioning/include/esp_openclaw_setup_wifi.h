@@ -37,6 +37,10 @@ bool esp_openclaw_setup_wifi_init(esp_openclaw_setup_wifi_t *binding,
  * The lease remains held between operations until the session closes. */
 esp_err_t esp_openclaw_setup_wifi_activate(esp_openclaw_setup_wifi_t *binding,
                                          uint64_t generation);
+/* Confirmed idle peer only. Delegates the bounded scan under this binding's
+ * private lease, preserves live links, and rechecks authority after blocking. */
+esp_err_t esp_openclaw_setup_wifi_scan(esp_openclaw_setup_wifi_t *binding,
+    uint64_t generation, uint64_t peer, wifi_ap_record_t *records, uint16_t *count, uint16_t *total);
 /* Uses session authentication, confirmation and deduplication. Credentials are
  * copied directly into the Wi-Fi owner; the binding retains no credential copy.
  * A synchronous rejection returns an ACCEPTED but FAILED receipt. */

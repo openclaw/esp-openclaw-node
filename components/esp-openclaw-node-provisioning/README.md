@@ -59,7 +59,48 @@ confirmation, C-string adaptation, and dispatch through the existing bindings.
 [application response format](../../docs/design/mobile-setup-responses.md), with
 explicit public wire codes and separate admission, outcome and observed-effect
 fields. It neither generates a comparison challenge nor maps native errors or
-authorizes access. Application dispatch and the BLE endpoint remain separate work.
+authorizes access. The BLE endpoint remains separate work.
+
+`esp_openclaw_setup_dispatcher.h` routes all six application operations through
+these owners. Initialize it once with the session, transfer, Wi-Fi/Gateway
+bindings and a callback borrowing the same encrypted-peer comparison shown by
+the local UI. It owns only bounded scratch, including 33/65/4097-byte C-string
+adaptations; keep it separate from transfer storage and off small task stacks.
+The dispatcher wipes its C-string scratch after the native owner synchronously
+copies it. The transfer retains the original request under its existing bounded
+retry and buffer-wiping lifecycle.
+
+After local confirmation, call `dispatcher_activate` once to acquire the existing
+leases without changing either link. If activation partly fails, retain the
+successful lease and retry while READY or close and keep polling. Do not activate
+on every request: retries must still work while an operation is BUSY.
+Pass each complete transfer handoff to `dispatcher_handle` on the owner task.
+It checks the exact pending token, buffer and length before decoding or effects,
+then completes the transfer immediately with an admission/error response.
+Read terminal receipts with new status transfers. The session retains the sole
+32-receipt deduplication authority, including native payload rejection.
+
+Before confirmation, only hello and cancel are admitted. Status requires READY
+or BUSY; scans require idle READY and delegate to the Wi-Fi binding's private
+lease. A connected/reconnecting radio refuses scans without disconnecting;
+offer manual SSID entry or Other ways. Blocking scans recheck peer authority
+before results can be published. Tab5 remote-radio joins remain unsupported.
+
+Forward the session cancel callback to `dispatcher_cancel`. Cancellation closes
+reply authority and does not promise a response or rollback. Call
+`dispatcher_poll` regularly even after BLE or the setup screen closes; it polls
+both bindings even when one reports an error. A binding polled before the other
+closes the session may release its lease on the next tick. Wake the existing
+automatic Gateway reconnect owner when `gateway_released` is true.
+
+Response outcome/category comes from the exact canonical receipt. Native
+progress/save observations are included only for a matching generation and
+operation ID with an observed native attempt; older/missing observations remain
+unknown. A false save observation never promises old credentials survived.
+The integrated Wi-Fi host lane exercises real frames, transfers, request/response
+codecs, dispatcher, both bindings and the native Wi-Fi owner. Its Gateway API
+boundary fixture complements the existing real connection-worker/lease tests;
+neither proves BLE authentication or phone pairing.
 
 `esp_openclaw_setup_session.h` provides transport-independent setup admission
 for Watch and Dial. It is a library foundation; no example exposes BLE setup

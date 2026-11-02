@@ -28,6 +28,22 @@ esp_err_t esp_openclaw_setup_wifi_activate(esp_openclaw_setup_wifi_t *binding,
     return err;
 }
 
+static bool scan_authorized(esp_openclaw_setup_wifi_t *binding, uint64_t generation, uint64_t peer)
+{
+    return binding->lease != 0 && binding->generation == generation &&
+        esp_openclaw_setup_authorize_peer(binding->session, generation, peer) == ESP_OPENCLAW_SETUP_OK &&
+        esp_openclaw_setup_snapshot(binding->session).phase == ESP_OPENCLAW_SETUP_READY;
+}
+
+esp_err_t esp_openclaw_setup_wifi_scan(esp_openclaw_setup_wifi_t *binding,
+    uint64_t generation, uint64_t peer, wifi_ap_record_t *records, uint16_t *count, uint16_t *total)
+{
+    if (binding == NULL || binding->session == NULL) return ESP_ERR_INVALID_ARG;
+    if (!scan_authorized(binding, generation, peer)) return ESP_ERR_INVALID_STATE;
+    esp_err_t err = esp_openclaw_node_wifi_setup_scan(binding->lease, records, count, total);
+    return scan_authorized(binding, generation, peer) ? err : ESP_ERR_INVALID_STATE;
+}
+
 typedef struct {
     esp_openclaw_setup_wifi_t *binding;
     const char *ssid;

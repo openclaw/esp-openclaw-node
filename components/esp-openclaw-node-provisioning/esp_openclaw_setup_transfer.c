@@ -52,6 +52,16 @@ bool esp_openclaw_setup_transfer_open(esp_openclaw_setup_transfer_t *transfer,
     return true;
 }
 
+bool esp_openclaw_setup_transfer_authorize_request(esp_openclaw_setup_transfer_t *transfer,
+    const esp_openclaw_setup_transfer_request_t *request)
+{
+    return request != NULL && esp_openclaw_setup_transfer_poll(transfer) &&
+        transfer->phase == ESP_OPENCLAW_TRANSFER_PENDING &&
+        request->token.generation == transfer->token.generation && request->token.peer == transfer->token.peer &&
+        request->token.transfer_id == transfer->token.transfer_id &&
+        request->data == transfer->request && request->size == transfer->total;
+}
+
 static esp_openclaw_setup_frame_error_t receive_request(esp_openclaw_setup_transfer_t *transfer,
     const esp_openclaw_setup_frame_t *frame, bool *handoff)
 {

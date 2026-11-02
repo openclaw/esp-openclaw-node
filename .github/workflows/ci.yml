@@ -211,7 +211,7 @@ jobs:
               python3 tests/run_input_host_tests.py --lvgl-dir managed_components/lvgl__lvgl &&
               python3 ../../components/esp-openclaw-node/tests/run_handshake_host_tests.py --cjson-dir managed_components/espressif__cjson/cJSON &&
               python3 ../../components/esp-openclaw-node/tests/run_scope_registry_host_tests.py --cjson-dir managed_components/espressif__cjson/cJSON &&
-              python3 ../../components/esp-openclaw-node-provisioning/tests/run_wifi_host_tests.py --cjson-dir managed_components/espressif__cjson/cJSON &&
+              python3 ../../components/esp-openclaw-node-provisioning/tests/run_wifi_host_tests.py --cjson-dir managed_components/espressif__cjson/cJSON --idf-path "$IDF_PATH" &&
               python3 ../../components/esp-openclaw-node-provisioning/tests/run_security2_host_tests.py --idf-path "$IDF_PATH" &&
               python3 tests/run_reader_host_tests.py --cjson-dir managed_components/espressif__cjson/cJSON
             fi &&

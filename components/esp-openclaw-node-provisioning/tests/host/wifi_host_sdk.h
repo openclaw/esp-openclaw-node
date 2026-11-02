@@ -25,6 +25,9 @@ const char *esp_err_to_name(esp_err_t);
 } while (0)
 #define ESP_LOGI(tag, ...) do { (void)(tag); if (false) printf(__VA_ARGS__); } while (0)
 #define ESP_LOGW ESP_LOGI
+#define ESP_LOG_NONE 0
+void esp_log_level_set(const char *, int);
+int esp_log_level_get(const char *);
 
 typedef uint32_t TickType_t;
 typedef uint32_t EventBits_t;
@@ -43,6 +46,7 @@ int xSemaphoreGive(SemaphoreHandle_t);
 
 typedef const char *esp_event_base_t;
 #define ESP_EVENT_DEFINE_BASE(name) const char *name = #name
+#define ESP_EVENT_DECLARE_BASE(name) extern const char *name
 typedef void (*esp_event_handler_t)(void *, esp_event_base_t, int32_t, void *);
 extern const char *WIFI_EVENT, *IP_EVENT;
 enum { ESP_EVENT_ANY_ID = -1, WIFI_EVENT_STA_START, WIFI_EVENT_STA_DISCONNECTED,

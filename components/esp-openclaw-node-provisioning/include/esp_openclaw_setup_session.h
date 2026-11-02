@@ -92,7 +92,12 @@ typedef struct {
     uint8_t receipt_count;
     bool has_operation;
     esp_openclaw_setup_receipt_t operation;
+    uint64_t opened_ms; /* Local generation fact, never a receipt/wire field. */
 } esp_openclaw_setup_snapshot_t;
+
+/* One timeout policy, also usable by a transport's immutable generation view.
+ * Its clock must be the same bounded thread-safe monotonic source as now_ms. */
+bool esp_openclaw_setup_time_is_current(uint64_t opened_ms, uint64_t now_ms);
 
 bool esp_openclaw_setup_init(esp_openclaw_setup_session_t *session,
                              const esp_openclaw_setup_callbacks_t *callbacks);

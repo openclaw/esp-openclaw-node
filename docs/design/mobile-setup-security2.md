@@ -4,8 +4,8 @@
 returns a public `protocomm_security_t` that delegates SRP6a, AES-GCM and opaque
 handshake data to ESP-IDF Security2 version 2, patch 1. It does not start BLE,
 generate proof of possession, attach/confirm a setup session, or expose an app
-pairing entry. The endpoint mailbox, server runtime, device screens and phone
-integration remain separate work.
+pairing entry. The [endpoint mailbox](mobile-setup-frames.md#sdk-endpoint-mailbox)
+is implemented; server runtime, device screens and phone integration remain separate work.
 
 The native implementation requires ESP32-S3 Wi-Fi and BLE, NimBLE, Security2 and
 dynamic per-tag log control. Both remote Wi-Fi configurations and all other

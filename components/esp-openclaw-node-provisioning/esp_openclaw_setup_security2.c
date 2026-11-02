@@ -62,6 +62,23 @@ uint64_t esp_openclaw_setup_security2_peer(void)
     return peer;
 }
 
+uint64_t esp_openclaw_setup_security2_peer_for_session(uint32_t id)
+{
+    portENTER_CRITICAL(&lock);
+    uint64_t peer = current && matches(current, id) ? current->peer : 0;
+    portEXIT_CRITICAL(&lock);
+    return peer;
+}
+
+bool esp_openclaw_setup_security2_revoke_peer(uint64_t peer)
+{
+    portENTER_CRITICAL(&lock);
+    bool matching = peer && current && current->peer == peer;
+    if (matching) { current->peer = 0; current->revoked = true; }
+    portEXIT_CRITICAL(&lock);
+    return matching;
+}
+
 bool esp_openclaw_setup_security2_peer_is_current(uint64_t peer)
 { return peer != 0 && esp_openclaw_setup_security2_peer() == peer; }
 
@@ -184,5 +201,7 @@ const protocomm_security_t *esp_openclaw_setup_security2(void) { return NULL; }
 bool esp_openclaw_setup_security2_quiet_logs(void) { return false; }
 void esp_openclaw_setup_security2_revoke(void) {}
 uint64_t esp_openclaw_setup_security2_peer(void) { return 0; }
+uint64_t esp_openclaw_setup_security2_peer_for_session(uint32_t id) { (void)id; return 0; }
+bool esp_openclaw_setup_security2_revoke_peer(uint64_t peer) { (void)peer; return false; }
 bool esp_openclaw_setup_security2_peer_is_current(uint64_t peer) { (void)peer; return false; }
 #endif

@@ -2,6 +2,9 @@
 #include "esp_openclaw_node_wifi.h"
 #include "esp_openclaw_setup_wifi.h"
 #include "esp_openclaw_setup_dispatcher.h"
+#include "esp_openclaw_setup_mailbox.h"
+#include "esp_openclaw_setup_security2.h"
+#include "protocomm_security2.h"
 #include "esp_openclaw_node_common_device_node_cmd.h"
 #include "cJSON.h"
 
@@ -855,20 +858,22 @@ typedef struct {
     esp_openclaw_setup_transfer_t transfer;
     esp_openclaw_setup_dispatcher_t dispatcher;
     uint64_t generation;
+    uint64_t peer, clock;
     uint32_t serial;
-    bool live, probe_handoff;
+    bool live, probe_handoff, guarded;
     uint8_t reply[596];
 } dispatcher_fixture_t;
 static dispatcher_fixture_t wire;
-static uint64_t wire_now(void *context) { (void)context; return 100; }
-static bool wire_peer(uint64_t peer, void *context) { return peer == 7 && ((dispatcher_fixture_t *)context)->live; }
+static uint64_t wire_now(void *context) { (void)context; return wire.clock ? wire.clock : 100; }
+static bool wire_peer(uint64_t peer, void *context)
+{ return wire.guarded ? esp_openclaw_setup_security2_peer_is_current(peer) : peer == 7 && ((dispatcher_fixture_t *)context)->live; }
 static void wire_cancel(esp_openclaw_setup_token_t token, void *context)
 { esp_openclaw_setup_dispatcher_cancel(&((dispatcher_fixture_t *)context)->dispatcher, token); }
 static bool wire_hello(uint64_t generation, uint64_t peer, esp_openclaw_setup_bytes_t *label,
     esp_openclaw_setup_bytes_t *model, const uint8_t **challenge, void *context)
 {
     static const uint8_t comparison[32] = {0xab};
-    assert(generation == ((dispatcher_fixture_t *)context)->generation && peer == 7);
+    assert(generation == ((dispatcher_fixture_t *)context)->generation && peer == wire.peer);
     *label = (esp_openclaw_setup_bytes_t){(const uint8_t *)"Watch", 5};
     *model = (esp_openclaw_setup_bytes_t){(const uint8_t *)"S3", 2};
     *challenge = comparison; return true;
@@ -876,9 +881,10 @@ static bool wire_hello(uint64_t generation, uint64_t peer, esp_openclaw_setup_by
 static void wire_open(void)
 {
     wire.live = true;
+    if (!wire.guarded) wire.peer = 7;
     assert(esp_openclaw_setup_open(&wire.session, &wire.generation) == ESP_OPENCLAW_SETUP_OK);
-    assert(esp_openclaw_setup_attach(&wire.session, wire.generation, 7) == ESP_OPENCLAW_SETUP_OK);
-    assert(esp_openclaw_setup_transfer_open(&wire.transfer, wire.generation, 7));
+    assert(esp_openclaw_setup_attach(&wire.session, wire.generation, wire.peer) == ESP_OPENCLAW_SETUP_OK);
+    assert(esp_openclaw_setup_transfer_open(&wire.transfer, wire.generation, wire.peer));
     wire.serial = 0;
 }
 static void wire_confirm(void)
@@ -1022,6 +1028,241 @@ static void check_setup_dispatcher(void)
     puts("setup dispatcher: real framed admission/status, native WiFi copies, retries, saved observations, cancellation and revoke passed");
 }
 
+/* Public vendor boundary only; these opaque fixture bytes are NOT SRP/AES-GCM
+ * proof. Actual guard/endpoint/frame/transfer/dispatcher/native WiFi code runs. */
+void esp_log_level_set(const char *tag, int level) { (void)tag; assert(level == ESP_LOG_NONE); }
+int esp_log_level_get(const char *tag) { (void)tag; return ESP_LOG_NONE; }
+static esp_err_t ble_sdk_init(protocomm_security_handle_t *handle) { *handle = &wire; return ESP_OK; }
+static esp_err_t ble_sdk_cleanup(protocomm_security_handle_t handle) { assert(handle == &wire); return ESP_OK; }
+static esp_err_t ble_sdk_session(protocomm_security_handle_t handle, uint32_t id)
+{ assert(handle == &wire && id == 7); return ESP_OK; }
+static esp_err_t ble_sdk_bytes(protocomm_security_handle_t handle, uint32_t id, const uint8_t *input,
+    ssize_t size, uint8_t **output, ssize_t *length, bool encrypt)
+{
+    assert(handle == &wire && id == 7);
+    *length = size + (encrypt ? 16 : -16); *output = calloc(1, (size_t)*length); assert(*output);
+    memcpy(*output, input, encrypt ? (size_t)size : (size_t)*length); return ESP_OK;
+}
+static esp_err_t ble_sdk_encrypt(protocomm_security_handle_t h, uint32_t id, const uint8_t *b,
+    ssize_t n, uint8_t **o, ssize_t *s) { return ble_sdk_bytes(h, id, b, n, o, s, true); }
+static esp_err_t ble_sdk_decrypt(protocomm_security_handle_t h, uint32_t id, const uint8_t *b,
+    ssize_t n, uint8_t **o, ssize_t *s) { return ble_sdk_bytes(h, id, b, n, o, s, false); }
+const protocomm_security_t protocomm_security2 = {.ver = 2, .patch_ver = 1,
+    .init = ble_sdk_init, .cleanup = ble_sdk_cleanup, .new_transport_session = ble_sdk_session,
+    .close_transport_session = ble_sdk_session, .encrypt = ble_sdk_encrypt, .decrypt = ble_sdk_decrypt};
+static bool mailbox_no_memory;
+static uint8_t *mailbox_allocation;
+static unsigned mailbox_discarded;
+void *mailbox_test_malloc(size_t size)
+{ assert(size == 464); mailbox_allocation = mailbox_no_memory ? NULL : malloc(size); return mailbox_allocation; }
+void mailbox_test_free(void *bytes)
+{
+    assert(bytes == mailbox_allocation);
+    for (size_t i = 0; i < 464; ++i) assert(mailbox_allocation[i] == 0);
+    ++mailbox_discarded; free(bytes);
+}
+
+#if SOC_WIFI_SUPPORTED && !CONFIG_ESP_WIFI_REMOTE_ENABLED && !CONFIG_ESP_HOST_WIFI_ENABLED
+static esp_openclaw_setup_mailbox_t mailbox;
+static const protocomm_security_t *ble_security;
+static protocomm_security_handle_t ble_handle;
+static uint8_t ble_input[464], ble_reply[464];
+static size_t ble_size;
+static unsigned scan_mailbox_probes;
+static pthread_mutex_t scan_gate = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t scan_condition = PTHREAD_COND_INITIALIZER;
+static bool scan_entered, scan_release;
+
+static esp_err_t ble_call(esp_openclaw_setup_frame_t *reply)
+{
+    uint8_t cipher[480] = {0}, *plain, *answer, *encrypted; ssize_t count, length, encrypted_size;
+    memcpy(cipher, ble_input, ble_size);
+    esp_err_t err = ble_security->decrypt(ble_handle, 7, cipher, (ssize_t)ble_size + 16, &plain, &count);
+    if (err != ESP_OK) return err;
+    protocomm_req_handler_t endpoint = esp_openclaw_setup_mailbox_endpoint;
+    err = endpoint(7, plain, count, &answer, &length, &mailbox); free(plain);
+    if (err != ESP_OK) return err;
+    err = ble_security->encrypt(ble_handle, 7, answer, length, &encrypted, &encrypted_size); free(answer);
+    if (err != ESP_OK) return err;
+    memcpy(ble_reply, encrypted, (size_t)encrypted_size - 16); free(encrypted);
+    assert(esp_openclaw_setup_frame_decode(ble_reply, (size_t)encrypted_size - 16, reply)); return ESP_OK;
+}
+static void ble_frame(esp_openclaw_setup_frame_kind_t kind, uint16_t total, uint16_t offset,
+    const uint8_t *bytes, uint16_t count)
+{
+    esp_openclaw_setup_frame_t frame = {.kind = kind, .transfer_id = wire.serial,
+        .total_size = total, .offset = offset, .payload_size = count, .payload = bytes};
+    assert(esp_openclaw_setup_frame_encode(&frame, ble_input, sizeof(ble_input), &ble_size));
+}
+static void ble_pending(void)
+{
+    esp_openclaw_setup_frame_t reply; assert(ble_call(&reply) == ESP_OK);
+    assert(reply.kind == ESP_OPENCLAW_SETUP_FRAME_ERROR && reply.payload[1] == ESP_OPENCLAW_SETUP_FRAME_PENDING);
+}
+static void ble_wiped(void)
+{
+    for (size_t i = 0; i < sizeof(mailbox.request); ++i) assert(!mailbox.request[i] && !mailbox.reply[i]);
+}
+static void ble_open(void)
+{
+    uint8_t opaque[17] = {0}, *plain; ssize_t size;
+    assert(ble_security->new_transport_session(ble_handle, 7) == ESP_OK);
+    assert(ble_security->decrypt(ble_handle, 7, opaque, sizeof(opaque), &plain, &size) == ESP_OK); free(plain);
+    wire.peer = esp_openclaw_setup_security2_peer(); wire.clock = 100; wire_open();
+    esp_openclaw_setup_snapshot_t snapshot = esp_openclaw_setup_snapshot(&wire.session);
+    assert(esp_openclaw_setup_mailbox_open(&mailbox, wire.generation, wire.peer, snapshot.opened_ms));
+}
+static bool ble_request(unsigned operation, unsigned id, const uint8_t *body, size_t size)
+{
+    uint8_t app[128] = {1, operation}; assert(size + 16 <= sizeof(app));
+    wire_integer(app + 4, operation == 1 ? 0 : wire.generation, 8); wire_integer(app + 12, id, 4);
+    if (size) memcpy(app + 16, body, size);
+    ++wire.serial; ble_frame(ESP_OPENCLAW_SETUP_FRAME_REQUEST, (uint16_t)(16 + size), 0, app, (uint16_t)(16 + size));
+    ble_pending(); esp_openclaw_setup_mailbox_poll(&mailbox);
+    esp_openclaw_setup_frame_t reply;
+    if (ble_call(&reply) != ESP_OK) return false;
+    assert(reply.kind == ESP_OPENCLAW_SETUP_FRAME_ACK); return true;
+}
+static esp_openclaw_setup_frame_t ble_pull(uint16_t offset)
+{
+    ble_frame(ESP_OPENCLAW_SETUP_FRAME_PULL, 0, offset, NULL, 0); ble_pending();
+    esp_openclaw_setup_mailbox_poll(&mailbox);
+    esp_openclaw_setup_frame_t reply; assert(ble_call(&reply) == ESP_OK && reply.kind == ESP_OPENCLAW_SETUP_FRAME_RESPONSE);
+    return reply;
+}
+static void scan_probe_mailbox(void)
+{
+    pthread_mutex_lock(&scan_gate);
+    ++scan_mailbox_probes;
+    scan_entered = true; pthread_cond_signal(&scan_condition);
+    while (!scan_release) pthread_cond_wait(&scan_condition, &scan_gate);
+    pthread_mutex_unlock(&scan_gate);
+}
+static void *scan_owner(void *unused)
+{ (void)unused; esp_openclaw_setup_mailbox_poll(&mailbox); return NULL; }
+static void ble_during_scan(void)
+{
+    esp_openclaw_setup_frame_t reply;
+    assert(ble_call(&reply) == ESP_OK && reply.kind == ESP_OPENCLAW_SETUP_FRAME_ACK);
+    ble_frame(ESP_OPENCLAW_SETUP_FRAME_PULL, 0, 0, NULL, 0); ble_pending(); ble_pending();
+    ble_frame(ESP_OPENCLAW_SETUP_FRAME_PULL, 0, 448, NULL, 0);
+    assert(ble_call(&reply) == ESP_OK && reply.kind == ESP_OPENCLAW_SETUP_FRAME_ERROR && reply.payload[1] == ESP_OPENCLAW_SETUP_FRAME_BUSY);
+    ble_frame(ESP_OPENCLAW_SETUP_FRAME_PULL, 0, 0, NULL, 0);
+}
+static void check_setup_mailbox(void)
+{
+    ble_security = esp_openclaw_setup_security2(); assert(ble_security && ble_security->init(&ble_handle) == ESP_OK);
+    assert(esp_openclaw_setup_mailbox_init(&mailbox, &wire.transfer, &wire.dispatcher, wire_now, &wire));
+    wire.guarded = true; wire.clock = 100;
+    assert(esp_openclaw_setup_open(&wire.session, &wire.generation) == ESP_OPENCLAW_SETUP_OK);
+    esp_openclaw_setup_snapshot_t snapshot = esp_openclaw_setup_snapshot(&wire.session);
+    assert(esp_openclaw_setup_mailbox_open(&mailbox, wire.generation, 0, snapshot.opened_ms));
+    uint8_t opaque[17] = {0}, *plain; ssize_t plain_size;
+    assert(ble_security->new_transport_session(ble_handle, 7) == ESP_OK);
+    assert(ble_security->decrypt(ble_handle, 7, opaque, sizeof(opaque), &plain, &plain_size) == ESP_OK); free(plain);
+    wire.peer = esp_openclaw_setup_security2_peer(); wire.serial = 1;
+    uint8_t first_hello[16] = {1, 1}; esp_openclaw_setup_frame_t reply;
+    ble_frame(ESP_OPENCLAW_SETUP_FRAME_REQUEST, 16, 0, first_hello, 16); ble_pending(); ble_wiped();
+    assert(esp_openclaw_setup_snapshot(&wire.session).phase == ESP_OPENCLAW_SETUP_DISCOVERABLE);
+    uint8_t *denied = NULL; ssize_t denied_size = -1;
+    assert(esp_openclaw_setup_mailbox_endpoint(8, ble_input, (ssize_t)ble_size, &denied, &denied_size, &mailbox) == ESP_ERR_INVALID_STATE);
+    assert(!denied && denied_size == -1 && esp_openclaw_setup_security2_peer_is_current(wire.peer));
+    assert(mailbox_discarded == 1); // Rejected SDK-owned reply allocation was wiped before release.
+    assert(esp_openclaw_setup_attach(&wire.session, wire.generation, wire.peer) == ESP_OPENCLAW_SETUP_OK);
+    assert(esp_openclaw_setup_transfer_open(&wire.transfer, wire.generation, wire.peer));
+    assert(!esp_openclaw_setup_mailbox_open(&mailbox, wire.generation, wire.peer, snapshot.opened_ms + 1));
+    assert(esp_openclaw_setup_mailbox_open(&mailbox, wire.generation, wire.peer, snapshot.opened_ms));
+    assert(!esp_openclaw_setup_mailbox_open(&mailbox, wire.generation, wire.peer, snapshot.opened_ms));
+    ble_pending(); esp_openclaw_setup_mailbox_poll(&mailbox); // Identical first hello, now canonical admission.
+    assert(ble_call(&reply) == ESP_OK && reply.kind == ESP_OPENCLAW_SETUP_FRAME_ACK);
+    reply = ble_pull(0); assert(reply.payload[16] == 1 && reply.payload[26] == 0xab);
+    uint8_t hello[16] = {1, 1}; ++wire.serial;
+    ble_frame(ESP_OPENCLAW_SETUP_FRAME_REQUEST, 16, 0, hello, 8);
+    mailbox_no_memory = true;
+    assert(ble_call(&reply) == ESP_ERR_NO_MEM); mailbox_no_memory = false;
+    esp_openclaw_setup_mailbox_poll(&mailbox); // Allocation failure leaves prior delivered reply intact, no new admission.
+    ble_pending();
+    uint8_t original[464]; size_t original_size = ble_size; memcpy(original, ble_input, ble_size);
+    ++wire.serial; ble_frame(ESP_OPENCLAW_SETUP_FRAME_REQUEST, 16, 0, hello, 8);
+    assert(ble_call(&reply) == ESP_OK && reply.payload[1] == ESP_OPENCLAW_SETUP_FRAME_BUSY);
+    --wire.serial; memcpy(ble_input, original, original_size); ble_size = original_size;
+    memset(ble_input + 16, 0xee, 8); esp_openclaw_setup_mailbox_poll(&mailbox); // Owned copy survives SDK input retirement.
+    ble_frame(ESP_OPENCLAW_SETUP_FRAME_REQUEST, 16, 8, hello + 8, 8);
+    assert(ble_call(&reply) == ESP_OK && reply.payload[1] == ESP_OPENCLAW_SETUP_FRAME_BUSY); // Prior ACK not delivered.
+    memcpy(ble_input, original, original_size); ble_size = original_size;
+    assert(ble_call(&reply) == ESP_OK && reply.kind == ESP_OPENCLAW_SETUP_FRAME_ACK && reply.offset == 8);
+    assert(ble_call(&reply) == ESP_OK && reply.offset == 8); // Lost ACK retry, no second handoff.
+    ble_frame(ESP_OPENCLAW_SETUP_FRAME_PULL, 0, 0, NULL, 0); ble_pending();
+    esp_openclaw_setup_mailbox_poll(&mailbox); ble_pending(); esp_openclaw_setup_mailbox_poll(&mailbox);
+    // A premature canonical PENDING pull cannot trap the missing request fragment.
+    ble_frame(ESP_OPENCLAW_SETUP_FRAME_REQUEST, 16, 8, hello + 8, 8); ble_pending();
+    esp_openclaw_setup_mailbox_poll(&mailbox);
+    assert(ble_call(&reply) == ESP_OK && reply.kind == ESP_OPENCLAW_SETUP_FRAME_ACK && reply.offset == 16);
+    reply = ble_pull(0); assert(reply.payload[16] == 1 && reply.payload[26] == 0xab);
+    wire_confirm();
+
+    /* A real owner thread blocks at the native scan API while this thread drives
+     * actual SDK endpoint callbacks: ACK/pull must not share the blocking lock. */
+    scan_found = 17; during_scan = scan_probe_mailbox;
+    uint8_t scan[16] = {1, 3}; wire_integer(scan + 4, wire.generation, 8);
+    ++wire.serial; ble_frame(ESP_OPENCLAW_SETUP_FRAME_REQUEST, 16, 0, scan, 16); ble_pending();
+    pthread_t owner; assert(pthread_create(&owner, NULL, scan_owner, NULL) == 0);
+    pthread_mutex_lock(&scan_gate);
+    while (!scan_entered) pthread_cond_wait(&scan_condition, &scan_gate);
+    pthread_mutex_unlock(&scan_gate);
+    ble_during_scan();
+    pthread_mutex_lock(&scan_gate); scan_release = true; pthread_cond_signal(&scan_condition); pthread_mutex_unlock(&scan_gate);
+    assert(pthread_join(owner, NULL) == 0); during_scan = NULL;
+    assert(scan_mailbox_probes == 1); ble_pending(); esp_openclaw_setup_mailbox_poll(&mailbox);
+    assert(ble_call(&reply) == ESP_OK && reply.kind == ESP_OPENCLAW_SETUP_FRAME_RESPONSE && reply.payload_size == 448 && reply.total_size == 596);
+    uint8_t first[464]; size_t first_size = 16 + reply.payload_size; memcpy(first, ble_reply, first_size);
+    assert(ble_call(&reply) == ESP_OK && memcmp(first, ble_reply, first_size) == 0); // Pull retries remain exact.
+    reply = ble_pull(448); assert(reply.offset == 448 && reply.payload_size == 148); scan_found = 0;
+
+    uint8_t credentials[16] = {0, 2, 'a', 'p', 0, 8, 'p', 'a', 's', 's', 'w', 'o', 'r', 'd'};
+    unsigned writes = config_writes;
+    assert(ble_request(4, 1, credentials, 14)); reply = ble_pull(0); assert(reply.payload[3] == 1);
+    assert(ble_request(2, 1, NULL, 0)); reply = ble_pull(0); assert(reply.payload[19] == 1);
+    uint64_t old_generation = wire.generation, old_peer = wire.peer;
+    assert(!ble_request(6, 0, NULL, 0)); ble_wiped();
+    for (unsigned i = 0; i < 40 && esp_openclaw_setup_snapshot(&wire.session).phase != ESP_OPENCLAW_SETUP_CLOSED; ++i) {
+        bool released; assert(esp_openclaw_setup_dispatcher_poll(&wire.dispatcher, &released) == ESP_OK); dispatch_all();
+    }
+    bool handed_back; assert(esp_openclaw_setup_dispatcher_poll(&wire.dispatcher, &handed_back) == ESP_OK);
+    assert(config_writes == writes && esp_openclaw_setup_snapshot(&wire.session).phase == ESP_OPENCLAW_SETUP_CLOSED);
+    assert(ble_security->close_transport_session(ble_handle, 7) == ESP_OK); ble_open();
+    assert(!esp_openclaw_setup_mailbox_close(&mailbox, old_generation, old_peer));
+    assert(!esp_openclaw_setup_security2_revoke_peer(old_peer) && esp_openclaw_setup_security2_peer_is_current(wire.peer));
+    assert(!esp_openclaw_setup_mailbox_open(&mailbox, old_generation, wire.peer, 100));
+    assert(ble_request(1, 0, NULL, 0)); // New generation cannot return the old slot's reply.
+    wire.clock = 100 + ESP_OPENCLAW_SETUP_TIMEOUT_MS - 1;
+    assert(ble_call(&reply) == ESP_OK && reply.kind == ESP_OPENCLAW_SETUP_FRAME_ACK);
+    wire.clock++; assert(ble_call(&reply) == ESP_ERR_INVALID_STATE); ble_wiped();
+    assert(esp_openclaw_setup_snapshot(&wire.session).phase == ESP_OPENCLAW_SETUP_CLOSED);
+    bool released; assert(esp_openclaw_setup_dispatcher_poll(&wire.dispatcher, &released) == ESP_OK);
+    assert(ble_security->close_transport_session(ble_handle, 7) == ESP_OK); ble_open();
+    assert(ble_request(1, 0, NULL, 0)); wire.clock = 99;
+    assert(ble_call(&reply) == ESP_ERR_INVALID_STATE); ble_wiped();
+    assert(esp_openclaw_setup_snapshot(&wire.session).phase == ESP_OPENCLAW_SETUP_CLOSED);
+    assert(esp_openclaw_setup_dispatcher_poll(&wire.dispatcher, &released) == ESP_OK);
+    assert(ble_security->close_transport_session(ble_handle, 7) == ESP_OK);
+    wire.clock = 100;
+    assert(esp_openclaw_setup_open(&wire.session, &wire.generation) == ESP_OPENCLAW_SETUP_OK);
+    snapshot = esp_openclaw_setup_snapshot(&wire.session);
+    assert(esp_openclaw_setup_mailbox_open(&mailbox, wire.generation, 0, snapshot.opened_ms));
+    assert(ble_security->new_transport_session(ble_handle, 7) == ESP_OK);
+    assert(ble_security->decrypt(ble_handle, 7, opaque, sizeof(opaque), &plain, &plain_size) == ESP_OK); free(plain);
+    esp_openclaw_setup_security2_revoke(); // Server exit before owner bind.
+    assert(esp_openclaw_setup_mailbox_close(&mailbox, wire.generation, 0));
+    assert(!esp_openclaw_setup_mailbox_open(&mailbox, wire.generation, esp_openclaw_setup_security2_peer(), snapshot.opened_ms));
+    assert(ble_call(&reply) == ESP_ERR_INVALID_STATE); ble_wiped(); esp_openclaw_setup_close(&wire.session);
+    assert(ble_security->cleanup(ble_handle) == ESP_OK);
+    puts("setup mailbox: actual SDK callbacks, owned fragments/pull retries, scan-time ACK, backpressure, cancel drain, generations and expiry passed");
+}
+#else
+static void check_setup_mailbox(void) { assert(!esp_openclaw_setup_security2()); }
+#endif
+
 int main(void)
 {
     assert(esp_openclaw_node_register_device_commands(NULL, NULL) == ESP_OK);
@@ -1069,6 +1310,7 @@ int main(void)
     check_setup_attempts();
     check_setup_binding();
     check_setup_dispatcher();
+    check_setup_mailbox();
     printf("Wi-Fi status and setup: %u failed checks\n", failures);
     return failures ? 1 : 0;
 }

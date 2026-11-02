@@ -1995,13 +1995,21 @@ static void check_watch_home_gesture(void)
     room_ui_set(ROOM_UI_IDLE, NULL);
 }
 
-static void check_watch_devices(const char *path)
+static void check_devices(const char *path, bool tab5)
 {
+    const char *local_name = tab5 ? "This Tab5" : "This Watch";
+    const char *local_action = tab5 ? LV_SYMBOL_HOME "  This Tab5" : LV_SYMBOL_HOME "  This Watch";
+    const char *offline = tab5 ? "Device list offline.\nThis Tab5 still works." : "Gateway offline.\nThis Watch still works.";
+    if (tab5) {
+        room_ui_facts_t facts = {.wifi = ROOM_UI_WIFI_CONNECTED,
+            .gateway = ROOM_UI_GATEWAY_CONNECTED, .talk = ROOM_UI_TALK_READY};
+        room_ui_store_facts(&facts);
+    }
     unsigned starts = talk_starts, stops = talk_stops, selections = agent_selections;
     assert(room_ui_watch_menu("devices") == ESP_OK);
     assert(device_open && room_ui_wants_devices());
     assert(visible_watch_text("Finding your devices..."));
-    assert(watch_status_pixels(284, 307) > 0);
+    if (!tab5) assert(watch_status_pixels(284, 307) > 0);
     lv_obj_t *refresh = lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_REFRESH " Refresh"));
     unsigned requests = device_requests;
     click_talk(refresh);
@@ -2021,11 +2029,19 @@ static void check_watch_devices(const char *path)
     lv_obj_t *row = lv_obj_get_parent(find_visible_text(lv_layer_top(), "Studio Dial"));
     lv_area_t area;
     lv_obj_get_coords(row, &area);
-    assert(lv_obj_get_height(row) >= 44 && area.x1 >= 26 && area.x2 < 342 && area.y2 < 376);
+    if (tab5) assert(lv_obj_get_height(row) >= 96 && area.x1 >= 160 && area.x2 < 1120 && area.y1 >= 320 && area.y2 < 544);
+    else assert(lv_obj_get_height(row) >= 44 && area.x1 >= 26 && area.x2 < 342 && area.y2 < 376);
     if (path) {
         char output[1024];
         snprintf(output, sizeof(output), "%s-devices.ppm", path);
         write_frame(output);
+    }
+    if (tab5) {
+        lv_obj_t *third = lv_obj_get_parent(find_text(lv_layer_top(), "Desk display"));
+        lv_obj_scroll_to_view(third, LV_ANIM_OFF);
+        lv_obj_update_layout(lv_layer_top());
+        assert(lv_obj_get_height(third) >= 96);
+        lv_obj_scroll_to_view(row, LV_ANIM_OFF);
     }
     click_talk(row);
     assert(visible_watch_text("Model: M5Stack Dial") && visible_watch_text("Connection: Online"));
@@ -2065,7 +2081,12 @@ static void check_watch_devices(const char *path)
     touch_talk(row, false);
     deny_display = false;
     room_ui_refresh();
-    assert(visible_watch_text("Gateway offline.\nThis Watch still works."));
+    assert(visible_watch_text(offline));
+    if (path && tab5) {
+        char output[1024];
+        snprintf(output, sizeof(output), "%s-devices-offline.ppm", path);
+        write_frame(output);
+    }
     const struct { esp_openclaw_devices_state_t state; const char *text; } failures[] = {
         {ESP_OPENCLAW_DEVICES_EMPTY, "No Gateway devices yet.\nPair a device to see it here."},
         {ESP_OPENCLAW_DEVICES_TIMEOUT, "Gateway did not reply.\nTap Refresh to try again."},
@@ -2091,14 +2112,15 @@ static void check_watch_devices(const char *path)
     view.state = ESP_OPENCLAW_DEVICES_OFFLINE;
     ++view.revision;
     room_ui_store_devices(&view, device_generation);
-    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_HOME "  This Watch")));
-    assert(!device_open && !room_ui_wants_devices() && visible_watch_text("This Watch"));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), local_action)));
+    assert(!device_open && !room_ui_wants_devices() && visible_watch_text(local_name));
     room_ui_store_devices(&view, old_generation);
-    assert(visible_watch_text("This Watch"));
+    assert(visible_watch_text(local_name));
     click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " Devices")));
     assert(device_open && visible_watch_text("Finding your devices..."));
     click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " Menu")));
-    assert(!device_open && !room_ui_wants_devices() && visible_watch_text("Menu"));
+    assert(!device_open && !room_ui_wants_devices() &&
+        visible_watch_text(tab5 ? LV_SYMBOL_LEFT " Home" : "Menu"));
     assert(starts == talk_starts && stops == talk_stops && selections == agent_selections);
 }
 
@@ -3093,6 +3115,61 @@ static void check_live_talk(const char *path)
     assert(!find_visible_fragment(lv_layer_top(), "The project is ready for review."));
 }
 
+static void check_tab5_device_navigation(const char *path)
+{
+    room_ui_facts_t facts = {.wifi = ROOM_UI_WIFI_CONNECTED,
+        .gateway = ROOM_UI_GATEWAY_CONNECTED, .talk = ROOM_UI_TALK_ACTIVE};
+    room_ui_store_facts(&facts);
+    unsigned starts = talk_starts, stops = talk_stops;
+    assert(room_ui_watch_menu("menu") == ESP_OK);
+    lv_obj_t *menu_row = lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_CHARGE "  Devices"));
+    lv_obj_scroll_to_view(menu_row, LV_ANIM_OFF);
+    click_talk(menu_row);
+    assert(device_open && visible_watch_text("Devices"));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_HOME "  This Tab5")));
+    assert(!device_open && visible_watch_text("This Tab5"));
+    if (path) {
+        char output[1024];
+        snprintf(output, sizeof(output), "%s-local-device.ppm", path);
+        write_frame(output);
+    }
+    const char *pages[] = {LV_SYMBOL_WIFI "  Connection", LV_SYMBOL_IMAGE "  Display"};
+    for (unsigned i = 0; i < 2; ++i) {
+        click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), pages[i])));
+        click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " This Tab5")));
+        assert(visible_watch_text("This Tab5"));
+    }
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " Devices")));
+    assert(device_open);
+    esp_openclaw_devices_snapshot_t view = {.state = ESP_OPENCLAW_DEVICES_READY, .revision = 1, .count = 1};
+    strcpy(view.devices[0].id, "desk-node");
+    strcpy(view.devices[0].name, "Desk node");
+    for (unsigned large = 0; large < 2; ++large) {
+        openclaw_reading_set_size(large ? OPENCLAW_READING_LARGE : OPENCLAW_READING_STANDARD);
+        openclaw_density_set(large ? OPENCLAW_DENSITY_COMFORTABLE : OPENCLAW_DENSITY_COMPACT);
+        ++view.revision;
+        room_ui_store_devices(&view, device_generation);
+        room_ui_refresh();
+        lv_obj_t *row = lv_obj_get_parent(find_visible_text(lv_layer_top(), "Desk node"));
+        lv_area_t row_area, list_area;
+        lv_obj_get_coords(row, &row_area);
+        lv_obj_get_coords(lv_obj_get_parent(row), &list_area);
+        int visible_bottom = row_area.y2 < list_area.y2 ? row_area.y2 : list_area.y2;
+        assert(row_area.x1 >= 160 && row_area.x2 < 1120 && row_area.y1 >= 320);
+        assert(visible_bottom - row_area.y1 + 1 >= 96 && row_area.y2 <= list_area.y2 && list_area.y2 < 440);
+        if (path && large) {
+            char output[1024];
+            snprintf(output, sizeof(output), "%s-devices-active-large.ppm", path);
+            write_frame(output);
+        }
+    }
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), "Return to call")));
+    assert(!device_open && visible_watch_text("End call"));
+    assert(talk_starts == starts && talk_stops == stops);
+    openclaw_reading_set_size(OPENCLAW_READING_STANDARD);
+    openclaw_density_set(OPENCLAW_DENSITY_COMPACT);
+}
+
 static void check_tab5_shell(const char *path)
 {
     room_ui_facts_t facts = {.wifi = ROOM_UI_WIFI_CONNECTED,
@@ -3125,6 +3202,7 @@ static void check_tab5_shell(const char *path)
     click_talk(connection);
     assert(find_visible_text(lv_layer_top(), "Connection"));
     assert(!lv_obj_is_visible(talk));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " Menu")));
     click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " Home")));
     assert(lv_obj_is_visible(talk));
     facts.talk = ROOM_UI_TALK_ACTIVE;
@@ -3385,6 +3463,8 @@ int main(int argc, char **argv)
         check_tab5_agents(argc == 3 ? argv[2] : NULL);
         check_live_talk(argc == 3 ? argv[2] : NULL);
         check_tab5_settings(argc == 3 ? argv[2] : NULL);
+        check_devices(argc == 3 ? argv[2] : NULL, true);
+        check_tab5_device_navigation(argc == 3 ? argv[2] : NULL);
         lv_deinit();
         free(frame);
         free(draw_buffer);
@@ -3514,7 +3594,7 @@ int main(int argc, char **argv)
         check_watch_conversations(argc == 3 ? argv[2] : NULL);
         check_watch_creation(argc == 3 ? argv[2] : NULL);
         check_watch_home_gesture();
-        check_watch_devices(argc == 3 ? argv[2] : NULL);
+        check_devices(argc == 3 ? argv[2] : NULL, false);
         check_watch_display_settings(argc == 3 ? argv[2] : NULL);
         check_watch_messaging(argc == 3 ? argv[2] : NULL);
         check_watch_voice(argc == 3 ? argv[2] : NULL);

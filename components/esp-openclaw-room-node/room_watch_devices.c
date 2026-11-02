@@ -1,5 +1,6 @@
 #include "openclaw_density.h"
 #include "room_watch_devices.h"
+#include "room_tab5_layout.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -7,7 +8,7 @@
 
 #define PAGE_SIZE 3
 
-static lv_obj_t *list, *root, *back_text, *heading, *local, *message, *counter;
+static lv_obj_t *list, *root, *back, *back_text, *heading, *local, *message, *counter, *detail_body;
 static lv_obj_t *refresh, *previous, *next, *rows[PAGE_SIZE], *names[PAGE_SIZE], *states[PAGE_SIZE];
 static lv_obj_t *detail_name, *detail_model, *detail_connection, *detail_pairing;
 static const esp_openclaw_devices_snapshot_t *devices;
@@ -50,7 +51,7 @@ void room_watch_devices_create(lv_obj_t *parent, lv_event_cb_t handler)
     lv_obj_set_scrollable(root, false);
     lv_obj_set_style_bg_color(root, lv_color_hex(0x15101b), 0);
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
-    lv_obj_t *back = button(26, 18, 144, 44, ROOM_DEVICE_BACK, handler);
+    back = button(26, 18, 144, 44, ROOM_DEVICE_BACK, handler);
     back_text = label(back, LV_SYMBOL_LEFT " Menu", 10, 14, 124);
     refresh = button(228, 64, 114, 44, ROOM_DEVICE_REFRESH, handler);
     label(refresh, LV_SYMBOL_REFRESH " Refresh", 10, 14, 100);
@@ -90,6 +91,33 @@ void room_watch_devices_create(lv_obj_t *parent, lv_event_cb_t handler)
     detail_model = label(root, "", 32, 190, 304);
     detail_connection = label(root, "", 32, 250, 304);
     detail_pairing = label(root, "", 32, 294, 304);
+    if (room_tab5_layout()) {
+        room_tab5_header(root, heading, back);
+        lv_label_set_text_static(lv_obj_get_child(local, 0), LV_SYMBOL_HOME "  This Tab5");
+        room_tab5_button(local, 160, 208, 624);
+        room_tab5_button(refresh, 800, 208, 320);
+        lv_obj_set_pos(list, 160, 320);
+        lv_obj_set_width(list, 960);
+        lv_obj_set_pos(message, 160, 336);
+        lv_obj_set_width(message, 960);
+        room_tab5_button(previous, 160, 560, 192);
+        room_tab5_button(next, 928, 560, 192);
+        lv_obj_set_pos(counter, 368, 590);
+        lv_obj_set_width(counter, 544);
+        detail_body = lv_obj_create(root);
+        lv_obj_remove_style_all(detail_body);
+        lv_obj_set_pos(detail_body, 160, 208);
+        lv_obj_set_size(detail_body, 960, 448);
+        lv_obj_set_scroll_dir(detail_body, LV_DIR_VER);
+        lv_obj_set_scrollbar_mode(detail_body, LV_SCROLLBAR_MODE_AUTO);
+        lv_obj_t *details[] = {detail_name, detail_model, detail_connection, detail_pairing};
+        for (unsigned i = 0; i < 4; ++i) {
+            lv_obj_set_parent(details[i], detail_body);
+            lv_obj_set_width(details[i], 936);
+            lv_obj_set_height(details[i], LV_SIZE_CONTENT);
+            lv_label_set_long_mode(details[i], LV_LABEL_LONG_WRAP);
+        }
+    }
     lv_obj_set_hidden(root, true);
 }
 
@@ -111,20 +139,45 @@ void room_watch_devices_render(const esp_openclaw_devices_snapshot_t *snapshot, 
     for (size_t i = 0; ready && selected_id[0] != '\0' && i < devices->count; ++i)
         if (strcmp(devices->devices[i].id, selected_id) == 0) selected = &devices->devices[i];
     bool detail = selected != NULL;
-    int row_height = openclaw_density_row_height(false);
-    lv_obj_set_height(local, row_height);
+    bool tab5 = room_tab5_layout();
+    bool entering_detail = tab5 && detail && lv_obj_is_hidden(detail_body);
+    int row_height = room_page_row(false);
+    int list_top = tab5 ? 320 : 116 + row_height + 8;
+    int list_height = content_bottom - (tab5 ? 112 : 56) - list_top;
+    if (tab5 && row_height > list_height) row_height = list_height;
+    lv_obj_set_height(local, tab5 ? 96 : row_height);
     lv_obj_set_y(lv_obj_get_child(local, 0), (row_height - 16) / 2);
     lv_obj_set_hidden(list, detail || !ready);
-    lv_obj_set_y(list, 116 + row_height + 8);
-    lv_obj_set_height(list, content_bottom - 56 - (116 + row_height + 8));
-    lv_obj_set_y(previous, content_bottom - 44);
-    lv_obj_set_y(counter, content_bottom - 29);
-    lv_obj_set_y(next, content_bottom - 44);
+    lv_obj_set_y(list, list_top);
+    lv_obj_set_height(list, list_height);
+    lv_obj_set_y(previous, content_bottom - (tab5 ? 96 : 44));
+    lv_obj_set_y(counter, content_bottom - (tab5 ? 66 : 29));
+    lv_obj_set_y(next, content_bottom - (tab5 ? 96 : 44));
     for (unsigned i = 0; i < PAGE_SIZE; ++i) {
-        lv_obj_set_pos(rows[i], 0, (int)i * (row_height + openclaw_density_row_gap()));
+        lv_obj_set_pos(rows[i], 0, (int)i * (row_height + room_page_gap()));
         lv_obj_set_height(rows[i], row_height);
         lv_obj_set_y(names[i], (row_height - 16) / 2);
         lv_obj_set_y(states[i], (row_height - 16) / 2);
+    }
+    if (tab5) {
+        room_tab5_header(root, heading, back);
+        room_tab5_button(local, 160, 208, 624);
+        lv_obj_set_height(local, tab5 ? 96 : row_height);
+        room_tab5_button(refresh, 800, 208, 320);
+        room_tab5_button(previous, 160, content_bottom - 96, 192);
+        room_tab5_button(next, 928, content_bottom - 96, 192);
+        lv_obj_set_style_text_font(message, room_page_font(), 0);
+        lv_obj_set_style_text_font(counter, room_page_font(), 0);
+        for (unsigned i = 0; i < PAGE_SIZE; ++i) {
+            room_tab5_button(rows[i], 0, (int)i * (row_height + room_page_gap()), 960);
+            lv_obj_set_height(rows[i], row_height);
+            lv_obj_set_width(names[i], 824);
+            lv_obj_set_pos(states[i], 888, 0);
+            lv_obj_align(states[i], LV_ALIGN_RIGHT_MID, -24, 0);
+            lv_obj_set_width(states[i], 40);
+        }
+        lv_obj_set_height(detail_body, content_bottom - 208);
+        lv_obj_set_hidden(detail_body, !detail);
     }
     if (!detail) selected_id[0] = '\0';
     if (!ready || offset >= devices->count) offset = 0;
@@ -163,6 +216,18 @@ void room_watch_devices_render(const esp_openclaw_devices_snapshot_t *snapshot, 
             selected->connected ? "Online" : "Offline");
         lv_label_set_text_fmt(detail_pairing, "Pairing: %s", !selected->paired_known ? "Unknown" :
             selected->paired ? "Paired" : "Not paired");
+        if (tab5) {
+            lv_obj_t *details[] = {detail_name, detail_model, detail_connection, detail_pairing};
+            int y = 0;
+            for (unsigned i = 0; i < 4; ++i) {
+                lv_obj_set_style_text_font(details[i], room_page_font(), 0);
+                lv_obj_set_pos(details[i], 0, y);
+                lv_obj_update_layout(details[i]);
+                y += lv_obj_get_height(details[i]) + 24;
+            }
+            if (entering_detail) lv_obj_scroll_to_y(detail_body, 0, LV_ANIM_OFF);
+            lv_obj_readjust_scroll(detail_body, LV_ANIM_OFF);
+        }
     } else if (ready) {
         size_t end = offset + PAGE_SIZE < devices->count ? offset + PAGE_SIZE : devices->count;
         lv_label_set_text_fmt(counter, "%u-%u / %u", (unsigned)offset + 1, (unsigned)end, (unsigned)devices->count);
@@ -170,7 +235,7 @@ void room_watch_devices_render(const esp_openclaw_devices_snapshot_t *snapshot, 
         const char *text = "Devices unavailable.\nTap Refresh to try again.";
         if (devices != NULL) switch (devices->state) {
             case ESP_OPENCLAW_DEVICES_IDLE: text = "Devices paused.\nTap Refresh to load."; break;
-            case ESP_OPENCLAW_DEVICES_OFFLINE: text = "Gateway offline.\nThis Watch still works."; break;
+            case ESP_OPENCLAW_DEVICES_OFFLINE: text = tab5 ? "Device list offline.\nThis Tab5 still works." : "Gateway offline.\nThis Watch still works."; break;
             case ESP_OPENCLAW_DEVICES_LOADING: text = "Finding your devices..."; break;
             case ESP_OPENCLAW_DEVICES_EMPTY: text = "No Gateway devices yet.\nPair a device to see it here."; break;
             case ESP_OPENCLAW_DEVICES_TOO_LARGE: text = "Too many devices for this view.\nOpen the mobile app."; break;

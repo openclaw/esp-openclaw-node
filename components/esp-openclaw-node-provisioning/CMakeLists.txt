@@ -12,6 +12,7 @@ idf_component_register(
         "esp_openclaw_setup_request.c"
         "esp_openclaw_setup_response.c"
         "esp_openclaw_setup_dispatcher.c"
+        "esp_openclaw_setup_security2.c"
         "esp_openclaw_setup_wifi.c"
         "esp_openclaw_setup_gateway.c"
     INCLUDE_DIRS "include"
@@ -23,6 +24,7 @@ idf_component_register(
         esp_netif
         esp_timer
         esp_wifi
+        protocomm
         espressif__cjson
         freertos
         nvs_flash)

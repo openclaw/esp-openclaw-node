@@ -179,6 +179,11 @@ jobs:
               python3 -m unittest discover -s ../../scripts/tests -p test_package_firmware.py -v
             fi &&
             ninja -C build -j2 &&
+            if [ "${{ matrix.name }}" = "m5stack-dial-node" ] || [ "${{ matrix.name }}" = "waveshare-amoled-watch-node" ]; then
+              xtensa-esp32s3-elf-nm --undefined-only \
+                build/esp-idf/esp-openclaw-node-provisioning/libesp-openclaw-node-provisioning.a |
+                grep -E '[[:space:]]U protocomm_security2$' >/dev/null || exit 1
+            fi &&
             if [ "${{ matrix.name }}" != "component-test-app-build" ]; then
               python3 ../../scripts/check_certificate_bundle.py \
                 --bundle build/esp-idf/mbedtls/x509_crt_bundle
@@ -207,6 +212,7 @@ jobs:
               python3 ../../components/esp-openclaw-node/tests/run_handshake_host_tests.py --cjson-dir managed_components/espressif__cjson/cJSON &&
               python3 ../../components/esp-openclaw-node/tests/run_scope_registry_host_tests.py --cjson-dir managed_components/espressif__cjson/cJSON &&
               python3 ../../components/esp-openclaw-node-provisioning/tests/run_wifi_host_tests.py --cjson-dir managed_components/espressif__cjson/cJSON &&
+              python3 ../../components/esp-openclaw-node-provisioning/tests/run_security2_host_tests.py --idf-path "$IDF_PATH" &&
               python3 tests/run_reader_host_tests.py --cjson-dir managed_components/espressif__cjson/cJSON
             fi &&
             if [ "${{ matrix.name }}" = "waveshare-amoled-room-node" ]; then

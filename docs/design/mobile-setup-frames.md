@@ -135,6 +135,10 @@ does not prove successful authentication; a reusable connection handle is not a
 boot-unique authenticated peer identity. Delegate cryptography to the SDK and
 track ownership at its synchronous session boundary.
 
+The [Security2 guard](mobile-setup-security2.md) implements that callback
+boundary. The synchronous BLE endpoint/mailbox, server lifecycle and device
+confirmation screens remain separate integration work.
+
 ## Codec and fixtures
 
 [`esp_openclaw_setup_frame.h`](../../components/esp-openclaw-node-provisioning/include/esp_openclaw_setup_frame.h)

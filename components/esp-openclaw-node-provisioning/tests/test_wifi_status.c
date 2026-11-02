@@ -1,6 +1,7 @@
 #include "wifi_host_sdk.h"
 #include "esp_openclaw_node_wifi.h"
 #include "esp_openclaw_setup_wifi.h"
+#include "esp_openclaw_setup_dispatcher.h"
 #include "esp_openclaw_node_common_device_node_cmd.h"
 #include "cJSON.h"
 
@@ -38,6 +39,8 @@ static esp_err_t connect_result = ESP_OK;
 static bool probe_reconnect_unlock;
 static bool disconnect_on_unlock;
 static esp_openclaw_node_wifi_setup_lease_t scan_lease;
+static uint16_t scan_found;
+static void (*during_scan)(void);
 
 static void check(bool condition, const char *message);
 
@@ -158,10 +161,19 @@ esp_err_t esp_wifi_scan_start(const wifi_scan_config_t *config, bool block)
         check(esp_openclaw_node_wifi_setup_scan(scan_lease, records, &count, &total) == ESP_ERR_WIFI_STATE,
               "a second leased scan cannot overlap");
     }
+    if (during_scan) during_scan();
     return scan_result;
 }
-esp_err_t esp_wifi_scan_get_ap_num(uint16_t *count) { *count = 0; return ESP_OK; }
-esp_err_t esp_wifi_scan_get_ap_records(uint16_t *count, wifi_ap_record_t *records) { (void)records; *count = 0; return ESP_OK; }
+esp_err_t esp_wifi_scan_get_ap_num(uint16_t *count) { *count = scan_found; return ESP_OK; }
+esp_err_t esp_wifi_scan_get_ap_records(uint16_t *count, wifi_ap_record_t *records)
+{
+    if (*count > scan_found) *count = scan_found;
+    for (unsigned i = 0; i < *count; ++i) {
+        records[i] = (wifi_ap_record_t){.rssi = -55, .primary = 6, .authmode = WIFI_AUTH_WPA2_PSK};
+        memset(records[i].ssid, 's', 32);
+    }
+    return ESP_OK;
+}
 esp_err_t esp_wifi_clear_ap_list(void) { return ESP_OK; }
 esp_err_t esp_openclaw_node_register_capability(esp_openclaw_node_handle_t node, const char *name)
 { (void)node; (void)name; return ESP_OK; }
@@ -797,6 +809,219 @@ static void check_setup_binding(void)
     connect_result = ESP_OK;
 }
 
+/* Gateway API boundary only. Native admission/worker/authority/drain behavior is
+ * exercised by the existing run_connect_lease_host_tests.py production lane. */
+struct esp_openclaw_node { unsigned unused; };
+static struct esp_openclaw_node gateway_node;
+static esp_openclaw_node_connect_lease_t gateway_lease, next_gateway_lease;
+static esp_openclaw_node_connect_attempt_t gateway_attempt;
+static unsigned gateway_begins;
+static char gateway_code[4097];
+esp_err_t esp_openclaw_node_connect_lease_acquire(esp_openclaw_node_handle_t node, esp_openclaw_node_connect_lease_t *lease)
+{
+    assert(node == &gateway_node && !gateway_lease); gateway_attempt = (esp_openclaw_node_connect_attempt_t){0};
+    *lease = gateway_lease = ++next_gateway_lease; return ESP_OK;
+}
+esp_err_t esp_openclaw_node_connect_lease_release(esp_openclaw_node_handle_t node, esp_openclaw_node_connect_lease_t lease)
+{
+    assert(node == &gateway_node && lease == gateway_lease);
+    assert(gateway_attempt.id == 0 || gateway_attempt.state == ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_SUCCEEDED ||
+        gateway_attempt.state == ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_FAILED);
+    gateway_lease = 0; return ESP_OK;
+}
+esp_err_t esp_openclaw_node_connect_begin_authorized(esp_openclaw_node_handle_t node,
+    esp_openclaw_node_connect_lease_t lease, const esp_openclaw_node_connect_request_t *request,
+    esp_openclaw_node_connect_authorize_t authorize, void *context, esp_openclaw_node_connect_attempt_id_t *attempt)
+{
+    assert(node == &gateway_node && lease == gateway_lease && authorize != NULL && context != NULL);
+    assert(request->source == ESP_OPENCLAW_NODE_CONNECT_SOURCE_SETUP_CODE && strlen(request->value) <= 4096);
+    strcpy(gateway_code, request->value);
+    gateway_attempt = (esp_openclaw_node_connect_attempt_t){.id = ++gateway_begins,
+        .state = ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_QUEUED};
+    *attempt = gateway_attempt.id; return ESP_OK;
+}
+esp_err_t esp_openclaw_node_connect_snapshot(esp_openclaw_node_handle_t node,
+    esp_openclaw_node_connect_lease_t lease, esp_openclaw_node_connect_attempt_id_t attempt,
+    esp_openclaw_node_connect_attempt_t *result)
+{ assert(node == &gateway_node && lease == gateway_lease && attempt == gateway_attempt.id); *result = gateway_attempt; return ESP_OK; }
+esp_err_t esp_openclaw_node_connect_cancel(esp_openclaw_node_handle_t node,
+    esp_openclaw_node_connect_lease_t lease, esp_openclaw_node_connect_attempt_id_t attempt)
+{ assert(node == &gateway_node && lease == gateway_lease && attempt == gateway_attempt.id); gateway_attempt.cancel_requested = true; return ESP_OK; }
+
+typedef struct {
+    esp_openclaw_setup_session_t session;
+    esp_openclaw_setup_wifi_t wifi;
+    esp_openclaw_setup_gateway_t gateway;
+    esp_openclaw_setup_transfer_t transfer;
+    esp_openclaw_setup_dispatcher_t dispatcher;
+    uint64_t generation;
+    uint32_t serial;
+    bool live, probe_handoff;
+    uint8_t reply[596];
+} dispatcher_fixture_t;
+static dispatcher_fixture_t wire;
+static uint64_t wire_now(void *context) { (void)context; return 100; }
+static bool wire_peer(uint64_t peer, void *context) { return peer == 7 && ((dispatcher_fixture_t *)context)->live; }
+static void wire_cancel(esp_openclaw_setup_token_t token, void *context)
+{ esp_openclaw_setup_dispatcher_cancel(&((dispatcher_fixture_t *)context)->dispatcher, token); }
+static bool wire_hello(uint64_t generation, uint64_t peer, esp_openclaw_setup_bytes_t *label,
+    esp_openclaw_setup_bytes_t *model, const uint8_t **challenge, void *context)
+{
+    static const uint8_t comparison[32] = {0xab};
+    assert(generation == ((dispatcher_fixture_t *)context)->generation && peer == 7);
+    *label = (esp_openclaw_setup_bytes_t){(const uint8_t *)"Watch", 5};
+    *model = (esp_openclaw_setup_bytes_t){(const uint8_t *)"S3", 2};
+    *challenge = comparison; return true;
+}
+static void wire_open(void)
+{
+    wire.live = true;
+    assert(esp_openclaw_setup_open(&wire.session, &wire.generation) == ESP_OPENCLAW_SETUP_OK);
+    assert(esp_openclaw_setup_attach(&wire.session, wire.generation, 7) == ESP_OPENCLAW_SETUP_OK);
+    assert(esp_openclaw_setup_transfer_open(&wire.transfer, wire.generation, 7));
+    wire.serial = 0;
+}
+static void wire_confirm(void)
+{
+    assert(esp_openclaw_setup_input_released(&wire.session, wire.generation) == ESP_OPENCLAW_SETUP_OK);
+    assert(esp_openclaw_setup_confirm(&wire.session, wire.generation) == ESP_OPENCLAW_SETUP_OK);
+    assert(esp_openclaw_setup_dispatcher_activate(&wire.dispatcher, wire.generation) == ESP_OK);
+}
+static void wire_integer(uint8_t *bytes, uint64_t value, unsigned count)
+{ while (count) { bytes[--count] = value; value >>= 8; } }
+static bool wire_exchange(unsigned operation, uint32_t id, const uint8_t *body, size_t body_size)
+{
+    uint8_t app[4114] = {1, operation}, input[464], output[464];
+    wire_integer(app + 4, operation == 1 ? 0 : wire.generation, 8); wire_integer(app + 12, id, 4);
+    if (body_size) memcpy(app + 16, body, body_size);
+    uint16_t total = (uint16_t)(16 + body_size);
+    esp_openclaw_setup_transfer_request_t handoff = {0};
+    ++wire.serial;
+    for (uint16_t offset = 0; offset < total;) {
+        uint16_t count = total - offset; if (count > 448) count = 448;
+        esp_openclaw_setup_frame_t frame = {.kind = ESP_OPENCLAW_SETUP_FRAME_REQUEST,
+            .transfer_id = wire.serial, .total_size = total, .offset = offset, .payload_size = count, .payload = app + offset};
+        size_t size, received;
+        assert(esp_openclaw_setup_frame_encode(&frame, input, sizeof(input), &size));
+        assert(esp_openclaw_setup_transfer_receive(&wire.transfer, wire.generation, 7,
+            input, size, output, sizeof(output), &received, &handoff));
+        offset += count;
+    }
+    assert(handoff.size == total);
+    if (wire.probe_handoff) {
+        uint8_t receipts = esp_openclaw_setup_snapshot(&wire.session).receipt_count;
+        esp_openclaw_setup_transfer_request_t forged = handoff; ++forged.token.transfer_id;
+        assert(!esp_openclaw_setup_dispatcher_handle(&wire.dispatcher, &forged));
+        assert(esp_openclaw_setup_snapshot(&wire.session).receipt_count == receipts);
+        forged = handoff; ++forged.data;
+        assert(!esp_openclaw_setup_dispatcher_handle(&wire.dispatcher, &forged));
+        assert(esp_openclaw_setup_snapshot(&wire.session).receipt_count == receipts);
+        wire.probe_handoff = false;
+    }
+    if (!esp_openclaw_setup_dispatcher_handle(&wire.dispatcher, &handoff)) return false;
+    // A second delivery of the same handoff cannot dispatch after publication.
+    assert(!esp_openclaw_setup_dispatcher_handle(&wire.dispatcher, &handoff));
+    for (unsigned offset = 0;;) {
+        esp_openclaw_setup_frame_t pull = {.kind = ESP_OPENCLAW_SETUP_FRAME_PULL,
+            .transfer_id = wire.serial, .offset = offset}, response;
+        size_t size, received;
+        assert(esp_openclaw_setup_frame_encode(&pull, input, sizeof(input), &size));
+        assert(esp_openclaw_setup_transfer_receive(&wire.transfer, wire.generation, 7,
+            input, size, output, sizeof(output), &received, &handoff));
+        assert(esp_openclaw_setup_frame_decode(output, received, &response) && response.kind == ESP_OPENCLAW_SETUP_FRAME_RESPONSE);
+        assert(response.total_size <= sizeof(wire.reply));
+        memcpy(wire.reply + offset, response.payload, response.payload_size);
+        offset += response.payload_size;
+        if (offset == response.total_size) break;
+    }
+    return true;
+}
+static unsigned wire_code(void) { return (unsigned)wire.reply[2] * 256 + wire.reply[3]; }
+static void revoke_scan(void) { wire.live = false; }
+
+static void check_setup_dispatcher(void)
+{
+    assert(esp_openclaw_node_wifi_disconnect() == ESP_OK);
+    esp_openclaw_setup_callbacks_t callbacks = {wire_now, wire_peer, wire_cancel, &wire};
+    assert(esp_openclaw_setup_init(&wire.session, &callbacks));
+    assert(esp_openclaw_setup_wifi_init(&wire.wifi, &wire.session));
+    assert(esp_openclaw_setup_gateway_init(&wire.gateway, &wire.session, &gateway_node));
+    assert(esp_openclaw_setup_transfer_init(&wire.transfer, &wire.session));
+    assert(esp_openclaw_setup_dispatcher_init(&wire.dispatcher, &wire.session, &wire.transfer,
+        &wire.wifi, &wire.gateway, wire_hello, &wire));
+    wire_open();
+    assert(wire_exchange(1, 0, NULL, 0) && wire_code() == 0 && wire.reply[16] == 1 && wire.reply[26] == 0xab);
+    assert(wire_exchange(2, 0, NULL, 0) && wire_code() == 0x104);
+    assert(wire_exchange(3, 0, NULL, 0) && wire_code() == 0x104);
+    assert(esp_openclaw_setup_confirm(&wire.session, wire.generation) == ESP_OPENCLAW_SETUP_NEEDS_CONFIRMATION);
+    wire_confirm();
+    scan_found = 17;
+    assert(wire_exchange(3, 0, NULL, 0) && wire_code() == 0);
+    assert(wire.reply[16] == 16 && wire.reply[17] == 1 && wire.reply[19] == 17 && wire.reply[20] == 32);
+    scan_found = 0;
+    uint8_t credentials[100] = {0, 32}; memset(credentials + 2, 's', 32);
+    credentials[34] = 0; credentials[35] = 64; memset(credentials + 36, 'f', 64);
+    unsigned writes = config_writes;
+    wire.probe_handoff = true;
+    assert(wire_exchange(4, 1, credentials, sizeof(credentials)) && wire_code() == 1 && config_writes == writes);
+    credentials[36] = '!';
+    assert(wire_exchange(4, 1, credentials, sizeof(credentials)) && wire_code() == 2 && config_writes == writes);
+    assert(wire_exchange(2, 1, NULL, 0) && wire_code() == 0);
+#if SOC_WIFI_SUPPORTED && !CONFIG_ESP_WIFI_REMOTE_ENABLED && !CONFIG_ESP_HOST_WIFI_ENABLED
+    assert(wire.reply[19] == 1); // New status transfer can read a pending apply.
+    for (unsigned i = 0; i < 40 && esp_openclaw_setup_wifi_snapshot(&wire.wifi).attempt.state != ESP_OPENCLAW_NODE_WIFI_JOINING; ++i) {
+        bool released; assert(esp_openclaw_setup_dispatcher_poll(&wire.dispatcher, &released) == ESP_OK); dispatch_all();
+    }
+    assert(memcmp(saved_config.sta.ssid, credentials + 2, 32) == 0 && saved_config.sta.password[0] == 'f');
+    ip_event_got_ip_t ip = {.esp_netif = &station, .ip_info.ip.addr = 0x010200c0};
+    wifi_handler(wifi_context, WIFI_EVENT, WIFI_EVENT_STA_CONNECTED, NULL);
+    ip_handler(ip_context, IP_EVENT, IP_EVENT_STA_GOT_IP, &ip);
+    bool released; assert(esp_openclaw_setup_dispatcher_poll(&wire.dispatcher, &released) == ESP_OK);
+    assert(wire_exchange(2, 1, NULL, 0) && wire.reply[19] == 2 && wire.reply[26] == 1 && wire.reply[27] == 1);
+#else
+    assert(wire.reply[19] == 3 && wire.reply[25] == 2); // Truthful remote-radio unsupported receipt.
+#endif
+    esp_openclaw_setup_close(&wire.session);
+    bool handed_back; assert(esp_openclaw_setup_dispatcher_poll(&wire.dispatcher, &handed_back) == ESP_OK && handed_back);
+    assert(esp_openclaw_node_wifi_connect() == ESP_OK);
+    ip_event_got_ip_t online = {.esp_netif = &station, .ip_info.ip.addr = 0x010200c0};
+    ip_handler(ip_context, IP_EVENT, IP_EVENT_STA_GOT_IP, &online);
+    wire_open(); wire_confirm();
+    unsigned mutations = driver_mutations;
+    assert(wire_exchange(3, 0, NULL, 0) && wire_code() == 0x105 && driver_mutations == mutations);
+    uint8_t code[4098] = {16, 0}; memset(code + 2, 'x', 4096);
+    assert(wire_exchange(5, 1, code, sizeof(code)) && wire_code() == 1 && strlen(gateway_code) == 4096);
+    code[2] = 'y';
+    unsigned began = gateway_begins;
+    assert(wire_exchange(5, 1, code, sizeof(code)) && wire_code() == 2 && gateway_begins == began && gateway_code[0] == 'x');
+    gateway_attempt.state = ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_FAILED;
+    gateway_attempt.local_err = ESP_ERR_TIMEOUT; gateway_attempt.credentials_saved = true;
+    assert(esp_openclaw_setup_dispatcher_poll(&wire.dispatcher, &handed_back) == ESP_OK && !handed_back);
+    assert(wire_exchange(2, 1, NULL, 0) && wire.reply[19] == 3 && wire.reply[25] == 4 && wire.reply[27] == 1);
+    assert(wire_exchange(5, 2, code, sizeof(code)) && wire_code() == 1);
+    assert(wire_exchange(2, 1, NULL, 0) && wire.reply[19] == 3 && wire.reply[25] == 4 &&
+        wire.reply[26] == 0 && wire.reply[27] == 0 && wire.reply[28] == 0);
+    assert(!wire_exchange(6, 0, NULL, 0) && gateway_attempt.cancel_requested);
+    assert(esp_openclaw_setup_dispatcher_poll(&wire.dispatcher, &handed_back) == ESP_OK && !handed_back);
+    assert(esp_openclaw_setup_snapshot(&wire.session).phase == ESP_OPENCLAW_SETUP_CLOSING);
+    gateway_attempt.state = ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_FAILED;
+    gateway_attempt.failure_reason = ESP_OPENCLAW_NODE_CONNECT_FAILURE_CANCELED;
+    assert(esp_openclaw_setup_dispatcher_poll(&wire.dispatcher, &handed_back) == ESP_OK && handed_back);
+    assert(!esp_openclaw_setup_transfer_poll(&wire.transfer));
+    // WiFi was polled before Gateway closed the session; its lease releases next tick.
+    assert(esp_openclaw_setup_dispatcher_poll(&wire.dispatcher, &handed_back) == ESP_OK && !handed_back);
+    assert(esp_openclaw_node_wifi_disconnect() == ESP_OK);
+    wire_open(); wire_confirm();
+    for (unsigned id = 1; id <= 32; ++id) assert(wire_exchange(5, id, code, sizeof(code)) && wire_code() == 1);
+    assert(wire_exchange(5, 33, code, sizeof(code)) && wire_code() == 0x106);
+    assert(wire_exchange(5, 1, code, sizeof(code)) && wire_code() == 2 && gateway_begins == began + 1);
+    during_scan = revoke_scan;
+    assert(!wire_exchange(3, 0, NULL, 0)); during_scan = NULL;
+    assert(!esp_openclaw_setup_transfer_poll(&wire.transfer));
+    assert(esp_openclaw_setup_dispatcher_poll(&wire.dispatcher, &handed_back) == ESP_OK && handed_back);
+    puts("setup dispatcher: real framed admission/status, native WiFi copies, retries, saved observations, cancellation and revoke passed");
+}
+
 int main(void)
 {
     assert(esp_openclaw_node_register_device_commands(NULL, NULL) == ESP_OK);
@@ -843,6 +1068,7 @@ int main(void)
     check_late_ip_after_disconnect();
     check_setup_attempts();
     check_setup_binding();
+    check_setup_dispatcher();
     printf("Wi-Fi status and setup: %u failed checks\n", failures);
     return failures ? 1 : 0;
 }

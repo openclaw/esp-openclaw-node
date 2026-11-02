@@ -61,7 +61,7 @@ typedef struct { uint8_t reason; } wifi_event_sta_disconnected_t;
 typedef enum { WIFI_AUTH_OPEN, WIFI_AUTH_WEP, WIFI_AUTH_WPA_PSK, WIFI_AUTH_WPA2_PSK,
     WIFI_AUTH_WPA_WPA2_PSK, WIFI_AUTH_WPA2_ENTERPRISE, WIFI_AUTH_WPA3_PSK,
     WIFI_AUTH_WPA2_WPA3_PSK, WIFI_AUTH_WAPI_PSK } wifi_auth_mode_t;
-typedef struct { int8_t rssi; uint8_t primary; wifi_auth_mode_t authmode; } wifi_ap_record_t;
+typedef struct { uint8_t ssid[33]; int8_t rssi; uint8_t primary; wifi_auth_mode_t authmode; } wifi_ap_record_t;
 typedef struct { struct {
     uint8_t ssid[32], password[64];
     struct { wifi_auth_mode_t authmode; } threshold;
@@ -93,17 +93,7 @@ esp_err_t esp_wifi_scan_get_ap_num(uint16_t *);
 esp_err_t esp_wifi_scan_get_ap_records(uint16_t *, wifi_ap_record_t *);
 esp_err_t esp_wifi_clear_ap_list(void);
 
-typedef void *esp_openclaw_node_handle_t;
-typedef struct { const char *code, *message; } esp_openclaw_node_error_t;
-typedef esp_err_t (*esp_openclaw_node_command_handler_t)(esp_openclaw_node_handle_t,
-    void *, const char *, size_t, char **, esp_openclaw_node_error_t *);
-typedef struct {
-    const char *name;
-    esp_openclaw_node_command_handler_t handler;
-    void *context;
-} esp_openclaw_node_command_t;
-esp_err_t esp_openclaw_node_register_capability(esp_openclaw_node_handle_t, const char *);
-esp_err_t esp_openclaw_node_register_command(esp_openclaw_node_handle_t, const esp_openclaw_node_command_t *);
+#include "esp_openclaw_node.h"
 typedef struct { char version[32], date[16], time[16]; } esp_app_desc_t;
 const esp_app_desc_t *esp_app_get_description(void);
 const char *esp_get_idf_version(void);

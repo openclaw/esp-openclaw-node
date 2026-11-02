@@ -2,8 +2,8 @@
 
 Watch and Dial share this version 1 application request format inside a completed
 [setup transfer](mobile-setup-frames.md). The request decoder and
-[response encoder](mobile-setup-responses.md) are implemented; dispatch, BLE and
-mobile integration remain separate work. Decoding
+[response encoder](mobile-setup-responses.md) and serialized dispatcher are
+implemented; BLE and mobile integration remain separate work. Decoding
 does not authenticate a peer, confirm a device, or apply settings.
 
 ## Header

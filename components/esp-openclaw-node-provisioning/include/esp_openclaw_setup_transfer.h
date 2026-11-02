@@ -51,6 +51,10 @@ bool esp_openclaw_setup_transfer_open(esp_openclaw_setup_transfer_t *transfer,
  * session owns their teardown/drain. Poll even when no frames arrive. */
 void esp_openclaw_setup_transfer_close(esp_openclaw_setup_transfer_t *transfer);
 bool esp_openclaw_setup_transfer_poll(esp_openclaw_setup_transfer_t *transfer);
+/* Admit only the exact current pending handoff, including borrowed buffer and
+ * size. Rechecks live peer authority; old/forged handoffs cannot dispatch. */
+bool esp_openclaw_setup_transfer_authorize_request(esp_openclaw_setup_transfer_t *transfer,
+    const esp_openclaw_setup_transfer_request_t *request);
 
 /* Input, output and transfer storage must not overlap. Reply capacity must be
  * at least FRAME_SIZE_MAX. False leaves output arguments/bytes unchanged.

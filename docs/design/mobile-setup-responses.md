@@ -1,8 +1,8 @@
 # Mobile setup responses
 
 Watch and Dial share this version 1 response format inside a completed
-[setup transfer](mobile-setup-frames.md). The encoder is implemented; dispatch,
-BLE and phone integration remain separate work. A response is at most 596 bytes
+[setup transfer](mobile-setup-frames.md). The encoder and serialized dispatcher
+are implemented; BLE and phone integration remain separate work. A response is at most 596 bytes
 and still uses bounded transport fragments, never one oversized attribute value.
 
 ## Header and result codes
@@ -122,3 +122,10 @@ compare independent hello, pending, older failed, duplicate succeeded, empty
 status, scan and error vectors. They cover exact maximum bodies, one-byte-short
 capacities, unknown values and inconsistent knowledge/identity fields under
 ASan/UBSan. This proves encoding, not authentication, dispatch or BLE pairing.
+
+The [dispatcher](../../components/esp-openclaw-node-provisioning/include/esp_openclaw_setup_dispatcher.h)
+checks exact pending transfer authority, delegates mutations to the canonical
+bindings, and maps native values explicitly to these public codes. Its
+[integrated tests](../../components/esp-openclaw-node-provisioning/tests/test_wifi_status.c)
+exercise framed admission/status, receipt retries, native Wi-Fi copies,
+cancellation, scan revocation and unknown observations for replaced attempts.

@@ -11,6 +11,7 @@ idf_component_register(
         "esp_openclaw_setup_transfer.c"
         "esp_openclaw_setup_request.c"
         "esp_openclaw_setup_response.c"
+        "esp_openclaw_setup_dispatcher.c"
         "esp_openclaw_setup_wifi.c"
         "esp_openclaw_setup_gateway.c"
     INCLUDE_DIRS "include"

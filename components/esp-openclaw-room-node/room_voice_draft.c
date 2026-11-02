@@ -368,7 +368,9 @@ bool room_voice_draft_poll(const room_voice_context_t *context, room_voice_snaps
     poll_chat();
     if (!sent && view.state == ROOM_VOICE_DRAFT && !context->send_enabled) {
         view.can_send = false;
-        strlcpy(view.detail, "Enable Messaging in Settings to send.", sizeof(view.detail));
+        /* Missing destination remains the first repair step for a local recording. */
+        if (context->agent_id[0] != '\0')
+            strlcpy(view.detail, "Enable Messaging in Settings to send.", sizeof(view.detail));
     }
     if (discarding && !room_voice_draft_busy()) {
         view.duration_ms = 0;

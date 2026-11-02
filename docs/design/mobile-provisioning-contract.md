@@ -117,8 +117,9 @@ setup-code fixtures; do not silently truncate valid credentials or identities.
 The shared [frame codec](mobile-setup-frames.md) defines the binary fragment
 envelope within the pinned BLE attribute limits and implements transfer reassembly.
 The [application request codec](mobile-setup-requests.md) defines exact command
-fields and bounds. Response/error messages and application dispatch remain separate
-work; an 8 KiB logical request must never be sent as one characteristic value.
+fields and bounds. The [response encoder](mobile-setup-responses.md) defines public
+results and bounded bodies. Application dispatch remains separate work; an 8 KiB
+logical request must never be sent as one characteristic value.
 
 Every mutating request has an operation ID and expected setup generation. Once
 accepted, a repeated ID returns that operation's status; it cannot run again or

@@ -42,6 +42,25 @@ and the normal ESP-IDF/cJSON/SDK path arguments described below.
 
 ## Live Talk
 
+Prepared calls expose `esp_openclaw_talk_call_snapshot`: a copied, bounded latest
+turn with user and agent text, partial/final flags and Gateway activity. Continue
+forwarding `talk.event` from the call's original operator connection. Both envelope
+session IDs must match the prepared call; events after cancellation are ignored.
+The snapshot API requires the caller to retain the call for the read.
+
+Text deltas append; complete text replaces the partial. Each side keeps at most
+1,023 UTF-8 bytes without splitting a code point. Sequence gaps and truncation
+mark text incomplete. A complete final repairs only its own text; clients must
+keep the incomplete indicator for a truncated final. Text from a turn without a
+matching `turn.started` is withheld, and finished-turn output cannot reactivate
+speaking. The snapshot retains only the latest admitted turn, not history.
+
+The event contract follows the Gateway's `transcript.delta/done`,
+`output.text.delta/done`, `output.audio.started/done`, and turn/session events.
+Speaking means Gateway output activity, not verified local playback. This API
+adds no mute, interruption, speech injection or automatic draft submission.
+Consumers still need to publish the snapshot through their own UI worker.
+
 Talk posts SDP and its single-use broker credential directly to the Gateway's
 `offerUrl`. HTTP redirects (including same-origin redirects) fail the exchange;
 configure the final offer URL in the Gateway or reverse proxy. Request-header

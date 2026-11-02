@@ -815,3 +815,99 @@ TEST_CASE("SDP exchange retains an offer header failure when a later header succ
     TEST_ASSERT_EQUAL(1, s_http.cleanup_count);
     stop_signaling(handle);
 }
+
+static void stream_event(esp_peer_signaling_handle_t call, unsigned seq,
+    const char *type, const char *turn, const char *text)
+{
+    cJSON *payload = cJSON_CreateObject();
+    cJSON_AddStringToObject(payload, "voiceSessionId", "voice-1");
+    cJSON *event = cJSON_AddObjectToObject(payload, "talkEvent");
+    cJSON_AddStringToObject(event, "sessionId", "voice-1");
+    cJSON_AddStringToObject(event, "type", type);
+    cJSON_AddNumberToObject(event, "seq", seq);
+    if (turn != NULL) cJSON_AddStringToObject(event, "turnId", turn);
+    if (text != NULL) cJSON_AddStringToObject(cJSON_AddObjectToObject(event, "payload"), "text", text);
+    char *json = cJSON_PrintUnformatted(payload);
+    esp_openclaw_talk_call_gateway_event(call, (esp_openclaw_node_handle_t)1, "talk.event", json);
+    free(json);
+    cJSON_Delete(payload);
+}
+
+TEST_CASE("live Talk text appends deltas and replaces final text without crossing turns", "[esp_openclaw_talk]")
+{
+    esp_peer_signaling_handle_t call = start_signaling();
+    respond_to_create(true, valid_response(), NULL);
+    esp_openclaw_talk_snapshot_t view;
+    stream_event(call, 1, "session.ready", NULL, NULL);
+    stream_event(call, 2, "turn.started", "turn-1", NULL);
+    stream_event(call, 3, "transcript.delta", "turn-1", "Hello ");
+    stream_event(call, 4, "transcript.delta", "turn-1", "Kitsune");
+    TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_talk_call_snapshot(call, &view));
+    TEST_ASSERT_EQUAL_STRING("Hello Kitsune", view.user_text);
+    TEST_ASSERT_FALSE(view.user_final);
+    TEST_ASSERT_FALSE(view.user_incomplete);
+    stream_event(call, 6, "transcript.delta", "turn-1", "!");
+    esp_openclaw_talk_call_snapshot(call, &view);
+    TEST_ASSERT_TRUE(view.user_incomplete);
+    stream_event(call, 7, "transcript.done", "turn-1", "Hello, Kitsune!");
+    stream_event(call, 8, "output.text.delta", "turn-1", "Hi ");
+    stream_event(call, 8, "output.text.delta", "turn-1", "duplicate");
+    stream_event(call, 9, "output.text.done", "turn-1", "Hi there.");
+    stream_event(call, 10, "output.text.delta", "turn-1", "late partial");
+    stream_event(call, 11, "output.audio.started", "turn-1", NULL);
+    esp_openclaw_talk_call_snapshot(call, &view);
+    TEST_ASSERT_EQUAL_STRING("Hello, Kitsune!", view.user_text);
+    TEST_ASSERT_EQUAL_STRING("Hi there.", view.agent_text);
+    TEST_ASSERT_TRUE(view.user_final && view.agent_final);
+    TEST_ASSERT_FALSE(view.user_incomplete || view.agent_incomplete);
+    TEST_ASSERT_EQUAL(ESP_OPENCLAW_TALK_SPEAKING, view.phase);
+    stream_event(call, 12, "turn.cancelled", "turn-1", NULL);
+    stream_event(call, 13, "output.audio.started", "turn-1", NULL);
+    esp_openclaw_talk_call_snapshot(call, &view);
+    TEST_ASSERT_FALSE(view.turn_active);
+    TEST_ASSERT_EQUAL(ESP_OPENCLAW_TALK_LISTENING, view.phase);
+    stream_event(call, 14, "turn.started", "turn-2", NULL);
+    stream_event(call, 15, "transcript.delta", "turn-1", "stale turn");
+    esp_openclaw_talk_call_snapshot(call, &view);
+    TEST_ASSERT_EQUAL_STRING("turn-2", view.turn_id);
+    TEST_ASSERT_EQUAL_STRING("", view.user_text);
+    TEST_ASSERT_EQUAL_STRING("", view.agent_text);
+    stop_signaling(call);
+}
+
+TEST_CASE("live Talk ignores foreign identity and bounds text on a UTF-8 boundary", "[esp_openclaw_talk]")
+{
+    esp_peer_signaling_handle_t call = start_signaling();
+    respond_to_create(true, valid_response(), NULL);
+    stream_event(call, 1, "turn.started", "turn-1", NULL);
+    const char *foreign = "{\"voiceSessionId\":\"foreign\",\"talkEvent\":{\"sessionId\":\"foreign\",\"type\":\"session.error\",\"seq\":100}}";
+    esp_openclaw_talk_call_gateway_event(call, (esp_openclaw_node_handle_t)1, "talk.event", foreign);
+    const char *ambiguous = "{\"voiceSessionId\":\"voice-1\",\"talkEvent\":{\"sessionId\":\"voice-1\",\"type\":\"session.error\",\"seq\":2,\"seq\":3}}";
+    esp_openclaw_talk_call_gateway_event(call, (esp_openclaw_node_handle_t)1, "talk.event", ambiguous);
+    const char *wrong_source = "{\"voiceSessionId\":\"voice-1\",\"talkEvent\":{\"sessionId\":\"voice-1\",\"type\":\"session.error\",\"seq\":2}}";
+    esp_openclaw_talk_call_gateway_event(call, (esp_openclaw_node_handle_t)2, "talk.event", wrong_source);
+    esp_openclaw_talk_snapshot_t view;
+    esp_openclaw_talk_call_snapshot(call, &view);
+    TEST_ASSERT_EQUAL(1, view.sequence);
+    TEST_ASSERT_EQUAL(ESP_OPENCLAW_TALK_LISTENING, view.phase);
+    char long_text[ESP_OPENCLAW_TALK_TEXT_BYTES + 8];
+    memset(long_text, 'x', sizeof(long_text));
+    long_text[ESP_OPENCLAW_TALK_TEXT_BYTES - 2] = '\xc3';
+    long_text[ESP_OPENCLAW_TALK_TEXT_BYTES - 1] = '\xa9';
+    long_text[sizeof(long_text) - 1] = '\0';
+    stream_event(call, 2, "transcript.done", "turn-1", long_text);
+    esp_openclaw_talk_call_snapshot(call, &view);
+    TEST_ASSERT_EQUAL(ESP_OPENCLAW_TALK_TEXT_BYTES - 2, strlen(view.user_text));
+    TEST_ASSERT_TRUE(view.user_final && view.user_incomplete);
+    stream_event(call, 3, "transcript.done", "turn-1", "Corrected");
+    esp_openclaw_talk_call_snapshot(call, &view);
+    TEST_ASSERT_FALSE(view.user_incomplete);
+    stream_event(call, 4, "session.error", NULL, NULL);
+    esp_openclaw_talk_call_snapshot(call, &view);
+    TEST_ASSERT_EQUAL(ESP_OPENCLAW_TALK_ERROR, view.phase);
+    esp_openclaw_talk_call_cancel(call);
+    stream_event(call, 5, "transcript.done", "turn-1", "after cancel");
+    esp_openclaw_talk_call_snapshot(call, &view);
+    TEST_ASSERT_EQUAL_STRING("Corrected", view.user_text);
+    stop_signaling(call);
+}

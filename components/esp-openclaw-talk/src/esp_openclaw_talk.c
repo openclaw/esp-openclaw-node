@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <strings.h>
+#include <math.h>
 
 #include "cJSON.h"
 #include "esp_http_client.h"
@@ -60,6 +61,7 @@ typedef struct esp_openclaw_talk_call {
     bool gateway_owned;
     bool diagnostic_failure_seen;
     bool speech_pending;
+    esp_openclaw_talk_snapshot_t snapshot;
     esp_openclaw_node_gateway_request_cb_t speech_callback;
     void *speech_ctx;
 } talk_signaling_t;
@@ -236,6 +238,8 @@ void esp_openclaw_talk_call_cancel(esp_openclaw_talk_call_handle_t talk)
     portENTER_CRITICAL(&talk->state_lock);
     talk->sealed = true;
     talk->stopped = true;
+    talk->snapshot.phase = ESP_OPENCLAW_TALK_CLOSED;
+    talk->snapshot.turn_active = false;
     portEXIT_CRITICAL(&talk->state_lock);
 }
 
@@ -812,6 +816,113 @@ static cJSON *unique_field(cJSON *object, const char *name)
     return found;
 }
 
+esp_err_t esp_openclaw_talk_call_snapshot(
+    esp_openclaw_talk_call_handle_t talk, esp_openclaw_talk_snapshot_t *snapshot)
+{
+    if (talk == NULL || snapshot == NULL) return ESP_ERR_INVALID_ARG;
+    portENTER_CRITICAL(&talk->state_lock);
+    *snapshot = talk->snapshot;
+    portEXIT_CRITICAL(&talk->state_lock);
+    return ESP_OK;
+}
+
+static bool copy_turn_text(char *dest, const char *text, size_t length, bool append)
+{
+    size_t used = append ? strlen(dest) : 0;
+    size_t count = ESP_OPENCLAW_TALK_TEXT_BYTES - 1 - used;
+    if (count > length) count = length;
+    /* A bounded excerpt must end at a UTF-8 boundary. */
+    if (count < length)
+        while (count > 0 && ((unsigned char)text[count] & 0xc0) == 0x80) --count;
+    memcpy(dest + used, text, count);
+    dest[used + count] = '\0';
+    return count != length;
+}
+
+typedef struct {
+    bool valid;
+    uint64_t sequence;
+    const char *turn;
+    size_t turn_length;
+    const char *text;
+    size_t text_length;
+} talk_stream_event_t;
+
+/* JSON traversal is unbounded by member count; do it before taking state_lock. */
+static talk_stream_event_t parse_stream_event(cJSON *event)
+{
+    talk_stream_event_t result = {0};
+    cJSON *sequence = unique_field(event, "seq");
+    if (!cJSON_IsNumber(sequence) || !isfinite(sequence->valuedouble) ||
+        sequence->valuedouble < 1 || sequence->valuedouble > 9007199254740991.0 ||
+        floor(sequence->valuedouble) != sequence->valuedouble) return result;
+    result.valid = true;
+    result.sequence = (uint64_t)sequence->valuedouble;
+    cJSON *turn = unique_field(event, "turnId");
+    if (cJSON_IsString(turn)) {
+        result.turn_length = strnlen(turn->valuestring, ESP_OPENCLAW_TALK_TURN_ID_BYTES);
+        if (result.turn_length > 0 && result.turn_length < ESP_OPENCLAW_TALK_TURN_ID_BYTES)
+            result.turn = turn->valuestring;
+    }
+    cJSON *text = unique_field(unique_field(event, "payload"), "text");
+    if (cJSON_IsString(text)) {
+        result.text = text->valuestring;
+        result.text_length = strnlen(result.text, ESP_OPENCLAW_TALK_TEXT_BYTES);
+    }
+    return result;
+}
+
+/* Called under state_lock; only bounded strings, copies and state transitions. */
+static void accept_talk_event(talk_signaling_t *talk, const talk_stream_event_t *event, const char *type)
+{
+    if (!event->valid) return;
+    uint64_t seq = event->sequence;
+    esp_openclaw_talk_snapshot_t *view = &talk->snapshot;
+    if (seq <= view->sequence) return;
+    bool gap = seq != view->sequence + 1;
+    view->sequence = seq;
+    if (gap) view->user_incomplete = view->agent_incomplete = true;
+    if (strcmp(type, "session.ready") == 0) {
+        if (view->phase == ESP_OPENCLAW_TALK_STARTING) view->phase = ESP_OPENCLAW_TALK_LISTENING;
+        return;
+    }
+    if (strcmp(type, "session.error") == 0) { view->phase = ESP_OPENCLAW_TALK_ERROR; return; }
+    if (event->turn == NULL) return;
+    if (strcmp(type, "turn.started") == 0) {
+        if (strcmp(view->turn_id, event->turn) == 0) return;
+        memcpy(view->turn_id, event->turn, event->turn_length + 1);
+        view->turn_active = true;
+        view->user_text[0] = view->agent_text[0] = '\0';
+        view->user_final = view->agent_final = false;
+        view->user_incomplete = view->agent_incomplete = gap;
+        view->phase = ESP_OPENCLAW_TALK_LISTENING;
+        return;
+    }
+    /* Missing turn admission withholds text rather than borrowing another turn. */
+    if (strcmp(view->turn_id, event->turn) != 0) return;
+    bool user = strcmp(type, "transcript.delta") == 0 || strcmp(type, "transcript.done") == 0;
+    bool agent = strcmp(type, "output.text.delta") == 0 || strcmp(type, "output.text.done") == 0;
+    if (user || agent) {
+        if (event->text == NULL) return;
+        bool final = strcmp(type, user ? "transcript.done" : "output.text.done") == 0;
+        bool *done = user ? &view->user_final : &view->agent_final;
+        bool *incomplete = user ? &view->user_incomplete : &view->agent_incomplete;
+        if (*done && !final) return;
+        bool truncated = copy_turn_text(user ? view->user_text : view->agent_text, event->text, event->text_length, !final);
+        *incomplete = final ? truncated : *incomplete || truncated;
+        *done = final;
+        if (user && view->turn_active && view->agent_text[0] == '\0' && view->phase != ESP_OPENCLAW_TALK_SPEAKING)
+            view->phase = final ? ESP_OPENCLAW_TALK_THINKING : ESP_OPENCLAW_TALK_LISTENING;
+    } else if (strcmp(type, "output.audio.started") == 0 && view->turn_active)
+        view->phase = ESP_OPENCLAW_TALK_SPEAKING;
+    else if (strcmp(type, "output.audio.done") == 0 && view->turn_active)
+        view->phase = ESP_OPENCLAW_TALK_LISTENING;
+    else if (strcmp(type, "turn.ended") == 0 || strcmp(type, "turn.cancelled") == 0) {
+        view->turn_active = false;
+        view->phase = ESP_OPENCLAW_TALK_LISTENING;
+    }
+}
+
 void esp_openclaw_talk_call_gateway_event(
     esp_openclaw_talk_call_handle_t talk, esp_openclaw_node_handle_t source,
     const char *event, const char *payload_json)
@@ -825,20 +936,23 @@ void esp_openclaw_talk_call_gateway_event(
     cJSON *nested = unique_field(payload, "talkEvent");
     cJSON *inner = unique_field(nested, "sessionId");
     cJSON *type = unique_field(nested, "type");
-    bool terminal = cJSON_IsObject(payload) && cJSON_IsObject(nested) &&
+    bool valid = cJSON_IsObject(payload) && cJSON_IsObject(nested) &&
         cJSON_IsString(outer) && cJSON_IsString(inner) && cJSON_IsString(type) &&
-        strcmp(type->valuestring, "session.closed") == 0 &&
         strcmp(outer->valuestring, inner->valuestring) == 0;
-    if (terminal && dispatch_enter(talk)) {
+    talk_stream_event_t stream = parse_stream_event(nested);
+    if (valid && dispatch_enter(talk)) {
         portENTER_CRITICAL(&talk->state_lock);
         bool matches = !talk->stopped && talk->voice_session_id != NULL &&
             strcmp(outer->valuestring, talk->voice_session_id) == 0;
-        if (matches) {
+        bool terminal = matches && strcmp(type->valuestring, "session.closed") == 0;
+        if (terminal) {
+            talk->snapshot.phase = ESP_OPENCLAW_TALK_CLOSED;
+            talk->snapshot.turn_active = false;
             talk->stopped = true;
             talk->sealed = true;
-        }
+        } else if (matches) accept_talk_event(talk, &stream, type->valuestring);
         portEXIT_CRITICAL(&talk->state_lock);
-        if (matches && talk->closed_cb != NULL) talk->closed_cb(talk->closed_ctx);
+        if (terminal && talk->closed_cb != NULL) talk->closed_cb(talk->closed_ctx);
         dispatch_exit(talk);
     }
     cJSON_Delete(payload);

@@ -2142,7 +2142,7 @@ static esp_err_t register_room_console_commands(void)
         },
         {
             .command = "brightness",
-            .help = "Set Watch awake brightness until restart; idle sleep and camera minimum stay enabled",
+            .help = "Save awake brightness; idle sleep and camera minimum stay enabled",
             .hint = "<10..100>",
             .func = brightness_console_command,
         },

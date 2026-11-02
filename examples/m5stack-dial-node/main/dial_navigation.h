@@ -34,7 +34,7 @@ typedef struct {
     lv_point_t press_point;
     bool moved;
     int brightness;
-    bool brightness_failed;
+    bool brightness_failed, brightness_temporary, brightness_save_failed;
     bool connection_known, gateway_connected;
     bool connection_home;
     esp_openclaw_node_wifi_status_t wifi;
@@ -71,7 +71,7 @@ void dial_navigation_activate(dial_navigation_t *nav);
 /* Opens a settings page without changing the configured control. */
 void dial_navigation_open_settings(dial_navigation_t *nav, dial_navigation_view_t page);
 void dial_navigation_open_home_connection(dial_navigation_t *nav);
-void dial_navigation_set_brightness(dial_navigation_t *nav, int percent, bool failed);
+void dial_navigation_set_brightness(dial_navigation_t *nav, int percent, bool failed, bool temporary);
 void dial_navigation_set_connection(dial_navigation_t *nav, const esp_openclaw_node_wifi_status_t *wifi, bool gateway);
 void dial_navigation_messaging_update(dial_navigation_t *nav, const dial_messaging_snapshot_t *snapshot);
 void dial_navigation_messaging_result(dial_navigation_t *nav, bool accepted);

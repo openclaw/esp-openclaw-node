@@ -1,3 +1,5 @@
+#include "openclaw_preferences.h"
+#include "nvs.h"
 #include "dial_input.h"
 #include "dial_home.h"
 #include "dial_navigation.h"
@@ -112,7 +114,8 @@ static void navigation_event(dial_navigation_event_t kind, size_t offset, void *
         ++brightness_requests;
         requested_offset = offset;
         if (!brightness_failure) brightness = (int)offset;
-        dial_navigation_set_brightness(&navigation, brightness, brightness_failure);
+        if (!brightness_failure) (void)openclaw_preferences_save(OPENCLAW_PREFERENCE_BRIGHTNESS, brightness);
+        dial_navigation_set_brightness(&navigation, brightness, brightness_failure, false);
     }
     else if (kind == DIAL_NAV_MESSAGING_REQUEST || kind == DIAL_NAV_MESSAGING_CANCEL) {
         if (kind == DIAL_NAV_MESSAGING_REQUEST) ++messaging_requests;
@@ -1535,7 +1538,7 @@ int main(int argc, char **argv)
     lv_obj_set_hidden(home.root, true);
     lv_obj_set_hidden(arc, true);
     dial_input_set_control(&input, false);
-    dial_navigation_set_brightness(&navigation, brightness, false);
+    dial_navigation_set_brightness(&navigation, brightness, false, false);
     dial_navigation_open(&navigation, false);
     for (unsigned i = 0; i < 4; ++i) {
         encoder_diff = 1;
@@ -1593,11 +1596,30 @@ int main(int argc, char **argv)
     assert(brightness == 10);
     dial_navigation_move(&navigation, -1);
     assert(brightness == 10 && confirmations == before_settings);
+    // Storage recovery must remain retryable at both clamp boundaries, even
+    // though the second attempt leaves the visible numeric value unchanged.
+    for (unsigned i = 0; i < 2; ++i) {
+        int edge = i == 0 ? 100 : 10;
+        int direction = i == 0 ? 1 : -1;
+        brightness = edge - direction * 5;
+        dial_navigation_set_brightness(&navigation, brightness, false, false);
+        fake_nvs_commit_error = 99;
+        dial_navigation_move(&navigation, direction);
+        assert(brightness == edge && navigation.brightness_save_failed);
+        assert(strcmp(lv_label_get_text(navigation.identity), "Not saved") == 0);
+        fake_nvs_commit_error = 0;
+        unsigned before_retry = brightness_requests;
+        dial_navigation_move(&navigation, direction);
+        assert(brightness_requests == before_retry + 1 && brightness == edge);
+        assert(!navigation.brightness_save_failed);
+        assert(strcmp(lv_label_get_text(navigation.identity), "Saved on device") == 0);
+    }
     // A command's new brightness cancels a held button; release cannot apply
     // the old gesture to its replacement value.
     touch(165, 168, true);
     brightness = 55;
-    dial_navigation_set_brightness(&navigation, brightness, false);
+    dial_navigation_set_brightness(&navigation, brightness, false, true);
+    assert(strcmp(lv_label_get_text(navigation.identity), "Until restart") == 0);
     touch(165, 168, false);
     assert(brightness == 55);
     touch(68, 44, true); touch(68, 44, false);

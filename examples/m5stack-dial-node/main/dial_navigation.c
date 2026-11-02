@@ -1,4 +1,5 @@
 #include "dial_navigation.h"
+#include "openclaw_preferences.h"
 #include "esp_openclaw_avatar.h"
 #include "openclaw_connection_details.h"
 #include "openclaw_reading.h"
@@ -479,7 +480,7 @@ static void render_display(dial_navigation_t *nav)
     lv_label_set_text_fmt(nav->description, "%d%%", nav->brightness);
     lv_obj_set_hidden(nav->identity, false);
     lv_obj_set_y(nav->identity, 116);
-    lv_label_set_text_static(nav->identity, nav->brightness_failed ? "Couldn't change" : "Until restart");
+    lv_label_set_text_static(nav->identity, nav->brightness_failed ? "Couldn't change" : nav->brightness_temporary ? "Until restart" : nav->brightness_save_failed ? "Not saved" : "Saved on device");
     lv_obj_set_hidden(nav->hint, false);
     lv_label_set_text_static(nav->hint, nav->brightness_failed ? "Turn to retry" : "Turn to set");
     for (unsigned i = 0; i < 3; ++i) {
@@ -910,7 +911,9 @@ static void render(dial_navigation_t *nav)
     lv_label_set_text_static(nav->hint, preview ? readable ? "Turn to read" : "Press: back" : detail ? "Press: open" : sessions ? "Chats / turn" : "Turn + press");
     if (nav->view == DIAL_NAV_MENU)
         lv_label_set_text_fmt(nav->hint, "Turn  %u / %u", nav->focus + 1, nav->count);
-    if (nav->view == DIAL_NAV_READING || nav->view == DIAL_NAV_DENSITY) lv_label_set_text_static(nav->hint, "Until restart");
+    if (nav->view == DIAL_NAV_READING || nav->view == DIAL_NAV_DENSITY)
+        lv_label_set_text_static(nav->hint, openclaw_preferences_saved(nav->view == DIAL_NAV_READING ?
+            OPENCLAW_PREFERENCE_READING : OPENCLAW_PREFERENCE_DENSITY) ? "Saved on device" : "Save failed; retry");
     if (preview) {
         const dial_conversations_snapshot_t *view = nav->conversations;
         const char *roles[] = {"You", "Assistant", "Tool", "System", "Other"};
@@ -1098,7 +1101,7 @@ void dial_navigation_move(dial_navigation_t *nav, int direction)
         int percent = nav->brightness + (direction > 0 ? 5 : -5);
         if (percent < 10) percent = nav->brightness < 10 && direction < 0 ? nav->brightness : 10;
         if (percent > 100) percent = 100;
-        if (percent != nav->brightness || nav->brightness_failed)
+        if (percent != nav->brightness || nav->brightness_failed || nav->brightness_save_failed)
             nav->handler(DIAL_NAV_BRIGHTNESS, (size_t)percent, nav->context);
         return;
     }
@@ -1329,11 +1332,15 @@ void dial_navigation_open_home_connection(dial_navigation_t *nav)
     nav->connection_home = true;
 }
 
-void dial_navigation_set_brightness(dial_navigation_t *nav, int percent, bool failed)
+void dial_navigation_set_brightness(dial_navigation_t *nav, int percent, bool failed, bool temporary)
 {
-    if (nav->brightness == percent && nav->brightness_failed == failed) return;
+    bool save_failed = !temporary && !openclaw_preferences_saved(OPENCLAW_PREFERENCE_BRIGHTNESS);
+    if (nav->brightness == percent && nav->brightness_failed == failed &&
+        nav->brightness_temporary == temporary && nav->brightness_save_failed == save_failed) return;
     nav->brightness = percent;
     nav->brightness_failed = failed;
+    nav->brightness_temporary = temporary;
+    nav->brightness_save_failed = save_failed;
     if (nav->view == DIAL_NAV_BACKLIGHT) changed(nav);
 }
 

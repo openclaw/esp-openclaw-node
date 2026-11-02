@@ -43,7 +43,7 @@ text**. Standard and Larger resize menu and settings labels, agent and conversat
 pickers, conversation previews,
 reviewed voice drafts, and scrollable Connection details. Menu touch targets and
 status icons keep their size; list spacing remains a separate choice. The
-preference lasts until restart. **This Watch → Display**
+preference is saved locally and restored after restart. **This Watch → Display**
 opens the same controls. USB `menu brightness` and `menu reading` open the
 corresponding subpages.
 
@@ -51,7 +51,14 @@ corresponding subpages.
 row height and spacing in menus, agent and conversation pickers, and device lists;
 font size stays separate. Longer lists scroll within their content area, keeping
 Back and the Talk control available. Compact is the default. The choice is local
-to this Watch and lasts until restart; USB `menu density` opens the same control.
+to this Watch and survives restart; USB `menu density` opens the same control.
+
+Awake brightness, reading size, and list spacing use the shared UI NVS namespace on
+Watch, Tab5, and Dial. Missing or invalid stored values use the board default.
+A storage error remains visible on its preference page. Choose the value again
+to retry. A failed text or spacing save keeps the previous selection. A brightness
+change can work for this boot even if saving fails. Its page reports that limit.
+The saved awake level does not replace idle sleep or the camera minimum.
 
 **Settings → Help** and **This Watch → Help** contain Navigation, Messages,
 USB setup, and Status topics. Each opens a scrollable reading page that follows

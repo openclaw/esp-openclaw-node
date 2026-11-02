@@ -1,4 +1,5 @@
 #include "room_ui_controller.h"
+#include "openclaw_preferences.h"
 
 #include <string.h>
 #include <stdlib.h>
@@ -1310,6 +1311,8 @@ void room_ui_init(void)
     tab5_home_enabled = board != NULL && board->model_identifier != NULL &&
         strcmp(board->model_identifier, "m5stack-tab5") == 0 &&
         lv_display_get_horizontal_resolution(display) == 1280 && lv_display_get_vertical_resolution(display) == 720;
+    if (watch_home_enabled || tab5_home_enabled)
+        watch_brightness = openclaw_preferences_load(OPENCLAW_PREFERENCE_BRIGHTNESS, -1);
     if (tab5_home_enabled) {
         room_tab5_ui_create(lv_layer_top(), watch_navigation_clicked);
         room_watch_settings_create(lv_layer_top(), watch_navigation_clicked, watch_messaging_clicked);
@@ -1457,12 +1460,13 @@ esp_err_t room_ui_watch_brightness(int percent)
         room_watch_status_set_awake(level > 0);
         room_watch_navigation_set_awake(level > 0);
     }
+    esp_err_t saved = err == ESP_OK ? openclaw_preferences_save(OPENCLAW_PREFERENCE_BRIGHTNESS, percent) : ESP_OK;
     taskENTER_CRITICAL(&state_mux);
     if (err == ESP_OK) watch_brightness = percent;
     watch_brightness_failed = err != ESP_OK;
     taskEXIT_CRITICAL(&state_mux);
     room_ui_paint_and_unlock();
-    return err;
+    return err == ESP_OK ? saved : err;
 }
 
 /* Paints `current_state`/`current_detail` with the display lock held. Returns

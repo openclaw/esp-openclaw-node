@@ -4,11 +4,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include "openclaw_reading.h"
+#include "room_handwriting_pad.h"
 #include "room_tab5_layout.h"
 
 static lv_obj_t *root, *heading, *recipient, *editor, *detail, *keyboard, *review_body, *review_text, *notice;
 static lv_obj_t *keys[6], *captions[6], *space, *remove_key, *page_key;
-static lv_obj_t *back, *left, *right, *previous, *review, *review_caption;
+static lv_obj_t *back, *left, *right, *previous, *review, *review_caption, *handwrite;
 static bool (*is_current)(void);
 static void (*submit)(bool, const char *);
 static uint32_t generation, epoch, pressed_epoch;
@@ -17,10 +18,10 @@ static unsigned page;
 static int content_bottom = 432;
 static bool full_warning;
 static size_t full_bytes;
-static bool reviewing, submitted, ready, available, keyboard_held;
+static bool reviewing, submitted, ready, available, keyboard_held, writing;
 static uint32_t keyboard_epoch;
 static const char alphabet[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.,?!'\"-:;/@_()[]{}<>+=*#%&\\|~`^$";
-enum { BACK = 6, LEFT, RIGHT, SPACE, DELETE, PAGE, PREVIOUS, REVIEW };
+enum { BACK = 6, LEFT, RIGHT, SPACE, DELETE, PAGE, PREVIOUS, REVIEW, HANDWRITE };
 
 static lv_obj_t *label(lv_obj_t *parent, const char *text, int width)
 {
@@ -36,6 +37,26 @@ static lv_obj_t *label(lv_obj_t *parent, const char *text, int width)
 
 static void layout(void);
 
+static bool handwriting_current(void)
+{
+    return writing && !reviewing && !submitted && available && is_current();
+}
+
+static bool handwriting_accept(char character)
+{
+    if (!handwriting_current()) return false;
+    size_t before = strlen(lv_textarea_get_text(editor));
+    lv_textarea_add_char(editor, character);
+    return strlen(lv_textarea_get_text(editor)) == before + 1;
+}
+
+static void handwriting_keyboard(void)
+{
+    writing = false;
+    ++epoch;
+    layout();
+}
+
 static void action(lv_event_t *event)
 {
     int value = (int)(intptr_t)lv_event_get_user_data(event);
@@ -50,7 +71,8 @@ static void action(lv_event_t *event)
         if (!valid) return;
         if (value == BACK) { submit(false, NULL); return; }
         if (submitted) return;
-        if (value == REVIEW) {
+        if (value == HANDWRITE) writing = true;
+        else if (value == REVIEW) {
             if (reviewing) {
                 if (lv_textarea_get_text(editor)[0] != '\0') submit(true, lv_textarea_get_text(editor));
             } else reviewing = true;
@@ -114,15 +136,15 @@ static void keyboard_event(lv_event_t *event)
 {
     lv_event_code_t code = lv_event_get_code(event);
     if (code == LV_EVENT_PRESSED) {
-        keyboard_held = is_current() && !reviewing && !submitted;
+        keyboard_held = is_current() && !reviewing && !submitted && !writing;
         keyboard_epoch = epoch;
     } else if (code == LV_EVENT_VALUE_CHANGED) {
-        if (!keyboard_held || keyboard_epoch != epoch || !is_current() || reviewing || submitted) return;
+        if (!keyboard_held || keyboard_epoch != epoch || !is_current() || reviewing || submitted || writing) return;
         lv_keyboard_def_event_cb(event);
         /* All maintained maps use release activation, including after case changes. */
         lv_buttonmatrix_set_button_ctrl_all(keyboard, LV_BUTTONMATRIX_CTRL_CLICK_TRIG | LV_BUTTONMATRIX_CTRL_NO_REPEAT);
     } else if (code == LV_EVENT_READY || code == LV_EVENT_CANCEL) {
-        if (keyboard_held && keyboard_epoch == epoch && is_current() && !reviewing && !submitted) {
+        if (keyboard_held && keyboard_epoch == epoch && is_current() && !reviewing && !submitted && !writing) {
             reviewing = true; /* Both visible keyboard actions keep the draft for review. */
             keyboard_held = false;
             ++epoch;
@@ -142,6 +164,7 @@ void room_text_composer_create(lv_obj_t *parent, bool (*current)(void), void (*h
     lv_obj_set_style_bg_color(root, lv_color_hex(0x15101b), 0);
     lv_obj_set_style_bg_opa(root, LV_OPA_COVER, 0);
     back = button("Cancel", 26, 18, 116, BACK);
+    handwrite = button("Handwrite", 152, 18, 80, HANDWRITE);
     left = button(LV_SYMBOL_LEFT, 242, 18, 44, LEFT);
     right = button(LV_SYMBOL_RIGHT, 298, 18, 44, RIGHT);
     heading = label(root, "Write message", 316);
@@ -196,6 +219,8 @@ void room_text_composer_create(lv_obj_t *parent, bool (*current)(void), void (*h
         lv_obj_set_width(detail, 960);
         lv_obj_set_pos(left, 1008, 32);
         lv_obj_set_pos(right, 1076, 32);
+        lv_obj_set_pos(handwrite, 800, 32);
+        lv_obj_set_width(handwrite, 160);
         lv_obj_set_pos(previous, 160, 600);
         lv_obj_set_width(previous, 300);
         lv_obj_set_pos(review, 820, 600);
@@ -212,6 +237,7 @@ void room_text_composer_create(lv_obj_t *parent, bool (*current)(void), void (*h
         lv_obj_add_event_cb(keyboard, keyboard_event, LV_EVENT_ALL, NULL);
         lv_buttonmatrix_set_button_ctrl_all(keyboard, LV_BUTTONMATRIX_CTRL_CLICK_TRIG | LV_BUTTONMATRIX_CTRL_NO_REPEAT);
     }
+    room_handwriting_pad_create(root, handwriting_current, handwriting_accept, handwriting_keyboard);
     lv_obj_add_flag(root, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -219,7 +245,7 @@ void room_text_composer_open(uint32_t value, const char *text)
 {
     generation = value;
     page = 0;
-    reviewing = submitted = full_warning = false;
+    reviewing = submitted = full_warning = writing = false;
     pressed = -1;
     keyboard_held = false;
     ++epoch;
@@ -272,7 +298,7 @@ static bool render_review(void)
 static void layout(void)
 {
     bool wide = room_tab5_layout();
-    bool editing = !reviewing && !submitted && available;
+    bool editing = !reviewing && !submitted && available && !writing;
     for (unsigned i = 0; i < 6; ++i) {
         unsigned index = page * 6 + i;
         char text[2] = {index < sizeof(alphabet) - 1 ? alphabet[index] : '\0', '\0'};
@@ -288,10 +314,11 @@ static void layout(void)
     lv_obj_set_hidden(page_key, wide || !editing);
     lv_obj_set_hidden(left, !editing);
     lv_obj_set_hidden(right, !editing);
-    lv_obj_set_hidden(detail, !wide && editing);
+    lv_obj_set_hidden(handwrite, !editing);
+    lv_obj_set_hidden(detail, (writing && available) || (!wide && editing));
     if (keyboard != NULL) lv_obj_set_hidden(keyboard, !editing);
-    lv_obj_set_hidden(previous, submitted || !available || (wide && editing));
-    lv_obj_set_hidden(review, submitted);
+    lv_obj_set_hidden(previous, writing || submitted || !available || (wide && editing));
+    lv_obj_set_hidden(review, writing || submitted);
     bool compact = content_bottom < (wide ? 600 : 400);
     lv_obj_set_height(editor, wide ? compact ? 96 : 184 : compact ? 50 : 98);
     lv_obj_set_height(review_body, wide ? compact ? 272 : 330 : compact ? 142 : 204);
@@ -311,19 +338,20 @@ static void layout(void)
     lv_obj_set_y(review, content_bottom - (wide ? 56 : 44));
     lv_label_set_text_static(lv_obj_get_child(previous, 0), reviewing ? "Edit" : "Prev keys");
     lv_label_set_text_static(review_caption, reviewing ? "Send" : "Review");
-    bool review_ok = editing || render_review();
+    bool review_ok = editing || writing || render_review();
     lv_obj_set_state(review, LV_STATE_DISABLED, !available || (reviewing && (!ready || !review_ok || lv_textarea_get_text(editor)[0] == '\0')));
     lv_label_set_text_static(lv_obj_get_child(back, 0), submitted ? "Done" : "Cancel");
-    lv_label_set_text_static(heading, submitted ? "Message status" : !available ? "Draft unavailable" : reviewing ? "Review message" : "Write message");
+    lv_label_set_text_static(heading, submitted ? "Message status" : !available ? "Draft unavailable" : reviewing ? "Review message" : writing ? "Handwriting" : "Write message");
     lv_obj_set_hidden(editor, !editing);
-    lv_obj_set_hidden(review_body, editing);
+    lv_obj_set_hidden(review_body, editing || writing);
+    room_handwriting_pad_show(writing && !reviewing && !submitted && available, content_bottom);
 }
 
 void room_text_composer_render(const room_voice_snapshot_t *draft, bool hidden, int bottom)
 {
     if (root == NULL) return;
     lv_obj_set_hidden(root, hidden);
-    if (hidden) { pressed = -1; keyboard_held = false; return; }
+    if (hidden) { pressed = -1; keyboard_held = false; room_handwriting_pad_show(false, bottom); return; }
     bool changed = submitted != (draft->state >= ROOM_VOICE_SENDING);
     submitted = draft->state >= ROOM_VOICE_SENDING;
     if (changed) { ++epoch; pressed = -1; }

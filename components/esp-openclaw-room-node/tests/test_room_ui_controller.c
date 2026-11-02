@@ -1526,6 +1526,116 @@ static lv_obj_t *find_type(lv_obj_t *parent, const lv_obj_class_t *type)
     return NULL;
 }
 
+static void draw_handwriting(lv_obj_t *ink, bool press)
+{
+    lv_obj_update_layout(lv_layer_top());
+    lv_area_t bounds;
+    lv_obj_get_coords(ink, &bounds);
+    int x = bounds.x1 + lv_area_get_width(&bounds) / 3;
+    int y = bounds.y1 + 12;
+    touch_point = (lv_point_t){x, y};
+    touch_state = LV_INDEV_STATE_PRESSED; lv_indev_read(touchscreen); lv_tick_inc(40);
+    if (press) {
+        touch_point.y = bounds.y2 - 12;
+        lv_indev_read(touchscreen); lv_tick_inc(40);
+        touch_point.x += (lv_area_get_height(&bounds) - 24) * 3 / 5;
+        lv_indev_read(touchscreen); lv_tick_inc(40);
+    }
+    touch_state = LV_INDEV_STATE_RELEASED; lv_indev_read(touchscreen); lv_tick_inc(40);
+}
+
+static void check_handwriting(lv_obj_t *panel, lv_obj_t *editor, const char *path)
+{
+    room_voice_snapshot_t original = composer_draft;
+    unsigned sends = composer_sends;
+    composer_draft.can_send = true;
+    composer_draft.detail[0] = '\0';
+    room_messaging_snapshot_t access = {.state = ROOM_MESSAGING_READY, .connected = true};
+    room_ui_store_messaging(&access);
+    room_ui_store_voice(&composer_draft); room_ui_refresh();
+    lv_textarea_set_text(editor, "");
+    click_talk(lv_obj_get_parent(find_visible_text(panel, "Handwrite")));
+    lv_obj_t *pad = lv_obj_get_parent(lv_obj_get_parent(find_visible_text(panel, "Recognize")));
+    lv_obj_t *ink = lv_obj_get_child(pad, 0);
+    lv_obj_t *accept = lv_obj_get_parent(find_visible_text(pad, "Accept"));
+    click_talk(lv_obj_get_parent(find_visible_text(pad, "Recognize")));
+    assert(find_visible_fragment(pad, "Draw a larger character") != NULL);
+    assert(lv_obj_has_state(accept, LV_STATE_DISABLED));
+    // Dark-screen ink wakes only; a tap also cannot become a recognized letter.
+    assert(room_board_display_brightness_set(0) == ESP_OK);
+    draw_handwriting(ink, true);
+    click_talk(lv_obj_get_parent(find_visible_text(pad, "Recognize")));
+    assert(find_visible_fragment(pad, "Draw a larger character") != NULL && brightness > 0);
+    draw_handwriting(ink, false);
+    click_talk(lv_obj_get_parent(find_visible_text(pad, "Recognize")));
+    assert(lv_obj_has_state(accept, LV_STATE_DISABLED));
+    click_talk(lv_obj_get_parent(find_visible_text(pad, "Clear")));
+    draw_handwriting(ink, true);
+    click_talk(lv_obj_get_parent(find_visible_text(pad, "Recognize")));
+    assert(find_visible_text(pad, "l") != NULL && lv_obj_has_state(accept, LV_STATE_DISABLED));
+    assert(lv_textarea_get_text(editor)[0] == '\0');
+    click_talk(lv_obj_get_parent(find_visible_text(pad, "l")));
+    assert(!lv_obj_has_state(accept, LV_STATE_DISABLED));
+    if (path) {
+        char output[1024];
+        snprintf(output, sizeof(output), "%s-handwriting.ppm", path);
+        write_frame(output);
+    }
+    click_talk(accept);
+    assert(strcmp(lv_textarea_get_text(editor), "l") == 0);
+    assert(lv_obj_has_state(accept, LV_STATE_DISABLED));
+    // Case is explicit, and every new stroke clears the previous candidates.
+    click_talk(lv_obj_get_parent(find_visible_text(pad, "abc")));
+    draw_handwriting(ink, true);
+    click_talk(lv_obj_get_parent(find_visible_text(pad, "Recognize")));
+    click_talk(lv_obj_get_parent(find_visible_text(pad, "L")));
+    click_talk(accept);
+    assert(strcmp(lv_textarea_get_text(editor), "lL") == 0);
+    draw_handwriting(ink, true);
+    click_talk(lv_obj_get_parent(find_visible_text(pad, "Recognize")));
+    click_talk(lv_obj_get_parent(find_visible_text(pad, "L")));
+    touch_talk(accept, true);
+    room_voice_snapshot_t saved = composer_draft;
+    composer_draft.state = ROOM_VOICE_UNAVAILABLE;
+    strcpy(composer_draft.detail, "Destination changed. Cancel and open a new reply.");
+    room_ui_store_voice(&composer_draft); room_ui_refresh();
+    touch_talk(accept, false);
+    assert(strcmp(lv_textarea_get_text(editor), "lL") == 0);
+    assert(find_visible_fragment(panel, "Destination changed.") != NULL);
+    composer_draft = saved;
+    room_ui_store_voice(&composer_draft); room_ui_refresh();
+    assert(lv_obj_has_state(accept, LV_STATE_DISABLED));
+    // Bounded recording must expose overflow, never classify a silently cut stroke.
+    lv_area_t bounds;
+    lv_obj_get_coords(ink, &bounds);
+    touch_point = (lv_point_t){bounds.x1 + 30, bounds.y1 + 30};
+    touch_state = LV_INDEV_STATE_PRESSED; lv_indev_read(touchscreen); lv_tick_inc(40);
+    for (unsigned i = 0; i < 514; ++i) {
+        touch_point.x = bounds.x1 + 30 + i % 2 * 20;
+        lv_indev_read(touchscreen); lv_tick_inc(40);
+    }
+    touch_state = LV_INDEV_STATE_RELEASED; lv_indev_read(touchscreen); lv_tick_inc(40);
+    assert(find_visible_fragment(pad, "Too many points.") != NULL);
+    click_talk(lv_obj_get_parent(find_visible_text(pad, "Recognize")));
+    assert(lv_obj_has_state(accept, LV_STATE_DISABLED));
+    click_talk(lv_obj_get_parent(find_visible_text(pad, "Clear")));
+    click_talk(lv_obj_get_parent(find_visible_text(pad, "Keyboard")));
+    assert(strcmp(lv_textarea_get_text(editor), "lL") == 0 && find_visible_text(panel, "Review") != NULL);
+    click_talk(lv_obj_get_parent(find_visible_text(panel, "Review")));
+    assert(find_visible_text(panel, "lL") != NULL);
+    assert(!lv_obj_has_state(lv_obj_get_parent(find_visible_text(panel, "Send")), LV_STATE_DISABLED));
+    assert(composer_sends == sends);
+    click_talk(lv_obj_get_parent(find_visible_text(panel, "Edit")));
+    // Reopening starts with no ink/candidate while the draft stays intact.
+    click_talk(lv_obj_get_parent(find_visible_text(panel, "Handwrite")));
+    assert(lv_obj_has_state(accept, LV_STATE_DISABLED));
+    click_talk(lv_obj_get_parent(find_visible_text(pad, "Keyboard")));
+    composer_draft = original;
+    access = (room_messaging_snapshot_t){.state = ROOM_MESSAGING_REQUIRED};
+    room_ui_store_messaging(&access);
+    room_ui_store_voice(&composer_draft); room_ui_refresh();
+}
+
 static void check_reader_composer(const char *path)
 {
     room_ui_set_voice_action_handler(text_action);
@@ -1573,6 +1683,7 @@ static void check_reader_composer(const char *path)
             assert(lv_obj_is_visible(keyboard));
         }
     }
+    check_handwriting(panel, editor, path);
     lv_textarea_set_text(editor, "caf\xc3\xa9");
     lv_textarea_set_cursor_pos(editor, LV_TEXTAREA_CURSOR_LAST);
     lv_textarea_delete_char(editor);

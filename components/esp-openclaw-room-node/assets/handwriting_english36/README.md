@@ -5,7 +5,7 @@ individual English letters and digits. It returns three candidates from
 `0123456789abcdefghijklmnopqrstuvwxyz`. The caller must require explicit
 candidate acceptance before using a character, and provide its own uppercase
 choice. This is not cursive or word recognition. This core has no input UI or
-message sender; native pad integration is separate work.
+message sender; input, acceptance and Send belong to its caller.
 
 The 106,288-byte model has SHA-256
 `485e9a768457ed132ca46ea30d94375a0f4596d9558c8aa80f59b096c83049c8`.

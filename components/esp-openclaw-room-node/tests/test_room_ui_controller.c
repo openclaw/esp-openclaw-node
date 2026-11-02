@@ -1,3 +1,4 @@
+#include "nvs.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -2751,6 +2752,11 @@ static void check_watch_reading_size(const char *path)
     assert(visible_watch_text("Reading text") && visible_watch_text(LV_SYMBOL_OK "  Standard"));
     lv_obj_t *sample = find_visible_text(lv_layer_top(), "Hello from your assistant.");
     assert(lv_obj_get_style_text_font(sample, 0) == &lv_font_montserrat_14);
+    fake_nvs_commit_error = 99;
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), "Larger")));
+    assert(lv_obj_get_style_text_font(sample, 0) == &lv_font_montserrat_14);
+    assert(visible_watch_text("Couldn't save. Try again."));
+    fake_nvs_commit_error = 0;
     click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), "Larger")));
     assert(lv_obj_get_style_text_font(sample, 0) == &lv_font_montserrat_20);
     assert(visible_watch_text(LV_SYMBOL_OK "  Larger"));

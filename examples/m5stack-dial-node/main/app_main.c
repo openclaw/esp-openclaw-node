@@ -33,6 +33,7 @@
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "lvgl.h"
+#include "openclaw_preferences.h"
 #include "nvs_flash.h"
 
 static const char *TAG = "openclaw_dial";
@@ -161,12 +162,14 @@ static void show_view(dial_view_t view)
     dial_input_set_control(&ui.input, view == VIEW_CONTROL);
 }
 
-static esp_err_t set_brightness(int percent)
+static esp_err_t set_brightness(int percent, bool save)
 {
     esp_err_t err = bsp_display_brightness_set(percent);
     if (err == ESP_OK) ui.brightness = percent;
-    dial_navigation_set_brightness(&ui.navigation, ui.brightness, err != ESP_OK);
-    return err;
+    esp_err_t saved = err == ESP_OK && save ?
+        openclaw_preferences_save(OPENCLAW_PREFERENCE_BRIGHTNESS, percent) : ESP_OK;
+    dial_navigation_set_brightness(&ui.navigation, ui.brightness, err != ESP_OK, !save);
+    return err == ESP_OK ? saved : err;
 }
 
 static void update_devices(bool refresh)
@@ -200,7 +203,7 @@ static void navigation_event(dial_navigation_event_t event, size_t offset, void 
     (void)context;
     if (event == DIAL_NAV_HOME) show_view(VIEW_FACE);
     else if (event == DIAL_NAV_CONTROL) show_view(VIEW_CONTROL);
-    else if (event == DIAL_NAV_BRIGHTNESS) set_brightness((int)offset);
+    else if (event == DIAL_NAV_BRIGHTNESS) set_brightness((int)offset, true);
     else if (event == DIAL_NAV_DEVICES_REFRESH) update_devices(true);
     else if (event == DIAL_NAV_CREATION_BEGIN || event == DIAL_NAV_CREATION_SUBMIT ||
              event == DIAL_NAV_CREATION_CLOSE || event == DIAL_NAV_CREATION_OPEN || event == DIAL_NAV_CREATION_CHATS) {
@@ -584,11 +587,12 @@ static esp_err_t start_display(void)
     };
     lv_display_t *display = bsp_display_start_with_config(&config);
     if (display == NULL) return ESP_FAIL;
-    ESP_RETURN_ON_ERROR(bsp_display_brightness_set(65), TAG, "backlight");
+    int brightness = openclaw_preferences_load(OPENCLAW_PREFERENCE_BRIGHTNESS, 65);
+    ESP_RETURN_ON_ERROR(bsp_display_brightness_set(brightness), TAG, "backlight");
     if (!bsp_display_lock(1000)) return ESP_ERR_TIMEOUT;
     bsp_display_rotate(display, LV_DISPLAY_ROTATION_270);
     ui.control = (dial_control_t){0, 100, 1, 50};
-    ui.brightness = 65;
+    ui.brightness = brightness;
     ui.mood = "neutral";
     strlcpy(ui.label, "Dial", sizeof(ui.label));
     lv_obj_t *screen = lv_screen_active();
@@ -615,7 +619,7 @@ static esp_err_t start_display(void)
     dial_home_create(&ui.home, screen);
     dial_input_bind_home(&ui.input, ui.home.menu_button, ui.home.agent_button, ui.home.primary_button);
     dial_navigation_create(&ui.navigation, screen, navigation_event, NULL);
-    dial_navigation_set_brightness(&ui.navigation, ui.brightness, false);
+    dial_navigation_set_brightness(&ui.navigation, ui.brightness, false, false);
     update_value();
     show_view(VIEW_FACE);
     lv_timer_create(refresh_ui, 50, NULL);
@@ -765,7 +769,7 @@ static esp_err_t handle_command(esp_openclaw_node_handle_t client, void *context
         if (!only_fields(params, fields, 1) || !integer_field(params, "percent", 0, 100, &percent)) {
             err = invalid(error, "percent must be an integer from 0 to 100");
         } else {
-            err = set_brightness(percent);
+            err = set_brightness(percent, false);
         }
     } else if (strcmp(command, "dial.complete") == 0) {
         const char *fields[] = {"requestId", "success", "text"};

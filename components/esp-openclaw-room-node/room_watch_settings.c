@@ -1,4 +1,5 @@
 #include "room_watch_settings.h"
+#include "openclaw_preferences.h"
 
 #include <stdint.h>
 #include "room_watch_navigation.h"
@@ -15,7 +16,7 @@ static room_watch_page_t native_page = ROOM_WATCH_HOME;
 static const char *tab5_help[] = {
     "Tap Menu to choose Agents, Conversations, Settings, or Talk. Swipe lists to see more.\n\n"
     "Back returns to the previous page. Home keeps an active call open.\n\n"
-    "Settings > Display changes reading size, list spacing, and awake brightness until restart.",
+    "Settings > Display changes reading size, list spacing, and awake brightness. These preferences survive restart.",
     "Choose an agent in Agents, then open Talk to agent. The microphone stays open until End call. "
     "You can browse other pages and return to the call.\n\n"
     "Conversations shows saved messages. Creating a conversation requires Messaging access.\n\n"
@@ -157,7 +158,7 @@ void room_watch_settings_create(lv_obj_t *parent, lv_event_cb_t handler, lv_even
 #if LV_FONT_MONTSERRAT_28
     lv_obj_set_style_text_font(level, &lv_font_montserrat_28, 0);
 #endif
-    detail = label(root, "Until restart", 206, 316);
+    detail = label(root, "Saved on this device", 206, 316);
     lv_obj_set_x(detail, 26);
     lv_obj_set_style_text_align(detail, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(detail, lv_color_hex(0xb8b0bd), 0);
@@ -333,14 +334,14 @@ void room_watch_settings_render(room_watch_page_t page, room_watch_page_t parent
         lv_obj_set_style_text_font(level, &lv_font_montserrat_14, 0);
         bool compact = openclaw_density() == OPENCLAW_DENSITY_COMPACT;
         lv_label_set_text_static(level, compact ? "More items in view" : "More room between items");
-        lv_label_set_text_static(detail, "Menu spacing / until restart");
+        lv_label_set_text_static(detail, openclaw_preferences_saved(OPENCLAW_PREFERENCE_DENSITY) ? "Saved on this device" : "Couldn't save. Try again.");
         lv_label_set_text_static(lv_obj_get_child(density_rows[0], 0), compact ? LV_SYMBOL_OK "  Compact" : "Compact");
         lv_label_set_text_static(lv_obj_get_child(density_rows[1], 0), compact ? "Comfortable" : LV_SYMBOL_OK "  Comfortable");
     }
     if (reading) {
         lv_obj_set_style_text_font(level, openclaw_reading_font(), 0);
         lv_label_set_text_static(level, "Hello from your assistant.");
-        lv_label_set_text_static(detail, "Menus and reading / until restart");
+        lv_label_set_text_static(detail, openclaw_preferences_saved(OPENCLAW_PREFERENCE_READING) ? "Saved on this device" : "Couldn't save. Try again.");
         bool large = openclaw_reading_size() == OPENCLAW_READING_LARGE;
         lv_label_set_text_static(lv_obj_get_child(reading_rows[0], 0), large ? "Standard" : LV_SYMBOL_OK "  Standard");
         lv_label_set_text_static(lv_obj_get_child(reading_rows[1], 0), large ? LV_SYMBOL_OK "  Larger" : "Larger");
@@ -353,7 +354,8 @@ void room_watch_settings_render(room_watch_page_t page, room_watch_page_t parent
 #endif
         lv_label_set_text_fmt(level, "%d%%", brightness);
         lv_label_set_text_static(detail, failed ? "Couldn't change. Try again." :
-            camera_minimum ? "Camera needs at least 40%" : "Awake brightness / until restart");
+            !openclaw_preferences_saved(OPENCLAW_PREFERENCE_BRIGHTNESS) ? "Couldn't save. Until restart only." :
+            camera_minimum ? "Camera needs at least 40%" : "Saved awake brightness");
     }
     lv_obj_t *buttons[] = {back, rows[0], rows[1], rows[2], rows[3], rows[4],
         help_rows[0], help_rows[1], help_rows[2], help_rows[3],

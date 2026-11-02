@@ -132,13 +132,14 @@ encoder or tap − / + for five-point steps between 10% and 100%; press to retur
 to Display.
 The page shows the last successfully applied value and an error if a change
 fails. It works offline, never submits the configured numeric control, and
-keeps focus during Gateway reconnects. Brightness lasts until restart; the
-existing `display.brightness` command updates the same value and retains its
-0–100% range. Hold still to return Home from any settings page.
+keeps focus during Gateway reconnects. Awake brightness is saved locally and restored after restart. The
+existing `display.brightness` command retains its 0–100% range and changes
+brightness until restart. It does not overwrite the saved local preference.
+A save error reports Not saved. Turn or tap again to retry. Hold still to return Home from any settings page.
 
 Settings → Display → Reading text offers Standard and Larger text. It reflows
 conversation previews, quick-reply reviews, and other scrollable reading views.
-The choice is local to this Dial and lasts until restart. Menus and status icons
+The choice is saved on this Dial and survives restart. Menus and status icons
 keep their existing size; this does not change the assigned control.
 
 **Display → List spacing** switches between Compact (three rows) and Comfortable
@@ -146,7 +147,8 @@ keep their existing size; this does not change the assigned control.
 quick-reply choices. Turn to reveal the remaining rows and press to choose; Back
 returns to the same selected item. Both layouts retain at least 44-pixel row
 height within the circular display. Compact is the default and the selection
-lasts until restart. It does not change text size or the assigned control.
+survives restart. A storage error keeps the previous selection and offers a retry.
+It does not change text size or the assigned control.
 Browse lists use 16-pixel text, increasing the selected label to 20 pixels when
 it fits. Long names stay on one line with an ellipsis; open
 the item to read its full identity.

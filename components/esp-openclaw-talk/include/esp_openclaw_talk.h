@@ -65,6 +65,36 @@ typedef struct esp_openclaw_talk_call *esp_openclaw_talk_call_handle_t;
 typedef void (*esp_openclaw_talk_closed_cb_t)(void *ctx);
 
 #define ESP_OPENCLAW_TALK_MAX_SPEECH_BYTES 1024U
+#define ESP_OPENCLAW_TALK_TEXT_BYTES 1024U
+#define ESP_OPENCLAW_TALK_TURN_ID_BYTES 128U
+
+typedef enum {
+    ESP_OPENCLAW_TALK_STARTING,
+    ESP_OPENCLAW_TALK_LISTENING,
+    ESP_OPENCLAW_TALK_THINKING,
+    ESP_OPENCLAW_TALK_SPEAKING,
+    ESP_OPENCLAW_TALK_ERROR,
+    ESP_OPENCLAW_TALK_CLOSED,
+} esp_openclaw_talk_phase_t;
+
+/** Latest turn only. Output activity describes Gateway events, not audible playback. */
+typedef struct {
+    uint64_t sequence;
+    esp_openclaw_talk_phase_t phase;
+    char turn_id[ESP_OPENCLAW_TALK_TURN_ID_BYTES];
+    char user_text[ESP_OPENCLAW_TALK_TEXT_BYTES];
+    char agent_text[ESP_OPENCLAW_TALK_TEXT_BYTES];
+    bool turn_active;
+    bool user_final;
+    bool agent_final;
+    /** Lost deltas or bounded text truncation; a full final can repair its own text. */
+    bool user_incomplete;
+    bool agent_incomplete;
+} esp_openclaw_talk_snapshot_t;
+
+/** Copy under the call's lock. Caller retains the call for this operation. */
+esp_err_t esp_openclaw_talk_call_snapshot(
+    esp_openclaw_talk_call_handle_t call, esp_openclaw_talk_snapshot_t *snapshot);
 
 esp_err_t esp_openclaw_talk_call_prepare(
     const esp_openclaw_talk_signaling_config_t *config,
@@ -87,7 +117,7 @@ void esp_openclaw_talk_call_release(esp_openclaw_talk_call_handle_t call);
 esp_err_t esp_openclaw_talk_call_say(
     esp_openclaw_talk_call_handle_t call, const char *text,
     esp_openclaw_node_gateway_request_cb_t callback, void *ctx);
-/** Parse borrowed JSON synchronously. Only exact talk.event/session.closed matches. */
+/** Parse borrowed JSON synchronously; only this source and exact session identity match. */
 void esp_openclaw_talk_call_gateway_event(
     esp_openclaw_talk_call_handle_t call, esp_openclaw_node_handle_t source,
     const char *event, const char *payload_json);

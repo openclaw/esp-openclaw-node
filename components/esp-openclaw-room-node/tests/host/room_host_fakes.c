@@ -890,6 +890,10 @@ void room_ui_store_facts(const room_ui_facts_t *facts) { host.home = *facts; }
 void room_ui_set_voice_action_handler(void (*handler)(room_voice_action_t, uint32_t, uint64_t, uint64_t))
 { (void)handler; }
 void room_ui_store_voice(const room_voice_snapshot_t *snapshot) { host.voice = *snapshot; }
+void room_ui_store_live_talk(const esp_openclaw_talk_snapshot_t *snapshot)
+{
+    host.live_talk = snapshot != NULL ? *snapshot : (esp_openclaw_talk_snapshot_t){0};
+}
 void room_ui_set_messaging_handler(void (*handler)(unsigned)) { (void)handler; }
 void room_ui_store_messaging(const room_messaging_snapshot_t *snapshot) { host.messaging = *snapshot; }
 
@@ -944,7 +948,10 @@ const char *WIFI_EVENT = "wifi";
 const char *IP_EVENT = "ip";
 void room_ui_show_face_hint(uint32_t ms) { (void)ms; }
 void room_ui_set_gateway(const char *gateway) { (void)gateway; }
-bool room_ui_talk_face_active(void) { return host.ui == ROOM_UI_SPEAKING; }
+bool room_ui_talk_face_active(void)
+{
+    return host.ui == ROOM_UI_LISTENING || host.ui == ROOM_UI_CONNECTING || host.ui == ROOM_UI_SPEAKING;
+}
 void room_face_play_gesture(room_face_gesture_t gesture) { (void)gesture; }
 void room_canvas_set_refresh_client(esp_openclaw_node_handle_t node) { (void)node; }
 void room_canvas_set_gateway_http_base(const char *url) { (void)url; }

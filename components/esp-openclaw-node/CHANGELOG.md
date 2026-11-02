@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Provide native setup bootstrap entropy under existing Wi-Fi ownership, requiring active nonsleeping RF without changing radio configuration or reconnect policy. Down, busy and remote radios fail without producing a seed.
+
 - Define bounded phone-setup responses with explicit public result codes, operation receipts, exact-attempt save observations, and scan truncation. Dispatch and BLE/mobile integration remain separate work.
 
 - Route bounded phone-setup requests through the canonical session, transfer, Wi-Fi and Gateway owners, with immediate admission receipts, explicit observation mapping, and cancellation draining. BLE/mobile adapters remain separate work.

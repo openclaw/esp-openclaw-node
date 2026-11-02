@@ -19,7 +19,7 @@ def main():
         (work / "sdkconfig.h").write_text("")
         for name in (
             "esp_err.h", "esp_wifi.h", "esp_check.h", "esp_event.h", "esp_log.h",
-            "esp_netif.h", "esp_app_desc.h", "esp_system.h", "esp_timer.h",
+            "esp_netif.h", "esp_app_desc.h", "esp_system.h", "esp_timer.h", "esp_random.h",
             "freertos/FreeRTOS.h", "freertos/event_groups.h",
             "freertos/semphr.h", "soc/soc_caps.h",
         ):

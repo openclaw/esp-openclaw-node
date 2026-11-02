@@ -24,6 +24,7 @@ idf_component_register(
         esp_event
         esp_netif
         esp_timer
+        esp_hw_support
         esp_wifi
         protocomm
         espressif__cjson

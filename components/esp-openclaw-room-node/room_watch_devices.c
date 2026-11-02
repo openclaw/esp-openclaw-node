@@ -83,14 +83,23 @@ void room_watch_devices_create(lv_obj_t *parent, lv_event_cb_t handler)
     next = button(276, 324, 66, 44, ROOM_DEVICE_NEXT, handler);
     label(next, LV_SYMBOL_RIGHT, 26, 14, 24);
     detail_name = label(root, "", 32, 122, 304);
-#if LV_FONT_MONTSERRAT_20
-    lv_obj_set_style_text_font(detail_name, &lv_font_montserrat_20, 0);
-#endif
-    lv_obj_set_height(detail_name, 54);
-    lv_label_set_long_mode(detail_name, LV_LABEL_LONG_WRAP);
     detail_model = label(root, "", 32, 190, 304);
     detail_connection = label(root, "", 32, 250, 304);
     detail_pairing = label(root, "", 32, 294, 304);
+    bool tab5 = room_tab5_layout();
+    detail_body = lv_obj_create(root);
+    lv_obj_remove_style_all(detail_body);
+    lv_obj_set_pos(detail_body, tab5 ? 160 : 26, tab5 ? 208 : 116);
+    lv_obj_set_size(detail_body, tab5 ? 960 : 316, tab5 ? 448 : 260);
+    lv_obj_set_scroll_dir(detail_body, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(detail_body, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_t *details[] = {detail_name, detail_model, detail_connection, detail_pairing};
+    for (unsigned i = 0; i < 4; ++i) {
+        lv_obj_set_parent(details[i], detail_body);
+        lv_obj_set_width(details[i], tab5 ? 936 : 304);
+        lv_obj_set_height(details[i], LV_SIZE_CONTENT);
+        lv_label_set_long_mode(details[i], LV_LABEL_LONG_WRAP);
+    }
     if (room_tab5_layout()) {
         room_tab5_header(root, heading, back);
         lv_label_set_text_static(lv_obj_get_child(local, 0), LV_SYMBOL_HOME "  This Tab5");
@@ -104,19 +113,6 @@ void room_watch_devices_create(lv_obj_t *parent, lv_event_cb_t handler)
         room_tab5_button(next, 928, 560, 192);
         lv_obj_set_pos(counter, 368, 590);
         lv_obj_set_width(counter, 544);
-        detail_body = lv_obj_create(root);
-        lv_obj_remove_style_all(detail_body);
-        lv_obj_set_pos(detail_body, 160, 208);
-        lv_obj_set_size(detail_body, 960, 448);
-        lv_obj_set_scroll_dir(detail_body, LV_DIR_VER);
-        lv_obj_set_scrollbar_mode(detail_body, LV_SCROLLBAR_MODE_AUTO);
-        lv_obj_t *details[] = {detail_name, detail_model, detail_connection, detail_pairing};
-        for (unsigned i = 0; i < 4; ++i) {
-            lv_obj_set_parent(details[i], detail_body);
-            lv_obj_set_width(details[i], 936);
-            lv_obj_set_height(details[i], LV_SIZE_CONTENT);
-            lv_label_set_long_mode(details[i], LV_LABEL_LONG_WRAP);
-        }
     }
     lv_obj_set_hidden(root, true);
 }
@@ -140,7 +136,9 @@ void room_watch_devices_render(const esp_openclaw_devices_snapshot_t *snapshot, 
         if (strcmp(devices->devices[i].id, selected_id) == 0) selected = &devices->devices[i];
     bool detail = selected != NULL;
     bool tab5 = room_tab5_layout();
-    bool entering_detail = tab5 && detail && lv_obj_is_hidden(detail_body);
+    bool entering_detail = detail && lv_obj_is_hidden(detail_body);
+    lv_obj_set_height(detail_body, content_bottom - (tab5 ? 208 : 116));
+    lv_obj_set_hidden(detail_body, !detail);
     int row_height = room_page_row(false);
     int list_top = tab5 ? 320 : 116 + row_height + 8;
     int list_height = content_bottom - (tab5 ? 112 : 56) - list_top;
@@ -176,8 +174,6 @@ void room_watch_devices_render(const esp_openclaw_devices_snapshot_t *snapshot, 
             lv_obj_align(states[i], LV_ALIGN_RIGHT_MID, -24, 0);
             lv_obj_set_width(states[i], 40);
         }
-        lv_obj_set_height(detail_body, content_bottom - 208);
-        lv_obj_set_hidden(detail_body, !detail);
     }
     if (!detail) selected_id[0] = '\0';
     if (!ready || offset >= devices->count) offset = 0;
@@ -216,18 +212,16 @@ void room_watch_devices_render(const esp_openclaw_devices_snapshot_t *snapshot, 
             selected->connected ? "Online" : "Offline");
         lv_label_set_text_fmt(detail_pairing, "Pairing: %s", !selected->paired_known ? "Unknown" :
             selected->paired ? "Paired" : "Not paired");
-        if (tab5) {
-            lv_obj_t *details[] = {detail_name, detail_model, detail_connection, detail_pairing};
-            int y = 0;
-            for (unsigned i = 0; i < 4; ++i) {
-                lv_obj_set_style_text_font(details[i], room_page_font(), 0);
-                lv_obj_set_pos(details[i], 0, y);
-                lv_obj_update_layout(details[i]);
-                y += lv_obj_get_height(details[i]) + 24;
-            }
-            if (entering_detail) lv_obj_scroll_to_y(detail_body, 0, LV_ANIM_OFF);
-            lv_obj_readjust_scroll(detail_body, LV_ANIM_OFF);
+        lv_obj_t *details[] = {detail_name, detail_model, detail_connection, detail_pairing};
+        int y = 0;
+        for (unsigned i = 0; i < 4; ++i) {
+            lv_obj_set_style_text_font(details[i], room_page_font(), 0);
+            lv_obj_set_pos(details[i], 0, y);
+            lv_obj_update_layout(details[i]);
+            y += lv_obj_get_height(details[i]) + (tab5 ? 24 : 16);
         }
+        if (entering_detail) lv_obj_scroll_to_y(detail_body, 0, LV_ANIM_OFF);
+        lv_obj_readjust_scroll(detail_body, LV_ANIM_OFF);
     } else if (ready) {
         size_t end = offset + PAGE_SIZE < devices->count ? offset + PAGE_SIZE : devices->count;
         lv_label_set_text_fmt(counter, "%u-%u / %u", (unsigned)offset + 1, (unsigned)end, (unsigned)devices->count);

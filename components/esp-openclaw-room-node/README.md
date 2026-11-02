@@ -459,6 +459,8 @@ action reloads the inventory. Back returns to the same page. A reconnect or
 replacement result cancels a held tap, and leaving Devices releases its
 inventory. Browsing never changes the Talk recipient or sends a device
 command. Remote controls are not part of this read-only view.
+Remote device details wrap names and models at the selected reading size.
+Scroll to reach longer details while Back and Return to call remain available.
 
 On the Watch, **Settings → Connection** (also reachable through **This Watch**)
 shows Gateway and Talk state above a scrollable Wi-Fi readout. The readout uses

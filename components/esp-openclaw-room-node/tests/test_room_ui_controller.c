@@ -3042,6 +3042,48 @@ static void check_watch_help(const char *path)
     puts("watch Help: touch entry, topics, Back, larger reading, retained scrolling and call safety passed");
 }
 
+static void check_live_talk(const char *path)
+{
+    room_ui_facts_t facts = {.wifi = ROOM_UI_WIFI_CONNECTED,
+        .gateway = ROOM_UI_GATEWAY_CONNECTED, .talk = ROOM_UI_TALK_ACTIVE};
+    room_ui_store_facts(&facts);
+    assert(room_ui_watch_menu("call") == ESP_OK);
+    esp_openclaw_talk_snapshot_t view = {.sequence = 2, .phase = ESP_OPENCLAW_TALK_LISTENING,
+        .turn_active = true, .user_text = "Tell me about the project"};
+    strcpy(view.turn_id, "turn-1");
+    room_ui_store_live_talk(&view);
+    room_ui_set(ROOM_UI_LISTENING, NULL);
+    assert(find_visible_text(lv_layer_top(), "Listening"));
+    assert(find_visible_fragment(lv_layer_top(), "You (partial)"));
+    view.user_final = true;
+    view.agent_incomplete = true;
+    view.phase = ESP_OPENCLAW_TALK_SPEAKING;
+    strcpy(view.agent_text, "The project is ready for review.");
+    ++view.sequence;
+    room_ui_store_live_talk(&view);
+    room_ui_set(ROOM_UI_SPEAKING, NULL);
+    assert(find_visible_text(lv_layer_top(), "Agent speaking"));
+    assert(find_visible_fragment(lv_layer_top(), "Agent (partial)"));
+    assert(find_visible_fragment(lv_layer_top(), "[Incomplete text]"));
+    if (path) { char output[1024]; snprintf(output, sizeof(output), "%s-live-talk.ppm", path); write_frame(output); }
+    view.agent_final = true;
+    view.agent_incomplete = false;
+    ++view.sequence;
+    room_ui_store_live_talk(&view);
+    room_ui_refresh();
+    assert(!find_visible_fragment(lv_layer_top(), "Agent (partial)"));
+    assert(!find_visible_fragment(lv_layer_top(), "[Incomplete text]"));
+    assert(room_ui_watch_menu("menu") == ESP_OK);
+    assert(!find_visible_text(lv_layer_top(), "Agent speaking"));
+    assert(room_ui_watch_menu("call") == ESP_OK);
+    assert(find_visible_text(lv_layer_top(), "Agent speaking"));
+    room_ui_store_live_talk(NULL);
+    facts.talk = ROOM_UI_TALK_READY;
+    room_ui_store_facts(&facts);
+    room_ui_set(ROOM_UI_IDLE, NULL);
+    assert(!find_visible_fragment(lv_layer_top(), "The project is ready for review."));
+}
+
 static void check_tab5_shell(const char *path)
 {
     room_ui_facts_t facts = {.wifi = ROOM_UI_WIFI_CONNECTED,
@@ -3219,6 +3261,7 @@ int main(int argc, char **argv)
     if (tab5) {
         check_tab5_shell(argc == 3 ? argv[2] : NULL);
         check_tab5_agents(argc == 3 ? argv[2] : NULL);
+        check_live_talk(argc == 3 ? argv[2] : NULL);
         lv_deinit();
         free(frame);
         free(draw_buffer);
@@ -3355,6 +3398,7 @@ int main(int argc, char **argv)
         check_watch_reading_size(argc == 3 ? argv[2] : NULL);
         check_watch_density(argc == 3 ? argv[2] : NULL);
         check_watch_help(argc == 3 ? argv[2] : NULL);
+        check_live_talk(argc == 3 ? argv[2] : NULL);
         // This isolated fixture replaces and destroys the mascot singleton.
         check_watch_repaint();
     }

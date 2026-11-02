@@ -465,3 +465,18 @@ automatically. Check Chats before creating another conversation. A late valid
 receipt can resolve that status, but a replaced connection must reload Chats
 before opening it. Pending creation never disconnects the shared Talk/Canvas
 connection to recover from a timeout.
+
+### Live Talk text
+
+Watch and Tab5 call views show the current turn from admitted Gateway Talk
+events: recognized user text and agent output grow while partial, then the final
+event replaces each excerpt. Text is bounded to 1023 UTF-8 bytes per speaker;
+missing events or truncation are identified as incomplete. Navigation preserves
+the active call, and ending it clears the on-screen turn. Before Talk events
+arrive, the existing call view remains available.
+
+Listening, thinking, and speaking reflect Gateway event activity; they do not
+prove local audio playback. End call uses the existing call lifecycle. The
+current WebRTC media contract does not expose a microphone mute control or a
+portable output-interruption command, so neither is presented as working. Dial
+has no microphone or speech speaker and retains its hardware-specific controls.

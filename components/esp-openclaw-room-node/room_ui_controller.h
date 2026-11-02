@@ -8,6 +8,7 @@
 #include "esp_openclaw_devices.h"
 #include "room_voice_draft.h"
 #include "room_messaging.h"
+#include "esp_openclaw_talk_snapshot.h"
 
 typedef enum {
     ROOM_UI_IDLE = 0,
@@ -132,3 +133,6 @@ const char *room_ui_state_name(room_ui_state_t state);
 void room_ui_set_diagnostics_open(bool open);
 void room_ui_raise_camera_indicator(void);
 bool room_ui_is_initialized(void);
+
+/* Store from the call owner, then publish the corresponding room UI state. */
+void room_ui_store_live_talk(const esp_openclaw_talk_snapshot_t *snapshot);

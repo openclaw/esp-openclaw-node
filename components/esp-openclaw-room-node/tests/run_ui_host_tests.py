@@ -123,7 +123,7 @@ def main():
             "-fno-sanitize-recover=all", "-fno-omit-frame-pointer",
             "-DLV_CONF_SKIP", "-DLV_USE_OS=LV_OS_NONE",
             "-DLV_USE_STDLIB_MALLOC=LV_STDLIB_CLIB", "-DLV_USE_LOG=0",
-            "-DLV_FONT_MONTSERRAT_20=1", f"-DLV_FONT_MONTSERRAT_28={0 if args.without_heading_font else 1}",
+            "-DLV_FONT_MONTSERRAT_20=1", "-DLV_FONT_MONTSERRAT_36=1", f"-DLV_FONT_MONTSERRAT_28={0 if args.without_heading_font else 1}",
             "-I", str(root), "-I", str(component), "-I", str(component / "include"),
             "-I", str(lvgl), str(tests / "test_room_ui_controller.c"),
             "-I", str(cjson), str(cjson / "cJSON.c"),

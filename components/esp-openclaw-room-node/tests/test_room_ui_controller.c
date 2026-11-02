@@ -3106,8 +3106,79 @@ static void check_tab5_shell(const char *path)
     room_ui_refresh();
     assert(!lv_obj_is_visible(talk));
     canvas_active = false;
-    assert(room_ui_watch_menu("agents") == ESP_ERR_INVALID_STATE);
+    assert(room_ui_watch_menu("home") == ESP_OK);
     assert(display_depth == 0 && critical_depth == 0);
+}
+
+static void check_tab5_agents(const char *path)
+{
+    room_ui_facts_t facts = {.wifi = ROOM_UI_WIFI_CONNECTED,
+        .gateway = ROOM_UI_GATEWAY_CONNECTED, .talk = ROOM_UI_TALK_READY};
+    room_ui_store_facts(&facts);
+    room_ui_set(ROOM_UI_IDLE, NULL);
+    assert(room_ui_watch_menu("agents") == ESP_OK && agent_open);
+    room_agents_snapshot_t roster = {.state = ROOM_AGENTS_READY, .revision = 40,
+        .page = {.count = 4, .total = 4, .main_key = "main"}};
+    for (unsigned i = 0; i < 4; ++i) {
+        snprintf(roster.page.agents[i].id, sizeof(roster.page.agents[i].id), "agent-%u", i);
+        snprintf(roster.page.agents[i].name, sizeof(roster.page.agents[i].name), "Assistant %u", i);
+    }
+    strcpy(roster.page.agents[0].name, "Kitsune");
+    strcpy(roster.page.agents[0].emoji, "🦊");
+    room_ui_store_agents(&roster);
+    lv_obj_t *row = lv_obj_get_parent(find_visible_text(lv_layer_top(), "Kitsune"));
+    lv_obj_update_layout(lv_layer_top());
+    assert(lv_obj_get_height(row) >= 96 && lv_obj_get_width(row) >= 900);
+    char output[1024];
+    if (path) { snprintf(output, sizeof(output), "%s-agents.ppm", path); write_frame(output); }
+    touch_talk(row, true);
+    ++roster.revision;
+    room_ui_store_agents(&roster);
+    touch_talk(row, false);
+    assert(!find_visible_text(lv_layer_top(), "Use for next Talk"));
+    click_talk(row);
+    lv_obj_t *choose = lv_obj_get_parent(find_visible_text(lv_layer_top(), "Use for next Talk"));
+    lv_obj_t *chats = lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LIST "  Conversations"));
+    lv_obj_update_layout(lv_layer_top());
+    assert(lv_obj_get_height(choose) >= 96 && lv_obj_get_height(chats) >= 96);
+    if (path) { snprintf(output, sizeof(output), "%s-agent.ppm", path); write_frame(output); }
+    unsigned selections = agent_selections;
+    click_talk(choose);
+    assert(agent_selections == selections + 1 && selected_revision == roster.revision);
+    room_ui_talk_target_t target = {.selected = true, .revision = 10, .id = "agent-0", .name = "Kitsune",
+        .avatar = {.kind = ESP_OPENCLAW_AVATAR_FOX}};
+    room_ui_store_talk_target(&target);
+    room_ui_agent_selection_complete(ESP_OK);
+    click_talk(chats);
+    assert(room_ui_wants_conversations() && conversation_action == ROOM_CONVERSATIONS_OPEN);
+    room_conversations_snapshot_t *view = calloc(1, sizeof(*view));
+    assert(view);
+    view->agent = roster.page.agents[0];
+    view->revision = 1;
+    view->state = ROOM_AGENTS_READY;
+    view->page.count = 1;
+    strcpy(view->page.sessions[0].title, "Project notes");
+    strcpy(view->page.sessions[0].last_message, "A private conversation excerpt");
+    room_ui_store_conversations(view, conversation_generation);
+    lv_obj_t *thread = lv_obj_get_parent(find_visible_text(lv_layer_top(), "Project notes"));
+    lv_obj_update_layout(lv_layer_top());
+    assert(lv_obj_get_height(thread) >= 96);
+    if (path) { snprintf(output, sizeof(output), "%s-chats.ppm", path); write_frame(output); }
+    click_talk(thread);
+    assert(conversation_action == ROOM_CONVERSATIONS_READ && conversation_value == 0);
+    view->selected = 0;
+    view->preview_revision = 1;
+    view->preview_state = ROOM_AGENTS_READY;
+    view->preview.status = ESP_OPENCLAW_PREVIEW_OK;
+    view->preview.count = 1;
+    view->preview.items[0].role = ESP_OPENCLAW_PREVIEW_USER;
+    strcpy(view->preview.items[0].text, "A private conversation excerpt");
+    room_ui_store_conversations(view, conversation_generation);
+    assert(find_visible_fragment(lv_layer_top(), "A private conversation excerpt"));
+    if (path) { snprintf(output, sizeof(output), "%s-reader.ppm", path); write_frame(output); }
+    assert(room_ui_watch_menu("home") == ESP_OK);
+    assert(!find_visible_fragment(lv_layer_top(), "A private conversation excerpt"));
+    free(view);
 }
 
 int main(int argc, char **argv)
@@ -3147,6 +3218,7 @@ int main(int argc, char **argv)
     assert(brightness == idle);
     if (tab5) {
         check_tab5_shell(argc == 3 ? argv[2] : NULL);
+        check_tab5_agents(argc == 3 ? argv[2] : NULL);
         lv_deinit();
         free(frame);
         free(draw_buffer);

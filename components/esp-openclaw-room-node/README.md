@@ -297,8 +297,14 @@ without starting or stopping a call while navigating.
 Navigation targets are at least 96 native pixels tall (about 8.3 mm on the
 nominal 110.69 mm display width); the primary control is 104 pixels. Host LVGL
 captures validate geometry and behavior, not touch ergonomics or audible speech.
-Agent browsing, history and settings are separate firmware slices; this shell
-does not expose unfinished pages. Existing Watch and Dial interfaces are unchanged.
+**Menu → Agents** provides native-size directory rows, configured avatars and
+explicit selection for the next Talk. Open an agent's **Conversations** to browse
+and read that agent's history or create an empty conversation. **Menu →
+Conversations** resumes the retained reader. Returning Home hides conversation
+excerpts; it does not replace the selected Talk recipient. Pending, offline,
+empty and failed requests use the same guarded state owners as Watch.
+
+Settings remain a separate firmware slice. Existing Watch and Dial interfaces are unchanged.
 
 ## Messaging access
 

@@ -1,0 +1,60 @@
+{
+  "publisher": "Neuromatch Academy EMNIST mirror",
+  "url": "https://osf.io/download/xwfaj/",
+  "tutorial": "https://deeplearning.neuromatch.io/tutorials/W2D2_ConvnetsAndDlThinking/student/W2D2_Tutorial1.html",
+  "upstream": "https://www.nist.gov/itl/products-and-services/emnist-dataset",
+  "etag": "\"bd3837da7d780c3ada14091cc2f0cc41-108\"",
+  "archive_bytes": 561671588,
+  "publisher_archive_sha256": "3b827470340ceb5e36dab6c3f1666032685ea52cdd7ecf71e1ad91570a7ca8de",
+  "full_archive_verification": "UNVERIFIED: partial member retrieval only",
+  "members": [
+    {
+      "name": "EMNIST/raw/emnist-balanced-train-images-idx3-ubyte.gz",
+      "method": 8,
+      "crc": 1728293510,
+      "compressed": 28212040,
+      "size": 28207740,
+      "offset": 196003796,
+      "sha256": "74295e75e4e9fa2c102147460ee7eb763653d5132d883a84fb88932bfb8d2db4"
+    },
+    {
+      "name": "EMNIST/raw/emnist-balanced-test-images-idx3-ubyte.gz",
+      "method": 8,
+      "crc": 907964092,
+      "compressed": 4715427,
+      "size": 4714707,
+      "offset": 224737323,
+      "sha256": "117fc12b015e37ea98bfb2cbba3f77c3782c056cdbd219b87abfc8661d7135db"
+    },
+    {
+      "name": "EMNIST/raw/emnist-balanced-train-labels-idx1-ubyte.gz",
+      "method": 8,
+      "crc": 841456236,
+      "compressed": 80633,
+      "size": 80618,
+      "offset": 402848252,
+      "sha256": "b46d41e5156a0a8aaaa4d18979fdd1588850fa8571018acffd5d93b325a7d6ed"
+    },
+    {
+      "name": "EMNIST/raw/emnist-balanced-test-labels-idx1-ubyte.gz",
+      "method": 0,
+      "crc": 1704497873,
+      "compressed": 13504,
+      "size": 13504,
+      "offset": 473134798,
+      "sha256": "a67cac948379b67270b9a4d0a01c8ec661598accf2f2b1964340b7c83cb175cd"
+    }
+  ],
+  "creators": [
+    "Gregory Cohen",
+    "Saeed Afshar",
+    "Jonathan Tapson",
+    "André van Schaik"
+  ],
+  "dataset_doi": "https://doi.org/10.26183/zn7s-gh79",
+  "paper": "https://arxiv.org/abs/1702.05373v2",
+  "rights": "Copyright Western Sydney University",
+  "source_license": "CC BY-ND 4.0",
+  "source_license_url": "https://creativecommons.org/licenses/by-nd/4.0/",
+  "source_record": "https://research-data.westernsydney.edu.au/published/2d9cc060519411ecb15399911543e199/"
+}

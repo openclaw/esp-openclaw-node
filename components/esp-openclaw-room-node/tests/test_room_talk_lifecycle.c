@@ -2622,6 +2622,9 @@ static void text_reader_stale(void)
     voice_tick();
     CHECK(host.chat_sends == 0 && host.voice.state == ROOM_VOICE_ERROR && host.voice.text[0] == '\0',
         "a changed reader invalidates the draft before a queued Send takes effect");
+    /* The reader refresh retains its real RPC until its callback completes. */
+    host_reply_agents(true, conversation_page);
+    voice_tick();
     voice_dismiss();
 }
 

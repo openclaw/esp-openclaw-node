@@ -519,6 +519,28 @@ receipt can resolve that status, but a replaced connection must reload Chats
 before opening it. Pending creation never disconnects the shared Talk/Canvas
 connection to recover from a timeout.
 
+### Handwritten replies on Watch and Tab5
+
+The text composer's **Handwrite** button opens an on-device character pad. Write
+one English letter or digit, tap **Recognize**, select one of three candidates,
+then tap **Accept** to insert that character into the same editable draft.
+**abc / ABC** explicitly chooses case. Use **Keyboard** for spaces, punctuation,
+cursor movement and deletion; then **Review → Send** to submit the message.
+Recognition and acceptance never send a message or change the recipient.
+
+Blank input, taps and dense ink floods show a retry instruction. **Clear** removes
+the current ink; a full 512-point pad asks you to clear it instead of silently
+cutting off a stroke. **Keyboard** clears the pad's ink/candidates and preserves
+the message draft. **Cancel** discards an unsent draft through its existing owner.
+Recipient invalidation clears candidates and blocks acceptance;
+the existing draft owner still checks the destination and Messaging authority
+at Send. Physical finger accuracy, latency and device memory need Studio testing.
+
+This is case-insensitive character recognition with an explicit case choice,
+not cursive or word recognition. The compact model's source attribution,
+per-class benchmark results, C parity and reproduction recipe are in
+[`assets/handwriting_english36`](assets/handwriting_english36/README.md).
+
 ### Live Talk text
 
 Watch and Tab5 call views show the current turn from admitted Gateway Talk

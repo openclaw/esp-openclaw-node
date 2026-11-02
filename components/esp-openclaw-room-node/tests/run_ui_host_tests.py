@@ -2,6 +2,8 @@
 """Render the real room UI with LVGL, without ESP-IDF, networking, or hardware."""
 
 import argparse
+import hashlib
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -96,6 +98,15 @@ def main():
             'const unsigned char pixels[] __asm__("_binary_openclaw_lobster_argb8888_start") = {\n'
             + ",".join(str(value) for value in bitmap) + "\n};\n"
         )
+        handwriting = (component / "assets/handwriting_english36.bin").read_bytes()
+        model_metrics = json.loads((component / "assets/handwriting_english36/metrics.json").read_text())
+        if len(handwriting) != 106288 or hashlib.sha256(handwriting).hexdigest() != model_metrics["model_sha256"]:
+            parser.error("handwriting model does not match its recorded size/hash")
+        handwriting_model = root / "handwriting_model.c"
+        handwriting_model.write_text(
+            'const unsigned char handwriting_model[] __asm__("_binary_handwriting_english36_bin_start") = {\n'
+            + ",".join(str(value) for value in handwriting) + "\n};\n"
+        )
         subprocess.run([
             sys.executable, str(component.parents[1] / "scripts/generate_watch_lobster.py"),
             "--output-dir", str(root),
@@ -151,6 +162,8 @@ def main():
             str(avatars / "esp_openclaw_avatar.c"), str(avatar_pixels),
             str(component / "room_watch_conversations.c"),
             str(component / "room_text_composer.c"),
+            str(component / "room_handwriting.c"), str(component / "room_handwriting_pad.c"),
+            str(handwriting_model),
             str(component / "room_face.c"),
             str(pixels), str(watch_pixels), str(component / "room_lobster.c"),
             *map(str, sorted((lvgl / "src").rglob("*.c"))),

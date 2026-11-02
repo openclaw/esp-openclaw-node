@@ -48,6 +48,8 @@
 - Honor the Watch's reading size in conversation titles and summaries, keeping long text within separate single-line rows in both list densities.
 - Follow reading size in Watch and Dial conversation-reader headings, revealing long titles while preserving menu styles and reading space.
 
+- Add on-device English letter/digit handwriting candidates to the Watch and Tab5 text composer, with explicit candidate acceptance and a separate Review/Send step.
+
 ## 1.3.1 - 2026-10-23
 
 **Highlights:** Security: remove affected CA roots from the examples' trust bundle; a firmware rebuild is required to apply the trust change.

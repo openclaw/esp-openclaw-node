@@ -29,6 +29,7 @@ idf_component_register(
         "room_voice_draft.c"
         "room_text_composer.c"
         "room_handwriting.c"
+        "room_handwriting_pad.c"
         "room_watch_home.c"
         "room_watch_status.c"
         "room_watch_navigation.c"
@@ -38,7 +39,7 @@ idf_component_register(
         "room_watch_conversations.c"
     INCLUDE_DIRS "include"
     PRIV_INCLUDE_DIRS "."
-    EMBED_FILES "assets/openclaw_lobster.argb8888"
+    EMBED_FILES "assets/openclaw_lobster.argb8888" "assets/handwriting_english36.bin"
     REQUIRES
         av_render
         console

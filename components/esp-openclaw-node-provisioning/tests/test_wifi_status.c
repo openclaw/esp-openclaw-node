@@ -1251,7 +1251,10 @@ static void check_setup_mailbox(void)
     snapshot = esp_openclaw_setup_snapshot(&wire.session);
     assert(esp_openclaw_setup_mailbox_open(&mailbox, wire.generation, 0, snapshot.opened_ms));
     assert(ble_security->new_transport_session(ble_handle, 7) == ESP_OK);
-    assert(ble_security->decrypt(ble_handle, 7, opaque, sizeof(opaque), &plain, &plain_size) == ESP_OK); free(plain);
+    uint8_t *exit_plain = NULL; ssize_t exit_plain_size = 0;
+    assert(ble_security->decrypt(ble_handle, 7, opaque, sizeof(opaque), &exit_plain, &exit_plain_size) == ESP_OK);
+    assert(exit_plain != NULL && exit_plain_size == (ssize_t)sizeof(opaque) - 16);
+    free(exit_plain);
     esp_openclaw_setup_security2_revoke(); // Server exit before owner bind.
     assert(esp_openclaw_setup_mailbox_close(&mailbox, wire.generation, 0));
     assert(!esp_openclaw_setup_mailbox_open(&mailbox, wire.generation, esp_openclaw_setup_security2_peer(), snapshot.opened_ms));

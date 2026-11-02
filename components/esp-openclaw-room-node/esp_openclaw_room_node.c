@@ -616,9 +616,9 @@ static void refresh_messaging(void)
     room_ui_store_messaging(&snapshot);
 }
 
-static void request_local_voice(room_voice_action_t action, uint32_t generation, uint64_t revision, uint64_t owner)
+static void request_local_voice(room_voice_action_t action, uint32_t generation, uint64_t revision, uint64_t owner, const char *text)
 {
-    room_voice_draft_request(action, generation, revision, owner);
+    room_voice_draft_request(action, generation, revision, owner, text);
     wake_talk_teardown();
 }
 
@@ -636,6 +636,20 @@ static void refresh_voice(void)
     if (talk_target.selected && !talk_target.expired) {
         strlcpy(context.agent_id, talk_target.id, sizeof(context.agent_id));
         strlcpy(context.session_key, talk_target.session_key, sizeof(context.session_key));
+    }
+    context.reader = room_voice_draft_uses_reader();
+    if (context.reader) {
+        room_conversation_reply_t target = {0};
+        context.valid = node_ready && operator_ready &&
+            room_conversations_reply_locked(&target);
+        context.recipient_revision = target.revision;
+        context.available = false; /* Text does not acquire audio or require Talk readiness. */
+        if (context.valid) {
+            strlcpy(context.agent_id, target.agent.id, sizeof(context.agent_id));
+            strlcpy(context.session_key, target.session.key, sizeof(context.session_key));
+            strlcpy(context.conversation, target.session.title, sizeof(context.conversation));
+            strlcpy(context.recipient, target.agent.name[0] ? target.agent.name : target.agent.id, sizeof(context.recipient));
+        }
     }
     context.send_enabled = room_messaging_ready_locked();
     static room_voice_snapshot_t snapshot;

@@ -44,7 +44,8 @@ static const struct help_topic {
         "For larger text or more space between rows, open Settings > Display."},
     {ROOM_WATCH_HELP_MESSAGES, LV_SYMBOL_ENVELOPE "  Messages", "Messages",
         "Choose your assistant in Agents and a thread in Conversations.\n\n"
-        "Hold to record captures a short message when recording is ready. Release to review the words, then tap Send. "
+        "Hold to record captures a short message when recording is ready. Release to review the words, then tap Edit / Review. "
+        "Use Write reply in a conversation to type without a microphone. Review, then Send submits the message. "
         "Leaving before Send discards an unsent recording or draft. If Send is unavailable, request access in Settings > Messaging.\n\n"
         "Live call is separate: open it from Menu, then tap Start call. Its microphone stays open until you tap End call there. "
         "Back and Home keep the call running; Return to call takes you back."},

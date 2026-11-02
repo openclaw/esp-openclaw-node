@@ -2286,7 +2286,7 @@ static void devices_errors(void)
 
 static void voice_begin(unsigned generation)
 {
-    request_local_voice(ROOM_VOICE_BEGIN, generation, talk_target_revision, operator_incarnation);
+    request_local_voice(ROOM_VOICE_BEGIN, generation, talk_target_revision, operator_incarnation, NULL);
     host_run_task("talk_teardown");
 }
 
@@ -2371,7 +2371,7 @@ static void voice_draft_lifecycle(void)
     host_run_task("talk_teardown");
     CHECK(host.voice.state == ROOM_VOICE_RECORDING && host.voice.duration_ms == 2000,
         "supervisor publishes actual captured duration");
-    request_local_voice(ROOM_VOICE_FINISH, 1, 0, 0);
+    request_local_voice(ROOM_VOICE_FINISH, 1, 0, 0, NULL);
     host_run_task("talk_teardown");
     CHECK(host.recording_stops == 1 && host.voice.state == ROOM_VOICE_FINISHING,
         "release finishes the capture without blocking the UI");
@@ -2385,35 +2385,35 @@ static void voice_draft_lifecycle(void)
     CHECK(!messaging_snapshot().can_request &&
         request_messaging(messaging_snapshot().revision) == ESP_ERR_INVALID_STATE,
         "permission changes preserve an editable draft");
-    request_local_voice(ROOM_VOICE_FINISH, 1, 0, 0);
+    request_local_voice(ROOM_VOICE_FINISH, 1, 0, 0, NULL);
     host_run_task("talk_teardown");
     CHECK(host.voice.state == ROOM_VOICE_DRAFT && host.recording_stops == 1,
         "late release after a duration cap preserves the draft");
     CHECK(host.opens == 0 && host.create_requests == 0 && host.speech_requests == 0,
         "transcription never starts Live Talk or sends a chat/speech request");
-    request_local_voice(ROOM_VOICE_CANCEL, 1, 0, 0);
+    request_local_voice(ROOM_VOICE_CANCEL, 1, 0, 0, NULL);
     host_run_task("talk_teardown");
     CHECK(host.voice.state == ROOM_VOICE_READY, "discard frees the draft and restores readiness");
 }
 
 static void voice_canceled_intent(void)
 {
-    request_local_voice(ROOM_VOICE_BEGIN, 1, talk_target_revision, operator_incarnation);
-    request_local_voice(ROOM_VOICE_CANCEL, 1, 0, 0);
-    request_local_voice(ROOM_VOICE_FINISH, 1, 0, 0);
+    request_local_voice(ROOM_VOICE_BEGIN, 1, talk_target_revision, operator_incarnation, NULL);
+    request_local_voice(ROOM_VOICE_CANCEL, 1, 0, 0, NULL);
+    request_local_voice(ROOM_VOICE_FINISH, 1, 0, 0, NULL);
     host_run_task("talk_teardown");
     CHECK(host.recording_starts == 0, "cancel dominates a coalesced begin and release");
-    request_local_voice(ROOM_VOICE_BEGIN, 2, talk_target_revision, operator_incarnation);
-    request_local_voice(ROOM_VOICE_FINISH, 2, 0, 0);
+    request_local_voice(ROOM_VOICE_BEGIN, 2, talk_target_revision, operator_incarnation, NULL);
+    request_local_voice(ROOM_VOICE_FINISH, 2, 0, 0, NULL);
     host_run_task("talk_teardown");
     CHECK(host.recording_starts == 0 && host.voice.state == ROOM_VOICE_ERROR,
         "a release before worker admission never starts a stray recording");
     voice_begin(3);
-    request_local_voice(ROOM_VOICE_CANCEL, 2, 0, 0);
+    request_local_voice(ROOM_VOICE_CANCEL, 2, 0, 0, NULL);
     host_run_task("talk_teardown");
     CHECK(host.recording_cancels == 0 && host.voice.state == ROOM_VOICE_STARTING,
         "an old gesture cannot cancel its replacement");
-    request_local_voice(ROOM_VOICE_CANCEL, 3, 0, 0);
+    request_local_voice(ROOM_VOICE_CANCEL, 3, 0, 0, NULL);
     host_run_task("talk_teardown");
     CHECK(host.recording_cancels == 1, "current cancel reaches recording cleanup");
     host.recording_active = false;
@@ -2459,7 +2459,7 @@ static void voice_media_exclusion(void)
     host_run_task("talk_start");
     CHECK(host.opens == 0 && host.voice.state == ROOM_VOICE_STARTING,
         "Live Talk cannot steal the recording's media gate");
-    request_local_voice(ROOM_VOICE_CANCEL, 2, 0, 0); host_run_task("talk_teardown");
+    request_local_voice(ROOM_VOICE_CANCEL, 2, 0, 0, NULL); host_run_task("talk_teardown");
     host.recording_active = false;
     host.expire_queue_wait = true; host_run_task("talk_teardown");
 }
@@ -2474,12 +2474,12 @@ static void voice_completion_race(void)
     host.expire_queue_wait = true; host_run_task("talk_teardown");
     CHECK(host.voice.state == ROOM_VOICE_TRANSCRIBING && host.voice.duration_ms == 2000,
         "completion between status reads must retain the backend draft");
-    request_local_voice(ROOM_VOICE_CANCEL, 1, 0, 0); host_run_task("talk_teardown");
+    request_local_voice(ROOM_VOICE_CANCEL, 1, 0, 0, NULL); host_run_task("talk_teardown");
     cancel_pending_transcription();
     voice_begin(2);
     CHECK(host.recording_starts == 2 && host.voice.state == ROOM_VOICE_STARTING,
         "racing completion cannot wedge the next recording");
-    request_local_voice(ROOM_VOICE_CANCEL, 2, 0, 0); host_run_task("talk_teardown");
+    request_local_voice(ROOM_VOICE_CANCEL, 2, 0, 0, NULL); host_run_task("talk_teardown");
     host.recording_active = false;
     host.expire_queue_wait = true; host_run_task("talk_teardown");
 }
@@ -2488,7 +2488,7 @@ static void voice_transcription_cancel(void)
 {
     voice_begin(1); voice_complete(); transcription_ready();
     CHECK(host.transcription_appends == 1, "one audio request in flight");
-    request_local_voice(ROOM_VOICE_CANCEL, 1, 0, 0); host_run_task("talk_teardown");
+    request_local_voice(ROOM_VOICE_CANCEL, 1, 0, 0, NULL); host_run_task("talk_teardown");
     CHECK(host.voice.text[0] == '\0' && room_voice_draft_busy(), "cancel retains pending callback ownership");
     transcription_event(operator_client, "transcript.done", 2, "{\"text\":\"Canceled words\"}");
     host_reply_transcription(true, "{\"ok\":true}");
@@ -2555,14 +2555,99 @@ static void voice_selected_draft(void)
 
 static void voice_send(void)
 {
-    request_local_voice(ROOM_VOICE_SEND, 1, host.voice.recipient_revision, host.voice.owner_incarnation);
+    request_local_voice(ROOM_VOICE_SEND, 1, host.voice.recipient_revision, host.voice.owner_incarnation, NULL);
     voice_tick();
 }
 
 static void voice_dismiss(void)
 {
-    request_local_voice(ROOM_VOICE_CANCEL, 1, 0, 0);
+    request_local_voice(ROOM_VOICE_CANCEL, 1, 0, 0, NULL);
     voice_tick();
+}
+
+static void text_reader_draft(void)
+{
+    unsigned revision = load_target_roster(target_roster);
+    CHECK(select_talk_agent("builder", revision) == ESP_OK, "Talk has a different explicit recipient");
+    CHECK(room_conversations_open("fixture", revision) == ESP_OK, "open reader independently of Talk");
+    host_run_task("talk_teardown");
+    host_reply_agents(true, conversation_page); host_run_task("talk_teardown");
+    room_conversations_snapshot_t reader = conversations_snapshot();
+    CHECK(room_conversations_preview(0, reader.revision) == ESP_OK, "select the reader conversation");
+    host_run_task("talk_teardown");
+    host_reply_agents(true, conversation_preview); host_run_task("talk_teardown");
+    reader = conversations_snapshot();
+    media_ready = false;
+    request_local_voice(ROOM_TEXT_BEGIN, 1, reader.preview_revision, operator_incarnation, NULL);
+    voice_tick();
+    CHECK(host.voice.state == ROOM_VOICE_DRAFT && host.voice.reader && host.recording_starts == 0 &&
+        host.chat_prepares == 1 && strstr(host.chat_params, "agent:fixture:thread:one") != NULL,
+        "text prepares the exact reader key without audio or Talk readiness");
+    host_reply_chat(true, "{\"sessionId\":\"reader-1\",\"sessionInfo\":{\"key\":\"agent:fixture:thread:one\","
+        "\"agentId\":\"fixture\",\"sessionId\":\"reader-1\",\"activeLeafEntryId\":null}}");
+    voice_tick();
+    CHECK(host.voice.can_send && host.chat_sends == 0 && strcmp(host.voice.agent_id, "fixture") == 0 &&
+        strcmp(talk_target.id, "builder") == 0, "preparation never sends or changes Talk routing");
+}
+
+static void text_reader_send(void)
+{
+    text_reader_draft();
+    char edited[] = "Edited reply: caf\xc3\xa9 \xf0\x9f\xa6\x8a";
+    request_local_voice(ROOM_VOICE_SEND, 1, host.voice.recipient_revision, host.voice.owner_incarnation, edited);
+    memset(edited, 'x', sizeof(edited) - 1); /* The display's buffer may change before the owner polls. */
+    voice_tick();
+    CHECK(host.chat_sends == 1 && host.voice.state == ROOM_VOICE_SENDING &&
+        strcmp(host.voice.text, "Edited reply: caf\xc3\xa9 \xf0\x9f\xa6\x8a") == 0 &&
+        strstr(host.chat_params, "agent:fixture:thread:one") != NULL &&
+        strstr(host.chat_params, "Edited reply:") != NULL,
+        "explicit Send owns edited UTF8 bytes and the reader branch, not the Talk target");
+    request_local_voice(ROOM_VOICE_SEND, 1, host.voice.recipient_revision, host.voice.owner_incarnation, "Again");
+    voice_tick();
+    CHECK(host.chat_sends == 1, "repeated text Send cannot replay");
+    host_emit_node(operator_client, ESP_OPENCLAW_NODE_EVENT_DISCONNECTED); voice_tick();
+    CHECK(host.voice.state == ROOM_VOICE_SEND_UNKNOWN, "lost text receipt remains ambiguous");
+    request_local_voice(ROOM_VOICE_SEND, 1, host.voice.recipient_revision, host.voice.owner_incarnation, "Again");
+    voice_tick();
+    CHECK(host.chat_sends == 1, "ambiguous text delivery cannot replay");
+    voice_dismiss(); host_reply_chat(false, NULL);
+}
+
+static void text_reader_stale(void)
+{
+    text_reader_draft();
+    uint64_t revision = host.voice.recipient_revision, owner = host.voice.owner_incarnation;
+    CHECK(room_conversations_refresh(0) == ESP_OK, "reader can change while an editor is open");
+    request_local_voice(ROOM_VOICE_SEND, 1, revision, owner, "Stale reply");
+    voice_tick();
+    CHECK(host.chat_sends == 0 && host.voice.state == ROOM_VOICE_ERROR && host.voice.text[0] == '\0',
+        "a changed reader invalidates the draft before a queued Send takes effect");
+    /* The reader refresh retains its real RPC until its callback completes. */
+    host_reply_agents(true, conversation_page);
+    voice_tick();
+    voice_dismiss();
+}
+
+static void text_reader_revoked(void)
+{
+    text_reader_draft();
+    xSemaphoreTake(state_lock, portMAX_DELAY);
+    room_messaging_invalidate_locked();
+    xSemaphoreGive(state_lock);
+    request_local_voice(ROOM_VOICE_SEND, 1, host.voice.recipient_revision, host.voice.owner_incarnation, "No access");
+    voice_tick();
+    CHECK(host.chat_sends == 0 && !host.voice.can_send, "fresh Messaging authority is required at the send effect");
+    voice_dismiss();
+}
+
+static void text_reader_cancel(void)
+{
+    text_reader_draft();
+    request_local_voice(ROOM_VOICE_CANCEL, 1, 0, 0, NULL);
+    request_local_voice(ROOM_VOICE_SEND, 1, host.voice.recipient_revision, host.voice.owner_incarnation, "Canceled");
+    voice_tick();
+    CHECK(host.chat_sends == 0 && host.voice.text[0] == '\0' && !room_voice_draft_connection_busy(),
+        "cancel dominates a queued text Send and releases the unsent draft");
 }
 
 static void voice_send_lifecycle(void)
@@ -2586,7 +2671,7 @@ static void voice_send_lifecycle(void)
     cJSON_Delete(params);
     voice_send();
     CHECK(host.chat_sends == 1, "a repeated Send cannot replay the accepted local submission");
-    request_local_voice(ROOM_VOICE_HIDE, 1, 0, 0); voice_tick();
+    request_local_voice(ROOM_VOICE_HIDE, 1, 0, 0, NULL); voice_tick();
     CHECK(host.voice.state == ROOM_VOICE_SENDING, "covering Home after acceptance preserves delivery evidence");
     host_reply_chat(true, reply); voice_tick();
     CHECK(host.voice.state == ROOM_VOICE_ACCEPTED && !room_voice_draft_busy(),
@@ -2600,10 +2685,10 @@ static void voice_send_lifecycle(void)
 static void voice_send_stale(void)
 {
     voice_selected_draft();
-    request_local_voice(ROOM_VOICE_SEND, 1, host.voice.recipient_revision, host.voice.owner_incarnation + 1);
+    request_local_voice(ROOM_VOICE_SEND, 1, host.voice.recipient_revision, host.voice.owner_incarnation + 1, NULL);
     voice_tick();
     CHECK(host.chat_sends == 0 && host.voice.state == ROOM_VOICE_DRAFT, "stale connection incarnation cannot Send");
-    request_local_voice(ROOM_VOICE_SEND, 1, host.voice.recipient_revision + 1, host.voice.owner_incarnation);
+    request_local_voice(ROOM_VOICE_SEND, 1, host.voice.recipient_revision + 1, host.voice.owner_incarnation, NULL);
     voice_tick();
     CHECK(host.chat_sends == 0, "stale recipient revision cannot Send");
     voice_dismiss();
@@ -2641,7 +2726,7 @@ static void voice_send_prepare_failure(void)
     transcription_finish("{\"text\":\"Keep these words.\"}");
     voice_send();
     CHECK(host.voice.state == ROOM_VOICE_DRAFT && !host.voice.can_send && host.chat_sends == 0 &&
-        strcmp(host.voice.text, "Keep these words.") == 0 && strstr(host.voice.detail, "record again") != NULL,
+        strcmp(host.voice.text, "Keep these words.") == 0 && strstr(host.voice.detail, "try again") != NULL,
         "failed conversation preparation preserves text and explains the disabled Send");
     voice_dismiss();
 }
@@ -2653,11 +2738,11 @@ static void voice_send_disabled(void)
     request_local_agent_selection("builder", revision); host_run_task("talk_teardown");
     voice_begin(1); voice_complete(); transcription_upload(32000);
     transcription_finish("{\"text\":\"Local draft.\"}");
-    request_local_voice(ROOM_VOICE_SEND, 1, host.voice.recipient_revision, host.voice.owner_incarnation);
+    request_local_voice(ROOM_VOICE_SEND, 1, host.voice.recipient_revision, host.voice.owner_incarnation, NULL);
     voice_tick();
     CHECK(!host.voice.can_send && host.chat_prepares == 0 && host.chat_sends == 0 &&
-        strstr(host.voice.detail, "Enable voice actions") != NULL, "default firmware keeps its read-only voice authority");
-    request_local_voice(ROOM_VOICE_CANCEL, 1, 0, 0); voice_tick();
+        strstr(host.voice.detail, "Enable Messaging") != NULL, "default firmware keeps its read-only voice authority");
+    request_local_voice(ROOM_VOICE_CANCEL, 1, 0, 0, NULL); voice_tick();
 }
 
 static void messaging_enabled_repair(void)
@@ -2683,10 +2768,10 @@ static void voice_send_without_agent(void)
 {
     voice_begin(1); voice_complete(); transcription_upload(32000);
     transcription_finish("{\"text\":\"Local draft.\"}");
-    request_local_voice(ROOM_VOICE_SEND, 1, host.voice.recipient_revision, host.voice.owner_incarnation); voice_tick();
+    request_local_voice(ROOM_VOICE_SEND, 1, host.voice.recipient_revision, host.voice.owner_incarnation, NULL); voice_tick();
     CHECK(!host.voice.can_send && host.chat_sends == 0 && host.chat_prepares == 0 &&
         strstr(host.voice.detail, "Choose an agent") != NULL, "default local draft never silently chooses a Send destination");
-    request_local_voice(ROOM_VOICE_CANCEL, 1, 0, 0); voice_tick();
+    request_local_voice(ROOM_VOICE_CANCEL, 1, 0, 0, NULL); voice_tick();
 }
 
 static void messaging_runtime_writes(void)
@@ -2712,10 +2797,10 @@ static void messaging_runtime_writes(void)
     transcription_finish("{\"text\":\"Turn on the reading light.\"}");
     CHECK(host.voice.state == ROOM_VOICE_DRAFT && host.voice.can_send && host.chat_sends == 0,
         "approved default firmware still requires explicit Send");
-    request_local_voice(ROOM_VOICE_SEND, 1, host.voice.recipient_revision, host.voice.owner_incarnation);
+    request_local_voice(ROOM_VOICE_SEND, 1, host.voice.recipient_revision, host.voice.owner_incarnation, NULL);
     voice_tick();
     CHECK(host.chat_sends == 1 && room_voice_draft_connection_busy(), "submitted chat holds its connection owner");
-    request_local_voice(ROOM_VOICE_CANCEL, 1, 0, 0); voice_tick();
+    request_local_voice(ROOM_VOICE_CANCEL, 1, 0, 0, NULL); voice_tick();
     host_reply_chat(true, "{\"status\":\"ok\"}");
 }
 
@@ -2731,6 +2816,8 @@ static const struct { const char *name; void (*run)(void); } cases[] = {
     {"messaging-enabled-repair", messaging_enabled_repair},
 #endif
 #if CONFIG_OPENCLAW_ROOM_VOICE_ACTIONS
+    {"text-reader-send", text_reader_send}, {"text-reader-stale", text_reader_stale},
+    {"text-reader-revoked", text_reader_revoked}, {"text-reader-cancel", text_reader_cancel},
     {"voice-send-lifecycle", voice_send_lifecycle}, {"voice-send-stale", voice_send_stale},
     {"voice-send-unknown", voice_send_unknown}, {"voice-send-queue-failure", voice_send_queue_failure},
     {"voice-send-prepare-failure", voice_send_prepare_failure},

@@ -72,6 +72,25 @@ static bool string_is(const cJSON *root, const char *key, const char *value)
     return cJSON_IsString(item) && strcmp(item->valuestring, value) == 0;
 }
 
+static bool utf8(const char *text, size_t length)
+{
+    for (size_t i = 0; i < length;) {
+        unsigned char first = (unsigned char)text[i++];
+        if (first == 0) return false;
+        if (first < 0x80) continue;
+        size_t tail = first >= 0xc2 && first <= 0xdf ? 1 :
+            first >= 0xe0 && first <= 0xef ? 2 : first >= 0xf0 && first <= 0xf4 ? 3 : 0;
+        if (tail == 0 || tail > length - i) return false;
+        unsigned char second = (unsigned char)text[i];
+        if ((first == 0xe0 && second < 0xa0) || (first == 0xed && second >= 0xa0) ||
+            (first == 0xf0 && second < 0x90) || (first == 0xf4 && second >= 0x90)) return false;
+        for (size_t j = 0; j < tail; ++j) {
+            if (((unsigned char)text[i++] & 0xc0) != 0x80) return false;
+        }
+    }
+    return true;
+}
+
 static cJSON *parse(const char *json)
 {
     if (json == NULL || strnlen(json, JSON_BYTES + 1) > JSON_BYTES) return NULL;
@@ -303,7 +322,9 @@ void esp_openclaw_transcription_event(esp_openclaw_transcription_handle_t h,
             else {
                 size_t have = strlen(h->snapshot.text), length = strlen(text->valuestring);
                 size_t separator = have != 0 && length != 0 ? 1 : 0;
-                if (length + separator >= sizeof(h->snapshot.text) - have)
+                if (!utf8(text->valuestring, length))
+                    fail(h, ESP_OPENCLAW_TRANSCRIPTION_ERROR_FORMAT);
+                else if (length + separator >= sizeof(h->snapshot.text) - have)
                     fail(h, ESP_OPENCLAW_TRANSCRIPTION_ERROR_TOO_LONG);
                 else if (length != 0) {
                     if (separator) h->snapshot.text[have++] = ' ';

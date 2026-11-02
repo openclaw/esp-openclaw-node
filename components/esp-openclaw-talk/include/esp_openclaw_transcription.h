@@ -38,7 +38,7 @@ typedef struct {
     esp_openclaw_transcription_state_t state;
     esp_openclaw_transcription_error_t error;
     size_t audio_bytes;
-    /** Final segments only. Sendable only when COMPLETE; empty means no speech. */
+    /** Valid UTF-8 final segments only. Sendable only when COMPLETE; empty means no speech. */
     char text[ESP_OPENCLAW_TRANSCRIPTION_TEXT_BYTES];
 } esp_openclaw_transcription_snapshot_t;
 

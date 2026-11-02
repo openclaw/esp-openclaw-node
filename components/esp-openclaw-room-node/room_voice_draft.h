@@ -23,7 +23,7 @@ typedef enum {
     ROOM_VOICE_SEND_FAILED,
 } room_voice_state_t;
 
-typedef enum { ROOM_VOICE_BEGIN, ROOM_VOICE_FINISH, ROOM_VOICE_CANCEL, ROOM_VOICE_SEND, ROOM_VOICE_HIDE } room_voice_action_t;
+typedef enum { ROOM_VOICE_BEGIN, ROOM_VOICE_FINISH, ROOM_VOICE_CANCEL, ROOM_VOICE_SEND, ROOM_VOICE_HIDE, ROOM_TEXT_BEGIN } room_voice_action_t;
 
 typedef struct {
     room_voice_state_t state;
@@ -32,20 +32,24 @@ typedef struct {
     uint64_t recipient_revision;
     uint64_t owner_incarnation;
     char recipient[65];
+    char conversation[97];
     char detail[96];
     char text[ESP_OPENCLAW_TRANSCRIPTION_TEXT_BYTES];
     bool can_send;
+    bool reader;
     char agent_id[65];
 } room_voice_snapshot_t;
 
 typedef struct {
     bool valid;
+    bool reader;
     bool available;
     bool send_enabled;
     esp_openclaw_node_handle_t operator_node;
     uint64_t recipient_revision;
     uint64_t owner_incarnation;
     char recipient[65];
+    char conversation[97];
     char agent_id[65];
     char session_key[ESP_OPENCLAW_CHAT_KEY_BYTES];
 } room_voice_context_t;
@@ -53,7 +57,9 @@ typedef struct {
 /* Display callbacks record bounded intent without waiting for audio or the
  * room owner. Generations increase across gestures; cancel is sticky. */
 void room_voice_draft_request(room_voice_action_t action, uint32_t generation,
-                             uint64_t recipient_revision, uint64_t owner_incarnation);
+                             uint64_t recipient_revision, uint64_t owner_incarnation, const char *text);
+/* Chooses the context owner before polling; text replies never use Talk routing. */
+bool room_voice_draft_uses_reader(void);
 bool room_voice_draft_needs_poll(void);
 /* Poll and event forwarding share the room state lock. The operator node is
  * process-lived, including while accepted cleanup callbacks drain. */

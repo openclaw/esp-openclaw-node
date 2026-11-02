@@ -209,6 +209,7 @@ jobs:
                 --case operator-scopes --case voice-send-lifecycle --case voice-send-stale --case voice-send-unknown \
                 --case voice-send-queue-failure --case voice-send-prepare-failure --case voice-send-without-agent \
                 --case text-reader-send --case text-reader-stale --case text-reader-revoked --case text-reader-cancel &&
+              python3 ../../components/esp-openclaw-room-node/tests/run_handwriting_host_tests.py &&
               python3 ../../components/esp-openclaw-room-node/tests/run_ui_host_tests.py --lvgl-dir managed_components/lvgl__lvgl
             fi &&
             if [ "${{ matrix.name }}" != "component-test-app-build" ]; then

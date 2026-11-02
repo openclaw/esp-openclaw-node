@@ -1,0 +1,310 @@
+{
+  "seed": 20261102,
+  "torch": "2.10.0",
+  "numpy": "2.4.2",
+  "threads": 2,
+  "alphabet": "0123456789abcdefghijklmnopqrstuvwxyz",
+  "case_sensitive": false,
+  "architecture": "784-128 ReLU-36 MLP, per-output-row int8 weights and float32 biases/scales",
+  "training_attempt": 1,
+  "training_count": 107302,
+  "validation_count": 5498,
+  "test_count": 18800,
+  "normalized_train_test_duplicate_rows_removed": 0,
+  "split": "SHA256 normalized image group modulo20 validation; official-test exact overlaps removed before training; no writer-disjoint claim",
+  "best_epoch": 17,
+  "validation_float": {
+    "top1": 0.8268461258639506,
+    "top3": 0.9676245907602765,
+    "macro_recall": 0.8250039024453529,
+    "per_class_recall": {
+      "0": 0.7291666666666666,
+      "1": 0.7580645161290323,
+      "2": 0.784,
+      "3": 0.9384615384615385,
+      "4": 0.868421052631579,
+      "5": 0.8467741935483871,
+      "6": 0.8992805755395683,
+      "7": 0.9494949494949495,
+      "8": 0.8468468468468469,
+      "9": 0.8955223880597015,
+      "a": 0.8247863247863247,
+      "b": 0.8596491228070176,
+      "c": 0.9351851851851852,
+      "d": 0.8454545454545455,
+      "e": 0.8721461187214612,
+      "f": 0.8711111111111111,
+      "g": 0.6444444444444445,
+      "h": 0.8972332015810277,
+      "i": 0.552,
+      "j": 0.8473282442748091,
+      "k": 0.8828125,
+      "l": 0.28703703703703703,
+      "m": 0.9047619047619048,
+      "n": 0.8914027149321267,
+      "o": 0.5363636363636364,
+      "p": 0.9387755102040817,
+      "q": 0.6163793103448276,
+      "r": 0.8307086614173228,
+      "s": 0.8137254901960784,
+      "t": 0.932806324110672,
+      "u": 0.8898305084745762,
+      "v": 0.9158878504672897,
+      "w": 0.95,
+      "x": 0.8943089430894309,
+      "y": 0.8686131386861314,
+      "z": 0.8813559322033898
+    }
+  },
+  "test_quantized": {
+    "top1": 0.8265425531914894,
+    "top3": 0.9644680851063829,
+    "macro_recall": 0.8297916666666666,
+    "per_class_recall": {
+      "0": 0.7375,
+      "1": 0.7625,
+      "2": 0.82,
+      "3": 0.9425,
+      "4": 0.885,
+      "5": 0.8025,
+      "6": 0.9175,
+      "7": 0.9675,
+      "8": 0.8675,
+      "9": 0.8925,
+      "a": 0.82875,
+      "b": 0.84,
+      "c": 0.9175,
+      "d": 0.83875,
+      "e": 0.88125,
+      "f": 0.8675,
+      "g": 0.62875,
+      "h": 0.885,
+      "i": 0.5875,
+      "j": 0.855,
+      "k": 0.9225,
+      "l": 0.3025,
+      "m": 0.925,
+      "n": 0.86875,
+      "o": 0.5975,
+      "p": 0.9425,
+      "q": 0.62125,
+      "r": 0.82875,
+      "s": 0.87,
+      "t": 0.88625,
+      "u": 0.9175,
+      "v": 0.8975,
+      "w": 0.965,
+      "x": 0.905,
+      "y": 0.8175,
+      "z": 0.88
+    },
+    "per_class_top3": {
+      "0": 0.9825,
+      "1": 0.9775,
+      "2": 0.98,
+      "3": 0.9725,
+      "4": 0.965,
+      "5": 0.9775,
+      "6": 0.99,
+      "7": 0.9875,
+      "8": 0.96,
+      "9": 0.98,
+      "a": 0.9575,
+      "b": 0.94625,
+      "c": 0.96,
+      "d": 0.9675,
+      "e": 0.97625,
+      "f": 0.9525,
+      "g": 0.92375,
+      "h": 0.96125,
+      "i": 0.9625,
+      "j": 0.94,
+      "k": 0.965,
+      "l": 0.985,
+      "m": 0.98,
+      "n": 0.9675,
+      "o": 0.98,
+      "p": 0.98,
+      "q": 0.9325,
+      "r": 0.9525,
+      "s": 0.9775,
+      "t": 0.97125,
+      "u": 0.9675,
+      "v": 0.9725,
+      "w": 0.9925,
+      "x": 0.9625,
+      "y": 0.9425,
+      "z": 0.9725
+    }
+  },
+  "epochs": [
+    {
+      "epoch": 1,
+      "loss": 1.734038109808332,
+      "top1": 0.6431429610767552,
+      "top3": 0.8675882138959622,
+      "macro_recall": 0.6594232474325845
+    },
+    {
+      "epoch": 2,
+      "loss": 1.4712974065898954,
+      "top1": 0.6795198253910513,
+      "top3": 0.8939614405238269,
+      "macro_recall": 0.6969912957768336
+    },
+    {
+      "epoch": 3,
+      "loss": 0.9447556356110912,
+      "top1": 0.7346307748272098,
+      "top3": 0.9239723535831211,
+      "macro_recall": 0.7428354845602185
+    },
+    {
+      "epoch": 4,
+      "loss": 1.1328381886053582,
+      "top1": 0.7537286285922153,
+      "top3": 0.9310658421244089,
+      "macro_recall": 0.7611490761742883
+    },
+    {
+      "epoch": 5,
+      "loss": 0.7641109063921698,
+      "top1": 0.7782830120043652,
+      "top3": 0.9423426700618407,
+      "macro_recall": 0.7815778459821666
+    },
+    {
+      "epoch": 6,
+      "loss": 0.9477595389539231,
+      "top1": 0.7777373590396508,
+      "top3": 0.9456165878501274,
+      "macro_recall": 0.7826934965052925
+    },
+    {
+      "epoch": 7,
+      "loss": 0.6774485747455691,
+      "top1": 0.7961076755183704,
+      "top3": 0.9547108039287013,
+      "macro_recall": 0.7967881122369507
+    },
+    {
+      "epoch": 8,
+      "loss": 0.848167591280636,
+      "top1": 0.7991997089850855,
+      "top3": 0.957620953073845,
+      "macro_recall": 0.8017253495949954
+    },
+    {
+      "epoch": 9,
+      "loss": 0.6243516104943163,
+      "top1": 0.8086576937068025,
+      "top3": 0.9607129865405603,
+      "macro_recall": 0.8071257013929759
+    },
+    {
+      "epoch": 10,
+      "loss": 0.7823409561739748,
+      "top1": 0.8093852309930883,
+      "top3": 0.9596216806111313,
+      "macro_recall": 0.8093829441175666
+    },
+    {
+      "epoch": 11,
+      "loss": 0.5885469058946857,
+      "top1": 0.8166606038559476,
+      "top3": 0.9665332848308475,
+      "macro_recall": 0.8141831100531522
+    },
+    {
+      "epoch": 12,
+      "loss": 0.7359574542028084,
+      "top1": 0.8212077118952347,
+      "top3": 0.9667151691524191,
+      "macro_recall": 0.8200113598402182
+    },
+    {
+      "epoch": 13,
+      "loss": 0.5581449114557094,
+      "top1": 0.8250272826482358,
+      "top3": 0.9672608221171335,
+      "macro_recall": 0.8237720505430534
+    },
+    {
+      "epoch": 14,
+      "loss": 0.6939912057463289,
+      "top1": 0.8210258275736632,
+      "top3": 0.967078937795562,
+      "macro_recall": 0.8202757872073251
+    },
+    {
+      "epoch": 15,
+      "loss": 0.5494229367869367,
+      "top1": 0.826664241542379,
+      "top3": 0.9681702437249909,
+      "macro_recall": 0.8245746055766109
+    },
+    {
+      "epoch": 16,
+      "loss": 0.692998884499714,
+      "top1": 0.8252091669698072,
+      "top3": 0.9668970534739906,
+      "macro_recall": 0.8244792228149014
+    },
+    {
+      "epoch": 17,
+      "loss": 0.5388942116520167,
+      "top1": 0.8268461258639506,
+      "top3": 0.9676245907602765,
+      "macro_recall": 0.8250039024453529
+    },
+    {
+      "epoch": 18,
+      "loss": 0.677681005205931,
+      "top1": 0.8253910512913787,
+      "top3": 0.967078937795562,
+      "macro_recall": 0.8245025803188991
+    }
+  ],
+  "model_bytes": 106288,
+  "model_sha256": "485e9a768457ed132ca46ea30d94375a0f4596d9558c8aa80f59b096c83049c8",
+  "wall_seconds": 14.423193832975812,
+  "peak_rss_bytes": 1088552960,
+  "scope": "Individual English letters and digits, case insensitive, three candidates requiring explicit acceptance. Not cursive words.",
+  "physical_status": "Not tested with fingers or device hardware. Studio proof deferred by owner.",
+  "input_checks": {
+    "host_sanitizers": "AddressSanitizer and UndefinedBehaviorSanitizer passed",
+    "orientation_fixtures": [
+      "L",
+      "F",
+      "R",
+      "2",
+      "4",
+      "7"
+    ],
+    "pen_up": "separate strokes leave middle band empty",
+    "rejected_inputs": [
+      "blank",
+      "single tap",
+      "less than 8 coordinate units of extent/movement",
+      "dense flood exceeding 320 of 784 normalized nonblack pixels"
+    ],
+    "ood_scope": "narrow blank/tap/dense-flood checks only; no general unknown-character detection or physical finger accuracy claim",
+    "physical_status": "deferred to Studio post restart"
+  },
+  "production_c_parity": {
+    "samples": 18800,
+    "preprocessing_mismatches": 0,
+    "max_absolute_logit_error": 1.52587890625e-05,
+    "top1_mismatches": 0,
+    "top3_order_mismatches": 0,
+    "host_seconds": 0.10806241602404043,
+    "host_ms_per_character": 0.005748000852342576,
+    "compiler_stack_usage": [
+      "components/esp-openclaw-room-node/room_handwriting.c:7:room_handwriting_normalize\t928\tstatic",
+      "components/esp-openclaw-room-node/room_handwriting.c:66:room_handwriting_logits\t560\tstatic",
+      "components/esp-openclaw-room-node/room_handwriting.c:112:room_handwriting_raster\t912\tstatic",
+      "components/esp-openclaw-room-node/room_handwriting.c:147:room_handwriting_recognize\t1008\tstatic"
+    ]
+  },
+  "source_sha256": "c2fe28ab04e5b4bda729b177f3e06d97ee765abc79e43beb2847852922fb36cb"
+}

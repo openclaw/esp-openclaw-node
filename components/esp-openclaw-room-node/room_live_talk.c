@@ -44,6 +44,9 @@ void room_live_talk_render(const esp_openclaw_talk_snapshot_t *view, bool hidden
 #if LV_FONT_MONTSERRAT_28
     if (tablet) font = &lv_font_montserrat_28;
 #endif
+#if LV_FONT_MONTSERRAT_36
+    if (tablet && openclaw_reading_size() == OPENCLAW_READING_LARGE) font = &lv_font_montserrat_36;
+#endif
     lv_obj_set_style_text_font(heading, font, 0);
     lv_obj_set_style_text_font(text, font, 0);
     const char *state = view->sequence == 0 ? "Call open" :

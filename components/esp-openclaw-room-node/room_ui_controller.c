@@ -1640,7 +1640,7 @@ static bool room_ui_render_locked(void)
             }
         }
 #if LV_FONT_MONTSERRAT_20
-        if (call_page) lv_obj_set_style_text_font(talk_pill_label, &lv_font_montserrat_20, 0);
+        if (call_page && watch_home_enabled) lv_obj_set_style_text_font(talk_pill_label, &lv_font_montserrat_20, 0);
 #endif
         taskENTER_CRITICAL(&state_mux);
         painted_target_revision = target.revision;

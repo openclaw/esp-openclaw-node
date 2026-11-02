@@ -3055,6 +3055,15 @@ static void check_live_talk(const char *path)
     room_ui_set(ROOM_UI_LISTENING, NULL);
     assert(find_visible_text(lv_layer_top(), "Listening"));
     assert(find_visible_fragment(lv_layer_top(), "You (partial)"));
+    if (width == 1280) {
+        lv_obj_t *end = find_visible_text(lv_layer_top(), "End call");
+        assert(end != NULL && lv_obj_get_style_text_font(end, 0) == &lv_font_montserrat_28);
+        openclaw_reading_set_size(OPENCLAW_READING_LARGE);
+        room_ui_refresh();
+        assert(lv_obj_get_style_text_font(find_visible_text(lv_layer_top(), "Listening"), 0) == &lv_font_montserrat_36);
+        openclaw_reading_set_size(OPENCLAW_READING_STANDARD);
+        room_ui_refresh();
+    }
     view.user_final = true;
     view.agent_incomplete = true;
     view.phase = ESP_OPENCLAW_TALK_SPEAKING;

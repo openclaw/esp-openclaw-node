@@ -29,4 +29,3 @@ typedef struct {
     bool user_incomplete;
     bool agent_incomplete;
 } esp_openclaw_talk_snapshot_t;
-

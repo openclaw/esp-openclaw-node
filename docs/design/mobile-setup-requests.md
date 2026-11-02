@@ -1,8 +1,9 @@
 # Mobile setup requests
 
 Watch and Dial share this version 1 application request format inside a completed
-[setup transfer](mobile-setup-frames.md). The decoder is implemented; response
-messages, dispatch, BLE and mobile integration remain separate work. Decoding
+[setup transfer](mobile-setup-frames.md). The request decoder and
+[response encoder](mobile-setup-responses.md) are implemented; dispatch, BLE and
+mobile integration remain separate work. Decoding
 does not authenticate a peer, confirm a device, or apply settings.
 
 ## Header
@@ -92,8 +93,9 @@ after their owner is done. Do not log payloads. Input and output must not overla
 All failures leave the output unchanged.
 
 Decoder results are local C API outcomes, not application response codes. Do not
-serialize those enum ordinals, pointers or native structs. Define and test the
-response/error schema before connecting a BLE endpoint.
+serialize those enum ordinals, pointers or native structs. The
+[response/error schema](mobile-setup-responses.md) defines separate public codes;
+its encoder does not replace authorization or native-to-public result mapping.
 
 ## Independent wire examples
 

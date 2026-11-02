@@ -55,7 +55,11 @@ messages only; it does not enable mutations or saved-state reads.
 allocation. It preserves full-width generation/operation IDs and returns bounded,
 borrowed SSID/password/setup-code spans. The caller still owns live authorization,
 confirmation, C-string adaptation, and dispatch through the existing bindings.
-Response messages, application dispatch and the BLE endpoint remain separate work.
+`esp_openclaw_setup_response.h` encodes the bounded
+[application response format](../../docs/design/mobile-setup-responses.md), with
+explicit public wire codes and separate admission, outcome and observed-effect
+fields. It neither generates a comparison challenge nor maps native errors or
+authorizes access. Application dispatch and the BLE endpoint remain separate work.
 
 `esp_openclaw_setup_session.h` provides transport-independent setup admission
 for Watch and Dial. It is a library foundation; no example exposes BLE setup
@@ -94,7 +98,8 @@ until then, reopening is refused. A stale generation cannot complete a newer
 attempt. Use `UNKNOWN` when work is drained but its external outcome is unresolved.
 Do not infer whether credentials remain saved from a canceled receipt; consult
 the Wi-Fi/node owner. Poll regularly for expiry, and use `snapshot` only for local
-UI metadata. Receipt details must be numeric public error codes, never secrets.
+UI metadata. Receipt details are local native failure values, never secrets;
+map them to stable public response categories before sending over transport.
 
 Clock and live-peer callbacks must not reenter the owner. Dispatch and cancel may
 synchronously call `complete` (for queue rejection or completed draining), but

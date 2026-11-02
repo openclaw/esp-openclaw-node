@@ -3042,10 +3042,79 @@ static void check_watch_help(const char *path)
     puts("watch Help: touch entry, topics, Back, larger reading, retained scrolling and call safety passed");
 }
 
+static void check_tab5_shell(const char *path)
+{
+    room_ui_facts_t facts = {.wifi = ROOM_UI_WIFI_CONNECTED,
+        .gateway = ROOM_UI_GATEWAY_CONNECTED, .talk = ROOM_UI_TALK_READY};
+    room_ui_store_facts(&facts);
+    room_ui_set(ROOM_UI_IDLE, NULL);
+    lv_obj_t *talk = lv_obj_get_parent(find_visible_text(lv_layer_top(), "Talk to agent"));
+    lv_obj_update_layout(lv_layer_top());
+    lv_area_t area;
+    lv_obj_get_coords(talk, &area);
+    assert(lv_obj_get_height(talk) >= 104 && area.x1 >= 0 && area.x2 < width && area.y2 < height);
+    snapshot(path);
+    click_talk(talk);
+    assert(talk_starts == 1);
+    room_ui_talk_target_t target = {.revision = 2, .selected = true, .name = "Kitsune"};
+    room_ui_store_talk_target(&target);
+    touch_talk(talk, true);
+    ++target.revision;
+    deny_display = true;
+    room_ui_store_talk_target(&target);
+    touch_talk(talk, false);
+    deny_display = false;
+    room_ui_refresh();
+    assert(talk_starts == 1); // A stale rendered recipient cannot start a call.
+    lv_obj_t *menu = lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_BARS " Menu"));
+    click_talk(menu);
+    lv_obj_t *connection = lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_WIFI "  Connection"));
+    lv_obj_update_layout(lv_layer_top());
+    assert(lv_obj_get_height(connection) >= 96);
+    click_talk(connection);
+    assert(find_visible_text(lv_layer_top(), "Connection"));
+    assert(!lv_obj_is_visible(talk));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_LEFT " Home")));
+    assert(lv_obj_is_visible(talk));
+    facts.talk = ROOM_UI_TALK_ACTIVE;
+    room_ui_store_facts(&facts);
+    room_ui_refresh();
+    assert(find_visible_text(lv_layer_top(), "End call"));
+    lv_refr_now(display);
+    size_t frame_bytes = (size_t)width * height * 4;
+    uint8_t *active_frame = malloc(frame_bytes);
+    assert(active_frame != NULL);
+    memcpy(active_frame, frame, frame_bytes);
+    target.avatar.kind = ESP_OPENCLAW_AVATAR_FOX;
+    snprintf(target.name, sizeof(target.name), "Future recipient");
+    ++target.revision;
+    room_ui_store_talk_target(&target);
+    room_ui_refresh();
+    lv_refr_now(display);
+    assert(memcmp(active_frame, frame, frame_bytes) == 0);
+    free(active_frame);
+    click_talk(menu);
+    assert(find_visible_text(lv_layer_top(), "Return to call"));
+    click_talk(talk);
+    assert(find_visible_text(lv_layer_top(), "End call") && talk_stops == 0);
+    click_talk(talk);
+    assert(talk_stops == 1);
+    room_diagnostics_open();
+    assert(!lv_obj_is_visible(talk));
+    room_diagnostics_close();
+    canvas_active = true;
+    room_ui_refresh();
+    assert(!lv_obj_is_visible(talk));
+    canvas_active = false;
+    assert(room_ui_watch_menu("agents") == ESP_ERR_INVALID_STATE);
+    assert(display_depth == 0 && critical_depth == 0);
+}
+
 int main(int argc, char **argv)
 {
     assert(argc >= 2);
     bool watch = strcmp(argv[1], "watch") == 0;
+    bool tab5 = strcmp(argv[1], "tab5") == 0;
     bool animated = watch || strcmp(argv[1], "animated") == 0;
     int idle = strcmp(argv[1], "tab5") == 0 ? 18 : 0;
     width = watch ? 368 : animated ? 410 : 1280;
@@ -3060,7 +3129,7 @@ int main(int argc, char **argv)
     lv_display_set_flush_cb(display, flush);
     esp_openclaw_room_node_config_t board = {
         .display_name = "OpenClaw M5Stack Tab5 Room Node",
-        .model_identifier = watch ? "waveshare-esp32-s3-touch-amoled-1.8" : "m5stack-tab5",
+        .model_identifier = watch ? "waveshare-esp32-s3-touch-amoled-1.8" : tab5 ? "m5stack-tab5" : "generic-test-board",
         .display = {.start = start_display, .lock = lock_display, .unlock = unlock_display,
             .set_brightness = set_brightness, .native_width = width, .native_height = height,
             .safe_inset = 24, .animated_face = animated, .idle_brightness = 101},
@@ -3076,6 +3145,14 @@ int main(int argc, char **argv)
     room_ui_set_conversation_handler(request_conversation);
     room_ui_init();
     assert(brightness == idle);
+    if (tab5) {
+        check_tab5_shell(argc == 3 ? argv[2] : NULL);
+        lv_deinit();
+        free(frame);
+        free(draw_buffer);
+        puts("PASS tab5: native touch targets, navigation, recipient fencing and call return");
+        return 0;
+    }
     check_talk_control(watch);
     check_dark_talk_control(watch);
     if (animated) {

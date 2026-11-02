@@ -14,6 +14,7 @@
 #include "room_face.h"
 #include "room_board.h"
 #include "room_watch_home.h"
+#include "room_tab5_ui.h"
 #include "room_watch_status.h"
 #include "room_watch_navigation.h"
 #include "room_watch_settings.h"
@@ -57,6 +58,7 @@ static lv_obj_t *talk_target_label;
 static lv_obj_t *camera_indicator;
 static bool animated_face_enabled;
 static bool watch_home_enabled;
+static bool tab5_home_enabled;
 static uint8_t idle_brightness;
 static int watch_brightness = -1;
 static bool watch_brightness_failed;
@@ -378,7 +380,7 @@ static void request_agents_page(size_t offset)
 static bool watch_navigation_active(void)
 {
     taskENTER_CRITICAL(&state_mux);
-    bool active = watch_home_enabled && watch_page != ROOM_WATCH_HOME;
+    bool active = (watch_home_enabled || tab5_home_enabled) && watch_page != ROOM_WATCH_HOME;
     taskEXIT_CRITICAL(&state_mux);
     return active;
 }
@@ -483,7 +485,7 @@ esp_err_t room_ui_watch_menu(const char *page)
     else if (strcmp(page, "home") == 0) requested = ROOM_WATCH_HOME;
     else return ESP_ERR_INVALID_ARG;
     taskENTER_CRITICAL(&state_mux);
-    bool available = watch_home_enabled && !diagnostics_open;
+    bool available = (watch_home_enabled || (tab5_home_enabled && room_tab5_ui_supports(requested))) && !diagnostics_open;
     taskEXIT_CRITICAL(&state_mux);
     if (!available) return ESP_ERR_INVALID_STATE;
     return watch_navigation_show(requested);
@@ -1294,6 +1296,10 @@ void room_ui_init(void)
     const esp_openclaw_room_node_config_t *board = room_board_config();
     watch_home_enabled = board != NULL && board->model_identifier != NULL &&
         strcmp(board->model_identifier, "waveshare-esp32-s3-touch-amoled-1.8") == 0;
+    tab5_home_enabled = board != NULL && board->model_identifier != NULL &&
+        strcmp(board->model_identifier, "m5stack-tab5") == 0 &&
+        lv_display_get_horizontal_resolution(display) == 1280 && lv_display_get_vertical_resolution(display) == 720;
+    if (tab5_home_enabled) room_tab5_ui_create(lv_layer_top(), watch_navigation_clicked);
     if (watch_home_enabled) {
         lv_obj_set_style_bg_color(lv_screen_active(), lv_color_hex(0x15101b), 0);
         lv_obj_set_style_bg_grad_color(lv_screen_active(), lv_color_hex(0x362031), 0);
@@ -1314,7 +1320,7 @@ void room_ui_init(void)
         animated_face_enabled = false;
         ESP_LOGW(TAG, "face unavailable; talk states fall back to text");
     }
-    if (board != NULL && !board_has_animated_face) home_create(display, board);
+    if (board != NULL && !board_has_animated_face && !tab5_home_enabled) home_create(display, board);
     if (talk_action_handler != NULL) {
         talk_pill = lv_obj_create(lv_layer_top());
         lv_obj_set_size(talk_pill, 148, 44);
@@ -1371,7 +1377,7 @@ static int room_ui_target_brightness(room_ui_state_t state, bool canvas_active)
     bool overlay = diagnostics_open;
     bool text_hint = text_hint_active;
     bool camera = camera_indicator_active;
-    bool navigation = watch_home_enabled && watch_page != ROOM_WATCH_HOME;
+    bool navigation = (watch_home_enabled || tab5_home_enabled) && watch_page != ROOM_WATCH_HOME;
     bool voice = watch_home_enabled && current_voice.state >= ROOM_VOICE_STARTING &&
         current_voice.state <= ROOM_VOICE_DRAFT;
     taskEXIT_CRITICAL(&state_mux);
@@ -1517,8 +1523,8 @@ static bool room_ui_render_locked(void)
         }
     }
     bool canvas_active = room_canvas_is_active();
-    bool navigation = watch_home_enabled && page != ROOM_WATCH_HOME && !canvas_active;
-    bool call_page = watch_home_enabled && page == ROOM_WATCH_CALL;
+    bool navigation = (watch_home_enabled || tab5_home_enabled) && page != ROOM_WATCH_HOME && !canvas_active;
+    bool call_page = (watch_home_enabled || tab5_home_enabled) && page == ROOM_WATCH_CALL;
     bool call_in_progress = facts.talk == ROOM_UI_TALK_CONNECTING || facts.talk == ROOM_UI_TALK_ACTIVE;
     // The call page keeps its control; other pages reserve space only during a call.
     int content_bottom = call_in_progress || call_page ? 370 : 432;
@@ -1557,6 +1563,7 @@ static bool room_ui_render_locked(void)
             page == ROOM_WATCH_AGENTS || page == ROOM_WATCH_DEVICES || settings;
         room_watch_status_render(&facts, !status_page || canvas_active || overlay || camera_active);
     }
+    if (tab5_home_enabled) room_tab5_ui_render(page, &facts, &target, state, detail, canvas_active || overlay);
     if (talk_pill != NULL) {
         if (watch_home_enabled) {
             /* Retained Canvas content keeps its existing top action clearance. */
@@ -1564,15 +1571,26 @@ static bool room_ui_render_locked(void)
             lv_obj_align(talk_pill, canvas_active ? LV_ALIGN_TOP_MID : LV_ALIGN_BOTTOM_MID,
                 0, canvas_active ? 14 : -20);
         }
+        if (tab5_home_enabled) {
+            lv_obj_set_size(talk_pill, 640, 104);
+            lv_obj_align(talk_pill, LV_ALIGN_BOTTOM_MID, 0, -64);
+            lv_obj_set_style_bg_color(talk_pill, lv_color_hex(0xd45139), 0);
+            lv_obj_set_style_bg_opa(talk_pill, LV_OPA_COVER, 0);
+            lv_obj_set_style_radius(talk_pill, 20, 0);
+#if LV_FONT_MONTSERRAT_28
+            lv_obj_set_style_text_font(talk_pill_label, &lv_font_montserrat_28, 0);
+#endif
+        }
         painted_talk_action = facts.talk == ROOM_UI_TALK_READY
             ? selecting || target.expired ? TALK_CONTROL_NONE : TALK_CONTROL_START
             : facts.talk == ROOM_UI_TALK_CONNECTING || facts.talk == ROOM_UI_TALK_ACTIVE ? TALK_CONTROL_STOP : TALK_CONTROL_NONE;
         bool start = painted_talk_action == TALK_CONTROL_START;
         bool stop = facts.talk == ROOM_UI_TALK_CONNECTING || facts.talk == ROOM_UI_TALK_ACTIVE;
-        bool return_to_call = watch_home_enabled && !call_page && stop;
+        bool return_to_call = (watch_home_enabled || tab5_home_enabled) && !call_page &&
+            (!tab5_home_enabled || page != ROOM_WATCH_HOME) && stop;
         if (return_to_call) painted_talk_action = TALK_CONTROL_RETURN;
-        const char *start_label = call_page ? "Start call" : "Start Talk";
-        const char *stop_label = call_page ? "End call" : "Stop Talk";
+        const char *start_label = tab5_home_enabled ? "Talk to agent" : call_page ? "Start call" : "Start Talk";
+        const char *stop_label = (tab5_home_enabled || call_page) ? "End call" : "Stop Talk";
         lv_label_set_text(talk_pill_label, return_to_call ? "Return to call" : start ? start_label : stop ? stop_label
             : selecting ? "Choosing agent..." : target.expired ? "Choose an agent" :
             facts.talk == ROOM_UI_TALK_STOPPING ? "Stopping..." : "Talk unavailable");
@@ -1600,8 +1618,14 @@ static bool room_ui_render_locked(void)
         taskEXIT_CRITICAL(&state_mux);
         lv_obj_set_state(talk_pill, LV_STATE_DISABLED, !start && !stop);
         bool browsing_idle = watch_home_enabled && !call_page && !call_in_progress && facts.talk != ROOM_UI_TALK_STOPPING;
-        bool hidden = overlay || (voice_home && !canvas_active && !navigation) || browsing_idle;
+        bool hidden = overlay || (voice_home && !canvas_active && !navigation) || browsing_idle ||
+            (tab5_home_enabled && (canvas_active || (page != ROOM_WATCH_HOME && !call_page && !stop) ||
+             (page == ROOM_WATCH_HOME && !start && !stop && facts.talk != ROOM_UI_TALK_STOPPING)));
         if (browsing_idle) {
+            painted_talk_action = TALK_CONTROL_NONE;
+            pressed_talk_action = TALK_CONTROL_NONE;
+        }
+        if (tab5_home_enabled && hidden) {
             painted_talk_action = TALK_CONTROL_NONE;
             pressed_talk_action = TALK_CONTROL_NONE;
         }
@@ -1611,7 +1635,7 @@ static bool room_ui_render_locked(void)
     if (gateway_label != NULL) {
         /* The gateway line rides along with every non-canvas view. */
         lv_label_set_text(gateway_label, gateway);
-        if (watch_home_enabled || home != NULL || canvas_active || overlay || gateway[0] == '\0') {
+        if (watch_home_enabled || tab5_home_enabled || home != NULL || canvas_active || overlay || gateway[0] == '\0') {
             lv_obj_add_flag(gateway_label, LV_OBJ_FLAG_HIDDEN);
         } else {
             lv_obj_clear_flag(gateway_label, LV_OBJ_FLAG_HIDDEN);
@@ -1627,7 +1651,7 @@ static bool room_ui_render_locked(void)
         }
         if (camera_indicator != NULL) lv_obj_move_foreground(camera_indicator);
     }
-    if (canvas_active || navigation || (watch_home_enabled && room_watch_home_review_visible())) {
+    if (canvas_active || navigation || tab5_home_enabled || (watch_home_enabled && room_watch_home_review_visible())) {
         room_face_hide();
         lv_obj_set_hidden(status_label, true);
         if (state == ROOM_UI_IDLE) {

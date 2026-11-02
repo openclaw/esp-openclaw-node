@@ -285,6 +285,21 @@ synthetic transports. Verify operator control loss and acoustic teardown on the
 target board as well; host results do not establish audible continuation or
 hardware behavior.
 
+## Tab5 Home and navigation
+
+The 1280 × 720 landscape Tab5 uses a dedicated Home with agent identity, live
+connection facts and **Talk to agent**. **Menu** opens Talk, Connection and Canvas.
+Connection explains the existing USB setup route; QR and Bluetooth pairing are
+not implemented. The next Talk recipient stays fenced through touch admission;
+an active call keeps its own recipient. **Return to call** opens its End control
+without starting or stopping a call while navigating.
+
+Navigation targets are at least 96 native pixels tall (about 8.3 mm on the
+nominal 110.69 mm display width); the primary control is 104 pixels. Host LVGL
+captures validate geometry and behavior, not touch ergonomics or audible speech.
+Agent browsing, history and settings are separate firmware slices; this shell
+does not expose unfinished pages. Existing Watch and Dial interfaces are unchanged.
+
 ## Messaging access
 
 Default Watch and room-node firmware can request messaging access without a

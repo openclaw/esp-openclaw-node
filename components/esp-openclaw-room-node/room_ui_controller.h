@@ -115,9 +115,9 @@ void room_ui_store_facts(const room_ui_facts_t *facts);
 void room_ui_refresh(void);
 /** Open a local watch page (menu, agents, conversations, settings, display, brightness, reading, density, messaging, connection, canvas, home) without changing Talk. */
 esp_err_t room_ui_watch_menu(const char *page);
-/** Runtime Watch preference; sleep and camera visibility remain controller-owned. */
+/** Runtime Watch/Tab5 preference; sleep and camera visibility remain controller-owned. */
 esp_err_t room_ui_watch_brightness(int percent);
-/** Apply the requested UI state through the Watch preference and camera floor. */
+/** Apply the requested UI state through the touch-device preference and camera floor. */
 esp_err_t room_ui_apply_display_brightness(int percent);
 /** Show the idle face for `show_ms` (tap wake-up or agent face.set outside a call). */
 void room_ui_show_face_hint(uint32_t show_ms);

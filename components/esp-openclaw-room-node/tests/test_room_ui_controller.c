@@ -3232,6 +3232,119 @@ static void check_tab5_agents(const char *path)
     free(view);
 }
 
+static void settings_snapshot(const char *base, const char *state)
+{
+    if (base == NULL) return;
+    char path[1024];
+    snprintf(path, sizeof(path), "%s-settings-%s.ppm", base, state);
+    write_frame(path);
+}
+
+static void check_tab5_settings(const char *path)
+{
+    room_ui_facts_t facts = {.wifi = ROOM_UI_WIFI_CONNECTED,
+        .gateway = ROOM_UI_GATEWAY_CONNECTED, .talk = ROOM_UI_TALK_READY};
+    room_ui_store_facts(&facts);
+    room_ui_set(ROOM_UI_IDLE, NULL);
+    unsigned before = toggles;
+    touch_point = (lv_point_t){16, 680};
+    touch_state = LV_INDEV_STATE_PRESSED;
+    lv_indev_read(touchscreen);
+    touch_state = LV_INDEV_STATE_RELEASED;
+    lv_indev_read(touchscreen);
+    assert(toggles == before && !canvas_active); // Blank Home touches cannot summon Canvas.
+
+    assert(room_ui_watch_menu("menu") == ESP_OK);
+    lv_obj_t *settings = lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_SETTINGS "  Settings"));
+    lv_obj_scroll_to_view(settings, LV_ANIM_OFF);
+    click_talk(settings);
+    assert(visible_watch_text("Settings"));
+    assert(visible_watch_text(LV_SYMBOL_WIFI " Wi-Fi    /    Connected"));
+    lv_obj_t *display_row = lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_IMAGE "  Display"));
+    assert(lv_obj_get_height(display_row) >= 96);
+    settings_snapshot(path, "menu");
+    click_talk(display_row);
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_IMAGE "  Brightness")));
+    lv_obj_t *dimmer = lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_MINUS "  5%"));
+    assert(lv_obj_get_height(dimmer) >= 96);
+    click_talk(dimmer);
+    assert(brightness == 75 && visible_watch_text("75%"));
+    fail_brightness = true;
+    assert(room_ui_watch_brightness(50) == ESP_ERR_TIMEOUT && brightness == 75);
+    assert(visible_watch_text("Couldn't change. Try again."));
+    fail_brightness = false;
+    assert(room_ui_watch_brightness(10) == ESP_OK);
+    assert(room_ui_camera_indicator_begin() == ESP_OK && brightness == 40);
+    assert(room_ui_apply_display_brightness(0) == ESP_OK && brightness == 40);
+    room_ui_camera_indicator_end();
+    assert(brightness == 10);
+    assert(room_ui_watch_brightness(80) == ESP_OK);
+    settings_snapshot(path, "brightness");
+
+    assert(room_ui_watch_menu("reading") == ESP_OK);
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), "Larger")));
+    assert(openclaw_reading_size() == OPENCLAW_READING_LARGE);
+    assert(lv_obj_get_style_text_font(find_visible_text(lv_layer_top(), "Hello from your assistant."), 0)->line_height >= 36);
+    settings_snapshot(path, "large");
+    openclaw_reading_set_size(OPENCLAW_READING_STANDARD);
+
+    room_ui_set_messaging_handler(request_messaging);
+    room_messaging_snapshot_t access = {.state = ROOM_MESSAGING_REQUIRED,
+        .revision = 701, .connected = true, .can_request = true};
+    room_ui_store_messaging(&access);
+    assert(room_ui_watch_menu("messaging") == ESP_OK);
+    lv_obj_t *request = lv_obj_get_parent(find_visible_text(lv_layer_top(), "Request access"));
+    assert(lv_obj_get_height(request) >= 96);
+    unsigned requests = messaging_requests;
+    touch_talk(request, true);
+    ++access.revision;
+    room_ui_store_messaging(&access);
+    touch_talk(request, false);
+    assert(messaging_requests == requests);
+    click_talk(request);
+    assert(messaging_requests == requests + 1 && messaging_revision == access.revision);
+    access.state = ROOM_MESSAGING_WAITING;
+    access.can_request = false;
+    ++access.revision;
+    room_ui_store_messaging(&access);
+    assert(visible_watch_text("Awaiting approval"));
+    settings_snapshot(path, "approval");
+    access.state = ROOM_MESSAGING_ERROR;
+    ++access.revision;
+    room_ui_store_messaging(&access);
+    settings_snapshot(path, "error");
+
+    assert(room_ui_watch_menu("help") == ESP_OK);
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_USB "  USB setup")));
+    assert(find_visible_fragment(lv_layer_top(), "QR and Bluetooth phone pairing are not available."));
+    settings_snapshot(path, "setup");
+    facts.wifi = ROOM_UI_WIFI_OFFLINE;
+    facts.gateway = ROOM_UI_GATEWAY_NO_SESSION;
+    facts.talk = ROOM_UI_TALK_NO_SESSION;
+    room_ui_store_facts(&facts);
+    wifi_status = (esp_openclaw_node_wifi_status_t){.has_saved_network = true,
+        .ssid = "Studio Wi-Fi", .last_disconnect_reason = 201};
+    assert(room_ui_watch_menu("connection") == ESP_OK);
+    assert(find_visible_fragment(lv_layer_top(), "Disconnect code: 201"));
+    settings_snapshot(path, "offline");
+    unsigned reads = wifi_reads;
+    status_tick();
+    assert(wifi_reads == reads + 1);
+    assert(room_ui_apply_display_brightness(0) == ESP_OK);
+    reads = wifi_reads;
+    status_tick();
+    assert(wifi_reads == reads);
+    assert(room_ui_apply_display_brightness(80) == ESP_OK);
+    status_tick();
+    assert(wifi_reads == reads + 1);
+    assert(room_ui_watch_menu("home") == ESP_OK);
+    reads = wifi_reads;
+    status_tick();
+    assert(wifi_reads == reads);
+    assert(display_depth == 0 && critical_depth == 0);
+    puts("tab5 settings: native controls, brightness failures and camera floor, stale approval, USB help, offline facts passed");
+}
+
 int main(int argc, char **argv)
 {
     assert(argc >= 2);
@@ -3271,6 +3384,7 @@ int main(int argc, char **argv)
         check_tab5_shell(argc == 3 ? argv[2] : NULL);
         check_tab5_agents(argc == 3 ? argv[2] : NULL);
         check_live_talk(argc == 3 ? argv[2] : NULL);
+        check_tab5_settings(argc == 3 ? argv[2] : NULL);
         lv_deinit();
         free(frame);
         free(draw_buffer);

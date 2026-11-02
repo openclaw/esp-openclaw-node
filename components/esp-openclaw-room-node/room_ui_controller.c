@@ -16,6 +16,7 @@
 #include "room_watch_home.h"
 #include "room_tab5_ui.h"
 #include "room_live_talk.h"
+#include "room_tab5_layout.h"
 #include "room_watch_status.h"
 #include "room_watch_navigation.h"
 #include "room_watch_settings.h"
@@ -39,7 +40,7 @@ static void room_ui_status_clicked(lv_event_t *event)
         lv_indev_t *indev = lv_indev_active();
         if (indev != NULL) lv_indev_wait_release(indev);
         room_diagnostics_open();
-    } else if (code == LV_EVENT_CLICKED && !room_diagnostics_is_open()) {
+    } else if (code == LV_EVENT_CLICKED && !room_tab5_layout() && !room_diagnostics_is_open()) {
         room_canvas_view_toggle();
     }
 }
@@ -1311,6 +1312,7 @@ void room_ui_init(void)
         lv_display_get_horizontal_resolution(display) == 1280 && lv_display_get_vertical_resolution(display) == 720;
     if (tab5_home_enabled) {
         room_tab5_ui_create(lv_layer_top(), watch_navigation_clicked);
+        room_watch_settings_create(lv_layer_top(), watch_navigation_clicked, watch_messaging_clicked);
         room_watch_agents_create(lv_layer_top(), watch_agents_clicked);
         room_watch_conversations_create(lv_layer_top(), watch_conversations_clicked);
     }
@@ -1412,9 +1414,9 @@ static int watch_display_level(int requested, int preference, bool camera)
 
 esp_err_t room_ui_apply_display_brightness(int percent)
 {
-    if (!watch_home_enabled) return room_board_display_brightness_set(percent);
+    if (!watch_home_enabled && !tab5_home_enabled) return room_board_display_brightness_set(percent);
     // Serialize the preference snapshot and hardware write with setting changes.
-    // The Watch port uses the recursive LVGL lock, including in Canvas callbacks.
+    // Both touch-device ports use the recursive LVGL lock, including in Canvas callbacks.
     if (!room_board_display_lock(100)) return ESP_ERR_TIMEOUT;
     taskENTER_CRITICAL(&state_mux);
     int preference = watch_brightness;
@@ -1433,7 +1435,7 @@ esp_err_t room_ui_apply_display_brightness(int percent)
 esp_err_t room_ui_watch_brightness(int percent)
 {
     if (percent < 10 || percent > 100) return ESP_ERR_INVALID_ARG;
-    if (!watch_home_enabled || status_label == NULL) return ESP_ERR_INVALID_STATE;
+    if ((!watch_home_enabled && !tab5_home_enabled) || status_label == NULL) return ESP_ERR_INVALID_STATE;
     if (!room_board_display_lock(100)) {
         taskENTER_CRITICAL(&state_mux);
         watch_brightness_failed = true;
@@ -1588,6 +1590,8 @@ static bool room_ui_render_locked(void)
             target.selected ? target.id : "", target.expired, selecting, selection_error, content_bottom);
         room_watch_conversations_render(painted_conversations,
             canvas_active || overlay || page != ROOM_WATCH_AGENTS || !chats, content_bottom);
+        room_watch_settings_render(page, parent, brightness, brightness_failed, camera_minimum, &messaging,
+            canvas_active || overlay || !room_tab5_settings_page(page), content_bottom);
     }
     bool live_visible = (watch_home_enabled || tab5_home_enabled) && !canvas_active && !overlay &&
         facts.talk == ROOM_UI_TALK_ACTIVE && painted_live_talk.sequence != 0 &&

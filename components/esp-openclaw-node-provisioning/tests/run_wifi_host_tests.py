@@ -10,11 +10,13 @@ import tempfile
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cjson-dir", type=Path, required=True)
+    parser.add_argument("--idf-path", type=Path, required=True)
     args = parser.parse_args()
     tests = Path(__file__).resolve().parent
     component = tests.parent
     with tempfile.TemporaryDirectory(prefix="wifi-status-") as directory:
         work = Path(directory)
+        (work / "sdkconfig.h").write_text("")
         for name in (
             "esp_err.h", "esp_wifi.h", "esp_check.h", "esp_event.h", "esp_log.h",
             "esp_netif.h", "esp_app_desc.h", "esp_system.h", "esp_timer.h",
@@ -29,12 +31,22 @@ def main():
         subprocess.run(["cc", "-std=gnu11", "-g", "-fsanitize=address,undefined",
                         "-Wno-deprecated-declarations", "-c", str(args.cjson_dir / "cJSON.c"),
                         "-o", str(cjson_object)], check=True)
-        command = [
+        compiler = [
             "cc", "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-g",
-            "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
+            "-fsanitize=address,undefined", "-fno-sanitize-recover=all", "-pthread",
+            "-DCONFIG_IDF_TARGET_ESP32S3=1", "-DSOC_BLE_SUPPORTED=1", "-DCONFIG_BT_ENABLED=1",
+            "-DCONFIG_BT_NIMBLE_ENABLED=1", "-DCONFIG_ESP_PROTOCOMM_SUPPORT_SECURITY_VERSION_2=1",
+            "-DCONFIG_LOG_DYNAMIC_LEVEL_CONTROL=1",
             "-I", str(work), "-I", str(tests / "host"),
             "-I", str(component / "include"), "-I", str(args.cjson_dir),
             "-I", str(component.parent / "esp-openclaw-node/include"),
+            "-I", str(args.idf_path / "components/protocomm/include/security"),
+            "-I", str(args.idf_path / "components/protocomm/include/common"),
+        ]
+        mailbox = work / "mailbox.o"
+        subprocess.run([*compiler, "-Dmalloc=mailbox_test_malloc", "-Dfree=mailbox_test_free", "-c",
+                        str(component / "esp_openclaw_setup_mailbox.c"), "-o", str(mailbox)], check=True)
+        command = [*compiler,
             str(tests / "test_wifi_status.c"),
             str(component / "esp_openclaw_node_wifi.c"),
             str(component / "esp_openclaw_setup_session.c"),
@@ -45,6 +57,7 @@ def main():
             str(component / "esp_openclaw_setup_request.c"),
             str(component / "esp_openclaw_setup_response.c"),
             str(component / "esp_openclaw_setup_dispatcher.c"),
+            str(component / "esp_openclaw_setup_security2.c"), str(mailbox),
             str(component / "esp_openclaw_node_common_device_node_cmd.c"),
             str(component / "esp_openclaw_node_example_json.c"),
             str(cjson_object), "-lm", "-o", str(binary),
@@ -53,7 +66,7 @@ def main():
                       ["-DCONFIG_ESP_WIFI_REMOTE_ENABLED=1"],
                       ["-DCONFIG_ESP_HOST_WIFI_ENABLED=1"]):
             subprocess.run(command + flags, check=True)
-            subprocess.run([str(binary)], check=True)
+            subprocess.run([str(binary)], check=True, timeout=30)
 
 
 if __name__ == "__main__":

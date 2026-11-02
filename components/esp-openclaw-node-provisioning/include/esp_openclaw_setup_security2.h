@@ -24,7 +24,11 @@ bool esp_openclaw_setup_security2_quiet_logs(void);
  * nonzero boot-unique peer, never a BLE address/connection ID. Cleanup/start
  * cannot reset its counter. Only canonical setup attach grants session access. */
 uint64_t esp_openclaw_setup_security2_peer(void);
+/* SDK endpoint: require the exact transport ID after SDK decryption. */
+uint64_t esp_openclaw_setup_security2_peer_for_session(uint32_t session_id);
 bool esp_openclaw_setup_security2_peer_is_current(uint64_t peer);
+/* Stale mailbox/lifecycle work cannot revoke a replacement authenticated peer. */
+bool esp_openclaw_setup_security2_revoke_peer(uint64_t peer);
 /* Local server owner: synchronously revoke BEFORE awaiting transport stop.
  * Callbacks/lifecycle must serialize on the BLE host; cleanup requires those
  * callbacks to have drained. No SDK callback may run after cleanup returns. */

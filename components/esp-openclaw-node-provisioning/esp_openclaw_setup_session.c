@@ -12,10 +12,13 @@ static void finish_close(esp_openclaw_setup_session_t *session)
     memset(session->receipts, 0, sizeof(session->receipts));
 }
 
+bool esp_openclaw_setup_time_is_current(uint64_t opened_ms, uint64_t now_ms)
+{ return now_ms >= opened_ms && now_ms - opened_ms < ESP_OPENCLAW_SETUP_TIMEOUT_MS; }
+
 static bool live(esp_openclaw_setup_session_t *session)
 {
     uint64_t now = session->callbacks.now_ms(session->callbacks.context);
-    return now >= session->opened_ms && now - session->opened_ms < ESP_OPENCLAW_SETUP_TIMEOUT_MS &&
+    return esp_openclaw_setup_time_is_current(session->opened_ms, now) &&
         (session->peer == 0 || session->callbacks.peer_is_current_authenticated(
             session->peer, session->callbacks.context));
 }
@@ -219,6 +222,7 @@ esp_openclaw_setup_snapshot_t esp_openclaw_setup_snapshot(esp_openclaw_setup_ses
     esp_openclaw_setup_snapshot_t snapshot = {
         .generation = session->generation, .phase = session->phase,
         .receipt_count = session->receipt_count, .has_operation = session->receipt_count != 0,
+        .opened_ms = session->opened_ms,
     };
     if (snapshot.has_operation) snapshot.operation = session->receipts[session->receipt_count - 1];
     return snapshot;

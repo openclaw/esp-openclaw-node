@@ -1,10 +1,10 @@
 # Mobile setup frames
 
 The Watch and Dial share this version 1 byte format for the encrypted custom
-setup endpoint. The structural codec and transfer owner are implemented; BLE
-transport, application dispatch, and mobile integration are not connected yet.
-The [application request codec](mobile-setup-requests.md) decodes completed requests;
-response messages remain separate work.
+setup endpoint. The codec, transfer owner, application dispatcher and SDK
+endpoint mailbox are implemented. BLE server lifecycle, device screens and
+mobile integration remain separate work. The [application request codec](mobile-setup-requests.md)
+decodes completed requests; [responses](mobile-setup-responses.md) describe admission and outcomes.
 See the [setup contract](mobile-provisioning-contract.md) for local confirmation
 and operation ownership. A valid frame does not authorize a setup operation.
 
@@ -57,10 +57,10 @@ IDs are not setup generations or mutating-operation IDs.
 | Error code | Meaning | Client action |
 | --- | --- | --- |
 | 1 | Invalid frame or transfer sequence | Correct the frame; do not advance the offset |
-| 2 | Another transfer owns the buffer | Finish that transfer before starting another |
+| 2 | Another exchange or transfer owns the buffer | Finish the outstanding exchange/transfer before starting another |
 | 3 | Transfer is no longer available | Query the application receipt with a new transfer after confirming the session is current |
 | 4 | Same transfer ID contains conflicting bytes or metadata | Close setup; never guess which mutation ran |
-| 5 | Response is pending | Pull again after a bounded delay; do not resubmit the mutation |
+| 5 | Frame exchange or response is pending | Retry the identical plaintext frame after a bounded delay; do not advance offsets or change operation IDs |
 | 6 | Logical request or response exceeds its limit | Surface the limit; never truncate |
 | 7 | Setup authority is no longer current | Reopen setup and confirm locally |
 | 8 | Transfer failed internally | Surface failure; query an admitted operation's receipt before any explicit retry |
@@ -135,9 +135,77 @@ does not prove successful authentication; a reusable connection handle is not a
 boot-unique authenticated peer identity. Delegate cryptography to the SDK and
 track ownership at its synchronous session boundary.
 
-The [Security2 guard](mobile-setup-security2.md) implements that callback
-boundary. The synchronous BLE endpoint/mailbox, server lifecycle and device
-confirmation screens remain separate integration work.
+The [Security2 guard](mobile-setup-security2.md) implements that security callback
+boundary. Server lifecycle and device confirmation screens remain separate work.
+
+## SDK endpoint mailbox
+
+[`esp_openclaw_setup_mailbox`](../../components/esp-openclaw-node-provisioning/include/esp_openclaw_setup_mailbox.h)
+is the actual synchronous protocomm endpoint callback. It owns one 464-byte
+request slot and one 464-byte reply slot, keyed by canonical generation, full
+authenticated peer and exact plaintext frame bytes. It is not an operation or
+receipt cache. The callback copies input before returning; it never waits for
+scanning, network work or the setup owner. The shared setup task polls this slot
+regularly alongside its existing dispatcher/native drain work; no new queue,
+notifier or worker is required.
+
+Arm the mailbox with peer zero and the canonical snapshot's `opened_ms` before
+starting BLE. The first successful SDK decrypt creates an authenticated peer
+and immediately calls the endpoint, before the setup task can bind it. While
+armed/unbound, valid frames receive PENDING only: no input is retained and no
+bytes are acknowledged. The setup owner observes that peer, creates its one
+comparison challenge, rechecks authority, attaches the session and opens the
+canonical transfer. It then binds the same mailbox generation to that exact
+peer without changing `opened_ms`. Binding is one-time; a bound peer cannot be
+replaced. The phone retries its identical first hello after PENDING.
+
+For **every request fragment and every response PULL**, the first queued call
+returns PENDING. Retry the **identical plaintext frame**, including ID, total,
+offset and payload, until the canonical ACK/response is available. Each retry
+uses a fresh SDK encrypted exchange; never replay old AES-GCM ciphertext. PENDING
+does not acknowledge any byte or operation. A different frame receives BUSY
+while queued/processing or while a ready reply has not yet been returned to the
+SDK. After delivery, the next frame may replace the slot; identical retries
+still return the retained reply. Canonical PENDING is progress rather than a
+retained final reply: its next retry queues fresh owner evaluation. A missing
+request fragment can also replace a premature PENDING pull, avoiding a stuck slot.
+
+The setup owner publishes the canonical fragment ACK **before** dispatching a
+completed request. Thus BLE can retrieve the ACK and queue a pull while a native
+scan blocks the owner task. That pull remains PENDING until the owner returns;
+connection attempts themselves use the existing asynchronous bindings. The
+handoff borrows canonical transfer storage, consumed synchronously before the
+next owner poll; it never borrows SDK input or a replaceable mailbox frame.
+For immediate user cancellation, the phone can disconnect rather than wait for
+a blocked scan to process another frame.
+
+Allocation failure precedes admission and retains any earlier valid exchange;
+retry the same frame. Full-slot backpressure cannot admit a new write. Recheck
+the SDK's exact current session/peer before returning a reply; SDK encryption
+checks authority again afterward. Cached replies also use the canonical pure
+timeout predicate with the same bounded, thread-safe monotonic clock, so they
+cannot escape after 120 seconds or a backwards clock while the owner is busy.
+No callback mutates the canonical session.
+
+Exact generation/peer close revokes only that peer; stale close cannot revoke a
+replacement. Server exit must revoke the guard before awaiting BLE stop, also
+while unbound. Queued/ready buffers wipe immediately. During the bounded
+transfer-receive phase, close revokes now and the in-use buffers wipe when that
+phase returns; this never waits for blocking application dispatch. Drain SDK
+callbacks and owner access before destroying storage. Continue dispatcher
+polling through native cancellation/drain even after BLE closes. Successful
+endpoint output transfers to SDK ownership; its private erasure limitation is
+documented with the [Security2 boundary](mobile-setup-security2.md).
+
+The [existing Wi-Fi host lane](../../components/esp-openclaw-node-provisioning/tests/run_wifi_host_tests.py)
+compiles against the actual SDK endpoint/security ABI and drives the real guard,
+mailbox, transfer, dispatcher and native Wi-Fi owner. An independent owner thread
+blocks at the native scan API while endpoint callbacks retrieve the ACK and
+queue/retry pulls. It also covers unbound first hello, owned fragmented input,
+pending-pull recovery, allocation/backpressure, accepted-write cancellation,
+stale close and cached-reply timeout/backwards-clock rejection. The vendor API
+fixture uses opaque bytes; encrypted phone/device exchange remains physical
+qualification, alongside the later server and screen integration.
 
 ## Codec and fixtures
 

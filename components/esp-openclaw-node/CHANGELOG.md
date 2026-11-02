@@ -34,6 +34,8 @@
 
 - Guard native Watch/Dial Security2 callbacks with exclusive transport admission, authenticated peer revocation, bounded application crypto buffers, and checked sensitive-log suppression. BLE server, endpoint and phone integration remain separate work.
 
+- Add a bounded phone-setup endpoint mailbox with explicit fragment/pull retries, canonical owner dispatch, peer/generation fencing and cached-reply expiry. BLE server, device screens and phone integration remain separate work.
+
 - Define a shared bounded setup-frame codec for future Watch/Dial phone provisioning, with explicit request, response, acknowledgment, pull, and error shapes. BLE transport and device pairing remain separate work.
 
 - Serialize explicit Wi-Fi credential, connect, disconnect, and scan operations so concurrent commands cannot change station configuration during an active scan.

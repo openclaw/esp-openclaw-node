@@ -4,11 +4,34 @@
 #include "room_watch_navigation.h"
 #include "openclaw_reading.h"
 #include "openclaw_density.h"
+#include "room_tab5_layout.h"
 
 static lv_obj_t *root, *heading, *back, *list;
 static lv_obj_t *rows[5], *level, *detail, *adjust[2], *display_rows[3], *reading_rows[2], *density_rows[2];
 static lv_obj_t *messaging_status, *messaging_detail, *messaging_action;
 static lv_obj_t *help_list, *help_rows[4], *help_body, *help_text;
+static lv_obj_t *native_detail;
+static room_watch_page_t native_page = ROOM_WATCH_HOME;
+static const char *tab5_help[] = {
+    "Tap Menu to choose Agents, Conversations, Settings, or Talk. Swipe lists to see more.\n\n"
+    "Back returns to the previous page. Home keeps an active call open.\n\n"
+    "Settings > Display changes reading size, list spacing, and awake brightness until restart.",
+    "Choose an agent in Agents, then open Talk to agent. The microphone stays open until End call. "
+    "You can browse other pages and return to the call.\n\n"
+    "Conversations shows saved messages. Creating a conversation requires Messaging access.\n\n"
+    "Recorded voice drafts and a text keyboard are not available on this Tab5 interface.",
+    "First setup uses USB and a computer. Open the serial console and enter:\n\n"
+    "wifi set \"<ssid>\" \"<password>\"\n"
+    "gateway setup-code <code>\n\n"
+    "Use a fresh voice-node setup code from OpenClaw. Keep passwords and codes private.\n\n"
+    "QR and Bluetooth phone pairing are not available. This Tab5 uses a remote Wi-Fi radio; "
+    "network setup here uses the USB console. After setup, it connects independently.",
+    "Wi-Fi, Gateway, and Talk are separate states. Wi-Fi alone does not mean OpenClaw is ready.\n\n"
+    "Settings > Connection shows current network and call readiness. If the Gateway is offline, "
+    "check the network and Gateway before trying Talk again.\n\n"
+    "Settings > Messaging requests approval on the Gateway. There is no on-device reconnect, "
+    "forget-network, or factory-reset action.",
+};
 static const struct help_topic {
     room_watch_page_t page;
     const char *label, *title, *text;
@@ -149,6 +172,44 @@ void room_watch_settings_create(lv_obj_t *parent, lv_event_cb_t handler, lv_even
     density_rows[1] = button("Comfortable", 26, 248, 316, ROOM_WATCH_COMFORTABLE, handler);
     reading_rows[0] = button("Standard", 26, 184, 316, ROOM_WATCH_TEXT_STANDARD, handler);
     reading_rows[1] = button("Larger", 26, 248, 316, ROOM_WATCH_TEXT_LARGE, handler);
+    if (room_tab5_layout()) {
+        room_tab5_header(root, heading, back);
+        native_detail = lv_obj_create(root);
+        lv_obj_remove_style_all(native_detail);
+        lv_obj_set_pos(native_detail, 160, 208);
+        lv_obj_set_size(native_detail, 960, 448);
+        lv_obj_set_scroll_dir(native_detail, LV_DIR_VER);
+        lv_obj_set_scrollbar_mode(native_detail, LV_SCROLLBAR_MODE_AUTO);
+        lv_obj_t *panels[] = {list, help_list, help_body};
+        for (unsigned i = 0; i < 3; ++i) {
+            lv_obj_set_pos(panels[i], 160, 208);
+            lv_obj_set_width(panels[i], 960);
+        }
+        lv_obj_t *controls[] = {level, detail, adjust[0], adjust[1], reading_rows[0], reading_rows[1],
+            density_rows[0], density_rows[1], messaging_status, messaging_detail, messaging_action};
+        for (unsigned i = 0; i < sizeof(controls) / sizeof(*controls); ++i)
+            lv_obj_set_parent(controls[i], native_detail);
+        lv_label_set_text_static(lv_obj_get_child(rows[2], 0), LV_SYMBOL_USB "  USB setup");
+        lv_obj_remove_event_cb(rows[2], handler);
+        lv_obj_add_event_cb(rows[2], handler, LV_EVENT_ALL, (void *)(intptr_t)ROOM_WATCH_HELP_SETUP);
+        lv_obj_set_width(help_text, 936);
+        lv_obj_set_style_text_color(help_text, lv_color_hex(0xf1ede5), 0);
+        lv_obj_set_pos(messaging_status, 0, 0);
+        lv_obj_set_width(messaging_status, 936);
+        lv_obj_set_pos(messaging_detail, 0, 64);
+        lv_obj_set_width(messaging_detail, 936);
+        room_tab5_button(messaging_action, 0, 240, 960);
+        lv_obj_set_pos(level, 0, 0);
+        lv_obj_set_width(level, 960);
+        lv_obj_set_width(detail, 960);
+        lv_label_set_long_mode(detail, LV_LABEL_LONG_WRAP);
+        room_tab5_button(adjust[0], 0, 148, 472);
+        room_tab5_button(adjust[1], 488, 148, 472);
+        for (unsigned i = 0; i < 2; ++i) {
+            room_tab5_button(reading_rows[i], 0, 72 + (int)i * 112, 960);
+            room_tab5_button(density_rows[i], 0, 72 + (int)i * 112, 960);
+        }
+    }
     lv_obj_set_hidden(root, true);
 }
 
@@ -157,9 +218,17 @@ void room_watch_settings_render(room_watch_page_t page, room_watch_page_t parent
     if (root == NULL) return;
     lv_obj_set_hidden(root, hidden);
     if (hidden) { lv_obj_set_hidden(help_body, true); return; }
-    lv_obj_set_height(list, content_bottom - 120);
-    lv_obj_set_height(help_list, content_bottom - 120);
-    lv_obj_set_height(help_body, content_bottom - 120);
+    bool tab5 = room_tab5_layout();
+    int content_top = tab5 ? 208 : 120;
+    lv_obj_set_height(list, content_bottom - content_top);
+    lv_obj_set_height(help_list, content_bottom - content_top);
+    lv_obj_set_height(help_body, content_bottom - content_top);
+    if (tab5) {
+        room_tab5_header(root, heading, back);
+        lv_obj_set_height(native_detail, content_bottom - content_top);
+        if (native_page != page) lv_obj_scroll_to_y(native_detail, 0, LV_ANIM_OFF);
+        native_page = page;
+    }
     bool display = page == ROOM_WATCH_DISPLAY;
     bool brightness_page = page == ROOM_WATCH_BRIGHTNESS;
     bool reading = page == ROOM_WATCH_READING;
@@ -173,8 +242,8 @@ void room_watch_settings_render(room_watch_page_t page, room_watch_page_t parent
     lv_obj_set_hidden(help_list, !help);
     lv_obj_set_hidden(help_body, topic == NULL);
     if (topic != NULL) {
-        lv_label_set_text_static(help_text, topic->text);
-        lv_obj_set_style_text_font(help_text, openclaw_reading_font(), 0);
+        lv_label_set_text_static(help_text, tab5 ? tab5_help[topic - help_topics] : topic->text);
+        lv_obj_set_style_text_font(help_text, room_page_font(), 0);
         lv_obj_update_layout(help_body);
         lv_obj_readjust_scroll(help_body, LV_ANIM_OFF);
         if (entering_topic) lv_obj_scroll_to_y(help_body, 0, LV_ANIM_OFF);
@@ -186,21 +255,25 @@ void room_watch_settings_render(room_watch_page_t page, room_watch_page_t parent
         parent == ROOM_WATCH_DISPLAY ? LV_SYMBOL_LEFT " Display" :
         parent == ROOM_WATCH_DEVICES ? LV_SYMBOL_LEFT " Devices" : LV_SYMBOL_LEFT " Menu");
     lv_obj_set_hidden(list, brightness_page || reading || density || permissions || help || topic != NULL);
-    int row_height = openclaw_density_row_height(false);
-    int row_step = row_height + openclaw_density_row_gap();
+    if (tab5) lv_obj_set_hidden(native_detail, !brightness_page && !reading && !density && !permissions);
+    int row_height = room_page_row(false);
+    int row_step = row_height + room_page_gap();
     for (unsigned i = 0; i < 5; ++i) {
         lv_obj_set_hidden(rows[i], display || brightness_page || reading || density || permissions || help || topic != NULL);
         lv_obj_set_pos(rows[i], 0, (int)i * row_step);
         lv_obj_set_height(rows[i], row_height);
+        if (tab5) { room_tab5_button(rows[i], 0, (int)i * row_step, 960); lv_obj_set_height(rows[i], row_height); }
     }
     for (unsigned i = 0; i < 3; ++i) {
         lv_obj_set_hidden(display_rows[i], !display);
         lv_obj_set_pos(display_rows[i], 0, (int)i * row_step);
         lv_obj_set_height(display_rows[i], row_height);
+        if (tab5) { room_tab5_button(display_rows[i], 0, (int)i * row_step, 960); lv_obj_set_height(display_rows[i], row_height); }
     }
     for (unsigned i = 0; i < 4; ++i) {
         lv_obj_set_pos(help_rows[i], 0, (int)i * row_step);
         lv_obj_set_height(help_rows[i], row_height);
+        if (tab5) { room_tab5_button(help_rows[i], 0, (int)i * row_step, 960); lv_obj_set_height(help_rows[i], row_height); }
     }
     lv_obj_set_hidden(messaging_status, !permissions);
     lv_obj_set_hidden(messaging_detail, !permissions);
@@ -213,12 +286,12 @@ void room_watch_settings_render(room_watch_page_t page, room_watch_page_t parent
         case ROOM_MESSAGING_REQUESTING:
             status = "Requesting access"; description = "Sending your request to the Gateway."; action = "Requesting..."; break;
         case ROOM_MESSAGING_WAITING:
-            status = "Awaiting approval"; description = "Approve this Watch on your Gateway. You can leave this screen while you wait."; action = "Waiting..."; break;
+            status = "Awaiting approval"; description = tab5 ? "Approve this Tab5 on your Gateway. You can leave this screen while you wait." : "Approve this Watch on your Gateway. You can leave this screen while you wait."; action = "Waiting..."; break;
         case ROOM_MESSAGING_CONNECTING:
             status = "Connecting"; description = "Access approved. Reconnecting before messaging is enabled."; action = "Connecting..."; break;
         case ROOM_MESSAGING_READY:
             status = messaging->connected ? "Messaging enabled" : "Gateway offline";
-            description = messaging->connected ? "You can send reviewed voice drafts and create conversations." : "Messaging is approved. Reconnect to your Gateway to use it.";
+            description = messaging->connected ? (tab5 ? "You can create conversations. Live Talk uses its own call access." : "You can send reviewed voice drafts and create conversations.") : "Messaging is approved. Reconnect to your Gateway to use it.";
             lv_obj_set_hidden(messaging_action, true); break;
         case ROOM_MESSAGING_REJECTED:
             status = "Request declined"; description = "The Gateway declined access. You can request it again."; action = "Try again"; break;
@@ -236,7 +309,8 @@ void room_watch_settings_render(room_watch_page_t page, room_watch_page_t parent
         lv_obj_set_clickable(messaging_action, messaging->can_request);
         if (messaging->can_request) lv_obj_clear_state(messaging_action, LV_STATE_DISABLED);
         else lv_obj_add_state(messaging_action, LV_STATE_DISABLED);
-        lv_obj_set_style_bg_color(messaging_action, lv_color_hex(messaging->can_request ? 0xa83648 : 0x302535), 0);
+        lv_obj_set_style_bg_color(messaging_action,
+            lv_color_hex(messaging->can_request ? (tab5 ? 0xd45139 : 0xa83648) : (tab5 ? 0x292723 : 0x302535)), 0);
     }
     lv_obj_set_hidden(level, !brightness_page && !reading && !density);
     lv_obj_set_hidden(detail, !brightness_page && !reading && !density);
@@ -246,8 +320,12 @@ void room_watch_settings_render(room_watch_page_t page, room_watch_page_t parent
         lv_obj_set_hidden(density_rows[i], !density);
         lv_obj_set_height(reading_rows[i], row_height);
         lv_obj_set_height(density_rows[i], row_height);
+        if (tab5) {
+            lv_obj_set_y(reading_rows[i], 72 + (int)i * row_step);
+            lv_obj_set_y(density_rows[i], 72 + (int)i * row_step);
+        }
     }
-    lv_obj_set_y(detail, reading || density ? 320 : 206);
+    lv_obj_set_y(detail, tab5 ? (reading || density ? 88 + 2 * row_step : 72) : reading || density ? 320 : 206);
     if (density) {
         lv_obj_set_style_text_font(level, &lv_font_montserrat_14, 0);
         bool compact = openclaw_density() == OPENCLAW_DENSITY_COMPACT;
@@ -278,11 +356,19 @@ void room_watch_settings_render(room_watch_page_t page, room_watch_page_t parent
         help_rows[0], help_rows[1], help_rows[2], help_rows[3],
         display_rows[0], display_rows[1], display_rows[2], reading_rows[0], reading_rows[1],
         density_rows[0], density_rows[1], adjust[0], adjust[1], messaging_action};
-    const lv_font_t *font = openclaw_reading_font();
+    const lv_font_t *font = room_page_font();
+    if (tab5) {
+        lv_obj_t *texts[] = {level, detail, messaging_status, messaging_detail};
+        for (unsigned i = 0; i < sizeof(texts) / sizeof(*texts); ++i)
+            lv_obj_set_style_text_font(texts[i], font, 0);
+        lv_obj_set_style_text_color(detail, lv_color_hex(0xb1aaa0), 0);
+        lv_obj_set_style_text_color(messaging_detail, lv_color_hex(0xb1aaa0), 0);
+    }
     for (unsigned i = 0; i < sizeof(buttons) / sizeof(buttons[0]); ++i) {
         lv_obj_t *text = lv_obj_get_child(buttons[i], 0);
         lv_obj_set_style_text_font(text, font, 0);
-        lv_obj_set_y(text, (lv_obj_get_height(buttons[i]) - font->line_height) / 2);
+        if (tab5) lv_obj_align(text, LV_ALIGN_LEFT_MID, 24, 0);
+        else lv_obj_set_y(text, (lv_obj_get_height(buttons[i]) - font->line_height) / 2);
     }
     if (!lv_obj_is_hidden(list)) {
         lv_obj_update_layout(list);
@@ -291,5 +377,9 @@ void room_watch_settings_render(room_watch_page_t page, room_watch_page_t parent
     if (help) {
         lv_obj_update_layout(help_list);
         lv_obj_readjust_scroll(help_list, LV_ANIM_OFF);
+    }
+    if (tab5 && !lv_obj_is_hidden(native_detail)) {
+        lv_obj_update_layout(native_detail);
+        lv_obj_readjust_scroll(native_detail, LV_ANIM_OFF);
     }
 }

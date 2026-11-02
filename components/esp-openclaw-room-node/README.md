@@ -412,6 +412,22 @@ connection intact; another read waits for the outstanding callback to finish.
 
 ### Device inventory
 
+On the Tab5, **Menu → Settings** exposes Display, Connection, USB setup,
+Messaging, and Help in the native 1280 × 720 landscape layout. Controls are
+at least 96 native pixels high (about 8.3 mm on the nominal display); reading
+text uses 28 or 36 pixels. Long details scroll, including while a call reserves
+space for **Return to call**. Brightness, reading size, and spacing last until
+restart. The camera indicator keeps the display at least 40% bright even when
+the saved brightness is lower.
+
+**Connection** shows measured Wi-Fi details and separate Gateway/Talk states.
+It refreshes the network sample only while visible and awake. **Messaging**
+uses the existing Gateway approval flow; it does not grant access locally.
+Tab5 setup still requires the USB console. QR/Bluetooth phone pairing,
+on-screen text entry, recorded voice drafts, reconnect/reset controls, and
+remote-radio provisioning from the display are not implemented. Blank Home
+taps do not toggle Canvas; use its explicit Menu entry.
+
 The USB commands `devices refresh`, `devices`, and `devices close` read the
 Gateway's authorized `node.list` inventory through the existing operator read
 connection. Discovery does not select an agent, start Talk, invoke a command,

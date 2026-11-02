@@ -1,12 +1,30 @@
 #include "room_tab5_ui.h"
 
 #include "esp_openclaw_avatar.h"
+#include "room_tab5_layout.h"
+#include "openclaw_connection_details.h"
 
 enum { INK = 0xf1ede5, MUTED = 0xb1aaa0, BACKGROUND = 0x1c1b19, SURFACE = 0x292723 };
 static lv_obj_t *root, *heading, *status, *body, *back, *identity, *avatar, *reconnect;
-static lv_obj_t *menu_rows[5];
+static lv_obj_t *menu_rows[6];
 static lv_image_dsc_t avatar_sources[3];
 static lv_obj_t *menu_list;
+static lv_obj_t *connection_body, *connection_text, *connection_status, *connection_setup;
+static bool connection_active;
+
+static void refresh_connection(lv_timer_t *timer)
+{
+    (void)timer;
+    if (!connection_active || !lv_obj_is_visible(connection_body) || room_board_display_is_dark()) return;
+    esp_openclaw_node_wifi_status_t wifi;
+    esp_openclaw_node_wifi_get_status(&wifi);
+    char details[384];
+    openclaw_wifi_details_format(details, sizeof(details), &wifi);
+    if (strcmp(lv_label_get_text(connection_text), details) != 0)
+        lv_label_set_text(connection_text, details);
+    lv_obj_update_layout(connection_text);
+    lv_obj_set_y(connection_setup, lv_obj_get_height(connection_text) + 32);
+}
 
 static const lv_font_t *body_font(void)
 {
@@ -95,24 +113,45 @@ void room_tab5_ui_create(lv_obj_t *parent, lv_event_cb_t navigation)
     menu_rows[2] = button(LV_SYMBOL_IMAGE "  Canvas", 160, 432, 960, ROOM_WATCH_CANVAS, navigation);
     menu_rows[3] = button(LV_SYMBOL_LIST "  Agents", 160, 544, 960, ROOM_WATCH_AGENTS, navigation);
     menu_rows[4] = button(LV_SYMBOL_ENVELOPE "  Conversations", 160, 656, 960, ROOM_WATCH_CONVERSATIONS, navigation);
-    for (unsigned i = 0; i < 5; ++i) {
+    menu_rows[5] = button(LV_SYMBOL_SETTINGS "  Settings", 160, 768, 960, ROOM_WATCH_SETTINGS, navigation);
+    for (unsigned i = 0; i < 6; ++i) {
         lv_obj_set_parent(menu_rows[i], menu_list);
         lv_obj_set_pos(menu_rows[i], 0, (int)i * 112);
     }
+    connection_status = label(root, "", 160, 208, 960);
+    connection_body = lv_obj_create(root);
+    lv_obj_remove_style_all(connection_body);
+    lv_obj_set_pos(connection_body, 160, 320);
+    lv_obj_set_size(connection_body, 960, 336);
+    lv_obj_set_scroll_dir(connection_body, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(connection_body, LV_SCROLLBAR_MODE_AUTO);
+    connection_text = label(connection_body, "", 0, 0, 936);
+    connection_setup = button(LV_SYMBOL_USB "  USB setup", 0, 0, 960, ROOM_WATCH_HELP_SETUP, navigation);
+    lv_obj_set_parent(connection_setup, connection_body);
+    lv_timer_create(refresh_connection, 1000, NULL);
+}
+
+bool room_tab5_settings_page(room_watch_page_t page)
+{
+    return page == ROOM_WATCH_SETTINGS || page == ROOM_WATCH_DISPLAY || page == ROOM_WATCH_BRIGHTNESS ||
+        page == ROOM_WATCH_READING || page == ROOM_WATCH_DENSITY || page == ROOM_WATCH_MESSAGING ||
+        (page >= ROOM_WATCH_HELP && page <= ROOM_WATCH_HELP_STATUS);
 }
 
 bool room_tab5_ui_supports(room_watch_page_t page)
 {
     return page == ROOM_WATCH_HOME || page == ROOM_WATCH_MENU || page == ROOM_WATCH_CALL ||
         page == ROOM_WATCH_CONNECTION || page == ROOM_WATCH_CANVAS ||
-        page == ROOM_WATCH_AGENTS || page == ROOM_WATCH_CONVERSATIONS;
+        page == ROOM_WATCH_AGENTS || page == ROOM_WATCH_CONVERSATIONS || room_tab5_settings_page(page);
 }
 
 void room_tab5_ui_render(room_watch_page_t page, const room_ui_facts_t *facts,
     const room_ui_talk_target_t *target, room_ui_state_t state, const char *detail, bool hidden)
 {
     if (root == NULL) return;
-    lv_obj_set_hidden(root, hidden || page == ROOM_WATCH_AGENTS);
+    bool entering_connection = !connection_active && !hidden && page == ROOM_WATCH_CONNECTION;
+    connection_active = !hidden && page == ROOM_WATCH_CONNECTION;
+    lv_obj_set_hidden(root, hidden || page == ROOM_WATCH_AGENTS || room_tab5_settings_page(page));
     lv_obj_set_hidden(status, hidden);
     if (hidden) return;
     lv_obj_move_foreground(status);
@@ -125,6 +164,24 @@ void room_tab5_ui_render(room_watch_page_t page, const room_ui_facts_t *facts,
     const char *gateway = facts->gateway == ROOM_UI_GATEWAY_CONNECTED ? "Connected" :
         facts->gateway == ROOM_UI_GATEWAY_NO_SESSION ? "Pairing needed" : "Gateway offline";
     lv_label_set_text_fmt(status, "%s    /    %s", network, gateway);
+    lv_obj_set_hidden(connection_body, !connection);
+    lv_obj_set_hidden(connection_status, !connection);
+    if (connection) {
+        const char *gateway_states[] = {"Starting", "Connecting", "Connected", "Offline", "Pairing needed"};
+        const char *talk_states[] = {"Starting", "Unavailable", "Waiting for access", "Pairing needed", "Ready", "Connecting", "Active", "Stopping"};
+        lv_label_set_text_fmt(connection_status, "Gateway: %s    /    Talk: %s",
+            (unsigned)facts->gateway < 5 ? gateway_states[facts->gateway] : "Unknown",
+            (unsigned)facts->talk < 8 ? talk_states[facts->talk] : "Unknown");
+        lv_obj_set_style_text_font(connection_status, room_page_font(), 0);
+        lv_obj_set_style_text_font(connection_text, room_page_font(), 0);
+        lv_obj_set_height(connection_body, active || facts->talk == ROOM_UI_TALK_CONNECTING ? 200 : 336);
+        lv_obj_update_layout(connection_text);
+        lv_obj_set_y(connection_setup, lv_obj_get_height(connection_text) + 32);
+        if (entering_connection) {
+            refresh_connection(NULL);
+            lv_obj_scroll_to_y(connection_body, 0, LV_ANIM_OFF);
+        }
+    }
     lv_obj_set_hidden(back, home);
     lv_obj_set_hidden(identity, !home || active || facts->talk == ROOM_UI_TALK_CONNECTING || facts->talk == ROOM_UI_TALK_STOPPING);
     bool unavailable = facts->talk != ROOM_UI_TALK_READY && facts->talk != ROOM_UI_TALK_ACTIVE &&
@@ -142,8 +199,9 @@ void room_tab5_ui_render(room_watch_page_t page, const room_ui_facts_t *facts,
     lv_obj_set_hidden(menu_list, !menu);
     lv_obj_set_height(menu_list, active || facts->talk == ROOM_UI_TALK_CONNECTING ? 312 : 448);
     lv_obj_set_hidden(heading, menu);
-    lv_obj_set_hidden(body, menu);
-    lv_obj_set_y(heading, home || call ? 368 : 220);
+    lv_obj_set_hidden(body, menu || connection);
+    lv_obj_set_pos(heading, connection ? 368 : 160, connection ? 112 : home || call ? 368 : 220);
+    lv_obj_set_width(heading, connection ? 544 : 960);
     lv_obj_set_y(body, home || call ? 424 : 284);
     const char *title = page == ROOM_WATCH_CONVERSATIONS ? "Opening your conversation..." : connection ? "Connection" : page == ROOM_WATCH_CANVAS ? "No canvas yet" :
         facts->talk == ROOM_UI_TALK_CONNECTING ? "Connecting your call..." :

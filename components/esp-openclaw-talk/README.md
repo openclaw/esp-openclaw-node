@@ -7,8 +7,9 @@ for recorded input. It uses `talk.session.create` with `mode: transcription`,
 `transport: gateway-relay`, and `brain: none`. The existing operator connection
 needs `operator.talk` and a configured Gateway transcription provider. It does
 not select an agent, open Live Talk, request new scopes, or submit chat messages.
-This is the transport prerequisite for the Watch's planned record/review/Send
-flow; microphone capture and that UI are not connected to this API yet.
+The Watch's [voice draft owner](../esp-openclaw-room-node/room_voice_draft.c)
+connects microphone capture to this API and presents the completed transcript
+for review. Sending remains a separate, explicit action with messaging authority.
 
 Begin once and publish the handle under the owner lock used by event forwarding,
 so an early ready event cannot be lost. Forward `talk.event` from that node and wait for `READY` before

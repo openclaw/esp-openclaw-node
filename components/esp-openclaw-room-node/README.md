@@ -305,7 +305,8 @@ Conversations** resumes the retained reader. Returning Home hides conversation
 excerpts; it does not replace the selected Talk recipient. Pending, offline,
 empty and failed requests use the same guarded state owners as Watch.
 
-Settings remain a separate firmware slice. Existing Watch and Dial interfaces are unchanged.
+Tab5 also exposes [native settings](#tab5-settings) through the shared settings owner.
+Watch and Dial retain their own layouts and input behavior.
 
 ## Messaging access
 
@@ -411,7 +412,7 @@ replacing the operator connection invalidates pending results. A 15-second
 read timeout reports a visible state but leaves the shared Talk/Canvas
 connection intact; another read waits for the outstanding callback to finish.
 
-### Device inventory
+### Tab5 settings
 
 On the Tab5, **Menu → Settings** exposes Display, Connection, USB setup,
 Messaging, and Help in the native 1280 × 720 landscape layout. Controls are
@@ -428,6 +429,8 @@ Tab5 setup still requires the USB console. QR/Bluetooth phone pairing,
 on-screen text entry, recorded voice drafts, reconnect/reset controls, and
 remote-radio provisioning from the display are not implemented. Blank Home
 taps do not toggle Canvas; use its explicit Menu entry.
+
+### Device inventory
 
 The USB commands `devices refresh`, `devices`, and `devices close` read the
 Gateway's authorized `node.list` inventory through the existing operator read

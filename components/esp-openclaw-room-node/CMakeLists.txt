@@ -25,6 +25,7 @@ idf_component_register(
         "room_recording.c"
         "room_ui_controller.c"
         "room_tab5_ui.c"
+        "room_live_talk.c"
         "room_voice_draft.c"
         "room_watch_home.c"
         "room_watch_status.c"

@@ -15,6 +15,7 @@
 #include "room_board.h"
 #include "room_watch_home.h"
 #include "room_tab5_ui.h"
+#include "room_live_talk.h"
 #include "room_watch_status.h"
 #include "room_watch_navigation.h"
 #include "room_watch_settings.h"
@@ -76,6 +77,15 @@ static bool diagnostics_open;
 static bool text_hint_active;
 static bool camera_indicator_active;
 static room_ui_facts_t current_facts;
+static esp_openclaw_talk_snapshot_t live_talk;
+
+void room_ui_store_live_talk(const esp_openclaw_talk_snapshot_t *snapshot)
+{
+    taskENTER_CRITICAL(&state_mux);
+    if (snapshot != NULL) live_talk = *snapshot;
+    else memset(&live_talk, 0, sizeof(live_talk));
+    taskEXIT_CRITICAL(&state_mux);
+}
 static esp_timer_handle_t text_hint_timer;
 static void (*talk_action_handler)(bool start, uint64_t recipient_revision);
 typedef enum { TALK_CONTROL_NONE, TALK_CONTROL_START, TALK_CONTROL_STOP, TALK_CONTROL_RETURN } talk_control_action_t;
@@ -1317,6 +1327,7 @@ void room_ui_init(void)
         room_watch_conversations_create(lv_layer_top(), watch_conversations_clicked);
         room_watch_status_create(lv_layer_top());
     }
+    if (watch_home_enabled || tab5_home_enabled) room_live_talk_create(lv_layer_top(), tab5_home_enabled);
     bool board_has_animated_face = board != NULL && board->display.animated_face;
     idle_brightness = board != NULL ? board->display.idle_brightness : 0;
     animated_face_enabled = board_has_animated_face;
@@ -1465,6 +1476,8 @@ static bool room_ui_render_locked(void)
     memcpy(gateway, gateway_text, sizeof(gateway));
     bool overlay = diagnostics_open;
     room_ui_facts_t facts = current_facts;
+    static esp_openclaw_talk_snapshot_t painted_live_talk;
+    painted_live_talk = live_talk;
     room_ui_talk_target_t target = current_target;
     static room_voice_snapshot_t voice;
     voice = current_voice;
@@ -1576,6 +1589,10 @@ static bool room_ui_render_locked(void)
         room_watch_conversations_render(painted_conversations,
             canvas_active || overlay || page != ROOM_WATCH_AGENTS || !chats, content_bottom);
     }
+    bool live_visible = (watch_home_enabled || tab5_home_enabled) && !canvas_active && !overlay &&
+        facts.talk == ROOM_UI_TALK_ACTIVE && painted_live_talk.sequence != 0 &&
+        (page == ROOM_WATCH_HOME || page == ROOM_WATCH_CALL);
+    room_live_talk_render(&painted_live_talk, !live_visible);
     if (talk_pill != NULL) {
         if (watch_home_enabled) {
             /* Retained Canvas content keeps its existing top action clearance. */
@@ -1623,7 +1640,7 @@ static bool room_ui_render_locked(void)
             }
         }
 #if LV_FONT_MONTSERRAT_20
-        if (call_page) lv_obj_set_style_text_font(talk_pill_label, &lv_font_montserrat_20, 0);
+        if (call_page && watch_home_enabled) lv_obj_set_style_text_font(talk_pill_label, &lv_font_montserrat_20, 0);
 #endif
         taskENTER_CRITICAL(&state_mux);
         painted_target_revision = target.revision;
@@ -1663,7 +1680,7 @@ static bool room_ui_render_locked(void)
         }
         if (camera_indicator != NULL) lv_obj_move_foreground(camera_indicator);
     }
-    if (canvas_active || navigation || tab5_home_enabled || (watch_home_enabled && room_watch_home_review_visible())) {
+    if (canvas_active || navigation || tab5_home_enabled || live_visible || (watch_home_enabled && room_watch_home_review_visible())) {
         room_face_hide();
         lv_obj_set_hidden(status_label, true);
         if (state == ROOM_UI_IDLE) {

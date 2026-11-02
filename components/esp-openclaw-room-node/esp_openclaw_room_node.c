@@ -78,7 +78,7 @@ static esp_openclaw_node_handle_t talk_operator;
 static esp_openclaw_talk_call_handle_t talk_call;
 static bool talk_media_owned;
 static bool talk_ambient_suspended;
-static bool talk_speaking_pending;
+static bool talk_listening_pending;
 static bool talk_connecting_pending;
 static bool talk_speech_failed_pending;
 static bool operator_ui_pending;
@@ -705,13 +705,13 @@ static void talk_teardown_task(void *arg)
         }
         bool close = talk_call != NULL && talk_cancel_requested &&
             !talk_start_in_flight && !talk_closing;
-        bool speaking = talk_speaking_pending && !talk_cancel_requested && !talk_closing;
+        bool listening = talk_listening_pending && !talk_cancel_requested && !talk_closing;
         bool connecting = talk_connecting_pending && !talk_active && !talk_cancel_requested && !talk_closing;
         bool speech_failed = talk_speech_failed_pending && talk_active &&
             !talk_cancel_requested && !talk_closing;
         bool operator_ui = operator_ui_pending && talk_call == NULL;
         bool ready = operator_ready;
-        talk_speaking_pending = false;
+        talk_listening_pending = false;
         talk_connecting_pending = false;
         talk_speech_failed_pending = false;
         operator_ui_pending = false;
@@ -720,6 +720,7 @@ static void talk_teardown_task(void *arg)
         esp_openclaw_talk_call_handle_t call = talk_call;
         const char *message = talk_cancel_message;
         uint32_t generation = talk_generation;
+        bool stream_active = call != NULL && talk_active && !talk_cancel_requested && !talk_closing;
         xSemaphoreGive(state_lock);
         if (expired_generation != 0) {
             talk_stage(expired_generation, "stop_request", timeout_accepted ? "accepted" : "ignored", 0);
@@ -729,13 +730,29 @@ static void talk_teardown_task(void *arg)
         refresh_voice();
         /* One worker serializes call/operator UI. A delayed callback never
          * paints over a replacement call's newer connecting/speaking state. */
-        if (speaking) room_ui_set(ROOM_UI_SPEAKING, NULL);
+        if (listening) room_ui_set(ROOM_UI_LISTENING, NULL);
         else if (connecting) {
             room_ui_set(ROOM_UI_CONNECTING, NULL);
             room_face_play_gesture(ROOM_FACE_GESTURE_SURPRISE);
         } else if (operator_ui) {
             room_ui_set(ready ? ROOM_UI_IDLE : ROOM_UI_ERROR, ready ? NULL : "Operator offline");
             if (ready) room_ui_show_face_hint(8000);
+        }
+        static uint32_t stream_generation;
+        static uint64_t stream_sequence;
+        if (stream_active) {
+            static esp_openclaw_talk_snapshot_t snapshot;
+            if (esp_openclaw_talk_call_snapshot(call, &snapshot) == ESP_OK &&
+                (stream_generation != generation || stream_sequence != snapshot.sequence)) {
+                stream_generation = generation;
+                stream_sequence = snapshot.sequence;
+                room_ui_store_live_talk(&snapshot);
+                room_ui_state_t phase = snapshot.phase == ESP_OPENCLAW_TALK_SPEAKING ? ROOM_UI_SPEAKING
+                    : snapshot.phase == ESP_OPENCLAW_TALK_THINKING ? ROOM_UI_CONNECTING
+                    : snapshot.phase == ESP_OPENCLAW_TALK_ERROR ? ROOM_UI_ERROR : ROOM_UI_LISTENING;
+                room_ui_set(phase, snapshot.phase == ESP_OPENCLAW_TALK_THINKING ? "Thinking" :
+                    snapshot.phase == ESP_OPENCLAW_TALK_ERROR ? "Conversation interrupted" : NULL);
+            }
         }
         if (local_error) room_ui_set(ROOM_UI_ERROR, recipient_changed ? "Recipient changed; start again" : target_expired
             ? "Choose an agent again after reconnecting" : "Talk unavailable; try again when ready");
@@ -794,6 +811,7 @@ static void talk_teardown_task(void *arg)
             talk_stage(generation, "media_release", "end", 0);
         }
         talk_audio_snapshot(generation, "released");
+        room_ui_store_live_talk(NULL);
         room_ui_set(message != NULL ? ROOM_UI_ERROR : ROOM_UI_IDLE, message);
         xSemaphoreTake(state_lock, portMAX_DELAY);
         webrtc = NULL;
@@ -847,8 +865,8 @@ static int webrtc_event(esp_webrtc_event_t *event, void *ctx)
         !talk_cancel_requested && !talk_closing;
     if (current && event->type == ESP_WEBRTC_EVENT_CONNECTED) {
         talk_dialing = false;
+        if (!talk_active) talk_listening_pending = true;
         talk_active = true;
-        talk_speaking_pending = true;
         wake_talk_teardown();
     } else if (event->type == ESP_WEBRTC_EVENT_CONNECT_FAILED ||
                event->type == ESP_WEBRTC_EVENT_DISCONNECTED) {
@@ -1048,6 +1066,7 @@ static void operator_gateway_event(
     if (bound) {
         esp_openclaw_talk_call_gateway_event(call, client, event, payload_json);
         esp_openclaw_talk_call_release(call);
+        wake_talk_teardown();
     }
     if (event != NULL && (strcmp(event, "voicewake.changed") == 0 ||
         strcmp(event, "voicewake.routing.changed") == 0)) {

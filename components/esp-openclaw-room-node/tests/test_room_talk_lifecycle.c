@@ -84,7 +84,7 @@ static void connect_call(void)
         "real Talk accepted Gateway-owned voice-a");
     host_emit_peer(webrtc, ESP_WEBRTC_EVENT_CONNECTED);
     host_run_task("talk_teardown");
-    host_require(talk_active && !talk_dialing && host.media_owned && !host.ambient && host.ui == ROOM_UI_SPEAKING,
+    host_require(talk_active && !talk_dialing && host.media_owned && !host.ambient && host.ui == ROOM_UI_LISTENING,
         "connected media precondition");
 }
 
@@ -450,9 +450,64 @@ static void expect_open(void)
     CHECK(host.closes == 0, "unrelated event must not close WebRTC");
     CHECK(host.media_ends == 0 && host.media_owned && !host.ambient, "unrelated event retains media ownership");
     CHECK(webrtc != NULL && talk_active, "unrelated event retains active call");
-    CHECK(host.ui == ROOM_UI_SPEAKING, "unrelated event retains speaking UI");
+    CHECK(host.ui == ROOM_UI_LISTENING, "unrelated event retains listening UI");
     CHECK(host.home.talk == ROOM_UI_TALK_ACTIVE, "active Talk has its own home fact");
 }
+static void live_event(const char *voice, unsigned sequence, const char *type, const char *text)
+{
+    cJSON *payload = cJSON_CreateObject();
+    cJSON_AddStringToObject(payload, "voiceSessionId", voice);
+    cJSON *event = cJSON_AddObjectToObject(payload, "talkEvent");
+    cJSON_AddStringToObject(event, "sessionId", voice);
+    cJSON_AddStringToObject(event, "turnId", "turn-1");
+    cJSON_AddStringToObject(event, "type", type);
+    cJSON_AddNumberToObject(event, "seq", sequence);
+    if (text != NULL) cJSON_AddStringToObject(cJSON_AddObjectToObject(event, "payload"), "text", text);
+    char *json = cJSON_PrintUnformatted(payload);
+    host_require(json != NULL, "stream fixture serialized");
+    host_emit_gateway(operator_client, "talk.event", json);
+    free(json);
+    cJSON_Delete(payload);
+    drain();
+}
+
+static void live_talk_updates(void)
+{
+    connect_call();
+    live_event("voice-a", 1, "session.ready", NULL);
+    live_event("voice-a", 2, "turn.started", NULL);
+    live_event("voice-a", 3, "transcript.delta", "Hello");
+    CHECK(host.ui == ROOM_UI_LISTENING && strcmp(host.live_talk.user_text, "Hello") == 0 &&
+        !host.live_talk.user_final, "worker publishes partial user text while listening");
+    live_event("voice-a", 4, "transcript.done", "Hello, Kitsune.");
+    CHECK(host.ui == ROOM_UI_CONNECTING && host.live_talk.user_final &&
+        strcmp(host.live_talk.user_text, "Hello, Kitsune.") == 0, "final user text enters thinking");
+    live_event("voice-a", 5, "output.text.delta", "Hi ");
+    live_event("voice-a", 6, "output.text.delta", "there.");
+    CHECK(strcmp(host.live_talk.agent_text, "Hi there.") == 0 && !host.live_talk.agent_final,
+        "worker publishes accumulated agent text");
+    live_event("voice-a", 7, "output.audio.started", NULL);
+    CHECK(host.ui == ROOM_UI_SPEAKING, "Gateway output activity enters speaking");
+    host_emit_peer(webrtc, ESP_WEBRTC_EVENT_CONNECTED);
+    drain();
+    CHECK(host.ui == ROOM_UI_SPEAKING, "duplicate peer connection does not erase stream phase");
+    live_event("voice-other", 99, "transcript.done", "Wrong owner");
+    CHECK(host.ui == ROOM_UI_SPEAKING && host.live_talk.sequence == 7 &&
+        strcmp(host.live_talk.user_text, "Hello, Kitsune.") == 0,
+        "unrelated voice cannot replace visible text or call phase");
+    live_event("voice-a", 8, "output.text.done", "Hi there!");
+    CHECK(host.live_talk.agent_final && strcmp(host.live_talk.agent_text, "Hi there!") == 0,
+        "final agent text replaces partial text");
+    live_event("voice-a", 9, "output.audio.done", NULL);
+    CHECK(host.ui == ROOM_UI_LISTENING, "output completion returns to listening");
+    stop();
+    drain();
+    CHECK(host.live_talk.sequence == 0 && host.live_talk.user_text[0] == '\0' &&
+        host.live_talk.agent_text[0] == '\0', "teardown clears private turn text");
+    live_event("voice-a", 10, "transcript.delta", "Late text");
+    CHECK(host.live_talk.sequence == 0, "late event cannot repopulate closed call text");
+}
+
 static void expect_closed(void)
 {
     printf("OBSERVED close=%u release=%u ambient_restore=%u media_owned=%d active=%d peer_disconnects=%u\n",
@@ -850,7 +905,7 @@ static void replacement_ordering(void)
     host_emit_gateway(operator_client, "talk.event", closed_a);
     wake_talk_teardown(); /* An old wake token is never a teardown action. */
     drain();
-    CHECK(host.closes == 1 && talk_active && host.ui == ROOM_UI_SPEAKING && !talk_cancel_requested,
+    CHECK(host.closes == 1 && talk_active && host.ui == ROOM_UI_LISTENING && !talk_cancel_requested,
         "old callbacks, timeout, terminal and wakeup cannot change replacement");
     host_fire_timeout(talk_timeout_timer);
     host_fire_timeout_generation(talk_timeout_timer, old_generation);
@@ -884,7 +939,7 @@ static void late_create_replacement(void)
     host_emit_node(original, ESP_OPENCLAW_NODE_EVENT_DISCONNECTED);
     host_emit_gateway(original, "talk.event", closed_a);
     drain();
-    CHECK(talk_active && operator_ready && host.ui == ROOM_UI_SPEAKING && host.closes == 1,
+    CHECK(talk_active && operator_ready && host.ui == ROOM_UI_LISTENING && host.closes == 1,
         "old-owner callbacks cannot change replacement readiness, UI or lifetime");
     stop();
     drain();
@@ -1269,7 +1324,7 @@ static void speech_confirmation(void)
     connect_call();
     host_reply_speech(false);
     drain();
-    CHECK(host.ui == ROOM_UI_SPEAKING && talk_active,
+    CHECK(host.ui == ROOM_UI_LISTENING && talk_active,
         "a late speech rejection cannot replace the next call's UI");
 }
 
@@ -2719,6 +2774,7 @@ static const struct { const char *name; void (*run)(void); } cases[] = {
     {"directory-errors", directory_errors},
     {"capture-source-scheduler", capture_source_scheduler},
     {"speech-confirmation", speech_confirmation},
+    {"live-talk-updates", live_talk_updates},
     {"operator-scopes", operator_scopes},
     {"voice-actions-provision", voice_actions_provision},
     {"voice-actions-stale", voice_actions_stale},

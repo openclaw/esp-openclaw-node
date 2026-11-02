@@ -71,7 +71,7 @@ void room_ui_init(void);
 /** Start carries the painted owner revision; Stop ignores it. Register before init. */
 void room_ui_set_talk_action_handler(void (*handler)(bool start, uint64_t recipient_revision));
 void room_ui_set_voice_action_handler(void (*handler)(room_voice_action_t action, uint32_t generation,
-                                                     uint64_t recipient_revision, uint64_t owner_incarnation));
+                                                     uint64_t recipient_revision, uint64_t owner_incarnation, const char *text));
 void room_ui_store_voice(const room_voice_snapshot_t *snapshot);
 /** Queue the displayed permission revision; the supervisor owns the request. */
 void room_ui_set_messaging_handler(void (*handler)(unsigned revision));

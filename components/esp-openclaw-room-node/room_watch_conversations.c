@@ -8,7 +8,7 @@
 #include <string.h>
 
 static lv_obj_t *root, *back_text, *heading, *list, *message, *body, *body_text;
-static lv_obj_t *previous, *next, *refresh, *new_chat, *creation_button, *creation_caption;
+static lv_obj_t *previous, *next, *refresh, *new_chat, *creation_button, *creation_caption, *reply;
 static lv_obj_t *rows[ESP_OPENCLAW_DIRECTORY_PAGE_SIZE], *titles[ESP_OPENCLAW_DIRECTORY_PAGE_SIZE];
 static lv_obj_t *summaries[ESP_OPENCLAW_DIRECTORY_PAGE_SIZE];
 static const room_conversations_snapshot_t *current;
@@ -109,6 +109,9 @@ void room_watch_conversations_create(lv_obj_t *parent, lv_event_cb_t handler)
     lv_obj_set_style_bg_opa(body, LV_OPA_60, LV_PART_SCROLLBAR);
     body_text = label(body, "", 0, 0, 306);
     lv_label_set_long_mode(body_text, LV_LABEL_LONG_WRAP);
+    reply = button(root, 26, 318, 316, 44, ROOM_CHAT_REPLY_BUTTON, handler);
+    label(reply, "Write reply", 12, 14, 292);
+    lv_obj_add_flag(reply, LV_OBJ_FLAG_HIDDEN);
     creation_button = button(root, 26, 318, 316, 44, ROOM_CHAT_CREATION_BUTTON, handler);
     lv_obj_set_style_opa(creation_button, LV_OPA_40, LV_STATE_DISABLED);
     creation_caption = label(creation_button, "", 12, 14, 292);
@@ -126,6 +129,7 @@ void room_watch_conversations_create(lv_obj_t *parent, lv_event_cb_t handler)
         room_tab5_button(refresh, 304, 552, 672);
         room_tab5_button(next, 992, 552, 128);
         room_tab5_button(creation_button, 160, 552, 960);
+        room_tab5_button(reply, 160, 552, 960);
         lv_obj_set_pos(body, 160, 208);
         lv_obj_set_width(body, 960);
         lv_obj_set_width(body_text, 948);
@@ -216,6 +220,8 @@ void room_watch_conversations_render(const room_conversations_snapshot_t *snapsh
     lv_obj_set_y(refresh, content_bottom - footer);
     lv_obj_set_y(next, content_bottom - footer);
     lv_obj_set_y(creation_button, content_bottom - footer);
+    lv_obj_set_y(reply, content_bottom - footer);
+    lv_obj_set_hidden(reply, true);
     int row_height = room_page_row(true);
     const lv_font_t *reading_font = room_page_font();
     int line_height = reading_font->line_height;
@@ -287,7 +293,11 @@ void room_watch_conversations_render(const room_conversations_snapshot_t *snapsh
     lv_obj_set_hidden(new_chat, !show_new);
     lv_obj_set_width(heading, wide ? 544 : show_new ? 184 : 316);
     lv_obj_set_hidden(creation_button, !creation);
-    lv_obj_set_height(body, content_bottom - (wide ? (creation ? 320 : 208) : creation ? 168 : 112));
+    bool reply_ready = preview && !creation && ready && preview_state == ROOM_AGENTS_READY &&
+        snapshot->selected < snapshot->page.count &&
+        (snapshot->preview.status == ESP_OPENCLAW_PREVIEW_OK || snapshot->preview.status == ESP_OPENCLAW_PREVIEW_EMPTY);
+    lv_obj_set_hidden(reply, !reply_ready);
+    lv_obj_set_height(body, content_bottom - (wide ? (creation || reply_ready ? 320 : 208) : creation || reply_ready ? 168 : 112));
     if (creation) {
         const room_creation_snapshot_t *draft = &snapshot->creation;
         const char *caption = "Create empty conversation";
@@ -382,7 +392,8 @@ room_chat_action_t room_watch_conversations_activate(int action, size_t *value)
         preview = false;
         return ROOM_CHAT_STAY;
     }
-    if (current == NULL || preview) return ROOM_CHAT_STAY;
+    if (current == NULL) return ROOM_CHAT_STAY;
+    if (preview) return action == ROOM_CHAT_REPLY_BUTTON && !lv_obj_is_hidden(reply) ? ROOM_CHAT_REPLY : ROOM_CHAT_STAY;
     if (creation) {
         if (action != ROOM_CHAT_CREATION_BUTTON) return ROOM_CHAT_STAY;
         const room_creation_snapshot_t *draft = &current->creation;

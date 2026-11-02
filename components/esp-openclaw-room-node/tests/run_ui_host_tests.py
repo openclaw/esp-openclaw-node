@@ -147,6 +147,7 @@ def main():
             str(component / "room_watch_devices.c"),
             str(avatars / "esp_openclaw_avatar.c"), str(avatar_pixels),
             str(component / "room_watch_conversations.c"),
+            str(component / "room_text_composer.c"),
             str(component / "room_face.c"),
             str(pixels), str(watch_pixels), str(component / "room_lobster.c"),
             *map(str, sorted((lvgl / "src").rglob("*.c"))),

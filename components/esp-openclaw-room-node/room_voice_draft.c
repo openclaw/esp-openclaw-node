@@ -15,7 +15,9 @@ static struct {
     uint64_t recipient_revision;
     uint64_t owner_incarnation;
     room_voice_action_t end;
-    bool pending, begin;
+    bool pending, begin, reader;
+    bool edited;
+    char text[ESP_OPENCLAW_CHAT_TEXT_BYTES];
 } intent;
 static bool polling;
 /* Supervisor-owned below this point. */
@@ -54,27 +56,40 @@ void room_voice_draft_event(esp_openclaw_node_handle_t source, const char *event
     }
 }
 
-void room_voice_draft_request(room_voice_action_t action, uint32_t generation, uint64_t revision, uint64_t owner)
+void room_voice_draft_request(room_voice_action_t action, uint32_t generation, uint64_t revision, uint64_t owner, const char *text)
 {
+    if (text != NULL && strnlen(text, sizeof(intent.text)) == sizeof(intent.text)) return;
     if (generation == 0) return;
     portENTER_CRITICAL(&intent_mux);
-    if (action == ROOM_VOICE_BEGIN && generation > intent.generation) {
+    if ((action == ROOM_VOICE_BEGIN || action == ROOM_TEXT_BEGIN) && generation > intent.generation) {
         intent.generation = generation;
         intent.recipient_revision = revision;
         intent.owner_incarnation = owner;
         intent.begin = true;
+        intent.reader = action == ROOM_TEXT_BEGIN;
+        intent.edited = false;
         intent.end = ROOM_VOICE_BEGIN;
         intent.pending = true;
-    } else if (action != ROOM_VOICE_BEGIN && generation == intent.generation &&
+    } else if (action != ROOM_VOICE_BEGIN && action != ROOM_TEXT_BEGIN && generation == intent.generation &&
                intent.end != ROOM_VOICE_CANCEL && (intent.end != ROOM_VOICE_HIDE || action == ROOM_VOICE_CANCEL)) {
         if (action == ROOM_VOICE_SEND) {
             intent.recipient_revision = revision;
             intent.owner_incarnation = owner;
+            intent.edited = text != NULL;
+            if (text != NULL) strlcpy(intent.text, text, sizeof(intent.text));
         }
         intent.end = action;
         intent.pending = true;
     }
     portEXIT_CRITICAL(&intent_mux);
+}
+
+bool room_voice_draft_uses_reader(void)
+{
+    portENTER_CRITICAL(&intent_mux);
+    bool reader = intent.reader;
+    portEXIT_CRITICAL(&intent_mux);
+    return reader;
 }
 
 bool room_voice_draft_needs_poll(void)
@@ -122,7 +137,7 @@ static void poll_chat(void)
     if (!sent) {
         if (view.state != ROOM_VOICE_DRAFT) return;
         if (chat_state.state == ESP_OPENCLAW_CHAT_FAILED)
-            strlcpy(view.detail, "Open the conversation and record again.", sizeof(view.detail));
+            strlcpy(view.detail, "Open the conversation and try again.", sizeof(view.detail));
         else if (view.can_send) {
             strlcpy(view.detail, queue_failed ? "Could not queue the message. Try Send again." : "", sizeof(view.detail));
         } else strlcpy(view.detail, "Preparing conversation...", sizeof(view.detail));
@@ -157,14 +172,15 @@ static void poll_chat(void)
     strlcpy(view.detail, detail, sizeof(view.detail));
 }
 
-static void send_draft(void)
+static void send_draft(const char *text)
 {
     if (chat == NULL || !view.can_send || view.state != ROOM_VOICE_DRAFT || sent) return;
     uint8_t bytes[16];
     char id[33];
     esp_fill_random(bytes, sizeof(bytes));
     for (size_t i = 0; i < sizeof(bytes); ++i) snprintf(id + i * 2, 3, "%02x", bytes[i]);
-    if (esp_openclaw_chat_send(chat, view.text, id) == ESP_OK) {
+    if (esp_openclaw_chat_send(chat, text != NULL ? text : view.text, id) == ESP_OK) {
+        if (text != NULL) strlcpy(view.text, text, sizeof(view.text));
         sent = true;
         view.can_send = false;
         poll_chat();
@@ -243,7 +259,11 @@ static const char *recording_error(room_recording_error_t error)
 bool room_voice_draft_poll(const room_voice_context_t *context, room_voice_snapshot_t *result)
 {
     portENTER_CRITICAL(&intent_mux);
-    bool pending = intent.pending, begin = intent.begin;
+    bool pending = intent.pending, begin = intent.begin, reader = intent.reader;
+    bool edited = intent.edited;
+    /* Keep the cross-task draft off the supervisor stack. */
+    static char edited_text[ESP_OPENCLAW_CHAT_TEXT_BYTES];
+    if (pending && edited) memcpy(edited_text, intent.text, sizeof(edited_text));
     uint32_t generation = intent.generation;
     uint64_t revision = intent.recipient_revision;
     uint64_t owner = intent.owner_incarnation;
@@ -253,23 +273,34 @@ bool room_voice_draft_poll(const room_voice_context_t *context, room_voice_snaps
     portEXIT_CRITICAL(&intent_mux);
 
     if (!sent && !discarding && (room_voice_draft_busy() || view.state == ROOM_VOICE_DRAFT) &&
-        (!context->valid || view.recipient_revision != context->recipient_revision ||
+        (!context->valid || context->reader != view.reader || view.recipient_revision != context->recipient_revision ||
          view.owner_incarnation != context->owner_incarnation)) {
-        discard("Destination changed. Record again.");
+        discard("Destination changed. Open the conversation again.");
     }
     if (pending && begin) {
         discard(NULL);
         view = (room_voice_snapshot_t){.generation = generation,
-            .recipient_revision = revision, .owner_incarnation = owner};
+            .recipient_revision = revision, .owner_incarnation = owner, .reader = reader};
         strlcpy(view.recipient, context->recipient, sizeof(view.recipient));
+        strlcpy(view.conversation, context->conversation, sizeof(view.conversation));
         if (transcription != NULL) view.state = ROOM_VOICE_CANCELING;
         if (end == ROOM_VOICE_CANCEL || end == ROOM_VOICE_HIDE) {
             /* A covered or canceled gesture never opens the microphone. */
         } else if (end == ROOM_VOICE_FINISH) {
             discard_error = "Released before recording started. Try again.";
-        } else if (room_voice_draft_busy() || !context->valid || revision != context->recipient_revision ||
+        } else if (room_voice_draft_busy() || !context->valid || context->reader != reader || revision != context->recipient_revision ||
                    owner != context->owner_incarnation) {
-            discard_error = room_voice_draft_busy() ? "Audio is finishing. Try again." : "Destination changed. Record again.";
+            discard_error = room_voice_draft_busy() ? "Audio is finishing. Try again." : "Destination changed. Open the conversation again.";
+        } else if (reader) {
+            discarding = false;
+            view.state = ROOM_VOICE_DRAFT;
+            strlcpy(view.agent_id, context->agent_id, sizeof(view.agent_id));
+            if (context->send_enabled && esp_openclaw_chat_prepare(context->operator_node,
+                context->session_key, context->agent_id, &chat) == ESP_OK) {
+                chat_polling = true;
+                strlcpy(view.detail, "Preparing conversation...", sizeof(view.detail));
+            } else strlcpy(view.detail, context->send_enabled ? "Open the conversation and try again."
+                : "Enable Messaging in Settings to send.", sizeof(view.detail));
         } else if (!context->available || room_media_request_recording(NULL, NULL) != ESP_OK) {
             discard_error = "Audio unavailable. Try again when ready.";
         } else {
@@ -284,13 +315,17 @@ bool room_voice_draft_poll(const room_voice_context_t *context, room_voice_snaps
                 strlcpy(view.detail, "Preparing conversation...", sizeof(view.detail));
             } else strlcpy(view.detail, context->agent_id[0] == '\0' ? "Choose an agent before recording to send."
                 : !context->send_enabled ? "Enable voice actions in firmware to send."
-                : "Open the conversation and record again.", sizeof(view.detail));
+                : "Open the conversation and try again.", sizeof(view.detail));
         }
     } else if (pending && generation == view.generation) {
         if (end == ROOM_VOICE_CANCEL || (end == ROOM_VOICE_HIDE && !sent)) discard(NULL);
         else if (end == ROOM_VOICE_FINISH && recording_owned && !discarding) room_recording_stop();
         else if (end == ROOM_VOICE_SEND && revision == view.recipient_revision &&
-                 owner == view.owner_incarnation && context->valid) send_draft();
+                 owner == view.owner_incarnation && context->valid &&
+                 revision == context->recipient_revision && owner == context->owner_incarnation &&
+                 context->send_enabled) {
+            send_draft(edited ? edited_text : NULL);
+        }
     }
     if (recording_owned) {
         /* Completion publishes terminal state before clearing active. Read
@@ -331,6 +366,10 @@ bool room_voice_draft_poll(const room_voice_context_t *context, room_voice_snaps
     }
     poll_transcription();
     poll_chat();
+    if (!sent && view.state == ROOM_VOICE_DRAFT && !context->send_enabled) {
+        view.can_send = false;
+        strlcpy(view.detail, "Enable Messaging in Settings to send.", sizeof(view.detail));
+    }
     if (discarding && !room_voice_draft_busy()) {
         view.duration_ms = 0;
         view.detail[0] = '\0';

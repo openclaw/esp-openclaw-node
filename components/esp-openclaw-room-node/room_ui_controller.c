@@ -25,8 +25,13 @@
 #include "room_watch_agents.h"
 #include "room_watch_devices.h"
 #include "room_watch_conversations.h"
+#include "room_text_composer.h"
 
 static bool watch_navigation_active(void);
+static void composer_action(bool send, const char *text);
+static bool composer_current(void);
+static bool composer_open;
+static uint32_t composer_generation;
 static void start_text_hint(uint32_t show_ms);
 static void room_ui_paint_and_unlock(void);
 static int room_ui_target_brightness(room_ui_state_t state, bool canvas_active);
@@ -122,7 +127,7 @@ static room_ui_talk_target_t current_target;
 /* A changed recipient must reach the display before accepting a new Start. */
 static uint64_t painted_target_revision;
 static room_voice_snapshot_t current_voice, painted_voice;
-static void (*voice_action_handler)(room_voice_action_t, uint32_t, uint64_t, uint64_t);
+static void (*voice_action_handler)(room_voice_action_t, uint32_t, uint64_t, uint64_t, const char *);
 /* Gesture state is display-owned. Audio ownership stays with the supervisor. */
 static bool voice_held, voice_started;
 static uint32_t voice_generation, voice_canceled_generation, voice_pressed_at;
@@ -448,11 +453,15 @@ static esp_err_t watch_navigation_show_context(room_watch_page_t page, unsigned 
     if (resume_reader) conversation_resume_failed = false;
     if (watch_page == ROOM_WATCH_CONVERSATIONS || suspend_reader || resume_reader) ++conversation_generation;
     bool wake_home = page == ROOM_WATCH_HOME;
+    bool dismiss_composer = composer_open;
+    composer_open = false;
     if (page != ROOM_WATCH_AGENTS) voice_conversation_agent[0] = '\0';
     watch_page = show_canvas ? ROOM_WATCH_HOME : page;
     pressed_watch_page = -1;
     pressed_talk_action = TALK_CONTROL_NONE;
     taskEXIT_CRITICAL(&state_mux);
+    if (dismiss_composer && voice_action_handler != NULL)
+        voice_action_handler(ROOM_VOICE_HIDE, composer_generation, 0, 0, NULL);
     if (leaving_devices) close_devices();
     if (entering_devices) open_devices();
     if (entering_agents) { room_watch_agents_reset(); request_agents_page(0); }
@@ -835,7 +844,7 @@ static void watch_conversations_clicked(lv_event_t *event)
     bool wake = code == LV_EVENT_PRESSED && room_board_display_is_dark();
     bool mode_current = room_watch_conversations_input_current();
     taskENTER_CRITICAL(&state_mux);
-    bool current = mode_current && conversations_open && watch_page == ROOM_WATCH_AGENTS && !diagnostics_open;
+    bool current = !composer_open && mode_current && conversations_open && watch_page == ROOM_WATCH_AGENTS && !diagnostics_open;
     if (current_conversations != NULL && painted_conversations != NULL) {
         current = current && current_conversations->revision == painted_conversations->revision &&
             current_conversations->preview_revision == painted_conversations->preview_revision &&
@@ -855,7 +864,18 @@ static void watch_conversations_clicked(lv_event_t *event)
     if (!activate) return;
     size_t value = 0;
     room_chat_action_t result = room_watch_conversations_activate(action, &value);
-    if (result == ROOM_CHAT_LEAVE) close_conversations(true);
+    if (result == ROOM_CHAT_REPLY) {
+        if (voice_action_handler == NULL || painted_conversations == NULL || voice_generation == UINT32_MAX) return;
+        taskENTER_CRITICAL(&state_mux);
+        uint64_t owner = current_voice.owner_incarnation;
+        bool sending = current_voice.state >= ROOM_VOICE_SENDING && current_voice.state <= ROOM_VOICE_ACCEPTED;
+        taskEXIT_CRITICAL(&state_mux);
+        if (sending) return;
+        composer_generation = ++voice_generation;
+        composer_open = true;
+        room_text_composer_open(composer_generation, "");
+        voice_action_handler(ROOM_TEXT_BEGIN, composer_generation, painted_conversations->preview_revision, owner, NULL);
+    } else if (result == ROOM_CHAT_LEAVE) close_conversations(true);
     else if (conversation_handler != NULL && (result == ROOM_CHAT_LOAD || result == ROOM_CHAT_READ)) {
         taskENTER_CRITICAL(&state_mux);
         if (current_conversations != NULL) {
@@ -881,6 +901,35 @@ static void watch_conversations_clicked(lv_event_t *event)
     room_ui_refresh();
 }
 
+static bool composer_current(void)
+{
+    if (room_board_display_is_dark()) { room_ui_show_face_hint(10000); return false; }
+    return composer_open && !diagnostics_open && !room_canvas_is_active();
+}
+
+static void composer_action(bool send, const char *text)
+{
+    if (!composer_current()) return;
+    if (!send) {
+        composer_open = false;
+        if (voice_action_handler != NULL)
+            voice_action_handler(ROOM_VOICE_HIDE, composer_generation, 0, 0, NULL);
+    } else {
+        taskENTER_CRITICAL(&state_mux);
+        bool current = current_voice.generation == composer_generation &&
+            current_voice.generation == painted_voice.generation && current_voice.state == ROOM_VOICE_DRAFT &&
+            current_voice.can_send && painted_voice.can_send &&
+            current_voice.recipient_revision == painted_voice.recipient_revision &&
+            current_voice.owner_incarnation == painted_voice.owner_incarnation &&
+            current_messaging.state == ROOM_MESSAGING_READY && current_messaging.connected;
+        taskEXIT_CRITICAL(&state_mux);
+        if (current && voice_action_handler != NULL)
+            voice_action_handler(ROOM_VOICE_SEND, composer_generation, painted_voice.recipient_revision,
+                painted_voice.owner_incarnation, text);
+    }
+    room_ui_refresh();
+}
+
 static talk_control_action_t talk_control_action(room_ui_talk_state_t talk)
 {
     if (talk == ROOM_UI_TALK_READY) return selection_pending || current_target.expired
@@ -894,7 +943,7 @@ void room_ui_set_talk_action_handler(void (*handler)(bool start, uint64_t recipi
     talk_action_handler = handler;
 }
 
-void room_ui_set_voice_action_handler(void (*handler)(room_voice_action_t, uint32_t, uint64_t, uint64_t))
+void room_ui_set_voice_action_handler(void (*handler)(room_voice_action_t, uint32_t, uint64_t, uint64_t, const char *))
 {
     voice_action_handler = handler;
 }
@@ -925,7 +974,7 @@ static void dismiss_voice(bool explicit)
     if (!explicit && (submitted || painted_voice.state >= ROOM_VOICE_SENDING)) return;
     if (generation != 0 && (explicit || generation != voice_canceled_generation) && voice_action_handler != NULL) {
         voice_canceled_generation = generation;
-        voice_action_handler(explicit ? ROOM_VOICE_CANCEL : ROOM_VOICE_HIDE, generation, 0, 0);
+        voice_action_handler(explicit ? ROOM_VOICE_CANCEL : ROOM_VOICE_HIDE, generation, 0, 0, NULL);
     }
 }
 
@@ -942,9 +991,7 @@ static bool voice_intent_current(void)
         current_voice.recipient_revision == painted_voice.recipient_revision &&
         current_voice.owner_incarnation == painted_voice.owner_incarnation;
     if (painted_voice.state == ROOM_VOICE_DRAFT)
-        current = current && current_voice.can_send && painted_voice.can_send &&
-            !current_target.expired && current_target.revision == painted_target_revision &&
-            current_facts.talk == ROOM_UI_TALK_READY;
+        current = current && !current_target.expired && current_target.revision == painted_target_revision;
     taskEXIT_CRITICAL(&state_mux);
     return current && !voice_held && !room_canvas_is_active();
 }
@@ -965,9 +1012,10 @@ static void watch_voice_send(lv_event_t *event)
         send_pressed_generation = 0;
         if (!valid) return;
         if (painted_voice.state == ROOM_VOICE_DRAFT) {
-            if (voice_action_handler != NULL)
-                voice_action_handler(ROOM_VOICE_SEND, painted_voice.generation,
-                    painted_voice.recipient_revision, painted_voice.owner_incarnation);
+            composer_generation = painted_voice.generation;
+            composer_open = true;
+            room_text_composer_open(composer_generation, painted_voice.text);
+            room_ui_refresh();
         } else {
             char agent[sizeof(voice_conversation_agent)];
             strlcpy(agent, painted_voice.agent_id, sizeof(agent));
@@ -1023,14 +1071,14 @@ static void watch_voice_clicked(lv_event_t *event)
             ++voice_generation;
             voice_started = true;
             if (voice_action_handler != NULL)
-                voice_action_handler(ROOM_VOICE_BEGIN, voice_generation, voice_revision, voice_owner);
+                voice_action_handler(ROOM_VOICE_BEGIN, voice_generation, voice_revision, voice_owner, NULL);
         }
     } else if (code == LV_EVENT_RELEASED) {
         bool finish = voice_started && (painted_voice.generation != voice_generation ||
             painted_voice.state == ROOM_VOICE_STARTING || painted_voice.state == ROOM_VOICE_RECORDING);
         voice_held = voice_started = false;
         if (finish && voice_action_handler != NULL)
-            voice_action_handler(ROOM_VOICE_FINISH, voice_generation, voice_revision, voice_owner);
+            voice_action_handler(ROOM_VOICE_FINISH, voice_generation, voice_revision, voice_owner, NULL);
         room_ui_refresh();
     }
 }
@@ -1330,6 +1378,8 @@ void room_ui_init(void)
         room_watch_conversations_create(lv_layer_top(), watch_conversations_clicked);
         room_watch_status_create(lv_layer_top());
     }
+    if (watch_home_enabled || tab5_home_enabled)
+        room_text_composer_create(lv_layer_top(), composer_current, composer_action);
     if (watch_home_enabled || tab5_home_enabled) room_live_talk_create(lv_layer_top(), tab5_home_enabled);
     bool board_has_animated_face = board != NULL && board->display.animated_face;
     idle_brightness = board != NULL ? board->display.idle_brightness : 0;
@@ -1552,7 +1602,12 @@ static bool room_ui_render_locked(void)
     bool voice_home = watch_home_enabled && voice_action_handler != NULL &&
         facts.talk != ROOM_UI_TALK_CONNECTING && facts.talk != ROOM_UI_TALK_ACTIVE &&
         facts.talk != ROOM_UI_TALK_STOPPING;
-    if (watch_home_enabled && (canvas_active || overlay || navigation || !voice_home)) cancel_voice();
+    if (watch_home_enabled && !composer_open && (canvas_active || overlay || navigation || !voice_home)) cancel_voice();
+    if (composer_open && (canvas_active || overlay)) {
+        composer_open = false;
+        if (voice_action_handler != NULL)
+            voice_action_handler(ROOM_VOICE_HIDE, composer_generation, 0, 0, NULL);
+    }
     painted_voice = voice;
     if (watch_home_enabled) {
         bool current = reader_context.epoch != 0 && room_conversations_resume_current(reader_context.epoch);
@@ -1582,11 +1637,11 @@ static bool room_ui_render_locked(void)
         bool status_page = page == ROOM_WATCH_HOME || page == ROOM_WATCH_MENU ||
             page == ROOM_WATCH_CONNECTION || page == ROOM_WATCH_CALL ||
             page == ROOM_WATCH_AGENTS || page == ROOM_WATCH_DEVICES || settings;
-        room_watch_status_render(&facts, !status_page || canvas_active || overlay || camera_active);
+        room_watch_status_render(&facts, !status_page || canvas_active || overlay || camera_active || composer_open);
     }
     if (tab5_home_enabled) {
         room_tab5_ui_render(page, parent, &facts, &target, state, detail,
-            canvas_active || overlay);
+            canvas_active || overlay || composer_open);
         room_watch_agents_render(&painted_agents, canvas_active || overlay || page != ROOM_WATCH_AGENTS || chats,
             target.selected ? target.id : "", target.expired, selecting, selection_error, content_bottom);
         room_watch_conversations_render(painted_conversations,
@@ -1595,6 +1650,8 @@ static bool room_ui_render_locked(void)
             canvas_active || overlay || !room_tab5_settings_page(page), content_bottom);
         room_watch_devices_render(painted_devices, canvas_active || overlay || page != ROOM_WATCH_DEVICES, content_bottom);
     }
+    if (watch_home_enabled || tab5_home_enabled)
+        room_text_composer_render(&voice, !composer_open || canvas_active || overlay, content_bottom);
     bool live_visible = (watch_home_enabled || tab5_home_enabled) && !canvas_active && !overlay &&
         facts.talk == ROOM_UI_TALK_ACTIVE && painted_live_talk.sequence != 0 &&
         (page == ROOM_WATCH_HOME || page == ROOM_WATCH_CALL);
@@ -1964,6 +2021,12 @@ void room_ui_set_diagnostics_open(bool open)
     }
     taskEXIT_CRITICAL(&state_mux);
     if (open) {
+        if (composer_open) {
+            composer_open = false;
+            if (voice_action_handler != NULL)
+                voice_action_handler(ROOM_VOICE_HIDE, composer_generation, 0, 0, NULL);
+            room_text_composer_render(NULL, true, 432);
+        }
         if (watch_home_enabled) {
             cancel_voice();
             room_watch_home_render(NULL, NULL, ROOM_UI_IDLE, "", NULL, NULL, false, false, ROOM_HOME_NONE, true);

@@ -308,3 +308,21 @@ TEST_CASE("transcription grants a fresh idle deadline after readiness and audio 
     TEST_ASSERT_EQUAL(ESP_OPENCLAW_TRANSCRIPTION_READY, snapshot(h).state);
     dispose(h);
 }
+
+TEST_CASE("transcription rejects malformed UTF8 before publishing editor text", "[transcription]")
+{
+    const char *invalid[] = {"{\"text\":\"\xf0\x9f\"}", "{\"text\":\"\xc3x\"}", "{\"text\":\"\xc0\x80\"}"};
+    for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i) {
+        esp_openclaw_transcription_handle_t h = ready();
+        event(h, "draft-1", "transcript.done", 2, invalid[i]);
+        esp_openclaw_transcription_snapshot_t result = snapshot(h);
+        TEST_ASSERT_EQUAL(ESP_OPENCLAW_TRANSCRIPTION_FAILED, result.state);
+        TEST_ASSERT_EQUAL(ESP_OPENCLAW_TRANSCRIPTION_ERROR_FORMAT, result.error);
+        TEST_ASSERT_EQUAL_STRING("", result.text);
+        dispose(h);
+    }
+    esp_openclaw_transcription_handle_t h = ready();
+    event(h, "draft-1", "transcript.done", 2, "{\"text\":\"caf\xc3\xa9 \xf0\x9f\xa6\x8a\"}");
+    TEST_ASSERT_EQUAL_STRING("caf\xc3\xa9 \xf0\x9f\xa6\x8a", snapshot(h).text);
+    dispose(h);
+}

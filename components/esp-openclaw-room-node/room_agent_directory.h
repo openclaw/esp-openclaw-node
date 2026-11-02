@@ -86,3 +86,11 @@ esp_err_t room_agent_directory_resolve_locked(unsigned revision, const char *id,
 void room_agent_directory_poll(bool defer_request);
 /* The caller holds the room lock; includes uncertain submitted writes. */
 bool room_conversations_creation_busy_locked(void);
+
+/* Caller holds the room lock. Resolve the exact live reader, never Talk. */
+typedef struct {
+    esp_openclaw_agent_t agent;
+    esp_openclaw_session_t session;
+    unsigned revision;
+} room_conversation_reply_t;
+bool room_conversations_reply_locked(room_conversation_reply_t *target);

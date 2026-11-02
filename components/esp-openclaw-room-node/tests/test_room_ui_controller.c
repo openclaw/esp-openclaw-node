@@ -533,7 +533,7 @@ static void check_watch_home(const char *path)
     watch_continue_button = lv_obj_get_parent(find_text(lv_layer_top(), "Choose agent"));
     watch_voice_button = lv_obj_get_parent(find_text(lv_layer_top(), "Hold to record"));
     watch_discard_button = lv_obj_get_parent(find_text(lv_layer_top(), "Discard"));
-    watch_send_button = lv_obj_get_parent(find_text(lv_layer_top(), LV_SYMBOL_UP "  Send"));
+    watch_send_button = lv_obj_get_parent(find_text(lv_layer_top(), "Edit / Review"));
     lv_obj_t *review = lv_obj_get_parent(find_text(lv_layer_top(), "Text draft"));
     for (unsigned i = 0; i < lv_obj_get_child_count(review); ++i) {
         lv_obj_t *child = lv_obj_get_child(review, i);
@@ -829,7 +829,7 @@ static void check_watch_navigation(const char *path)
     puts("watch menu, live connection, Talk and empty Canvas: passed");
 }
 
-static void voice_action(room_voice_action_t action, uint32_t generation, uint64_t revision, uint64_t owner);
+static void voice_action(room_voice_action_t action, uint32_t generation, uint64_t revision, uint64_t owner, const char *text);
 
 static void check_watch_live_call(const char *path)
 {
@@ -1494,6 +1494,156 @@ static void check_watch_agent_detail(const char *path)
     puts("watch agent detail: full identities, reading sizes, scroll reachability and fixed call-safe actions passed");
 }
 
+static room_voice_snapshot_t composer_draft;
+static unsigned composer_sends, composer_hides;
+static char composer_sent[ESP_OPENCLAW_CHAT_TEXT_BYTES];
+static void text_action(room_voice_action_t action, uint32_t generation, uint64_t revision, uint64_t owner, const char *text)
+{
+    assert(critical_depth == 0);
+    if (action == ROOM_TEXT_BEGIN) {
+        composer_draft = (room_voice_snapshot_t){.state = ROOM_VOICE_DRAFT, .generation = generation,
+            .recipient_revision = revision, .owner_incarnation = owner, .reader = true};
+        strcpy(composer_draft.recipient, "Reader agent");
+        strcpy(composer_draft.conversation, "Selected conversation");
+        strcpy(composer_draft.detail, "Enable Messaging in Settings to send.");
+        room_ui_store_voice(&composer_draft);
+    } else if (action == ROOM_VOICE_SEND) {
+        assert(revision == composer_draft.recipient_revision && owner == composer_draft.owner_incarnation);
+        ++composer_sends;
+        snprintf(composer_sent, sizeof(composer_sent), "%s", text);
+    } else if (action == ROOM_VOICE_HIDE) ++composer_hides;
+}
+
+static lv_obj_t *find_type(lv_obj_t *parent, const lv_obj_class_t *type)
+{
+    if (!lv_obj_is_visible(parent)) return NULL;
+    if (lv_obj_check_type(parent, type)) return parent;
+    for (unsigned i = 0; i < lv_obj_get_child_count(parent); ++i) {
+        lv_obj_t *found = find_type(lv_obj_get_child(parent, i), type);
+        if (found != NULL) return found;
+    }
+    return NULL;
+}
+
+static void check_reader_composer(const char *path)
+{
+    room_ui_set_voice_action_handler(text_action);
+    room_voice_snapshot_t idle = {.owner_incarnation = 77};
+    room_ui_store_voice(&idle);
+    unsigned sends = composer_sends, hides = composer_hides;
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), "Write reply")));
+    assert(visible_watch_text("Write message") && composer_sends == sends);
+    lv_obj_t *panel = lv_obj_get_parent(find_visible_text(lv_layer_top(), "Write message"));
+    lv_obj_t *editor = find_type(panel, &lv_textarea_class);
+    assert(editor != NULL && lv_textarea_get_text(editor)[0] == '\0');
+    if (width < 500) {
+        click_talk(lv_obj_get_parent(find_visible_text(panel, "a")));
+        click_talk(lv_obj_get_parent(find_visible_text(panel, "b")));
+        click_talk(lv_obj_get_parent(find_visible_text(panel, LV_SYMBOL_LEFT)));
+        click_talk(lv_obj_get_parent(find_visible_text(panel, LV_SYMBOL_BACKSPACE)));
+        click_talk(lv_obj_get_parent(find_visible_text(panel, "c")));
+        assert(strcmp(lv_textarea_get_text(editor), "cb") == 0);
+        click_talk(lv_obj_get_parent(find_visible_text(panel, "Next keys")));
+        click_talk(lv_obj_get_parent(find_visible_text(panel, "g")));
+        assert(strcmp(lv_textarea_get_text(editor), "cgb") == 0);
+    } else {
+        lv_obj_t *keyboard = find_type(panel, &lv_keyboard_class);
+        assert(keyboard != NULL);
+        // The first QWERTY touch wakes only, without inserting a hidden character.
+        assert(room_board_display_brightness_set(0) == ESP_OK);
+        touch_point = (lv_point_t){290, 406};
+        touch_state = LV_INDEV_STATE_PRESSED; lv_indev_read(touchscreen); lv_tick_inc(40);
+        touch_state = LV_INDEV_STATE_RELEASED; lv_indev_read(touchscreen); lv_tick_inc(40);
+        assert(lv_textarea_get_text(editor)[0] == '\0' && brightness > 0);
+        // Touch the maintained QWERTY key through the real LVGL input device.
+        touch_point = (lv_point_t){290, 406};
+        touch_state = LV_INDEV_STATE_PRESSED; lv_indev_read(touchscreen); lv_tick_inc(40);
+        touch_state = LV_INDEV_STATE_RELEASED; lv_indev_read(touchscreen); lv_tick_inc(40);
+        assert(strcmp(lv_textarea_get_text(editor), "q") == 0);
+        // Checkmark and keyboard/hide both have a visible, non-sending result.
+        const int key_x[] = {1050, 230};
+        for (unsigned i = 0; i < 2; ++i) {
+            touch_point = (lv_point_t){key_x[i], 572};
+            touch_state = LV_INDEV_STATE_PRESSED; lv_indev_read(touchscreen); lv_tick_inc(40);
+            touch_state = LV_INDEV_STATE_RELEASED; lv_indev_read(touchscreen); lv_tick_inc(40);
+            assert(visible_watch_text("Review message") && composer_sends == sends);
+            assert(strcmp(lv_textarea_get_text(editor), "q") == 0);
+            click_talk(lv_obj_get_parent(find_visible_text(panel, "Edit")));
+            assert(lv_obj_is_visible(keyboard));
+        }
+    }
+    lv_textarea_set_text(editor, "caf\xc3\xa9");
+    lv_textarea_set_cursor_pos(editor, LV_TEXTAREA_CURSOR_LAST);
+    lv_textarea_delete_char(editor);
+    assert(strcmp(lv_textarea_get_text(editor), "caf") == 0);
+    lv_textarea_add_text(editor, "\xc3\xa9");
+    char full[ESP_OPENCLAW_CHAT_TEXT_BYTES];
+    memset(full, 'x', sizeof(full) - 2); full[sizeof(full) - 2] = '\0';
+    lv_textarea_set_text(editor, full);
+    lv_textarea_add_text(editor, "\xc3\xa9");
+    assert(strlen(lv_textarea_get_text(editor)) == sizeof(full) - 2);
+    lv_textarea_add_char(editor, 'y');
+    assert(strlen(lv_textarea_get_text(editor)) == sizeof(full) - 1);
+    lv_textarea_add_char(editor, 'z');
+    assert(strlen(lv_textarea_get_text(editor)) == sizeof(full) - 1);
+    if (width < 500) {
+        click_talk(lv_obj_get_parent(find_visible_text(panel, LV_SYMBOL_BACKSPACE)));
+    } else {
+        touch_point = (lv_point_t){1080, 406};
+        touch_state = LV_INDEV_STATE_PRESSED; lv_indev_read(touchscreen); lv_tick_inc(40);
+        touch_state = LV_INDEV_STATE_RELEASED; lv_indev_read(touchscreen); lv_tick_inc(40);
+    }
+    assert(strlen(lv_textarea_get_text(editor)) == sizeof(full) - 2);
+    assert(find_visible_fragment(panel, "Draft full:") == NULL);
+    if (width < 500) {
+        click_talk(lv_obj_get_parent(find_visible_text(panel, "g")));
+    } else {
+        touch_point = (lv_point_t){290, 406};
+        touch_state = LV_INDEV_STATE_PRESSED; lv_indev_read(touchscreen); lv_tick_inc(40);
+        touch_state = LV_INDEV_STATE_RELEASED; lv_indev_read(touchscreen); lv_tick_inc(40);
+    }
+    assert(strlen(lv_textarea_get_text(editor)) == sizeof(full) - 1);
+    assert(lv_textarea_get_text(editor)[sizeof(full) - 2] == (width < 500 ? 'g' : 'q'));
+    lv_textarea_set_text(editor, "literal \\u00E9");
+    click_talk(lv_obj_get_parent(find_visible_text(panel, "Review")));
+    assert(find_visible_text(panel, "literal \\\\u00E9") != NULL);
+    assert(find_visible_fragment(panel, "Unicode escapes show") != NULL);
+    click_talk(lv_obj_get_parent(find_visible_text(panel, "Edit")));
+    lv_textarea_set_text(editor, "A reviewed reply: caf\xc3\xa9 \xf0\x9f\xa6\x8a");
+    char output[1024];
+    if (path) { snprintf(output, sizeof(output), "%s-composer-edit.ppm", path); write_frame(output); }
+    click_talk(lv_obj_get_parent(find_visible_text(panel, "Review")));
+    lv_obj_t *send = lv_obj_get_parent(find_visible_text(panel, "Send"));
+    assert(lv_obj_has_state(send, LV_STATE_DISABLED) && composer_sends == sends);
+    composer_draft.can_send = true; composer_draft.detail[0] = '\0';
+    room_messaging_snapshot_t access = {.state = ROOM_MESSAGING_READY, .connected = true};
+    room_ui_store_messaging(&access);
+    room_ui_store_voice(&composer_draft); room_ui_refresh();
+    assert(visible_watch_text("Review message") && !lv_obj_has_state(send, LV_STATE_DISABLED));
+    assert(find_visible_text(panel, "A reviewed reply: caf\\u00E9 \\U0001F98A") != NULL);
+    assert(find_visible_fragment(panel, "Unicode escapes show") != NULL);
+    assert(!visible_watch_text(LV_SYMBOL_WIFI " Wi-Fi    /    Connected"));
+    if (path) { snprintf(output, sizeof(output), "%s-composer-review.ppm", path); write_frame(output); }
+    touch_talk(send, true);
+    ++composer_draft.owner_incarnation;
+    room_ui_store_voice(&composer_draft); // Reject a held Send before repaint.
+    touch_talk(send, false);
+    assert(composer_sends == sends);
+    --composer_draft.owner_incarnation;
+    room_ui_store_voice(&composer_draft); room_ui_refresh();
+    click_talk(send);
+    assert(composer_sends == sends + 1 && strcmp(composer_sent, "A reviewed reply: caf\xc3\xa9 \xf0\x9f\xa6\x8a") == 0);
+    composer_draft.state = ROOM_VOICE_SEND_UNKNOWN;
+    strcpy(composer_draft.detail, "Check the conversation before sending again.");
+    room_ui_store_voice(&composer_draft); room_ui_refresh();
+    assert(!lv_obj_is_visible(send));
+    click_talk(lv_obj_get_parent(find_visible_text(panel, "Done")));
+    assert(composer_hides == hides + 1 && visible_watch_text("Write reply"));
+    room_ui_set_voice_action_handler(NULL);
+    room_ui_store_voice(&idle);
+    puts("reader composer: native edit/review, UTF8 byte/cursor/delete bounds, read-only and stale Send, explicit delivery passed");
+}
+
 static void check_watch_conversations(const char *path)
 {
     assert(room_ui_watch_menu("agents") == ESP_OK);
@@ -1571,6 +1721,7 @@ static void check_watch_conversations(const char *path)
     room_ui_store_conversations(view, conversation_generation);
     assert(lv_obj_is_visible(find_text(lv_layer_top(), LV_SYMBOL_LEFT " Chats")));
     if (path) { snprintf(output, sizeof(output), "%s-preview.ppm", path); write_frame(output); }
+    check_reader_composer(path);
     lv_obj_update_layout(lv_layer_top());
     touch_state = LV_INDEV_STATE_RELEASED; lv_indev_read(touchscreen);
     touch_point = (lv_point_t){180, 250}; touch_state = LV_INDEV_STATE_PRESSED;
@@ -1586,11 +1737,11 @@ static void check_watch_conversations(const char *path)
     room_ui_facts_t call_facts = {.wifi = ROOM_UI_WIFI_CONNECTED,
         .gateway = ROOM_UI_GATEWAY_CONNECTED, .talk = ROOM_UI_TALK_ACTIVE};
     room_ui_store_facts(&call_facts); room_ui_set(ROOM_UI_SPEAKING, NULL);
-    assert(lv_obj_get_height(scrolled) == 258 && visible_watch_text("Return to call"));
+    assert(lv_obj_get_height(scrolled) == 202 && visible_watch_text("Return to call"));
     lv_obj_scroll_to_y(scrolled, 10000, LV_ANIM_OFF);
     call_facts.talk = ROOM_UI_TALK_READY;
     room_ui_store_facts(&call_facts); room_ui_set(ROOM_UI_IDLE, NULL);
-    assert(lv_obj_get_height(scrolled) == 320 && lv_obj_get_scroll_bottom(scrolled) >= 0);
+    assert(lv_obj_get_height(scrolled) == 264 && lv_obj_get_scroll_bottom(scrolled) >= 0);
     assert(!visible_watch_text("Return to call") && !visible_watch_text("Start Talk"));
     lv_obj_scroll_to_y(scrolled, scroll_y, LV_ANIM_OFF);
     room_ui_talk_target_t target = {.selected = true, .id = "builder", .name = "Builder"};
@@ -2458,8 +2609,9 @@ static void check_watch_messaging(const char *path)
 
 static unsigned voice_begins, voice_finishes, voice_cancels, voice_sends;
 static uint32_t voice_request_generation;
-static void voice_action(room_voice_action_t action, uint32_t generation, uint64_t revision, uint64_t owner)
+static void voice_action(room_voice_action_t action, uint32_t generation, uint64_t revision, uint64_t owner, const char *text)
 {
+    (void)text;
     assert(critical_depth == 0);
     voice_request_generation = generation;
     if (action == ROOM_VOICE_BEGIN) {
@@ -2650,10 +2802,14 @@ static void check_watch_voice(const char *path)
     test_voice.can_send = false;
     strcpy(test_voice.detail, "Preparing conversation...");
     show_voice(ROOM_VOICE_DRAFT);
-    lv_obj_t *send_button = lv_obj_get_parent(find_visible_text(lv_layer_top(), LV_SYMBOL_UP "  Send"));
-    assert(lv_obj_has_state(send_button, LV_STATE_DISABLED));
+    lv_obj_t *send_button = lv_obj_get_parent(find_visible_text(lv_layer_top(), "Edit / Review"));
+    assert(!lv_obj_has_state(send_button, LV_STATE_DISABLED));
     click_talk(send_button);
-    assert(voice_sends == 0 && visible_watch_text("Preparing conversation..."));
+    assert(voice_sends == 0 && visible_watch_text("Write message"));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), "Review")));
+    assert(lv_obj_has_state(lv_obj_get_parent(find_visible_text(lv_layer_top(), "Send")), LV_STATE_DISABLED));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), "Cancel")));
+    assert(voice_sends == 0);
     voice_snapshot(path, "preparing");
     test_voice.can_send = true;
     strcpy(test_voice.detail, "Could not queue the message. Try Send again.");
@@ -2680,16 +2836,23 @@ static void check_watch_voice(const char *path)
     click_talk(send_button);
     assert(voice_sends == 0 && brightness > 0);
     click_talk(send_button);
+    assert(voice_sends == 0 && visible_watch_text("Write message"));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), "Review")));
+    room_messaging_snapshot_t ready_access = {.state = ROOM_MESSAGING_READY, .connected = true};
+    room_ui_store_messaging(&ready_access);
+    lv_obj_t *explicit_send = lv_obj_get_parent(find_visible_text(lv_layer_top(), "Send"));
+    click_talk(explicit_send);
     assert(voice_sends == 1);
     // A new press that starts on Send must not become navigation mid-gesture.
-    touch_talk(send_button, true);
+    touch_talk(explicit_send, true);
     strcpy(test_voice.detail, "Message accepted. Open Conversations for the reply.");
     show_voice(ROOM_VOICE_ACCEPTED);
     unsigned requests = conversation_requests;
-    touch_talk(send_button, false);
+    touch_talk(explicit_send, false);
     assert(conversation_requests == requests && voice_sends == 1);
     unsigned submitted_cancels = voice_cancels;
     assert(room_ui_watch_menu("menu") == ESP_OK);
+    ++submitted_cancels; // Hiding the shared view never aborts the submitted turn.
     assert(voice_cancels == submitted_cancels);
     assert(room_ui_watch_menu("home") == ESP_OK);
     assert(visible_watch_text("Accepted"));
@@ -3353,6 +3516,7 @@ static void check_tab5_agents(const char *path)
     room_ui_store_conversations(view, conversation_generation);
     assert(find_visible_fragment(lv_layer_top(), "A private conversation excerpt"));
     if (path) { snprintf(output, sizeof(output), "%s-reader.ppm", path); write_frame(output); }
+    check_reader_composer(path);
     assert(room_ui_watch_menu("home") == ESP_OK);
     assert(!find_visible_fragment(lv_layer_top(), "A private conversation excerpt"));
     free(view);

@@ -290,6 +290,19 @@ static bool reader_available(void)
     return false;
 }
 
+bool room_conversations_reply_locked(room_conversation_reply_t *target)
+{
+    const room_conversations_snapshot_t *reader = directory.conversations;
+    if (!reader_available() || reader->state != ROOM_AGENTS_READY ||
+        reader->preview_state != ROOM_AGENTS_READY || reader->selected >= reader->page.count ||
+        (reader->preview.status != ESP_OPENCLAW_PREVIEW_OK && reader->preview.status != ESP_OPENCLAW_PREVIEW_EMPTY))
+        return false;
+    target->agent = reader->agent;
+    target->session = reader->page.sessions[reader->selected];
+    target->revision = directory.preview_revision;
+    return true;
+}
+
 static bool creation_owner(void)
 {
     if (!directory.ready || directory.client != directory.creation_client ||

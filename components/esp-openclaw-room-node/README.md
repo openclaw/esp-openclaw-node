@@ -92,7 +92,7 @@ offers **Continue conversation** with its own agent name; otherwise Home offers
 **Choose agent**. Offline and setup states offer **Connection**. Continue does
 not change the next Talk recipient shown in the agent capsule. During a live
 call the primary action is **Return to call**. Draft review keeps its explicit
-Send and Discard actions.
+Edit / Review and Discard actions.
 
 The local USB command `agents refresh [offset]` reads a page of up to eight
 agents through the existing operator connection. `agents` reports its state
@@ -217,11 +217,28 @@ changing the recipient, or losing the connection clears the draft. Empty speech,
 provider failures, and timeouts offer re-recording.
 
 With [voice actions](#voice-agent-actions) enabled and approved, select an agent
-before recording. **Send** submits the reviewed text to that agent's existing
-main conversation, using the session and branch captured when recording began.
+before recording. **Edit / Review** opens the same editor used for typed replies.
+Edit the transcription, then choose **Review**. **Send** submits it to that agent's
+existing main conversation. It uses the session and branch captured when recording began.
 A changed or missing conversation must be opened and recorded again. Default
 firmware still permits local recording and transcription, with Send disabled;
 it retains the read-only Live Talk permissions.
+
+Watch and Tab5 readers have a **Write reply** action for an available conversation.
+It opens a local text draft for that exact agent and conversation. Browsing and
+typing do not change the next Talk recipient. Text entry does not need a microphone
+or a ready Talk session. Watch uses paged English letter, number, and punctuation
+keys with cursor, space, and delete controls. Tab5 uses a QWERTY keyboard. Drafts
+accept at most 2047 UTF-8 bytes. Insertion never splits a character at the limit.
+
+Choose **Review** to see the full scrollable draft and recipient, **Edit** to make
+changes, or **Cancel** to discard an unsent draft. Only **Send** submits a message.
+Characters that the installed font cannot draw appear as Unicode escapes in
+review, with an explanatory notice. Literal backslashes are doubled in that
+view. The editor buffer and sent message keep their original UTF-8 bytes.
+Malformed transcription text fails before it reaches the editor. Messaging access
+must still be enabled at submission. A changed reader or connection invalidates
+the unsent draft. Open the conversation again. Drafts do not survive a reboot.
 
 Send is explicit and single-use: **Sending** waits for Gateway acceptance,
 **Accepted** means the turn is running, and **Sent** means this turn finished
@@ -330,7 +347,7 @@ new approval request. Keep the device powered until it reports enabled.
 An expired local wait can still accept a late approval; it never resubmits on
 its own. Changing Gateways invalidates the previous pending approval.
 
-Messaging enables explicit new-chat creation and reviewed voice-draft Send.
+Messaging enables explicit new-chat creation and reviewed text or voice-draft Send.
 The runtime selection resets after a reboot; default firmware again declares
 only read/talk until access is requested. Previously granted Gateway scopes
 are not revoked by rebooting. The Settings interface for this flow is separate

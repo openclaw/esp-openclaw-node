@@ -162,7 +162,7 @@ void room_watch_home_create(lv_obj_t *parent, lv_event_cb_t menu_handler, lv_eve
     send_button = action(root, "Send", send_handler, &send_label);
     lv_obj_set_pos(send_button, 138, 376);
     lv_obj_set_size(send_button, 204, 52);
-    lv_label_set_text_static(send_label, LV_SYMBOL_UP "  Send");
+    lv_label_set_text_static(send_label, "Edit / Review");
     lv_obj_center(send_label);
     lv_obj_set_hidden(send_button, true);
 }
@@ -206,9 +206,9 @@ void room_watch_home_render(const room_ui_facts_t *facts, const room_ui_talk_tar
     lv_obj_set_hidden(review_panel, !review);
     lv_obj_set_hidden(voice_button, primary != ROOM_HOME_NONE || voice == NULL || ((transcribing || draft || submitted) && !holding));
     lv_obj_set_hidden(send_button, !(draft || submitted) || holding);
-    lv_label_set_text_static(send_label, sending ? "Sending..." : submitted ? "Conversations" : LV_SYMBOL_UP "  Send");
+    lv_label_set_text_static(send_label, sending ? "Sending..." : submitted ? "Conversations" : "Edit / Review");
     lv_obj_center(send_label);
-    lv_obj_set_state(send_button, LV_STATE_DISABLED, sending || (draft && !voice->can_send));
+    lv_obj_set_state(send_button, LV_STATE_DISABLED, sending);
     lv_obj_set_hidden(discard_button, !review);
     lv_obj_set_size(discard_button, transcribing ? 316 : 104, 52);
     lv_label_set_text_static(lv_obj_get_child(discard_button, 0), canceling ? "Canceling..." : transcribing ? "Cancel" : submitted ? "Done" : "Discard");

@@ -887,7 +887,7 @@ esp_err_t room_media_get_webrtc_provider(esp_webrtc_media_provider_t *provider)
 void room_ui_set(room_ui_state_t state, const char *detail)
 { (void)detail; host.ui = state; }
 void room_ui_store_facts(const room_ui_facts_t *facts) { host.home = *facts; }
-void room_ui_set_voice_action_handler(void (*handler)(room_voice_action_t, uint32_t, uint64_t, uint64_t))
+void room_ui_set_voice_action_handler(void (*handler)(room_voice_action_t, uint32_t, uint64_t, uint64_t, const char *))
 { (void)handler; }
 void room_ui_store_voice(const room_voice_snapshot_t *snapshot) { host.voice = *snapshot; }
 void room_ui_store_live_talk(const esp_openclaw_talk_snapshot_t *snapshot)

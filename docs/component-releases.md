@@ -28,4 +28,7 @@ uv run --no-project --with PyYAML==6.0.3 python scripts/check_component_release.
 The registry publishes the core component; the checksummed GitHub source archive
 also includes room examples and Talk code. Example and board qualification remain
 in the exact-commit push CI matrix. This workflow does not publish firmware images
-or modify an existing release or version tag.
+or modify an existing release or version tag. The separate
+[web USB installer workflow](web-usb-install.md) can stage these exact-release CI
+images and, with explicit publish selection, promote them to the existing Pages
+site without changing the component release.

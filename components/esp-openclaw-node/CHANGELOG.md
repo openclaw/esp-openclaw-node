@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add staged browser USB firmware manifests for ESP32-S3, ESP-BOX-3, and M5Dial, with exact stable-release CI provenance and opt-in Pages publication.
+
 - Use the standard GitHub Actions runtime budget for CodeQL instead of the rollout-specific 20-minute job cap.
 
 - Batch main CodeQL security scans every six hours while retaining pull request and manual analysis.

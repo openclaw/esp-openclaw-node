@@ -1,0 +1,194 @@
+name: Stage web USB firmware
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Published stable tag (blank selects the latest stable release)
+        type: string
+        required: false
+      publish:
+        description: Publish the staged manifest and images to the existing gh-pages site
+        type: boolean
+        default: false
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  stage:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+      commit: ${{ steps.release.outputs.commit }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Test web firmware staging
+        run: python3 -B -m unittest discover -s scripts/tests -p test_stage_web_firmware.py -v
+
+      - name: Resolve a released commit and its successful main CI run
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          version="$REQUESTED_VERSION"
+          if [ -z "$version" ]; then
+            version=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)
+          fi
+          [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$version" > "$RUNNER_TEMP/web-release.json"
+          jq -e --arg version "$version" \
+            '.tag_name == $version and .draft == false and .prerelease == false and .published_at != null' \
+            "$RUNNER_TEMP/web-release.json" > /dev/null
+          test "$(git cat-file -t "refs/tags/$version")" = tag
+          git -c gpg.format=ssh \
+            -c gpg.ssh.allowedSignersFile=.github/release-allowed-signers verify-tag "$version"
+          commit=$(git rev-parse "refs/tags/$version^{commit}")
+          git merge-base --is-ancestor "$commit" origin/main
+          gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$commit&event=push&status=success&per_page=100" \
+            --jq '[.workflow_runs[] | select(.event == "push" and .head_branch == "main" and .conclusion == "success")] | sort_by(.run_number, .run_attempt) | last' \
+            > "$RUNNER_TEMP/web-ci.json"
+          jq -e --arg commit "$commit" '.head_sha == $commit and .id > 0 and .run_attempt > 0' \
+            "$RUNNER_TEMP/web-ci.json" > /dev/null
+          run_id=$(jq -r .id "$RUNNER_TEMP/web-ci.json")
+          attempt=$(jq -r .run_attempt "$RUNNER_TEMP/web-ci.json")
+          for example in esp32-node esp-box-3-display m5stack-dial-node; do
+            artifact="firmware-$example-esp32s3-$commit-$attempt"
+            gh run download "$run_id" --repo "$GITHUB_REPOSITORY" \
+              --name "$artifact" --dir "bundles/$artifact"
+          done
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          echo "attempt=$attempt" >> "$GITHUB_OUTPUT"
+
+      - name: Stage versioned images and the latest manifest
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          COMMIT: ${{ steps.release.outputs.commit }}
+          RUN_ID: ${{ steps.release.outputs.run_id }}
+          ATTEMPT: ${{ steps.release.outputs.attempt }}
+        run: |
+          python3 scripts/stage_web_firmware.py \
+            --input bundles --output site/web-flash \
+            --version "$VERSION" --commit "$COMMIT" \
+            --run-id "$RUN_ID" --run-attempt "$ATTEMPT"
+          printf '%s\n' \
+            "Staged $VERSION ($COMMIT), CI run $RUN_ID attempt $ATTEMPT." \
+            "This artifact is a preview. It has not updated the public installer or flashed hardware." \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload installer preview
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: web-flash-${{ steps.release.outputs.version }}-${{ steps.release.outputs.commit }}
+          path: site/
+          if-no-files-found: error
+
+  publish:
+    if: inputs.publish
+    needs: stage
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: web-usb-firmware-publish
+      cancel-in-progress: false
+    permissions:
+      actions: read
+      contents: write
+      pages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: gh-pages
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: web-flash-${{ needs.stage.outputs.version }}-${{ needs.stage.outputs.commit }}
+          path: ${{ runner.temp }}/web-flash-payload
+      - name: Preserve the site and publish the versioned firmware subtree
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PAYLOAD: ${{ runner.temp }}/web-flash-payload
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/pages" \
+            --jq '.build_type == "legacy" and .source.branch == "gh-pages" and .source.path == "/"' | grep -qx true
+          python3 - <<'PYCODE'
+          import json
+          import os
+          from pathlib import Path
+          import shutil
+          incoming = Path(os.environ["PAYLOAD"]) / "web-flash"
+          new = json.loads((incoming / "manifest.json").read_text())
+          existing = Path("web-flash/manifest.json")
+          if existing.exists():
+              old = json.loads(existing.read_text())
+              version = lambda value: tuple(map(int, value.removeprefix("v").split(".")))
+              if version(old["version"]) > version(new["version"]):
+                  raise SystemExit("Refusing to move the latest firmware backwards")
+              if old["version"] == new["version"] and old != new:
+                  raise SystemExit("Refusing to change an already published firmware version")
+          for source in incoming.rglob("*"):
+              if not source.is_file():
+                  continue
+              relative = source.relative_to(incoming)
+              target = Path("web-flash") / relative
+              if relative.as_posix() != "manifest.json" and target.exists() and target.read_bytes() != source.read_bytes():
+                  raise SystemExit("Refusing to overwrite immutable firmware bytes")
+          # Only this subtree changes; keep the existing Launchpad index and old versions.
+          shutil.copytree(incoming, "web-flash", dirs_exist_ok=True)
+          PYCODE
+          git add -- web-flash
+          if ! git diff --cached --quiet; then
+            git -c user.name=github-actions[bot] \
+              -c user.email=41898282+github-actions[bot]@users.noreply.github.com \
+              commit -m "chore(firmware): publish web installer ${{ needs.stage.outputs.version }}"
+            git push origin HEAD:gh-pages
+          fi
+          # GITHUB_TOKEN branch pushes do not trigger Pages; request the existing legacy build.
+          gh api --method POST "repos/$GITHUB_REPOSITORY/pages/builds" --silent
+      - name: Verify published manifest and public image bytes
+        env:
+          PAYLOAD: ${{ runner.temp }}/web-flash-payload
+        run: |
+          python3 - <<'PYCODE'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import time
+          import urllib.request
+          base = "https://openclaw.github.io/esp-openclaw-node/web-flash/"
+          expected = json.loads((Path(os.environ["PAYLOAD"]) / "web-flash/manifest.json").read_text())
+          deadline = time.monotonic() + 600
+          while True:
+              try:
+                  with urllib.request.urlopen(base + "manifest.json", timeout=20) as response:
+                      actual = json.load(response)
+                      cors = response.headers.get("Access-Control-Allow-Origin")
+                  if actual != expected or cors != "*":
+                      raise ValueError("Published manifest or CORS is not ready")
+                  for board in expected["boards"]:
+                      for part in board["parts"]:
+                          with urllib.request.urlopen(base + part["path"], timeout=30) as response:
+                              image = response.read()
+                              if response.headers.get("Access-Control-Allow-Origin") != "*":
+                                  raise ValueError("Image CORS is not enabled")
+                          if len(image) != part["size"] or hashlib.sha256(image).hexdigest() != part["sha256"]:
+                              raise ValueError("Published image differs from verified firmware")
+                  print("Verified published manifest and all firmware images")
+                  break
+              except (OSError, ValueError):
+                  if time.monotonic() >= deadline:
+                      raise
+                  time.sleep(min(10, max(0, deadline - time.monotonic())))
+          PYCODE

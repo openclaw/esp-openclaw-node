@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Batch main CodeQL security scans every six hours while retaining pull request and manual analysis.
+
 - Add local M5Dial phone setup with QR/manual discovery, painted comparison confirmation, fresh encoder/touch input, and cancellation before navigation or screen-off. USB setup remains available.
 
 - Add local native Watch phone setup with QR/manual discovery, painted comparison confirmation, fresh touch/BOOT input, and cancellation before screen replacement or sleep. Tab5 keeps USB setup.

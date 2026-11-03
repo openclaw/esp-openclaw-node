@@ -4,7 +4,11 @@
 #include "esp_openclaw_setup_dispatcher.h"
 #include "esp_openclaw_setup_mailbox.h"
 #include "esp_openclaw_setup_security2.h"
+#include "esp_openclaw_setup_runtime.h"
 #include "protocomm_security2.h"
+#include "protocomm_ble.h"
+#include "esp_srp.h"
+#include "freertos/task.h"
 #include "esp_openclaw_node_common_device_node_cmd.h"
 #include "cJSON.h"
 
@@ -845,10 +849,15 @@ static struct esp_openclaw_node gateway_node;
 static esp_openclaw_node_connect_lease_t gateway_lease, next_gateway_lease;
 static esp_openclaw_node_connect_attempt_t gateway_attempt;
 static unsigned gateway_begins;
+static esp_err_t gateway_acquire_error;
+static esp_openclaw_node_connect_authorize_t gateway_authority;
+static void *gateway_authority_context;
 static char gateway_code[4097];
 esp_err_t esp_openclaw_node_connect_lease_acquire(esp_openclaw_node_handle_t node, esp_openclaw_node_connect_lease_t *lease)
 {
-    assert(node == &gateway_node && !gateway_lease); gateway_attempt = (esp_openclaw_node_connect_attempt_t){0};
+    assert(node == &gateway_node && !gateway_lease);
+    if (gateway_acquire_error != ESP_OK) return gateway_acquire_error;
+    gateway_attempt = (esp_openclaw_node_connect_attempt_t){0};
     *lease = gateway_lease = ++next_gateway_lease; return ESP_OK;
 }
 esp_err_t esp_openclaw_node_connect_lease_release(esp_openclaw_node_handle_t node, esp_openclaw_node_connect_lease_t lease)
@@ -865,6 +874,7 @@ esp_err_t esp_openclaw_node_connect_begin_authorized(esp_openclaw_node_handle_t 
     assert(node == &gateway_node && lease == gateway_lease && authorize != NULL && context != NULL);
     assert(request->source == ESP_OPENCLAW_NODE_CONNECT_SOURCE_SETUP_CODE && strlen(request->value) <= 4096);
     strcpy(gateway_code, request->value);
+    gateway_authority = authorize; gateway_authority_context = context;
     gateway_attempt = (esp_openclaw_node_connect_attempt_t){.id = ++gateway_begins,
         .state = ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_QUEUED};
     *attempt = gateway_attempt.id; return ESP_OK;
@@ -1057,7 +1067,8 @@ static void check_setup_dispatcher(void)
 /* Public vendor boundary only; these opaque fixture bytes are NOT SRP/AES-GCM
  * proof. Actual guard/endpoint/frame/transfer/dispatcher/native WiFi code runs. */
 void esp_log_level_set(const char *tag, int level) { (void)tag; assert(level == ESP_LOG_NONE); }
-int esp_log_level_get(const char *tag) { (void)tag; return ESP_LOG_NONE; }
+static bool quiet_broken;
+int esp_log_level_get(const char *tag) { (void)tag; return quiet_broken ? 1 : ESP_LOG_NONE; }
 static esp_err_t ble_sdk_init(protocomm_security_handle_t *handle) { *handle = &wire; return ESP_OK; }
 static esp_err_t ble_sdk_cleanup(protocomm_security_handle_t handle) { assert(handle == &wire); return ESP_OK; }
 static esp_err_t ble_sdk_session(protocomm_security_handle_t handle, uint32_t id)
@@ -1292,6 +1303,322 @@ static void check_setup_mailbox(void)
 static void check_setup_mailbox(void) { assert(!esp_openclaw_setup_security2()); }
 #endif
 
+/* Drive the actual boot-lifetime task through FreeRTOS queue boundaries on a
+ * host thread. A permit advances exactly one owner iteration; no runtime-only
+ * tick helper or alternate state machine is compiled into production. */
+typedef struct {
+    pthread_mutex_t lock;
+    pthread_cond_t condition;
+    uint8_t items[4][32];
+    unsigned count, size, cycles;
+    bool waiting, permit, executed;
+    TickType_t wait;
+} runtime_queue_t;
+static runtime_queue_t *runtime_queue;
+static bool fail_queue, fail_task;
+static pthread_t runtime_thread;
+static TaskFunction_t runtime_task;
+static void *runtime_context;
+QueueHandle_t xQueueCreate(UBaseType_t length, UBaseType_t size)
+{
+    assert(length == 4 && size <= 32);
+    if (fail_queue) return NULL;
+    runtime_queue = calloc(1, sizeof(*runtime_queue)); assert(runtime_queue);
+    assert(pthread_mutex_init(&runtime_queue->lock, NULL) == 0);
+    assert(pthread_cond_init(&runtime_queue->condition, NULL) == 0);
+    runtime_queue->size = size; return runtime_queue;
+}
+void vQueueDelete(QueueHandle_t value)
+{
+    runtime_queue_t *q = value; assert(q == runtime_queue && !q->executed);
+    pthread_mutex_destroy(&q->lock); pthread_cond_destroy(&q->condition); free(q); runtime_queue = NULL;
+}
+BaseType_t xQueueSend(QueueHandle_t value, const void *item, TickType_t timeout)
+{
+    runtime_queue_t *q = value; assert(timeout == 0);
+    pthread_mutex_lock(&q->lock);
+    bool accepted = q->count < 4;
+    if (accepted) memcpy(q->items[q->count++], item, q->size);
+    pthread_mutex_unlock(&q->lock); return accepted;
+}
+BaseType_t xQueueReceive(QueueHandle_t value, void *item, TickType_t timeout)
+{
+    runtime_queue_t *q = value;
+    pthread_mutex_lock(&q->lock);
+    if (q->executed) ++q->cycles;
+    q->executed = true; q->waiting = true; q->wait = timeout;
+    pthread_cond_broadcast(&q->condition);
+    while (!q->permit) pthread_cond_wait(&q->condition, &q->lock);
+    q->permit = false; q->waiting = false;
+    bool received = q->count != 0;
+    if (received) { memcpy(item, q->items[0], q->size); memmove(q->items, q->items + 1, --q->count * sizeof(q->items[0])); }
+    pthread_mutex_unlock(&q->lock); return received;
+}
+static void *run_runtime(void *unused) { (void)unused; runtime_task(runtime_context); return NULL; }
+BaseType_t xTaskCreate(TaskFunction_t function, const char *name, uint32_t stack,
+    void *context, UBaseType_t priority, TaskHandle_t *handle)
+{
+    (void)name; (void)stack; (void)priority; (void)handle;
+    if (fail_task) return 0;
+    runtime_task = function; runtime_context = context;
+    assert(pthread_create(&runtime_thread, NULL, run_runtime, NULL) == 0);
+    assert(pthread_detach(runtime_thread) == 0); return pdPASS;
+}
+#if SOC_WIFI_SUPPORTED && !CONFIG_ESP_WIFI_REMOTE_ENABLED && !CONFIG_ESP_HOST_WIFI_ENABLED && !CONFIG_BT_CTRL_MODEM_SLEEP
+static void runtime_step(void)
+{
+    runtime_queue_t *q = runtime_queue;
+    pthread_mutex_lock(&q->lock);
+    while (!q->waiting) pthread_cond_wait(&q->condition, &q->lock);
+    assert(q->count || q->wait == 20); /* Closed and drained must block indefinitely. */
+    unsigned cycle = q->cycles;
+    q->permit = true; pthread_cond_broadcast(&q->condition);
+    while (q->cycles == cycle) pthread_cond_wait(&q->condition, &q->lock);
+    pthread_mutex_unlock(&q->lock);
+}
+#endif
+
+static char *runtime_salt, *runtime_verifier;
+static unsigned runtime_wipes;
+void runtime_test_free(void *data)
+{
+    size_t size = data && data == runtime_salt ? 16 : data && data == runtime_verifier ? 384 : 0;
+    for (size_t i = 0; i < size; ++i) assert(((uint8_t *)data)[i] == 0);
+    if (size) { ++runtime_wipes; if (data == runtime_salt) runtime_salt = NULL; else runtime_verifier = NULL; }
+    free(data);
+}
+
+#if SOC_WIFI_SUPPORTED && !CONFIG_ESP_WIFI_REMOTE_ENABLED && !CONFIG_ESP_HOST_WIFI_ENABLED && !CONFIG_BT_CTRL_MODEM_SLEEP
+struct protocomm {
+    const protocomm_security_t *security;
+    protocomm_security_handle_t handle;
+    const protocomm_security2_params_t *parameters;
+    protocomm_req_handler_t endpoint;
+    void *context;
+};
+static protocomm_t *runtime_pc;
+static unsigned construct_failure, runtime_stops, runtime_deletes, runtime_wakes;
+static bool runtime_ble, cancel_in_srp, expire_in_srp, cancel_in_start, fail_stop;
+static esp_openclaw_setup_runtime_handle_t runtime_handle;
+static uint64_t runtime_request;
+protocomm_t *protocomm_new(void)
+{ assert(!runtime_pc); return construct_failure == 2 ? NULL : (runtime_pc = calloc(1, sizeof(*runtime_pc))); }
+void protocomm_delete(protocomm_t *pc)
+{
+    assert(pc == runtime_pc && !runtime_ble);
+    if (pc->security) {
+        assert(pc->parameters->salt == runtime_salt && pc->parameters->verifier == runtime_verifier);
+        assert(pc->security->cleanup(pc->handle) == ESP_OK);
+    }
+    ++runtime_deletes; free(pc); runtime_pc = NULL;
+}
+esp_err_t protocomm_set_security(protocomm_t *pc, const char *name, const protocomm_security_t *security, const void *params)
+{
+    assert(!strcmp(name, "prov-session") && security->ver == 2 && security->patch_ver == 1);
+    if (construct_failure == 3) return ESP_FAIL;
+    esp_err_t error = security->init(&pc->handle);
+    if (error == ESP_OK) { pc->security = security; pc->parameters = params; }
+    return error;
+}
+esp_err_t protocomm_set_version(protocomm_t *pc, const char *name, const char *version)
+{
+    assert(pc->security && !strcmp(name, "proto-ver"));
+    cJSON *json = cJSON_Parse(version); assert(json);
+    cJSON *prov = cJSON_GetObjectItemCaseSensitive(json, "prov");
+    assert(cJSON_GetObjectItemCaseSensitive(prov, "sec_ver")->valueint == 2 &&
+           cJSON_GetObjectItemCaseSensitive(prov, "sec_patch_ver")->valueint == 1);
+    cJSON_Delete(json); return construct_failure == 4 ? ESP_FAIL : ESP_OK;
+}
+esp_err_t protocomm_add_endpoint(protocomm_t *pc, const char *name, protocomm_req_handler_t handler, void *context)
+{
+    assert(!strcmp(name, "oc-setup") && handler == esp_openclaw_setup_mailbox_endpoint);
+    if (construct_failure == 5) return ESP_FAIL;
+    pc->endpoint = handler; pc->context = context; return ESP_OK;
+}
+esp_err_t protocomm_ble_start(protocomm_t *pc, const protocomm_ble_config_t *config)
+{
+    assert(pc == runtime_pc && pc->endpoint && !runtime_ble && config->nu_lookup_count == 3);
+    assert(!config->keep_ble_on && !config->ble_notify && !config->ble_bonding && !config->ble_link_encryption);
+    if (construct_failure == 6) return ESP_FAIL;
+    if (cancel_in_start) assert(esp_openclaw_setup_runtime_cancel(runtime_handle, runtime_request) == ESP_OK);
+    runtime_ble = true; return ESP_OK;
+}
+esp_err_t protocomm_ble_stop(protocomm_t *pc)
+{
+    assert(pc == runtime_pc && runtime_ble && esp_openclaw_setup_security2_peer() == 0);
+    assert(pthread_equal(pthread_self(), runtime_thread));
+    ++runtime_stops;
+    if (fail_stop) return ESP_FAIL;
+    runtime_ble = false; return ESP_OK;
+}
+esp_err_t esp_srp_gen_salt_verifier(const char *username, int username_size, const char *password,
+    int password_size, char **salt, int salt_size, char **verifier, int *verifier_size)
+{
+    assert(!strcmp(username, "openclaw") && username_size == 8 && password_size == 32 && strlen(password) == 32 && salt_size == 16);
+    assert(!runtime_salt && !runtime_verifier && !runtime_ble && !quiet_broken);
+    if (cancel_in_srp) assert(esp_openclaw_setup_runtime_cancel(runtime_handle, runtime_request) == ESP_OK);
+    if (expire_in_srp) now_us += 120000000;
+    if (construct_failure == 1) return ESP_FAIL;
+    runtime_salt = *salt = malloc(16); runtime_verifier = *verifier = malloc(384);
+    assert(*salt && *verifier); memset(*salt, 0x55, 16); memset(*verifier, 0x66, 384); *verifier_size = 384;
+    return ESP_OK;
+}
+static void reconnect_runtime(void *context) { assert(context == &runtime_wakes); ++runtime_wakes; }
+static esp_openclaw_setup_runtime_snapshot_t runtime_view(void)
+{ esp_openclaw_setup_runtime_snapshot_t view; assert(esp_openclaw_setup_runtime_snapshot(runtime_handle, &view)); return view; }
+static void runtime_open(void)
+{
+    uint64_t old = runtime_request;
+    assert(esp_openclaw_setup_runtime_open(runtime_handle, &runtime_request) == ESP_OK && runtime_request > old);
+    for (unsigned i = 0; i < 5 && runtime_view().phase == ESP_OPENCLAW_SETUP_RUNTIME_OPENING; ++i) runtime_step();
+    assert(runtime_view().phase != ESP_OPENCLAW_SETUP_RUNTIME_OPENING);
+}
+static esp_openclaw_setup_frame_t runtime_frame(void)
+{
+    uint8_t cipher[480] = {0}, *plain, *output, *encrypted; ssize_t plain_size, size, encrypted_size;
+    memcpy(cipher, ble_input, ble_size);
+    assert(runtime_pc->security->decrypt(runtime_pc->handle, 7, cipher, ble_size + 16, &plain, &plain_size) == ESP_OK);
+    assert(runtime_pc->endpoint(7, plain, plain_size, &output, &size, runtime_pc->context) == ESP_OK); free(plain);
+    assert(runtime_pc->security->encrypt(runtime_pc->handle, 7, output, size, &encrypted, &encrypted_size) == ESP_OK); free(output);
+    memcpy(ble_reply, encrypted, encrypted_size - 16); free(encrypted);
+    esp_openclaw_setup_frame_t frame; assert(esp_openclaw_setup_frame_decode(ble_reply, encrypted_size - 16, &frame));
+    return frame;
+}
+static esp_openclaw_setup_runtime_snapshot_t runtime_attach(void)
+{
+    assert(runtime_pc->security->new_transport_session(runtime_pc->handle, 7) == ESP_OK);
+    /* Encode the real hello header rather than dispatching a helper request. */
+    wire.serial = 1;
+    uint8_t hello_bytes[16] = {1, 1}; ble_frame(ESP_OPENCLAW_SETUP_FRAME_REQUEST, 16, 0, hello_bytes, 16);
+    assert(runtime_frame().payload[1] == ESP_OPENCLAW_SETUP_FRAME_PENDING);
+    runtime_step(); /* First decrypt -> owner attach -> one-time mailbox bind. */
+    assert(runtime_frame().payload[1] == ESP_OPENCLAW_SETUP_FRAME_PENDING);
+    runtime_step(); assert(runtime_frame().kind == ESP_OPENCLAW_SETUP_FRAME_ACK);
+    ble_frame(ESP_OPENCLAW_SETUP_FRAME_PULL, 0, 0, NULL, 0);
+    assert(runtime_frame().payload[1] == ESP_OPENCLAW_SETUP_FRAME_PENDING);
+    runtime_step(); esp_openclaw_setup_frame_t reply = runtime_frame();
+    assert(reply.kind == ESP_OPENCLAW_SETUP_FRAME_RESPONSE && reply.payload_size > 32);
+    esp_openclaw_setup_runtime_snapshot_t view = runtime_view();
+    assert(view.peer && view.session.phase == ESP_OPENCLAW_SETUP_COMPARISON && strlen(view.comparison) == 9 && !view.qr[0]);
+    const uint8_t *challenge = reply.payload + reply.payload_size - 32;
+    char comparison[10]; snprintf(comparison, sizeof(comparison), "%02X%02X %02X%02X", challenge[0], challenge[1], challenge[2], challenge[3]);
+    assert(!strcmp(view.comparison, comparison));
+    return view;
+}
+static void runtime_request_frame(unsigned operation, const uint8_t *body, size_t body_size)
+{
+    uint8_t request[128] = {1, operation}; assert(body_size + 16 <= sizeof(request));
+    wire_integer(request + 4, runtime_view().session.generation, 8); wire_integer(request + 12, 1, 4);
+    if (body_size) memcpy(request + 16, body, body_size);
+    ++wire.serial; ble_frame(ESP_OPENCLAW_SETUP_FRAME_REQUEST, body_size + 16, 0, request, body_size + 16);
+    assert(runtime_frame().payload[1] == ESP_OPENCLAW_SETUP_FRAME_PENDING);
+    runtime_step(); assert(runtime_frame().kind == ESP_OPENCLAW_SETUP_FRAME_ACK);
+}
+static void runtime_confirm(esp_openclaw_setup_runtime_snapshot_t view)
+{
+    assert(esp_openclaw_setup_runtime_action(runtime_handle, runtime_request, view.session.generation, view.peer, ESP_OPENCLAW_SETUP_LOCAL_NEUTRAL) == ESP_OK);
+    assert(esp_openclaw_setup_runtime_action(runtime_handle, runtime_request, view.session.generation, view.peer, ESP_OPENCLAW_SETUP_LOCAL_CONFIRM) == ESP_OK);
+    runtime_step(); runtime_step();
+}
+static void check_setup_runtime(void)
+{
+    esp_openclaw_setup_runtime_config_t config = {.node = &gateway_node,
+        .label = "Fixture device", .model = "fixture-s3", .gateway_reconnect = reconnect_runtime, .context = &runtime_wakes};
+    fail_queue = true; assert(esp_openclaw_setup_runtime_create(&config, &runtime_handle) == ESP_ERR_NO_MEM); fail_queue = false;
+    fail_task = true; assert(esp_openclaw_setup_runtime_create(&config, &runtime_handle) == ESP_ERR_NO_MEM); fail_task = false;
+    assert(esp_openclaw_setup_runtime_create(&config, &runtime_handle) == ESP_OK);
+    assert(esp_openclaw_setup_runtime_create(&config, &runtime_handle) == ESP_ERR_INVALID_STATE);
+    assert(esp_openclaw_setup_runtime_open(runtime_handle, &runtime_request) == ESP_OK);
+    assert(esp_openclaw_setup_runtime_cancel(runtime_handle, runtime_request) == ESP_OK);
+    runtime_step(); assert(runtime_view().can_open && !runtime_pc); /* Cancel queued OPEN before owner runs. */
+    for (construct_failure = 1; construct_failure <= 6; ++construct_failure) {
+        runtime_open();
+        assert(runtime_view().can_open && runtime_view().error != ESP_OK && !runtime_pc && !runtime_salt && !runtime_verifier);
+    }
+    construct_failure = 0;
+    cancel_in_srp = true; runtime_open(); cancel_in_srp = false; assert(runtime_view().can_open && !runtime_pc);
+    expire_in_srp = true; runtime_open(); expire_in_srp = false; assert(runtime_view().can_open && !runtime_pc);
+    cancel_in_start = true; runtime_open(); cancel_in_start = false; assert(runtime_view().can_open && !runtime_pc);
+    quiet_broken = true; runtime_open(); quiet_broken = false; assert(runtime_view().can_open && !runtime_pc);
+    runtime_open(); esp_openclaw_setup_runtime_snapshot_t discover = runtime_view();
+    assert(runtime_ble && discover.qr[0] && strlen(discover.pop) == 32 && !discover.wifi.lease_held && !discover.gateway.lease_held);
+    cJSON *qr = cJSON_Parse(discover.qr); assert(qr);
+    assert(!strcmp(cJSON_GetObjectItemCaseSensitive(qr, "pop")->valuestring, discover.pop) &&
+           !strcmp(cJSON_GetObjectItemCaseSensitive(qr, "username")->valuestring, "openclaw")); cJSON_Delete(qr);
+    esp_openclaw_setup_runtime_snapshot_t view = runtime_attach();
+    assert(esp_openclaw_setup_runtime_action(runtime_handle, runtime_request, view.session.generation, view.peer, ESP_OPENCLAW_SETUP_LOCAL_CONFIRM) == ESP_OK);
+    runtime_step(); assert(runtime_view().session.phase == ESP_OPENCLAW_SETUP_COMPARISON);
+    for (unsigned i = 0; i < 4; ++i) assert(esp_openclaw_setup_runtime_action(runtime_handle, runtime_request,
+        view.session.generation, view.peer, ESP_OPENCLAW_SETUP_LOCAL_NEUTRAL) == ESP_OK);
+    assert(esp_openclaw_setup_runtime_action(runtime_handle, runtime_request, view.session.generation, view.peer, ESP_OPENCLAW_SETUP_LOCAL_CONFIRM) == ESP_ERR_TIMEOUT);
+    for (unsigned i = 0; i < 4; ++i) runtime_step();
+    assert(esp_openclaw_setup_runtime_action(runtime_handle, runtime_request, view.session.generation, view.peer, ESP_OPENCLAW_SETUP_LOCAL_CONFIRM) == ESP_OK);
+    gateway_acquire_error = ESP_FAIL;
+    runtime_step(); view = runtime_view(); assert(view.session.phase == ESP_OPENCLAW_SETUP_READY && view.wifi.lease_held && !view.gateway.lease_held && view.error == ESP_FAIL);
+    gateway_acquire_error = ESP_OK;
+    for (unsigned i = 0; i < 3; ++i) assert(esp_openclaw_setup_runtime_action(runtime_handle, runtime_request,
+        view.session.generation, view.peer, ESP_OPENCLAW_SETUP_LOCAL_RETRY) == ESP_OK);
+    runtime_step(); view = runtime_view(); assert(view.gateway.lease_held && view.error == ESP_OK);
+    unsigned deleted = runtime_deletes, stopped = runtime_stops;
+    fail_stop = true; assert(esp_openclaw_setup_runtime_cancel(runtime_handle, runtime_request) == ESP_OK);
+    assert(!runtime_view().qr[0] && esp_openclaw_setup_security2_peer() == 0);
+    runtime_step(); view = runtime_view(); assert(view.phase == ESP_OPENCLAW_SETUP_RUNTIME_ERROR && !view.can_open);
+    runtime_step(); /* A queued activation retry must not become a failed-stop cleanup retry. */
+    assert(runtime_stops == stopped + 1 && runtime_deletes == deleted && runtime_salt && runtime_verifier && runtime_wakes);
+    fail_stop = false;
+    assert(esp_openclaw_setup_runtime_action(runtime_handle, runtime_request, view.session.generation, view.peer, ESP_OPENCLAW_SETUP_LOCAL_RETRY) == ESP_OK);
+    runtime_step(); assert(runtime_view().can_open && !runtime_pc && runtime_deletes == deleted + 1);
+    uint64_t stale = runtime_request;
+    runtime_open(); assert(strcmp(discover.pop, runtime_view().pop));
+    assert(esp_openclaw_setup_runtime_cancel(runtime_handle, stale) == ESP_ERR_INVALID_STATE && runtime_ble);
+    now_us += 120000000; assert(!runtime_view().qr[0]); runtime_step(); assert(runtime_view().can_open && !runtime_ble);
+    runtime_open(); view = runtime_attach(); runtime_confirm(view);
+    uint8_t credentials[] = {0, 2, 'a', 'p', 0, 8, 'p', 'a', 's', 's', 'w', 'o', 'r', 'd'};
+    runtime_request_frame(4, credentials, sizeof(credentials));
+    for (unsigned i = 0; i < 40 && runtime_view().wifi.attempt.state != ESP_OPENCLAW_NODE_WIFI_JOINING; ++i) { dispatch_all(); runtime_step(); }
+    assert(runtime_view().wifi.attempt.state == ESP_OPENCLAW_NODE_WIFI_JOINING);
+    unsigned writes = config_writes;
+    stop_result = ESP_FAIL; fail_stop = true;
+    assert(esp_openclaw_setup_runtime_cancel(runtime_handle, runtime_request) == ESP_OK); runtime_step();
+    assert(runtime_pc && !runtime_view().can_open && runtime_view().wifi.operation_pending &&
+        runtime_view().wifi.attempt.state == ESP_OPENCLAW_NODE_WIFI_RECOVERY_REQUIRED);
+    stop_result = ESP_OK; view = runtime_view();
+    assert(esp_openclaw_setup_runtime_action(runtime_handle, runtime_request, view.session.generation, view.peer, ESP_OPENCLAW_SETUP_LOCAL_RETRY) == ESP_OK);
+    runtime_step(); view = runtime_view();
+    assert(runtime_pc && view.error != ESP_OK && view.wifi.attempt.state != ESP_OPENCLAW_NODE_WIFI_RECOVERY_REQUIRED);
+    for (unsigned i = 0; i < 40 && runtime_view().wifi.lease_held; ++i) { runtime_step(); dispatch_all(); }
+    view = runtime_view(); assert(runtime_pc && view.error != ESP_OK && !view.can_open && !view.wifi.lease_held);
+    fail_stop = false;
+    assert(esp_openclaw_setup_runtime_action(runtime_handle, runtime_request, view.session.generation, view.peer, ESP_OPENCLAW_SETUP_LOCAL_RETRY) == ESP_OK);
+    for (unsigned i = 0; i < 40 && !runtime_view().can_open; ++i) { runtime_step(); dispatch_all(); }
+    assert(runtime_view().can_open && config_writes == writes && !runtime_view().wifi.lease_held);
+    runtime_open(); view = runtime_attach();
+    assert(esp_openclaw_node_wifi_set_credentials("Fixture network", NULL) == ESP_OK);
+    ip_event_got_ip_t ip = {.esp_netif = &station}; ip_handler(ip_context, IP_EVENT, IP_EVENT_STA_GOT_IP, &ip);
+    runtime_confirm(view);
+    uint8_t setup_code[] = {0, 4, 'c', 'o', 'd', 'e'};
+    runtime_request_frame(5, setup_code, sizeof(setup_code));
+    assert(runtime_view().gateway.operation_pending && gateway_authority(gateway_authority_context));
+    assert(esp_openclaw_setup_runtime_cancel(runtime_handle, runtime_request) == ESP_OK && !gateway_authority(gateway_authority_context));
+    runtime_step(); assert(!runtime_pc && !runtime_view().can_open && gateway_attempt.cancel_requested);
+    uint64_t denied_request = 0;
+    assert(esp_openclaw_setup_runtime_open(runtime_handle, &denied_request) == ESP_ERR_INVALID_STATE && !denied_request);
+    gateway_attempt.state = ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_FAILED;
+    gateway_attempt.failure_reason = ESP_OPENCLAW_NODE_CONNECT_FAILURE_CANCELED;
+    runtime_step(); runtime_step(); assert(runtime_view().can_open && !runtime_view().gateway.lease_held);
+    assert(runtime_wipes >= 2 && runtime_queue->wait == portMAX_DELAY);
+    puts("setup runtime: real owner task, SDK construction/unwind, first hello, local confirmation, cancel/stop retry, authority and idle passed");
+}
+#else
+static void check_setup_runtime(void)
+{
+    esp_openclaw_setup_runtime_handle_t output = (void *)1; uint64_t request = 9;
+    assert(esp_openclaw_setup_runtime_create(NULL, &output) == ESP_ERR_NOT_SUPPORTED && output == (void *)1);
+    assert(esp_openclaw_setup_runtime_open(output, &request) == ESP_ERR_NOT_SUPPORTED && request == 9);
+    assert(!runtime_queue);
+}
+#endif
+
 int main(void)
 {
     uint8_t seed[32] = {0x72}; unsigned random_before = random_calls;
@@ -1357,6 +1684,7 @@ int main(void)
     check_setup_binding();
     check_setup_dispatcher();
     check_setup_mailbox();
+    check_setup_runtime();
     printf("Wi-Fi status and setup: %u failed checks\n", failures);
     return failures ? 1 : 0;
 }

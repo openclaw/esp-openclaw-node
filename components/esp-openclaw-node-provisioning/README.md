@@ -10,7 +10,7 @@ Wi-Fi credential changes, connect/disconnect commands, and scans admit one
 explicit operation at a time. A competing call returns `ESP_ERR_WIFI_STATE`
 before changing station configuration or reconnect policy. Status remains
 readable while an operation runs. This serializes existing command calls;
-exclusive phone-setup ownership is a separate integration step.
+the confirmed setup bindings also reserve exclusive phone-setup ownership.
 
 Use `wifi scan` in the USB console before setting credentials to list up to 16
 nearby networks, strongest first, with channel, RSSI, and the ESP-IDF auth mode.
@@ -36,6 +36,10 @@ radios fail without changing the output. The caller must wipe this seed after
 deriving its ephemeral secret; this API does not start BLE or provide pairing.
 The RF requirement follows the pinned
 [ESP-IDF RNG contract](https://github.com/espressif/esp-idf/blob/b774170ff46c393eeb5e495ea37936038d3f4f4f/docs/en/api-reference/system/random.rst).
+
+`esp_openclaw_setup_runtime.h` owns the native setup task and copied local
+snapshots. Read its [runtime contract](../../docs/design/mobile-setup-runtime.md)
+before integrating a board. Device screens and the phone adapter remain separate work.
 
 `esp_openclaw_setup_frame.h` provides the allocation-free
 [setup frame codec](../../docs/design/mobile-setup-frames.md). It validates the
@@ -68,7 +72,7 @@ confirmation, C-string adaptation, and dispatch through the existing bindings.
 [application response format](../../docs/design/mobile-setup-responses.md), with
 explicit public wire codes and separate admission, outcome and observed-effect
 fields. It neither generates a comparison challenge nor maps native errors or
-authorizes access. The BLE endpoint remains separate work.
+authorizes access. The endpoint mailbox and shared native runtime use these codecs.
 
 `esp_openclaw_setup_dispatcher.h` routes all six application operations through
 these owners. Initialize it once with the session, transfer, Wi-Fi/Gateway

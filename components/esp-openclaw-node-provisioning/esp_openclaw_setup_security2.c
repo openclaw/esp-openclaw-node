@@ -1,13 +1,8 @@
 #include "esp_openclaw_setup_security2.h"
 
-#include "sdkconfig.h"
-#include "soc/soc_caps.h"
+#include "esp_openclaw_setup_native.h"
 
-#if CONFIG_IDF_TARGET_ESP32S3 && SOC_WIFI_SUPPORTED && SOC_BLE_SUPPORTED && \
-    !CONFIG_ESP_WIFI_REMOTE_ENABLED && !CONFIG_ESP_HOST_WIFI_ENABLED && \
-    CONFIG_BT_ENABLED && CONFIG_BT_NIMBLE_ENABLED && \
-    CONFIG_ESP_PROTOCOMM_SUPPORT_SECURITY_VERSION_2 && CONFIG_LOG_DYNAMIC_LEVEL_CONTROL && \
-    !CONFIG_LOG_TAG_LEVEL_IMPL_NONE
+#if OPENCLAW_SETUP_NATIVE
 
 #include <stdlib.h>
 #include "esp_log.h"

@@ -6,6 +6,8 @@
 
 - Provide native setup bootstrap entropy under existing Wi-Fi ownership, requiring active nonsleeping RF without changing radio configuration or reconnect policy. Down, busy and remote radios fail without producing a seed.
 
+- Add a shared native Watch/Dial phone-setup runtime with ephemeral Security2 credentials, bounded local controls, synchronous cancel and owner-task BLE/native-operation draining. Device screens and phone integration remain separate work.
+
 - Define bounded phone-setup responses with explicit public result codes, operation receipts, exact-attempt save observations, and scan truncation. Dispatch and BLE/mobile integration remain separate work.
 
 - Route bounded phone-setup requests through the canonical session, transfer, Wi-Fi and Gateway owners, with immediate admission receipts, explicit observation mapping, and cancellation draining. BLE/mobile adapters remain separate work.

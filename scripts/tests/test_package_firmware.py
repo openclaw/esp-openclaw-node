@@ -19,6 +19,8 @@ SCRIPT = Path(__file__).resolve().parents[1] / "package_firmware.py"
 sys.path.insert(0, str(SCRIPT.parent))
 from test_idf_tab5_compat import fixture_profile, seed_sdk
 import idf_tab5_compat as compat
+from test_idf_srp_salt import fixture_profile as srp_fixture_profile, seed_sdk as seed_srp_sdk
+import idf_srp_salt as srp
 from test_tab5_sdio_diagnostics import HAS_MANAGER, component_fixture
 import tab5_sdio_diagnostics as sdio
 from test_tab5_camera_compat import camera_fixture, resolve_alternate_camera, seed_camera_sdk, write_object
@@ -390,6 +392,74 @@ class FirmwareBundleTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "IDF contains modified source"):
                 self.package()
         self.assertFalse(self.output.exists())
+
+    def configure_native_setup(self, name):
+        destination = self.repo / "examples" / name
+        self.project.rename(destination)
+        self.project = destination
+        self.build = destination / "build"
+        self.output = self.build / "firmware"
+        self.description.update(
+            project_path=str(destination), build_dir=str(self.build),
+            config_file=str(destination / "sdkconfig"),
+            config_defaults=str(destination / "sdkconfig.defaults"),
+        )
+        self.config += (
+            "CONFIG_BT_ENABLED=y\nCONFIG_BT_NIMBLE_ENABLED=y\n"
+            "CONFIG_ESP_PROTOCOMM_SUPPORT_SECURITY_VERSION_2=y\n"
+        )
+
+    def test_salt_patch_native_bundles_record_exact_sdk_provenance(self):
+        base = seed_srp_sdk(self.idf)
+        with srp_fixture_profile(base):
+            expected = srp.apply_sdk_patch(self.idf)
+            for name in ("m5stack-dial-node", "waveshare-esp32-s3-touch-amoled-1.8-room-node"):
+                with self.subTest(example=name):
+                    self.configure_native_setup(name)
+                    self.output = self.build / f"firmware-{name}"
+                    self.package()
+                    metadata = json.loads((self.output / "manifest.json").read_text())["idf"]
+                    self.assertTrue(metadata["dirty"])
+                    self.assertEqual(metadata["commit"], base)
+                    self.assertEqual(metadata["security2_salt_patch"], expected)
+                    self.assertEqual(expected["patched_source_sha256"],
+                                     firmware.sha256(self.idf / srp.SOURCE_PATH))
+
+    def test_salt_patch_tampering_or_unrelated_dirt_cannot_produce_bundle(self):
+        self.configure_native_setup("m5stack-dial-node")
+        base = seed_srp_sdk(self.idf)
+        with srp_fixture_profile(base):
+            srp.apply_sdk_patch(self.idf)
+            source = self.idf / srp.SOURCE_PATH
+            patched = source.read_bytes()
+            source.write_bytes(patched + b"/* unrelated change */\n")
+            with self.assertRaises(ValueError):
+                self.package()
+            self.assertFalse(self.output.exists())
+            source.write_bytes(patched)
+            (self.idf / "other.c").write_text("unrelated\n")
+            with self.assertRaises(ValueError):
+                self.package()
+            self.assertFalse(self.output.exists())
+
+    def test_salt_patch_requires_approved_example_and_native_configuration(self):
+        base = seed_srp_sdk(self.idf)
+        with srp_fixture_profile(base):
+            srp.apply_sdk_patch(self.idf)
+            with self.assertRaisesRegex(ValueError, "IDF contains modified source"):
+                self.package()
+            self.configure_native_setup("m5stack-dial-node")
+            native = self.config
+            for change in (
+                "CONFIG_ESP_WIFI_REMOTE_ENABLED=y\n", "CONFIG_ESP_HOST_WIFI_ENABLED=y\n",
+                "CONFIG_BT_ENABLED=n\n", "CONFIG_BT_NIMBLE_ENABLED=n\n",
+                "CONFIG_ESP_PROTOCOMM_SUPPORT_SECURITY_VERSION_2=n\n",
+            ):
+                with self.subTest(configuration=change):
+                    self.config = native + change
+                    with self.assertRaisesRegex(ValueError, "IDF contains modified source"):
+                        self.package()
+                    self.assertFalse(self.output.exists())
 
     def test_diagnostic_bundle_requires_explicit_mode_and_records_both_actual_patches(self):
         self.configure_tab5()

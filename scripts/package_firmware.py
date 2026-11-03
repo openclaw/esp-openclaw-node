@@ -16,6 +16,7 @@ import tempfile
 from urllib.parse import urlsplit
 
 from idf_tab5_compat import verify_sdk_patch
+from idf_srp_salt import verify_sdk_patch as verify_srp_salt_patch
 from tab5_sdio_diagnostics import COMPONENT as SDIO_COMPONENT, verify_component_patch
 from tab5_camera_compat import (
     COMPONENT as CAMERA_COMPONENT,
@@ -206,9 +207,17 @@ def package_firmware(project, build, output, target, provenance, dependencies,
     if nvs_diagnostics and (project.name != "m5stack-tab5-room-node" or not idf_dirty):
         raise ValueError("NVS diagnostics require the explicitly patched Tab5 SDK")
     if idf_dirty:
-        if project.name != "m5stack-tab5-room-node":
+        if project.name == "m5stack-tab5-room-node":
+            idf_compatibility = verify_sdk_patch(idf, nvs_diagnostics)
+        elif (project.name in {"m5stack-dial-node", "waveshare-esp32-s3-touch-amoled-1.8-room-node"}
+              and all(config.get(key) == "y" for key in (
+                  "CONFIG_BT_ENABLED", "CONFIG_BT_NIMBLE_ENABLED",
+                  "CONFIG_ESP_PROTOCOMM_SUPPORT_SECURITY_VERSION_2"))
+              and not any(config.get(key) == "y" for key in (
+                  "CONFIG_ESP_WIFI_REMOTE_ENABLED", "CONFIG_ESP_HOST_WIFI_ENABLED"))):
+            idf_compatibility = {"security2_salt_patch": verify_srp_salt_patch(idf)}
+        else:
             raise ValueError("IDF contains modified source")
-        idf_compatibility = verify_sdk_patch(idf, nvs_diagnostics)
     if not dependencies.get("dependencies"):
         raise ValueError("Resolved dependency lock is empty")
     sdio_patch = None

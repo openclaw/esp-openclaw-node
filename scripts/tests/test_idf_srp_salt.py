@@ -1,6 +1,6 @@
 """Exercise SDK mutation admission with real Git and the maintained patch."""
 
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 import os
 from pathlib import Path
 import sys
@@ -28,6 +28,23 @@ PATCHED = ORIGINAL.replace(
 )
 
 
+def seed_sdk(idf):
+    source = idf / guard.SOURCE_PATH
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_bytes(ORIGINAL)
+    guard.git(idf, "add", ".")
+    guard.git(idf, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.com",
+              "-c", "commit.gpgsign=false", "commit", "-qm", "SDK fixture")
+    return guard.git(idf, "rev-parse", "HEAD").decode().strip()
+
+
+@contextmanager
+def fixture_profile(base):
+    with patch.multiple(guard, BASE_COMMIT=base, ORIGINAL_SHA256=guard.digest(ORIGINAL),
+                        PATCHED_SHA256=guard.digest(PATCHED)):
+        yield
+
+
 class SaltPatchTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix="srp-patch-test-")
@@ -38,16 +55,9 @@ class SaltPatchTests(unittest.TestCase):
         contexts.enter_context(patch.dict(os.environ, {
             "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}))
         guard.git(self.idf, "init", "-q")
+        base = seed_sdk(self.idf)
         self.source = self.idf / guard.SOURCE_PATH
-        self.source.parent.mkdir(parents=True)
-        self.source.write_bytes(ORIGINAL)
-        guard.git(self.idf, "add", ".")
-        guard.git(self.idf, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.com",
-                  "-c", "commit.gpgsign=false", "commit", "-qm", "SDK fixture")
-        base = guard.git(self.idf, "rev-parse", "HEAD").decode().strip()
-        contexts.enter_context(patch.multiple(
-            guard, BASE_COMMIT=base, ORIGINAL_SHA256=guard.digest(ORIGINAL),
-            PATCHED_SHA256=guard.digest(PATCHED)))
+        contexts.enter_context(fixture_profile(base))
 
     def test_apply_verify_and_repeat_have_one_exact_delta(self):
         with self.assertRaises(ValueError):

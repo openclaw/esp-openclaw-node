@@ -43,6 +43,11 @@ python3 -m unittest discover -s scripts/tests -p test_idf_srp_salt.py -v
 python3 scripts/tests/run_idf_srp_host_tests.py --idf-path /path/to/esp-idf
 ```
 
+Firmware packaging accepts this exact verified SDK edit only for native Watch
+and M5Dial Security2 configurations, recording its identity as
+`idf.security2_salt_patch` in the bundle manifest. Other SDK changes remain
+errors; this does not enable a general dirty-SDK override.
+
 The optional `--mbedtls-path` selects the same pinned source when using a
 minimal read-only SDK source cache. Host software crypto does not qualify
 physical BLE exchanges or hardware acceleration. SDK upgrades must recheck

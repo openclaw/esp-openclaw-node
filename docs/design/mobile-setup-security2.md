@@ -5,7 +5,8 @@ returns a public `protocomm_security_t` that delegates SRP6a, AES-GCM and opaque
 handshake data to ESP-IDF Security2 version 2, patch 1. It does not start BLE,
 generate proof of possession, attach/confirm a setup session, or expose an app
 pairing entry. The [endpoint mailbox](mobile-setup-frames.md#sdk-endpoint-mailbox)
-is implemented; server runtime, device screens and phone integration remain separate work.
+and [native server runtime](mobile-setup-runtime.md) are implemented; device
+screens and phone integration remain separate work.
 
 The native implementation requires ESP32-S3 Wi-Fi and BLE, NimBLE, Security2 and
 dynamic per-tag log control. Both remote Wi-Fi configurations and all other
@@ -15,10 +16,12 @@ use this path to configure its remote C6 radio.
 
 ## Admission and authority
 
-One setup server owns the SDK security handle. Its lifecycle and callbacks
-serialize on the BLE host; drain callbacks before cleanup. Cross-task peer
-queries and local revocation use a critical section. Never call SDK lifecycle
-callbacks from the LVGL or setup owner task.
+One setup server owns the SDK security handle. Transport callbacks serialize on
+the BLE host. The setup owner initializes security before starting callbacks and
+calls public BLE stop without holding locks. Successful stop drains callbacks
+before protocomm deletion/security cleanup on that owner. Never call NimBLE stop
+from its host callback: it waits for host work. Cross-task peer queries and local
+revocation use a critical section; LVGL never calls SDK lifecycle operations.
 
 The guard reserves one transport ID **before** forwarding `new_transport_session`:
 the SDK otherwise closes its old session unconditionally. A different connection

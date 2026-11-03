@@ -42,10 +42,13 @@ def main():
             "-I", str(component.parent / "esp-openclaw-node/include"),
             "-I", str(args.idf_path / "components/protocomm/include/security"),
             "-I", str(args.idf_path / "components/protocomm/include/common"),
+            "-I", str(args.idf_path / "components/protocomm/include/transports"),
+            "-I", str(args.idf_path / "components/protocomm/include/crypto/srp6a"),
         ]
         mailbox = work / "mailbox.o"
         subprocess.run([*compiler, "-Dmalloc=mailbox_test_malloc", "-Dfree=mailbox_test_free", "-c",
                         str(component / "esp_openclaw_setup_mailbox.c"), "-o", str(mailbox)], check=True)
+        runtime = work / "runtime.o"
         command = [*compiler,
             str(tests / "test_wifi_status.c"),
             str(component / "esp_openclaw_node_wifi.c"),
@@ -57,14 +60,17 @@ def main():
             str(component / "esp_openclaw_setup_request.c"),
             str(component / "esp_openclaw_setup_response.c"),
             str(component / "esp_openclaw_setup_dispatcher.c"),
-            str(component / "esp_openclaw_setup_security2.c"), str(mailbox),
+            str(component / "esp_openclaw_setup_security2.c"), str(mailbox), str(runtime),
             str(component / "esp_openclaw_node_common_device_node_cmd.c"),
             str(component / "esp_openclaw_node_example_json.c"),
             str(cjson_object), "-lm", "-o", str(binary),
         ]
         for flags in ([], ["-DSOC_WIFI_SUPPORTED=0"],
                       ["-DCONFIG_ESP_WIFI_REMOTE_ENABLED=1"],
-                      ["-DCONFIG_ESP_HOST_WIFI_ENABLED=1"]):
+                      ["-DCONFIG_ESP_HOST_WIFI_ENABLED=1"],
+                      ["-DCONFIG_BT_CTRL_MODEM_SLEEP=1"]):
+            subprocess.run([*compiler, *flags, "-Dfree=runtime_test_free", "-c",
+                            str(component / "esp_openclaw_setup_runtime.c"), "-o", str(runtime)], check=True)
             subprocess.run(command + flags, check=True)
             subprocess.run([str(binary)], check=True, timeout=30)
 

@@ -30,8 +30,9 @@ bool esp_openclaw_setup_security2_peer_is_current(uint64_t peer);
 /* Stale mailbox/lifecycle work cannot revoke a replacement authenticated peer. */
 bool esp_openclaw_setup_security2_revoke_peer(uint64_t peer);
 /* Local server owner: synchronously revoke BEFORE awaiting transport stop.
- * Callbacks/lifecycle must serialize on the BLE host; cleanup requires those
- * callbacks to have drained. No SDK callback may run after cleanup returns. */
+ * Callbacks serialize on the BLE host. Initialize before starting callbacks;
+ * the owner task stops/drains the transport before cleanup. Never stop NimBLE
+ * from its host callback: the public stop operation waits for that host. */
 void esp_openclaw_setup_security2_revoke(void);
 
 #ifdef __cplusplus

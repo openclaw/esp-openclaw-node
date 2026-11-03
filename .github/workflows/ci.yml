@@ -183,6 +183,9 @@ jobs:
               xtensa-esp32s3-elf-nm --undefined-only \
                 build/esp-idf/esp-openclaw-node-provisioning/libesp-openclaw-node-provisioning.a |
                 grep -E "[[:space:]]U protocomm_security2$" >/dev/null || exit 1
+              xtensa-esp32s3-elf-nm --undefined-only \
+                build/esp-idf/esp-openclaw-node-provisioning/libesp-openclaw-node-provisioning.a |
+                grep -E "[[:space:]]U esp_srp_gen_salt_verifier$" >/dev/null || exit 1
             fi &&
             if [ "${{ matrix.name }}" != "component-test-app-build" ]; then
               python3 ../../scripts/check_certificate_bundle.py \

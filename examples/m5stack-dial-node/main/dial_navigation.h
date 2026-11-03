@@ -1,6 +1,8 @@
 #pragma once
 
 #include "dial_action.h"
+#include "dial_input.h"
+#include "openclaw_setup.h"
 #include "openclaw_status_bar.h"
 #include "dial_directory.h"
 #include "dial_messaging.h"
@@ -11,7 +13,7 @@
 #include "esp_openclaw_node_wifi.h"
 
 typedef enum { DIAL_NAV_MENU, DIAL_NAV_AGENTS, DIAL_NAV_DETAIL, DIAL_NAV_SESSIONS, DIAL_NAV_PREVIEW, DIAL_NAV_SETTINGS, DIAL_NAV_DISPLAY, DIAL_NAV_BACKLIGHT, DIAL_NAV_READING, DIAL_NAV_DENSITY, DIAL_NAV_CONNECTION, DIAL_NAV_ACTIVITY, DIAL_NAV_DEVICES, DIAL_NAV_DEVICE_DETAIL, DIAL_NAV_LOCAL_DEVICE, DIAL_NAV_MESSAGING, DIAL_NAV_REPLY_PICKER, DIAL_NAV_REPLY_REVIEW, DIAL_NAV_REPLY_ACTIONS, DIAL_NAV_CREATION, DIAL_NAV_HELP, DIAL_NAV_HELP_TOPIC } dial_navigation_view_t;
-typedef enum { DIAL_NAV_HOME, DIAL_NAV_CONTROL, DIAL_NAV_REFRESH, DIAL_NAV_CHANGED, DIAL_NAV_CONVERSATIONS, DIAL_NAV_SESSIONS_REFRESH, DIAL_NAV_READ, DIAL_NAV_RESUME, DIAL_NAV_BRIGHTNESS, DIAL_NAV_DEVICES_REFRESH, DIAL_NAV_MESSAGING_REQUEST, DIAL_NAV_MESSAGING_CANCEL, DIAL_NAV_REPLY_BEGIN, DIAL_NAV_REPLY_SEND, DIAL_NAV_REPLY_CLOSE, DIAL_NAV_REPLY_READ, DIAL_NAV_CREATION_BEGIN, DIAL_NAV_CREATION_SUBMIT, DIAL_NAV_CREATION_CLOSE, DIAL_NAV_CREATION_OPEN, DIAL_NAV_CREATION_CHATS } dial_navigation_event_t;
+typedef enum { DIAL_NAV_HOME, DIAL_NAV_WAKE, DIAL_NAV_CONTROL, DIAL_NAV_REFRESH, DIAL_NAV_CHANGED, DIAL_NAV_CONVERSATIONS, DIAL_NAV_SESSIONS_REFRESH, DIAL_NAV_READ, DIAL_NAV_RESUME, DIAL_NAV_BRIGHTNESS, DIAL_NAV_DEVICES_REFRESH, DIAL_NAV_MESSAGING_REQUEST, DIAL_NAV_MESSAGING_CANCEL, DIAL_NAV_REPLY_BEGIN, DIAL_NAV_REPLY_SEND, DIAL_NAV_REPLY_CLOSE, DIAL_NAV_REPLY_READ, DIAL_NAV_CREATION_BEGIN, DIAL_NAV_CREATION_SUBMIT, DIAL_NAV_CREATION_CLOSE, DIAL_NAV_CREATION_OPEN, DIAL_NAV_CREATION_CHATS } dial_navigation_event_t;
 /* CHANGED asks the input owner to cancel active gestures before replacing rows. */
 typedef void (*dial_navigation_handler_t)(dial_navigation_event_t event, size_t offset, void *context);
 
@@ -21,6 +23,11 @@ typedef struct {
     openclaw_status_bar_t status;
     lv_obj_t *avatars[3], *detail_avatar, *detail_initials;
     lv_obj_t *messaging_icon, *messaging_status, *messaging_detail;
+    openclaw_setup_t *setup;
+    lv_group_t *setup_group;
+    dial_input_t *input;
+    esp_openclaw_setup_runtime_handle_t setup_runtime;
+    esp_err_t (*setup_wake)(void *context);
     dial_navigation_view_t view;
     unsigned focus, first, count;
     unsigned revision, conversation_revision, preview_revision;
@@ -81,3 +88,9 @@ void dial_navigation_creation_update(dial_navigation_t *nav, const dial_creation
 void dial_navigation_creation_result(dial_navigation_t *nav, bool accepted);
 void dial_navigation_open_activity(dial_navigation_t *nav);
 void dial_navigation_activity_update(dial_navigation_t *nav, const dial_activity_t *activity);
+
+/* Display-lock owned adapter. Runtime is created once by app_main, never here. */
+bool dial_navigation_setup_create(dial_navigation_t *nav, dial_input_t *input,
+                                 esp_err_t (*wake)(void *context));
+void dial_navigation_setup_update(dial_navigation_t *nav);
+void dial_navigation_setup_close(dial_navigation_t *nav);

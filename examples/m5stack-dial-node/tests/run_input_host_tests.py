@@ -12,6 +12,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--lvgl-dir", type=Path, required=True)
     parser.add_argument("--snapshot-prefix", type=Path)
+    parser.add_argument("--snapshot-name", help="Capture only one named state")
     args = parser.parse_args()
     lvgl = args.lvgl_dir.resolve()
     tests = Path(__file__).resolve().parent
@@ -37,7 +38,7 @@ def main():
             "cc", "-std=gnu11", "-O1", "-g", "-fsanitize=address,undefined",
             "-fno-sanitize-recover=all", "-fno-omit-frame-pointer",
             "-DLV_CONF_SKIP", "-DLV_USE_OS=LV_OS_NONE", "-DLV_USE_LOG=0",
-            "-DLV_USE_STDLIB_MALLOC=LV_STDLIB_CLIB",
+            "-DLV_USE_STDLIB_MALLOC=LV_STDLIB_CLIB", "-DLV_USE_QRCODE=1",
             "-DLV_FONT_MONTSERRAT_16=1", "-DLV_FONT_MONTSERRAT_20=1", "-DLV_FONT_MONTSERRAT_24=1",
             "-I", directory,
             "-I", str(root / "components/esp-openclaw-node-provisioning/tests/host"),
@@ -48,6 +49,7 @@ def main():
             "-I", str(root / "components/esp-openclaw-ui/include"),
             str(tests / "test_dial_input.c"), str(tests.parent / "main/dial_input.c"),
             str(tests.parent / "main/dial_home.c"),
+            str(root / "components/esp-openclaw-ui/openclaw_setup.c"),
             str(root / "components/esp-openclaw-ui/openclaw_status_bar.c"),
             str(root / "components/esp-openclaw-ui/openclaw_connection_details.c"),
             str(root / "components/esp-openclaw-ui/openclaw_reading.c"),
@@ -61,7 +63,7 @@ def main():
             *map(str, sorted((lvgl / "src").rglob("*.c"))), "-lm", "-o", str(binary),
         ]
         subprocess.run(command, check=True)
-        subprocess.run([str(binary), *([str(args.snapshot_prefix)] if args.snapshot_prefix else [])], check=True)
+        subprocess.run([str(binary), *([str(args.snapshot_prefix), args.snapshot_name or ""] if args.snapshot_prefix else [])], check=True)
 
 
 if __name__ == "__main__":

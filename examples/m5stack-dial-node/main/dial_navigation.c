@@ -25,7 +25,7 @@ static const struct {
         "and approve this Dial on your Gateway.\n\n"
         "This Dial has no microphone or speech speaker. It works independently of the Watch."},
     {"USB setup", LV_SYMBOL_USB,
-        "First setup uses USB and a computer. Open the device's serial console and enter:\n\n"
+        "For phone setup, use Settings > Phone setup in OpenClaw. USB setup uses a computer. Open the device's serial console and enter:\n\n"
         "wifi set \"<ssid>\" \"<password>\"\n"
         "gateway setup-code <code>\n\n"
         "Use a fresh device setup code from OpenClaw. Keep your password and code private.\n\n"
@@ -131,6 +131,7 @@ static void list_row(dial_navigation_t *nav, unsigned row, const char *name)
 
 static void changed(dial_navigation_t *nav)
 {
+    dial_navigation_setup_close(nav);
     nav->handler(DIAL_NAV_CHANGED, 0, nav->context);
     render(nav);
 }
@@ -245,6 +246,13 @@ static void touch(lv_event_t *event)
     dial_navigation_t *nav = lv_event_get_user_data(event);
     lv_event_code_t code = lv_event_get_code(event);
     lv_indev_t *indev = lv_indev_active();
+    if (nav->input && nav->brightness == 0) {
+        if (code == LV_EVENT_PRESSED && indev) {
+            lv_indev_wait_release(indev);
+            nav->handler(DIAL_NAV_WAKE, 0, nav->context);
+        }
+        return;
+    }
     if (indev != NULL && lv_indev_get_type(indev) == LV_INDEV_TYPE_POINTER) {
         lv_point_t point;
         lv_indev_get_point(indev, &point);
@@ -435,8 +443,8 @@ static void item(dial_navigation_t *nav, unsigned index, const char **name, cons
         return;
     }
     if (nav->view == DIAL_NAV_SETTINGS) {
-        const char *names[] = {"Display", "Connection", "Messaging", "Help", "Back"};
-        const char *icons[] = {LV_SYMBOL_IMAGE, LV_SYMBOL_WIFI, LV_SYMBOL_ENVELOPE, "?", LV_SYMBOL_LEFT};
+        const char *names[] = {"Display", "Connection", "Messaging", "Help", "Phone setup", "Back"};
+        const char *icons[] = {LV_SYMBOL_IMAGE, LV_SYMBOL_WIFI, LV_SYMBOL_ENVELOPE, "?", LV_SYMBOL_WIFI, LV_SYMBOL_LEFT};
         *name = names[index];
         *icon = icons[index];
         return;
@@ -887,7 +895,7 @@ static void render(dial_navigation_t *nav)
     bool sessions = nav->view == DIAL_NAV_SESSIONS;
     bool preview = nav->view == DIAL_NAV_PREVIEW;
     bool message = (nav->view == DIAL_NAV_AGENTS || sessions) && agent_count(nav) == 0;
-    nav->count = detail || preview ? 1 : (nav->view == DIAL_NAV_MENU || nav->view == DIAL_NAV_SETTINGS || nav->view == DIAL_NAV_HELP) ? 5 :
+    nav->count = detail || preview ? 1 : nav->view == DIAL_NAV_SETTINGS ? 6 : (nav->view == DIAL_NAV_MENU || nav->view == DIAL_NAV_HELP) ? 5 :
         nav->view == DIAL_NAV_DISPLAY ? 4 : (nav->view == DIAL_NAV_READING || nav->view == DIAL_NAV_DENSITY) ? 3 : agent_count(nav) + creation_entry(nav) + has_next(nav) + has_previous(nav) + 2;
     if (!detail && !preview && nav->focus >= nav->count) nav->focus = 0;
     unsigned visible = message ? 2 : list_visible();
@@ -1241,6 +1249,16 @@ void dial_navigation_activate(dial_navigation_t *nav)
     }
     if (nav->view == DIAL_NAV_BACKLIGHT || nav->view == DIAL_NAV_CONNECTION) { back(nav); return; }
     if (nav->view == DIAL_NAV_SETTINGS) {
+        if (nav->focus == 4) {
+            if (!nav->setup || !nav->input) return;
+            dial_input_set_control(nav->input, false);
+            if (!openclaw_setup_show(nav->setup)) return;
+            nav->input->suspended = true;
+            lv_indev_set_group(nav->input->encoder, nav->setup_group);
+            lv_group_set_editing(nav->setup_group, false);
+            dial_navigation_setup_update(nav);
+            return;
+        }
         if (nav->focus < 4) dial_navigation_open_settings(nav, nav->focus == 0 ? DIAL_NAV_DISPLAY :
             nav->focus == 1 ? DIAL_NAV_CONNECTION : nav->focus == 2 ? DIAL_NAV_MESSAGING : DIAL_NAV_HELP);
         else back(nav);
@@ -1338,6 +1356,7 @@ void dial_navigation_set_brightness(dial_navigation_t *nav, int percent, bool fa
     if (nav->brightness == percent && nav->brightness_failed == failed &&
         nav->brightness_temporary == temporary && nav->brightness_save_failed == save_failed) return;
     nav->brightness = percent;
+    if (nav->input) nav->input->asleep = percent == 0;
     nav->brightness_failed = failed;
     nav->brightness_temporary = temporary;
     nav->brightness_save_failed = save_failed;
@@ -1414,4 +1433,68 @@ void dial_navigation_activity_update(dial_navigation_t *nav, const dial_activity
     if (nav->activity.revision == activity->revision) return;
     nav->activity = *activity;
     if (nav->view == DIAL_NAV_ACTIVITY) changed(nav);
+}
+
+static esp_err_t setup_action(void *context, openclaw_setup_action_t action, openclaw_setup_key_t *key)
+{
+    dial_navigation_t *nav = context;
+    if (action == OPENCLAW_SETUP_WAKE) return nav->setup_wake(nav->context);
+    if (action == OPENCLAW_SETUP_CANCEL && !key->request) return ESP_OK;
+    if (!nav->setup_runtime) return ESP_ERR_INVALID_STATE;
+    if (action == OPENCLAW_SETUP_OPEN) return esp_openclaw_setup_runtime_open(nav->setup_runtime, &key->request);
+    if (action == OPENCLAW_SETUP_CANCEL) return esp_openclaw_setup_runtime_cancel(nav->setup_runtime, key->request);
+    esp_openclaw_setup_local_action_t local = action == OPENCLAW_SETUP_NEUTRAL ? ESP_OPENCLAW_SETUP_LOCAL_NEUTRAL :
+        action == OPENCLAW_SETUP_CONFIRM ? ESP_OPENCLAW_SETUP_LOCAL_CONFIRM : ESP_OPENCLAW_SETUP_LOCAL_RETRY;
+    return esp_openclaw_setup_runtime_action(nav->setup_runtime, key->request, key->generation, key->peer, local);
+}
+
+bool dial_navigation_setup_create(dial_navigation_t *nav, dial_input_t *input,
+                                 esp_err_t (*wake)(void *context))
+{
+    nav->input = input;
+    input->asleep = nav->brightness == 0;
+    nav->setup_wake = wake;
+    nav->setup_group = lv_group_create();
+    if (!nav->setup_group) return false;
+    lv_group_t *previous = lv_group_get_default();
+    lv_group_set_default(nav->setup_group);
+    nav->setup = openclaw_setup_create(lv_obj_get_parent(nav->root), false, setup_action, nav);
+    lv_group_set_default(previous);
+    if (nav->setup) return true;
+    lv_group_delete(nav->setup_group);
+    nav->setup_group = NULL;
+    return false;
+}
+
+void dial_navigation_setup_close(dial_navigation_t *nav)
+{
+    openclaw_setup_close(nav->setup);
+    if (nav->input && nav->input->suspended) {
+        nav->input->suspended = false;
+        lv_indev_set_group(nav->input->encoder, nav->input->group);
+        dial_input_set_control(nav->input, false);
+    }
+}
+
+void dial_navigation_setup_update(dial_navigation_t *nav)
+{
+    if (!openclaw_setup_is_visible(nav->setup)) {
+        dial_navigation_setup_close(nav);
+        return;
+    }
+    esp_openclaw_setup_runtime_snapshot_t snapshot = {.error = ESP_ERR_INVALID_STATE, .can_open = true};
+    if (nav->setup_runtime) esp_openclaw_setup_runtime_snapshot(nav->setup_runtime, &snapshot);
+    lv_obj_t *focused = lv_group_get_focused(nav->setup_group);
+    openclaw_setup_update(nav->setup, &snapshot, nav->brightness > 0);
+    if (focused && lv_obj_is_visible(focused) && !lv_obj_has_state(focused, LV_STATE_DISABLED))
+        lv_group_focus_obj(focused); /* Hide/show during refresh must retain encoder selection. */
+    if (focused && (!lv_obj_is_visible(focused) || lv_obj_has_state(focused, LV_STATE_DISABLED)) &&
+        lv_indev_get_state(nav->input->encoder) == LV_INDEV_STATE_PRESSED) {
+        /* A release from an old control must not click its replacement. */
+        lv_indev_reset(nav->input->encoder, NULL);
+        lv_indev_wait_release(nav->input->encoder);
+    }
+    volatile unsigned char *bytes = (volatile unsigned char *)&snapshot;
+    for (size_t i = 0; i < sizeof(snapshot); ++i) bytes[i] = 0;
+    if (!openclaw_setup_is_visible(nav->setup)) dial_navigation_setup_close(nav);
 }

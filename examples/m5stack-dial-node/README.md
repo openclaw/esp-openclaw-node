@@ -23,6 +23,19 @@ idf.py -p <dial-serial-port> flash monitor
 ```
 
 Back up the existing firmware before changing the device's partition layout.
+For phone setup, open **Settings > Phone setup** on the Dial, then choose
+**Start phone setup**. In a compatible OpenClaw phone app, scan the displayed QR
+or enter its manual details. Match the comparison code on both screens, release
+all controls, then tap or turn to **Codes match** and press. This explicit local
+step enables the phone's Wi-Fi and Gateway requests; review the destination on
+the phone before Apply. Setup does not advertise automatically at boot.
+
+**Cancel**, another page, or turning the screen off closes local setup authority.
+Earlier saved changes may remain; check the phone's result before retrying.
+**Other ways** keeps the USB instructions available. USB setup remains available
+when phone setup cannot start. Hardware BLE exchange, panel timing and full phone
+flow still require device qualification.
+
 Generate a setup code on a reachable Gateway, then provision over USB:
 
 ```text

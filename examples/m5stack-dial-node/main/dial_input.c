@@ -19,9 +19,18 @@ static void pointer_motion(dial_input_t *input, lv_indev_t *indev)
 static void object_event(lv_event_t *event)
 {
     dial_input_t *input = lv_event_get_user_data(event);
+    if (input->suspended) return;
     lv_indev_t *indev = lv_indev_active();
     bool pointer = indev != NULL && lv_indev_get_type(indev) == LV_INDEV_TYPE_POINTER;
     lv_event_code_t code = lv_event_get_code(event);
+    if (input->asleep) {
+        if (indev && (code == LV_EVENT_PRESSED || code == LV_EVENT_KEY)) {
+            lv_indev_reset(indev, NULL); /* Consume all detents from this dark-screen read. */
+            lv_indev_wait_release(indev);
+            emit(input, DIAL_INPUT_WAKE, pointer);
+        }
+        return;
+    }
     lv_obj_t *target = lv_event_get_current_target(event);
     if (code == LV_EVENT_PRESSED && pointer) {
         input->pointer_moved = false;
@@ -74,6 +83,7 @@ void dial_input_bind_home(dial_input_t *input, lv_obj_t *menu, lv_obj_t *agents,
 static void encoder_long_press(lv_event_t *event)
 {
     dial_input_t *input = lv_event_get_user_data(event);
+    if (input->suspended) return;
     emit(input, DIAL_INPUT_HOME, false);
     // Stop LVGL from treating this same hold/release as an edit toggle or click.
     lv_indev_reset(input->encoder, NULL);

@@ -229,7 +229,9 @@ jobs:
                 --case voice-send-queue-failure --case voice-send-prepare-failure --case voice-send-without-agent \
                 --case text-reader-send --case text-reader-stale --case text-reader-revoked --case text-reader-cancel &&
               python3 ../../components/esp-openclaw-room-node/tests/run_handwriting_host_tests.py &&
-              python3 ../../components/esp-openclaw-room-node/tests/run_ui_host_tests.py --lvgl-dir managed_components/lvgl__lvgl
+              python3 ../../components/esp-openclaw-room-node/tests/run_ui_host_tests.py --lvgl-dir managed_components/lvgl__lvgl &&
+              python3 ../../components/esp-openclaw-ui/tests/run_setup_host_tests.py --lvgl-dir managed_components/lvgl__lvgl &&
+              python3 ../../components/esp-openclaw-ui/tests/run_setup_host_tests.py --lvgl-dir managed_components/lvgl__lvgl --without-qr
             fi &&
             if [ "${{ matrix.name }}" != "component-test-app-build" ]; then
               python3 ../../scripts/package_firmware.py \

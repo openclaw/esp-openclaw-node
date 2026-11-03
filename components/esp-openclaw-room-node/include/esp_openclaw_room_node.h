@@ -15,6 +15,10 @@
 extern "C" {
 #endif
 
+/* Fresh local BOOT level, including release, read under the display lock.
+ * true consumes the board's normal toggle; keep sampling at board cadence. */
+bool esp_openclaw_room_node_boot_sample(bool pressed);
+
 typedef struct {
     lv_display_t *(*start)(void *ctx);
     esp_err_t (*setup_local_input)(void *ctx, void (*toggle_view)(void));

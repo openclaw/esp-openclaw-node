@@ -64,8 +64,18 @@ The saved awake level does not replace idle sleep or the camera minimum.
 USB setup, and Status topics. Each opens a scrollable reading page that follows
 the text-size preference and keeps **Return to call** available during a call.
 Back returns to the topic list, then to the page that opened Help. USB `menu help`
-opens the same guide. Setup instructions describe the current USB console flow;
-they do not advertise QR or Bluetooth provisioning.
+opens the same guide. The USB instructions remain available under Other ways.
+
+The native 1.8-inch Watch adds **Settings → Phone setup**. Start explicitly
+opens the shared Security2 runtime; the local screen shows ephemeral QR/manual
+details and a comparison code for a compatible OpenClaw phone client. Confirmation
+requires completed painting, new released touch/BOOT samples, then a fresh touch.
+BOOT cancels; it never confirms. Cancel, navigation, screen-off, Camera,
+Diagnostics, and Canvas takeover revoke setup before covering or replacing it.
+The existing BOOT task copies runtime snapshots and samples GPIO under the display
+lock. No remote menu or Canvas command can open or confirm phone setup.
+Tab5 keeps USB setup. Physical panel, BLE exchange, and companion-phone validation
+remain required on the actual boards.
 
 On the 1.8-inch Watch, **Menu → Agents** opens the agent directory.
 Swipe the list to browse up to eight agents per page; use the arrows for more

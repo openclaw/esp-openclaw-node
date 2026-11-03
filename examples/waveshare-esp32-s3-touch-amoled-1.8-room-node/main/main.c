@@ -25,11 +25,15 @@ static void boot_button_task(void *arg)
     (void)arg;
     bool was_pressed = false;
     for (;;) {
-        bool pressed = gpio_get_level(GPIO_NUM_0) == 0;
-        if (pressed && !was_pressed && toggle_room_view != NULL) {
-            toggle_room_view();
+        /* Sample under the same recursive lock as comparison paint/input.
+         * A level read before waiting for this lock is not post-paint proof. */
+        if (bsp_display_lock(100)) {
+            bool pressed = gpio_get_level(GPIO_NUM_0) == 0;
+            bool consumed = esp_openclaw_room_node_boot_sample(pressed);
+            if (!consumed && pressed && !was_pressed && toggle_room_view != NULL) toggle_room_view();
+            was_pressed = pressed;
+            bsp_display_unlock();
         }
-        was_pressed = pressed;
         vTaskDelay(pdMS_TO_TICKS(60));
     }
 }

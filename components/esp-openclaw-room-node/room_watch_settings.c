@@ -8,7 +8,7 @@
 #include "room_tab5_layout.h"
 
 static lv_obj_t *root, *heading, *back, *list;
-static lv_obj_t *rows[5], *level, *detail, *adjust[2], *display_rows[3], *reading_rows[2], *density_rows[2];
+static lv_obj_t *rows[6], *level, *detail, *adjust[2], *display_rows[3], *reading_rows[2], *density_rows[2];
 static lv_obj_t *messaging_status, *messaging_detail, *messaging_action;
 static lv_obj_t *help_list, *help_rows[4], *help_body, *help_text;
 static lv_obj_t *native_detail;
@@ -50,7 +50,8 @@ static const struct help_topic {
         "Live call is separate: open it from Menu, then tap Start call. Its microphone stays open until you tap End call there. "
         "Back and Home keep the call running; Return to call takes you back."},
     {ROOM_WATCH_HELP_SETUP, LV_SYMBOL_USB "  USB setup", "USB setup",
-        "First setup uses USB and a computer.\n\n"
+        "The AMOLED Watch supports Settings > Phone setup with a compatible OpenClaw phone app. "
+        "For USB setup, use a computer.\n\n"
         "Open the device's serial console and enter:\n"
         "wifi set \"<ssid>\" \"<password>\"\n"
         "gateway setup-code <code>\n\n"
@@ -118,6 +119,7 @@ void room_watch_settings_create(lv_obj_t *parent, lv_event_cb_t handler, lv_even
     rows[2] = button(LV_SYMBOL_SETTINGS "  Device status", 26, 248, 316, ROOM_WATCH_DEVICE_STATUS, handler);
     rows[3] = button(LV_SYMBOL_ENVELOPE "  Messaging", 26, 312, 316, ROOM_WATCH_MESSAGING, handler);
     rows[4] = button("?  Help", 26, 376, 316, ROOM_WATCH_HELP, handler);
+    rows[5] = button(LV_SYMBOL_BLUETOOTH "  Phone setup", 26, 120, 316, ROOM_WATCH_PHONE_SETUP, handler);
     help_list = lv_obj_create(root);
     lv_obj_remove_style_all(help_list);
     lv_obj_set_pos(help_list, 26, 120);
@@ -168,7 +170,7 @@ void room_watch_settings_create(lv_obj_t *parent, lv_event_cb_t handler, lv_even
     display_rows[0] = button(LV_SYMBOL_IMAGE "  Brightness", 26, 120, 316, ROOM_WATCH_BRIGHTNESS, handler);
     display_rows[1] = button(LV_SYMBOL_LIST "  Reading text", 26, 184, 316, ROOM_WATCH_READING, handler);
     display_rows[2] = button(LV_SYMBOL_LIST "  List spacing", 26, 248, 316, ROOM_WATCH_DENSITY, handler);
-    for (unsigned i = 0; i < 5; ++i) lv_obj_set_parent(rows[i], list);
+    for (unsigned i = 0; i < 6; ++i) lv_obj_set_parent(rows[i], list);
     for (unsigned i = 0; i < 3; ++i) lv_obj_set_parent(display_rows[i], list);
     density_rows[0] = button("Compact", 26, 184, 316, ROOM_WATCH_COMPACT, handler);
     density_rows[1] = button("Comfortable", 26, 248, 316, ROOM_WATCH_COMFORTABLE, handler);
@@ -263,9 +265,9 @@ void room_watch_settings_render(room_watch_page_t page, room_watch_page_t parent
     if (tab5) lv_obj_set_hidden(native_detail, !brightness_page && !reading && !density && !permissions);
     int row_height = room_page_row(false);
     int row_step = row_height + room_page_gap();
-    for (unsigned i = 0; i < 5; ++i) {
-        lv_obj_set_hidden(rows[i], display || brightness_page || reading || density || permissions || help || topic != NULL);
-        lv_obj_set_pos(rows[i], 0, (int)i * row_step);
+    for (unsigned i = 0; i < 6; ++i) {
+        lv_obj_set_hidden(rows[i], (tab5 && i == 5) || display || brightness_page || reading || density || permissions || help || topic != NULL);
+        lv_obj_set_pos(rows[i], 0, (tab5 ? (int)i : i == 5 ? 0 : (int)i + 1) * row_step);
         lv_obj_set_height(rows[i], row_height);
         if (tab5) { room_tab5_button(rows[i], 0, (int)i * row_step, 960); lv_obj_set_height(rows[i], row_height); }
     }
@@ -358,7 +360,7 @@ void room_watch_settings_render(room_watch_page_t page, room_watch_page_t parent
             !openclaw_preferences_saved(OPENCLAW_PREFERENCE_BRIGHTNESS) ? "Couldn't save. Until restart only." :
             camera_minimum ? "Camera needs at least 40%" : "Saved awake brightness");
     }
-    lv_obj_t *buttons[] = {back, rows[0], rows[1], rows[2], rows[3], rows[4],
+    lv_obj_t *buttons[] = {back, rows[0], rows[1], rows[2], rows[3], rows[4], rows[5],
         help_rows[0], help_rows[1], help_rows[2], help_rows[3],
         display_rows[0], display_rows[1], display_rows[2], reading_rows[0], reading_rows[1],
         density_rows[0], density_rows[1], adjust[0], adjust[1], messaging_action};

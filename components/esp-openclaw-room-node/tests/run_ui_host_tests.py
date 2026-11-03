@@ -19,22 +19,18 @@ typedef int esp_err_t;
 #define ESP_ERR_INVALID_STATE 2
 #define ESP_ERR_TIMEOUT 3
 #define ESP_ERR_NO_MEM 4
+#define ESP_ERR_INVALID_RESPONSE 5
+#define ESP_ERR_INVALID_SIZE 6
 """,
     "esp_codec_dev.h": "typedef void *esp_codec_dev_handle_t;",
-    "esp_openclaw_node.h": """
-#include <stddef.h>
-#include "esp_err.h"
-typedef struct esp_openclaw_node *esp_openclaw_node_handle_t;
-typedef struct { const char *code; const char *message; } esp_openclaw_node_error_t;
-typedef esp_err_t (*esp_openclaw_node_command_handler_t)(esp_openclaw_node_handle_t,
-    void *, const char *, size_t, char **, esp_openclaw_node_error_t *);
-typedef struct {
-    const char *name;
-    esp_openclaw_node_command_handler_t handler;
-    void *context;
-} esp_openclaw_node_command_t;
-esp_err_t esp_openclaw_node_register_command(esp_openclaw_node_handle_t,
-    const esp_openclaw_node_command_t *);
+    "esp_check.h": "",
+    "esp_heap_caps.h": """
+#include <stdlib.h>
+#define MALLOC_CAP_SPIRAM 1
+#define MALLOC_CAP_8BIT 2
+void *heap_caps_malloc(size_t, unsigned);
+void *heap_caps_aligned_alloc(size_t, size_t, unsigned);
+void heap_caps_free(void *);
 """,
     "esp_log.h": """
 #define ESP_LOGE(tag, ...) ((void)(tag))
@@ -60,6 +56,8 @@ void ui_enter_critical(portMUX_TYPE *);
 void ui_exit_critical(portMUX_TYPE *);
 #define taskENTER_CRITICAL(lock) ui_enter_critical(lock)
 #define taskEXIT_CRITICAL(lock) ui_exit_critical(lock)
+#define portENTER_CRITICAL(lock) ui_enter_critical(lock)
+#define portEXIT_CRITICAL(lock) ui_exit_critical(lock)
 size_t strlcpy(char *, const char *, size_t);
 """,
     "freertos/semphr.h": "typedef void *SemaphoreHandle_t;",
@@ -129,11 +127,30 @@ def main():
             + "\n};\n"
         )
         binary = root / "room-ui-test"
+        # Keep the actual Canvas activation/screen switch. Other Canvas APIs
+        # remain the existing fixture boundaries for unrelated UI scenarios.
+        canvas_object = root / "canvas.o"
+        canvas_command = ["cc", "-std=gnu11", "-O1", "-g", "-fsanitize=address,undefined",
+                          "-fno-sanitize-recover=all", "-ffunction-sections", "-fdata-sections",
+                          "-DLV_CONF_SKIP", "-DLV_USE_OS=LV_OS_NONE"]
+        for path in (root, component, component / "include", lvgl, cjson,
+                     component.parent / "esp-openclaw-node/include",
+                     component.parent / "esp-openclaw-ui/include",
+                     component.parent / "esp-openclaw-node-provisioning/include",
+                     component.parent / "esp-openclaw-talk/include",
+                     component.parent / "esp-openclaw-chat/include",
+                     component.parent / "esp-openclaw-directory/include"):
+            canvas_command += ["-I", str(path)]
+        for name in ("set_action_handler", "is_active", "get_diagnostics", "hide", "view_toggle"):
+            canvas_command.append(f"-Droom_canvas_{name}=unused_canvas_{name}")
+        subprocess.run([*canvas_command, "-c", str(component / "room_canvas_a2ui_store.c"),
+                        "-o", str(canvas_object)], check=True)
         command = [
             "cc", "-std=gnu11", "-O1", "-g", "-fsanitize=address,undefined",
             "-fno-sanitize-recover=all", "-fno-omit-frame-pointer",
             "-DLV_CONF_SKIP", "-DLV_USE_OS=LV_OS_NONE",
             "-DLV_USE_STDLIB_MALLOC=LV_STDLIB_CLIB", "-DLV_USE_LOG=0",
+            "-DLV_USE_QRCODE=1",
             "-DLV_FONT_MONTSERRAT_20=1", "-DLV_FONT_MONTSERRAT_36=1", f"-DLV_FONT_MONTSERRAT_28={0 if args.without_heading_font else 1}",
             "-I", str(root), "-I", str(component), "-I", str(component / "include"),
             "-I", str(lvgl), str(tests / "test_room_ui_controller.c"),
@@ -141,6 +158,7 @@ def main():
             "-I", str(component.parent / "esp-openclaw-directory/include"),
             "-I", str(component.parent / "esp-openclaw-talk/include"),
             "-I", str(component.parent / "esp-openclaw-node-provisioning/include"),
+            "-I", str(component.parent / "esp-openclaw-node/include"),
             "-I", str(component.parent / "esp-openclaw-ui/include"),
             "-I", str(component.parent / "esp-openclaw-talk/include"),
             "-I", str(component.parent / "esp-openclaw-chat/include"),
@@ -153,6 +171,7 @@ def main():
             str(component.parent / "esp-openclaw-ui/openclaw_connection_details.c"),
             str(component.parent / "esp-openclaw-ui/openclaw_reading.c"),
             str(component.parent / "esp-openclaw-ui/openclaw_density.c"),
+            str(component.parent / "esp-openclaw-ui/openclaw_setup.c"),
             "-I", str(component.parent / "esp-openclaw-ui/tests/host"),
             str(component.parent / "esp-openclaw-ui/openclaw_preferences.c"),
             str(component.parent / "esp-openclaw-ui/tests/host/nvs.c"),
@@ -167,6 +186,7 @@ def main():
             str(component / "room_face.c"),
             str(pixels), str(watch_pixels), str(component / "room_lobster.c"),
             *map(str, sorted((lvgl / "src").rglob("*.c"))),
+            str(canvas_object), "-Wl,-dead_strip" if sys.platform == "darwin" else "-Wl,--gc-sections",
             "-lm", "-o", str(binary),
         ]
         print("Building real room UI + LVGL host renderer", flush=True)

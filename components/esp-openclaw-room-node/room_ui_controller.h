@@ -9,6 +9,7 @@
 #include "room_voice_draft.h"
 #include "room_messaging.h"
 #include "esp_openclaw_talk_snapshot.h"
+#include "esp_openclaw_setup_runtime.h"
 
 typedef enum {
     ROOM_UI_IDLE = 0,
@@ -68,6 +69,11 @@ typedef struct {
 } room_ui_diagnostics_snapshot_t;
 
 void room_ui_init(void);
+/* Boot-lifetime runtime; no entry or confirmation through remote menu commands. */
+void room_ui_set_setup_runtime(esp_openclaw_setup_runtime_handle_t runtime);
+bool room_ui_boot_sample(bool pressed);
+/* Display lock held: revoke before replacing/covering the setup view. */
+void room_ui_close_phone_setup(void);
 /** Start carries the painted owner revision; Stop ignores it. Register before init. */
 void room_ui_set_talk_action_handler(void (*handler)(bool start, uint64_t recipient_revision));
 void room_ui_set_voice_action_handler(void (*handler)(room_voice_action_t action, uint32_t generation,

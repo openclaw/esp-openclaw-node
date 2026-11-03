@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Use the standard GitHub Actions runtime budget for CodeQL instead of the rollout-specific 20-minute job cap.
+
 - Batch main CodeQL security scans every six hours while retaining pull request and manual analysis.
 
 - Add local M5Dial phone setup with QR/manual discovery, painted comparison confirmation, fresh encoder/touch input, and cancellation before navigation or screen-off. USB setup remains available.

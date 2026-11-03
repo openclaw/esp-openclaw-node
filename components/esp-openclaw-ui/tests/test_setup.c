@@ -120,8 +120,8 @@ int main(int argc, char **argv)
     lv_init();
     display = lv_display_create(width, height);
     lv_display_set_color_format(display, LV_COLOR_FORMAT_RGB888);
-    frame = calloc(width * height, 3);
-    void *buffer = malloc(width * 16 * 3);
+    frame = calloc((size_t)width * height, 3);
+    void *buffer = malloc((size_t)width * 16 * 3);
     lv_display_set_buffers(display, buffer, NULL, width * 16 * 3, LV_DISPLAY_RENDER_MODE_PARTIAL);
     lv_display_set_flush_cb(display, flush);
     lv_display_set_flush_wait_cb(display, wait_dma);

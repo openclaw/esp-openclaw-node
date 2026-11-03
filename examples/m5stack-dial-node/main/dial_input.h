@@ -4,6 +4,7 @@
 
 typedef enum {
     DIAL_INPUT_OPEN,
+    DIAL_INPUT_WAKE,
     DIAL_INPUT_HOME,
     DIAL_INPUT_CHANGE,
     DIAL_INPUT_CONFIRM,
@@ -24,7 +25,7 @@ typedef struct {
     dial_input_handler_t handler;
     void *context;
     lv_point_t press_point;
-    bool control, pointer_moved;
+    bool control, pointer_moved, suspended, asleep;
 } dial_input_t;
 
 void dial_input_init(dial_input_t *input, lv_indev_t *encoder, lv_obj_t *screen,

@@ -26,7 +26,7 @@ static unsigned refreshes, previous, next, opens, reads;
 static unsigned device_refreshes;
 static esp_openclaw_devices_snapshot_t devices;
 static dial_conversations_snapshot_t conversations;
-static const char *snapshot_prefix;
+static const char *snapshot_prefix, *snapshot_name;
 static uint16_t frame[240 * 240];
 static size_t requested_offset;
 static int brightness = 65;
@@ -43,6 +43,50 @@ static unsigned creation_begins, creation_submits, creation_closes, creation_ope
 static unsigned creation_requested_revision;
 static bool creation_rejected;
 static uint16_t pixels[240 * 240];
+
+struct esp_openclaw_setup_runtime { unsigned unused; };
+static struct esp_openclaw_setup_runtime setup_runtime;
+static esp_openclaw_setup_runtime_snapshot_t setup_snapshot;
+static unsigned setup_opens, setup_cancels, setup_neutrals, setup_confirms, setup_retries, setup_wakes;
+static uint64_t setup_cancel_id;
+static esp_err_t setup_admission;
+
+esp_err_t esp_openclaw_setup_runtime_open(esp_openclaw_setup_runtime_handle_t runtime, uint64_t *request)
+{
+    assert(runtime == &setup_runtime);
+    ++setup_opens;
+    if (setup_admission == ESP_OK) *request = 91;
+    return setup_admission;
+}
+esp_err_t esp_openclaw_setup_runtime_cancel(esp_openclaw_setup_runtime_handle_t runtime, uint64_t request)
+{
+    assert(runtime == &setup_runtime);
+    ++setup_cancels; setup_cancel_id = request;
+    return ESP_OK;
+}
+esp_err_t esp_openclaw_setup_runtime_action(esp_openclaw_setup_runtime_handle_t runtime,
+    uint64_t request, uint64_t generation, uint64_t peer, esp_openclaw_setup_local_action_t action)
+{
+    assert(runtime == &setup_runtime && request == 91 && generation == 12 && peer == 37);
+    if (action == ESP_OPENCLAW_SETUP_LOCAL_NEUTRAL) ++setup_neutrals;
+    else if (action == ESP_OPENCLAW_SETUP_LOCAL_CONFIRM) ++setup_confirms;
+    else ++setup_retries;
+    return ESP_OK;
+}
+bool esp_openclaw_setup_runtime_snapshot(esp_openclaw_setup_runtime_handle_t runtime,
+    esp_openclaw_setup_runtime_snapshot_t *snapshot)
+{
+    assert(runtime == &setup_runtime);
+    *snapshot = setup_snapshot;
+    return true;
+}
+static esp_err_t setup_wake(void *context)
+{
+    (void)context;
+    ++setup_wakes;
+    dial_navigation_set_brightness(&navigation, 65, false, true);
+    return ESP_OK;
+}
 
 static void flush(lv_display_t *display, const lv_area_t *area, uint8_t *data)
 {
@@ -73,6 +117,7 @@ static void event(dial_input_event_t kind, int value, bool pointer, void *contex
     (void)value;
     (void)pointer;
     (void)context;
+    if (kind == DIAL_INPUT_WAKE) { setup_wake(NULL); return; }
     if (kind == DIAL_INPUT_HOME_MENU) { ++home_menus; return; }
     if (kind == DIAL_INPUT_HOME_AGENTS) { ++home_agents; return; }
     if (!navigating && !input.control && kind == DIAL_INPUT_OPEN) ++home_opens;
@@ -110,6 +155,7 @@ static void navigation_event(dial_navigation_event_t kind, size_t offset, void *
 {
     (void)context;
     dial_input_set_control(&input, false);
+    if (kind == DIAL_NAV_WAKE) { setup_wake(NULL); return; }
     if (kind == DIAL_NAV_BRIGHTNESS) {
         ++brightness_requests;
         requested_offset = offset;
@@ -262,7 +308,7 @@ static void touch(int x, int y, bool pressed)
 
 static void snapshot(const char *name)
 {
-    if (snapshot_prefix == NULL) return;
+    if (snapshot_prefix == NULL || (snapshot_name && *snapshot_name && strcmp(name, snapshot_name) != 0)) return;
     char path[1024];
     assert(snprintf(path, sizeof(path), "%s-%s.ppm", snapshot_prefix, name) < (int)sizeof(path));
     lv_obj_invalidate(lv_screen_active());
@@ -1031,10 +1077,141 @@ static void check_help(lv_indev_t *encoder)
     puts("Dial Help: topic selection, reading bounds, encoder/touch Back, offline text and no action submission passed");
 }
 
+static lv_obj_t *setup_button(lv_obj_t *object, const char *caption)
+{
+    if (lv_obj_check_type(object, &lv_label_class) && lv_obj_is_visible(object) &&
+        strcmp(lv_label_get_text(object), caption) == 0) return lv_obj_get_parent(object);
+    for (unsigned i = 0; i < lv_obj_get_child_count(object); ++i) {
+        lv_obj_t *found = setup_button(lv_obj_get_child(object, i), caption);
+        if (found) return found;
+    }
+    return NULL;
+}
+
+static void setup_tap(const char *caption)
+{
+    lv_obj_update_layout(lv_screen_active());
+    lv_obj_t *button = setup_button(lv_screen_active(), caption);
+    assert(button);
+    lv_area_t area; lv_obj_get_coords(button, &area);
+    int x = (area.x1 + area.x2) / 2, y = (area.y1 + area.y2) / 2;
+    touch(x, y, true); touch(x, y, false);
+}
+
+static void setup_entry(lv_indev_t *encoder)
+{
+    dial_navigation_open_settings(&navigation, DIAL_NAV_SETTINGS);
+    for (unsigned i = 0; i < 4; ++i) { encoder_diff = 1; lv_indev_read(encoder); advance(40); }
+    assert(navigation.focus == 4 && setup_button(lv_screen_active(), "Phone setup"));
+    press_encoder(encoder);
+    assert(openclaw_setup_is_visible(navigation.setup) && input.suspended);
+    assert(lv_indev_get_group(encoder) == navigation.setup_group);
+}
+
+static void setup_poll(lv_timer_t *timer)
+{
+    (void)timer;
+    dial_navigation_setup_update(&navigation);
+}
+
+static void check_phone_setup(lv_indev_t *encoder)
+{
+    openclaw_density_set(OPENCLAW_DENSITY_COMPACT);
+    openclaw_reading_set_size(OPENCLAW_READING_STANDARD);
+    navigating = true;
+    lv_obj_set_hidden(home.root, true);
+    lv_obj_set_hidden(input.arc, true);
+    dial_navigation_set_brightness(&navigation, 65, false, false);
+    assert(dial_navigation_setup_create(&navigation, &input, setup_wake));
+    lv_timer_t *poll = lv_timer_create(setup_poll, 50, NULL);
+    navigation.setup_runtime = &setup_runtime;
+    setup_snapshot = (esp_openclaw_setup_runtime_snapshot_t){.can_open = true};
+    setup_entry(encoder);
+    assert(!setup_opens); /* Opening the local screen never starts RF. */
+    setup_tap("Start phone setup");
+    assert(setup_opens == 1);
+    dial_navigation_setup_update(&navigation); /* pre-OPEN snapshot must retain cancel ID */
+    setup_tap("Cancel");
+    dial_navigation_setup_update(&navigation);
+    assert(setup_cancels == 1 && setup_cancel_id == 91 && !input.suspended);
+    assert(lv_indev_get_group(encoder) == input.group);
+
+    setup_entry(encoder);
+    setup_admission = ESP_ERR_TIMEOUT;
+    setup_tap("Start phone setup");
+    dial_navigation_setup_update(&navigation);
+    assert(setup_opens == 2);
+    setup_admission = ESP_OK;
+    setup_tap("Retry"); assert(setup_opens == 3);
+    setup_snapshot = (esp_openclaw_setup_runtime_snapshot_t){.request_id = 91, .peer = 37,
+        .phase = ESP_OPENCLAW_SETUP_RUNTIME_ACTIVE,
+        .session = {.generation = 12, .phase = ESP_OPENCLAW_SETUP_COMPARISON}};
+    strcpy(setup_snapshot.comparison, "1234-5678"); /* Synthetic, never a PoP. */
+    encoder_state = LV_INDEV_STATE_PRESSED;
+    lv_indev_read(encoder);
+    dial_navigation_setup_update(&navigation);
+    lv_display_send_event(lv_display_get_default(), LV_EVENT_FLUSH_WAIT_FINISH, NULL);
+    lv_indev_read(pointer); lv_indev_read(encoder);
+    assert(!setup_neutrals && !setup_confirms);
+    lv_obj_t *confirm = setup_button(lv_screen_active(), "Codes match"); assert(confirm);
+    lv_obj_send_event(confirm, LV_EVENT_CLICKED, NULL);
+    assert(!setup_confirms); /* No synthetic physical confirmation. */
+    encoder_state = LV_INDEV_STATE_RELEASED; lv_indev_read(encoder); advance(40);
+    assert(setup_neutrals == 1 && !setup_confirms);
+    assert(setup_button(lv_screen_active(), "Codes match"));
+    lv_group_focus_obj(confirm);
+    snapshot("phone-setup-comparison");
+    assert(lv_obj_get_group(confirm) == navigation.setup_group);
+    assert(lv_group_get_focused(navigation.setup_group) == confirm);
+    press_encoder(encoder);
+    assert(setup_confirms == 1);
+    dial_navigation_setup_close(&navigation);
+    assert(!input.suspended && lv_indev_get_group(encoder) == input.group);
+
+    setup_entry(encoder);
+    dial_navigation_open_settings(&navigation, DIAL_NAV_DISPLAY);
+    assert(!openclaw_setup_is_visible(navigation.setup) && !input.suspended);
+    assert(setup_cancel_id == 91);
+    setup_snapshot = (esp_openclaw_setup_runtime_snapshot_t){.can_open = true};
+    setup_entry(encoder);
+    dial_navigation_set_brightness(&navigation, 0, false, true);
+    dial_navigation_setup_update(&navigation);
+    unsigned opens_before_wake = setup_opens;
+    setup_tap("Start phone setup");
+    assert(setup_wakes == 1 && setup_opens == opens_before_wake);
+    dial_navigation_setup_update(&navigation);
+    setup_tap("Start phone setup");
+    assert(setup_opens == opens_before_wake + 1);
+    dial_navigation_setup_close(&navigation);
+    dial_navigation_set_brightness(&navigation, 0, false, true);
+    unsigned wake_count = setup_wakes;
+    encoder_diff = -2; lv_indev_read(encoder); advance(40);
+    assert(setup_wakes == wake_count + 1 && navigation.focus == 4);
+    assert(!openclaw_setup_is_visible(navigation.setup));
+    dial_navigation_set_brightness(&navigation, 0, false, true);
+    wake_count = setup_wakes;
+    press_encoder(encoder); /* First dark-screen press wakes, never opens setup. */
+    assert(setup_wakes == wake_count + 1 && !openclaw_setup_is_visible(navigation.setup));
+    assert(navigation.view == DIAL_NAV_SETTINGS && navigation.focus == 4);
+    press_encoder(encoder);
+    assert(openclaw_setup_is_visible(navigation.setup) && setup_opens == opens_before_wake + 1);
+    dial_navigation_setup_close(&navigation);
+    dial_navigation_set_brightness(&navigation, 0, false, true);
+    wake_count = setup_wakes;
+    touch(120, 82, true); touch(120, 82, false);
+    assert(setup_wakes == wake_count + 1 && navigation.view == DIAL_NAV_SETTINGS);
+    assert(!openclaw_setup_is_visible(navigation.setup));
+    lv_timer_delete(poll);
+    openclaw_setup_destroy(navigation.setup); navigation.setup = NULL;
+    lv_group_delete(navigation.setup_group);
+    puts("Dial phone setup: explicit entry, exact IDs, encoder neutral/fresh press, synthetic rejection, navigation and wake-only input passed");
+}
+
 int main(int argc, char **argv)
 {
     check_avatar_identity();
     snapshot_prefix = argc > 1 ? argv[1] : NULL;
+    snapshot_name = argc > 2 ? argv[2] : NULL;
     lv_init();
     lv_display_t *display = lv_display_create(240, 240);
     lv_display_set_color_format(display, LV_COLOR_FORMAT_RGB565);
@@ -2068,6 +2245,7 @@ int main(int argc, char **argv)
     puts("Home targets: decorative center, distinct actions, gesture fences and Connection Back passed");
     check_help(encoder);
     check_local_back(encoder);
+    check_phone_setup(encoder);
     assert(reader_boundary_failures == 0);
     lv_deinit();
 }

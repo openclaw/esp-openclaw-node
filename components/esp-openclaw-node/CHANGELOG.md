@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add local M5Dial phone setup with QR/manual discovery, painted comparison confirmation, fresh encoder/touch input, and cancellation before navigation or screen-off. USB setup remains available.
+
 - Add local native Watch phone setup with QR/manual discovery, painted comparison confirmation, fresh touch/BOOT input, and cancellation before screen replacement or sleep. Tab5 keeps USB setup.
 
 - Add shared local phone-setup presentation with QR/manual details and comparison confirmation gated on completed painting and fresh physical input. Board entries remain separate work.

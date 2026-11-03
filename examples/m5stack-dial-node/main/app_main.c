@@ -132,6 +132,7 @@ static void close_devices(void)
 
 static void show_view(dial_view_t view)
 {
+    dial_navigation_setup_close(&ui.navigation);
     if (view != VIEW_NAVIGATION) {
         if (ui.navigation.reply.state != DIAL_REPLY_IDLE)
             dial_reader_reply_close(ui.navigation.reply.revision);
@@ -164,12 +165,25 @@ static void show_view(dial_view_t view)
 
 static esp_err_t set_brightness(int percent, bool save)
 {
+    if (percent == 0) dial_navigation_setup_close(&ui.navigation);
     esp_err_t err = bsp_display_brightness_set(percent);
     if (err == ESP_OK) ui.brightness = percent;
     esp_err_t saved = err == ESP_OK && save ?
         openclaw_preferences_save(OPENCLAW_PREFERENCE_BRIGHTNESS, percent) : ESP_OK;
     dial_navigation_set_brightness(&ui.navigation, ui.brightness, err != ESP_OK, !save);
     return err == ESP_OK ? saved : err;
+}
+
+static esp_err_t wake_display(void *context)
+{
+    (void)context;
+    return set_brightness(openclaw_preferences_load(OPENCLAW_PREFERENCE_BRIGHTNESS, 65), false);
+}
+
+static void setup_gateway_reconnect(void *context)
+{
+    (void)context;
+    if (reconnect.task) xTaskNotifyGive(reconnect.task);
 }
 
 static void update_devices(bool refresh)
@@ -201,7 +215,8 @@ static void update_devices(bool refresh)
 static void navigation_event(dial_navigation_event_t event, size_t offset, void *context)
 {
     (void)context;
-    if (event == DIAL_NAV_HOME) show_view(VIEW_FACE);
+    if (event == DIAL_NAV_WAKE) wake_display(NULL);
+    else if (event == DIAL_NAV_HOME) show_view(VIEW_FACE);
     else if (event == DIAL_NAV_CONTROL) show_view(VIEW_CONTROL);
     else if (event == DIAL_NAV_BRIGHTNESS) set_brightness((int)offset, true);
     else if (event == DIAL_NAV_DEVICES_REFRESH) update_devices(true);
@@ -450,6 +465,13 @@ static bool same_home_context(const dial_home_context_t *a, const dial_home_cont
 static void input_event(dial_input_event_t event, int value, bool pointer, void *context)
 {
     (void)context;
+    if (openclaw_setup_is_visible(ui.navigation.setup)) return;
+    if (event == DIAL_INPUT_WAKE || ui.brightness == 0) {
+        lv_indev_t *indev = lv_indev_active();
+        if (indev) lv_indev_wait_release(indev);
+        wake_display(NULL);
+        return;
+    }
     if (event == DIAL_INPUT_CHANGE) {
         if (dial_control_move(&ui.control, value)) {
             ++ui.changes;
@@ -493,6 +515,7 @@ static void input_event(dial_input_event_t event, int value, bool pointer, void 
 static void refresh_ui(lv_timer_t *timer)
 {
     (void)timer;
+    dial_navigation_setup_update(&ui.navigation);
     xSemaphoreTake(action_lock, portMAX_DELAY);
     action_result_t result;
     if (xQueueReceive(results, &result, 0) == pdTRUE && dial_action_complete(&action_state, result.token, result.delivery)) {
@@ -511,6 +534,7 @@ static void refresh_ui(lv_timer_t *timer)
     const char *activity = ui.submitted.request_id[0] != '\0' &&
         ui.submitted.token.connection_id == action_state.connection_id ? dial_activity_title(latest.stage) : NULL;
     xSemaphoreGive(action_lock);
+    if (openclaw_setup_is_visible(ui.navigation.setup)) return;
     static uint32_t connection_sample_at;
     static bool connection_sampled;
     bool connection_visible = ui.view == VIEW_NAVIGATION && ui.brightness > 0;
@@ -620,6 +644,10 @@ static esp_err_t start_display(void)
     dial_input_bind_home(&ui.input, ui.home.menu_button, ui.home.agent_button, ui.home.primary_button);
     dial_navigation_create(&ui.navigation, screen, navigation_event, NULL);
     dial_navigation_set_brightness(&ui.navigation, ui.brightness, false, false);
+    if (!dial_navigation_setup_create(&ui.navigation, &ui.input, wake_display)) {
+        bsp_display_unlock();
+        return ESP_ERR_NO_MEM;
+    }
     update_value();
     show_view(VIEW_FACE);
     lv_timer_create(refresh_ui, 50, NULL);
@@ -1082,6 +1110,14 @@ void app_main(void)
     esp_err_t reader_err = dial_reader_start(node);
     if (reader_err != ESP_OK) ESP_LOGW(TAG, "read access unavailable: %s", esp_err_to_name(reader_err));
     ESP_ERROR_CHECK(esp_openclaw_node_example_saved_session_reconnect_start(&reconnect, node, "dial_reconnect"));
+    esp_openclaw_setup_runtime_handle_t setup_runtime = NULL;
+    const esp_openclaw_setup_runtime_config_t setup = {.node = node, .label = "OpenClaw M5Dial",
+        .model = "m5stack-dial", .gateway_reconnect = setup_gateway_reconnect};
+    esp_err_t setup_err = esp_openclaw_setup_runtime_create(&setup, &setup_runtime);
+    if (setup_err != ESP_OK) ESP_LOGW(TAG, "phone setup unavailable: %s", esp_err_to_name(setup_err));
+    bsp_display_lock(0);
+    ui.navigation.setup_runtime = setup_runtime;
+    bsp_display_unlock();
     ESP_ERROR_CHECK(esp_openclaw_node_example_repl_start(node));
     const esp_console_cmd_t local = {.command = "local", .help = "Run a Dial command over USB (no agent session)",
         .hint = "<command> <JSON object>", .func = local_command};

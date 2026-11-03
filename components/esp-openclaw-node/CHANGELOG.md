@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Guard native Watch and M5Dial Security2 salt generation against short SDK allocations with a pinned, source-verified ESP-IDF patch, recording its identity in firmware bundles. Short salts fail safely before use; BLE setup presentation remains separate work.
+
 - Provide native setup bootstrap entropy under existing Wi-Fi ownership, requiring active nonsleeping RF without changing radio configuration or reconnect policy. Down, busy and remote radios fail without producing a seed.
 
 - Define bounded phone-setup responses with explicit public result codes, operation receipts, exact-attempt save observations, and scan truncation. Dispatch and BLE/mobile integration remain separate work.

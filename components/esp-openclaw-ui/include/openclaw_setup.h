@@ -20,6 +20,7 @@ typedef esp_err_t (*openclaw_setup_action_cb_t)(void *context,
 openclaw_setup_t *openclaw_setup_create(lv_obj_t *parent, bool has_boot_button,
     openclaw_setup_action_cb_t action, void *context);
 bool openclaw_setup_show(openclaw_setup_t *view);
+bool openclaw_setup_is_visible(const openclaw_setup_t *view);
 void openclaw_setup_update(openclaw_setup_t *view,
     const esp_openclaw_setup_runtime_snapshot_t *snapshot, bool awake);
 /* Leaving/replacing/covering the view must call close before showing another

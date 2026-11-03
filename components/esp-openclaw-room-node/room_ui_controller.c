@@ -27,6 +27,7 @@
 #include "room_watch_devices.h"
 #include "room_watch_conversations.h"
 #include "room_text_composer.h"
+#include "openclaw_setup.h"
 
 static bool watch_navigation_active(void);
 static void composer_action(bool send, const char *text);
@@ -35,6 +36,7 @@ static bool composer_open;
 static uint32_t composer_generation;
 static void start_text_hint(uint32_t show_ms);
 static void room_ui_paint_and_unlock(void);
+static bool room_ui_render_locked(void);
 static int room_ui_target_brightness(room_ui_state_t state, bool canvas_active);
 
 /* Tap toggles retained Canvas content; hold opens local diagnostics. */
@@ -78,6 +80,8 @@ static char gateway_text[64];
  * losing the operator-ready IDLE update once left the face stuck in the
  * connecting look forever. Painting may fail and retry; the fact may not.  */
 static portMUX_TYPE state_mux = portMUX_INITIALIZER_UNLOCKED;
+static esp_openclaw_setup_runtime_handle_t setup_runtime;
+static openclaw_setup_t *phone_setup;
 static room_ui_state_t current_state = ROOM_UI_IDLE;
 static char current_detail[48];
 static bool diagnostics_open;
@@ -122,6 +126,71 @@ static room_watch_page_t watch_parent(room_watch_page_t page)
     return ROOM_WATCH_HOME;
 }
 static int pressed_watch_page = -1;
+
+void room_ui_set_setup_runtime(esp_openclaw_setup_runtime_handle_t runtime)
+{
+    taskENTER_CRITICAL(&state_mux);
+    setup_runtime = runtime;
+    taskEXIT_CRITICAL(&state_mux);
+}
+
+static esp_err_t phone_setup_action(void *context, openclaw_setup_action_t action, openclaw_setup_key_t *key)
+{
+    (void)context;
+    taskENTER_CRITICAL(&state_mux);
+    esp_openclaw_setup_runtime_handle_t runtime = setup_runtime;
+    bool covered = camera_indicator_active || diagnostics_open;
+    taskEXIT_CRITICAL(&state_mux);
+    if (action == OPENCLAW_SETUP_WAKE) return room_ui_apply_display_brightness(ROOM_CANVAS_ACTIVE_BRIGHTNESS);
+    if (action == OPENCLAW_SETUP_CANCEL && !key->request) return ESP_OK;
+    if (covered && action != OPENCLAW_SETUP_CANCEL) return ESP_ERR_INVALID_STATE;
+    if (!runtime) return ESP_ERR_INVALID_STATE;
+    if (action == OPENCLAW_SETUP_OPEN) return esp_openclaw_setup_runtime_open(runtime, &key->request);
+    if (action == OPENCLAW_SETUP_CANCEL) return esp_openclaw_setup_runtime_cancel(runtime, key->request);
+    esp_openclaw_setup_local_action_t local = action == OPENCLAW_SETUP_NEUTRAL ? ESP_OPENCLAW_SETUP_LOCAL_NEUTRAL :
+        action == OPENCLAW_SETUP_CONFIRM ? ESP_OPENCLAW_SETUP_LOCAL_CONFIRM : ESP_OPENCLAW_SETUP_LOCAL_RETRY;
+    return esp_openclaw_setup_runtime_action(runtime, key->request, key->generation, key->peer, local);
+}
+
+void room_ui_close_phone_setup(void)
+{
+    openclaw_setup_close(phone_setup);
+    taskENTER_CRITICAL(&state_mux);
+    if (watch_page == ROOM_WATCH_PHONE_SETUP) watch_page = ROOM_WATCH_SETTINGS;
+    taskEXIT_CRITICAL(&state_mux);
+}
+
+static void phone_setup_refresh_locked(void)
+{
+    if (openclaw_setup_is_visible(phone_setup)) {
+        taskENTER_CRITICAL(&state_mux);
+        esp_openclaw_setup_runtime_handle_t runtime = setup_runtime;
+        taskEXIT_CRITICAL(&state_mux);
+        esp_openclaw_setup_runtime_snapshot_t snapshot = {.can_open = true};
+        if (runtime) esp_openclaw_setup_runtime_snapshot(runtime, &snapshot);
+        openclaw_setup_update(phone_setup, &snapshot, !room_board_display_is_dark());
+        volatile uint8_t *bytes = (volatile uint8_t *)&snapshot;
+        for (size_t i = 0; i < sizeof(snapshot); ++i) bytes[i] = 0;
+    }
+}
+
+/* The existing Watch BOOT producer supplies both this cadence and NEW levels.
+ * No extra task or timer is needed to copy the runtime's local presentation. */
+bool room_ui_boot_sample(bool pressed)
+{
+    if (!watch_home_enabled) return false;
+    if (!room_board_display_lock(100)) return true;
+    phone_setup_refresh_locked();
+    bool consumed = openclaw_setup_boot_sample(phone_setup, pressed);
+    if (!openclaw_setup_is_visible(phone_setup)) {
+        taskENTER_CRITICAL(&state_mux);
+        bool returned = watch_page == ROOM_WATCH_PHONE_SETUP;
+        taskEXIT_CRITICAL(&state_mux);
+        if (returned) { room_ui_close_phone_setup(); room_ui_paint_and_unlock(); return consumed; }
+    }
+    room_board_display_unlock();
+    return consumed;
+}
 static void (*agents_action_handler)(bool open, size_t offset);
 static room_agents_snapshot_t current_agents, painted_agents;
 static room_ui_talk_target_t current_target;
@@ -405,6 +474,11 @@ static bool watch_navigation_active(void)
 static esp_err_t watch_navigation_show_context(room_watch_page_t page, unsigned reader_epoch)
 {
     if (!room_board_display_lock(100)) return ESP_ERR_TIMEOUT;
+    room_ui_close_phone_setup();
+    if (page == ROOM_WATCH_PHONE_SETUP && (!watch_home_enabled || !openclaw_setup_show(phone_setup))) {
+        room_board_display_unlock();
+        return ESP_ERR_INVALID_STATE;
+    }
     if (page == ROOM_WATCH_DEVICE_STATUS) {
         esp_err_t err = room_diagnostics_open();
         room_board_display_unlock();
@@ -474,6 +548,7 @@ static esp_err_t watch_navigation_show_context(room_watch_page_t page, unsigned 
     } else if (leaving_agents && agents_action_handler != NULL) agents_action_handler(false, 0);
     if (resume_reader && conversation_handler != NULL)
         conversation_handler(ROOM_CONVERSATIONS_RESUME, "", 0, 0, conversation_generation);
+    phone_setup_refresh_locked();
     if (wake_home) start_text_hint(10000);
     room_ui_paint_and_unlock();
     return ESP_OK;
@@ -1430,6 +1505,7 @@ void room_ui_init(void)
             lv_obj_set_hidden(talk_target_label, true);
         }
     }
+    if (watch_home_enabled) phone_setup = openclaw_setup_create(lv_layer_top(), true, phone_setup_action, NULL);
     room_board_display_unlock();
     room_ui_refresh();
 }
@@ -1472,6 +1548,10 @@ esp_err_t room_ui_apply_display_brightness(int percent)
     // Serialize the preference snapshot and hardware write with setting changes.
     // Both touch-device ports use the recursive LVGL lock, including in Canvas callbacks.
     if (!room_board_display_lock(100)) return ESP_ERR_TIMEOUT;
+    if (percent == 0 && openclaw_setup_is_visible(phone_setup)) {
+        room_ui_close_phone_setup();
+        (void)room_ui_render_locked();
+    }
     taskENTER_CRITICAL(&state_mux);
     int preference = watch_brightness;
     bool camera = camera_indicator_active;
@@ -1629,7 +1709,7 @@ static bool room_ui_render_locked(void)
         taskEXIT_CRITICAL(&state_mux);
         bool settings = page == ROOM_WATCH_SETTINGS || page == ROOM_WATCH_LOCAL_DEVICE || page == ROOM_WATCH_DISPLAY || page == ROOM_WATCH_BRIGHTNESS || page == ROOM_WATCH_READING || page == ROOM_WATCH_DENSITY || page == ROOM_WATCH_MESSAGING ||
             (page >= ROOM_WATCH_HELP && page <= ROOM_WATCH_HELP_STATUS);
-        room_watch_navigation_render(page, &facts, !navigation || overlay || page == ROOM_WATCH_AGENTS ||
+        room_watch_navigation_render(page, &facts, !navigation || overlay || page == ROOM_WATCH_PHONE_SETUP || page == ROOM_WATCH_AGENTS ||
             page == ROOM_WATCH_DEVICES || settings, resume_failed, parent, content_bottom);
         room_watch_devices_render(painted_devices, !navigation || overlay || page != ROOM_WATCH_DEVICES, content_bottom);
         room_watch_settings_render(page, parent, brightness, brightness_failed, camera_minimum, &messaging,
@@ -1714,7 +1794,7 @@ static bool room_ui_render_locked(void)
         taskEXIT_CRITICAL(&state_mux);
         lv_obj_set_state(talk_pill, LV_STATE_DISABLED, !start && !stop);
         bool browsing_idle = watch_home_enabled && !call_page && !call_in_progress && facts.talk != ROOM_UI_TALK_STOPPING;
-        bool hidden = overlay || (voice_home && !canvas_active && !navigation) || browsing_idle ||
+        bool hidden = overlay || page == ROOM_WATCH_PHONE_SETUP || (voice_home && !canvas_active && !navigation) || browsing_idle ||
             (tab5_home_enabled && (canvas_active || (page != ROOM_WATCH_HOME && !call_page && !stop) ||
              (page == ROOM_WATCH_HOME && !start && !stop && facts.talk != ROOM_UI_TALK_STOPPING)));
         if (browsing_idle) {
@@ -1934,6 +2014,7 @@ esp_err_t room_ui_camera_indicator_begin(void)
     if (status_label == NULL || !room_board_display_lock(500)) {
         return ESP_ERR_TIMEOUT;
     }
+    room_ui_close_phone_setup();
     if (camera_indicator == NULL) {
         camera_indicator = lv_label_create(lv_layer_top());
     }
@@ -2007,6 +2088,7 @@ const char *room_ui_state_name(room_ui_state_t state)
 
 void room_ui_set_diagnostics_open(bool open)
 {
+    if (open) room_ui_close_phone_setup();
     taskENTER_CRITICAL(&state_mux);
     diagnostics_open = open;
     if (open) {

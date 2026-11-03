@@ -94,8 +94,16 @@ existing diagnostics overlay from Settings. The first touch on a dark screen onl
 Settings → Help opens short Navigation, Messages, USB setup, and Status guides.
 The same Help is available through This Watch and `menu help` in the USB console.
 Topics support larger reading text and scrolling; Back retains the entry point,
-and an active call stays reachable without ending it. USB remains the implemented
-setup route; QR and Bluetooth provisioning are not enabled by these guides.
+and an active call stays reachable without ending it. USB setup remains available.
+
+**Settings → Phone setup → Start phone setup** opens native BLE setup for a
+compatible OpenClaw phone client. Scan its QR or use the manual details. Compare
+the phone and Watch codes, release all controls, then tap **Codes match**.
+BOOT or Cancel closes setup; BOOT cannot confirm. Navigation, screen-off, Camera,
+Diagnostics, and Canvas takeover also cancel. Earlier saved changes can remain.
+**Other ways** shows USB instructions. The USB `menu` and remote display commands
+cannot open or confirm this local setup screen. Real phone/radio and panel timing
+checks remain part of physical board validation.
 
 Conversations returns to the last reader and its scroll position while the
 same content is still current. Leaving for Menu or Home keeps that reader in

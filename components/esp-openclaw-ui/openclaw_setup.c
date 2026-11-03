@@ -290,6 +290,11 @@ bool openclaw_setup_show(openclaw_setup_t *view)
     return true;
 }
 
+bool openclaw_setup_is_visible(const openclaw_setup_t *view)
+{
+    return view && view->visible;
+}
+
 void openclaw_setup_update(openclaw_setup_t *view,
     const esp_openclaw_setup_runtime_snapshot_t *snapshot, bool awake)
 {

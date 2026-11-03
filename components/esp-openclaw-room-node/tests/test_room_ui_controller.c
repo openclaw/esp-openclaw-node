@@ -15,6 +15,7 @@
 #include "openclaw_reading.h"
 #include "openclaw_density.h"
 #include "esp_openclaw_node_wifi.h"
+#include "room_canvas_internal.h"
 
 static lv_display_t *display;
 static uint8_t *frame, *draw_buffer;
@@ -28,6 +29,42 @@ static unsigned talk_starts, talk_stops, display_flushes;
 static uint64_t talk_recipient;
 static esp_openclaw_node_wifi_status_t wifi_status = {.connected = true};
 static unsigned wifi_reads;
+static esp_openclaw_setup_runtime_snapshot_t setup_snapshot = {.can_open = true};
+static unsigned setup_opens, setup_cancels, setup_actions;
+static uint64_t setup_request, cancelled_request, action_request, action_generation, action_peer;
+static esp_openclaw_setup_local_action_t setup_action;
+static esp_err_t setup_result;
+/* Runtime is the already-proven SDK boundary here: record adapter calls and
+ * supply copied owner snapshots, without implementing any session policy. */
+esp_err_t esp_openclaw_setup_runtime_open(esp_openclaw_setup_runtime_handle_t runtime, uint64_t *request)
+{
+    assert(runtime && display_depth > 0 && !critical_depth);
+    ++setup_opens;
+    if (setup_result == ESP_OK) *request = ++setup_request;
+    return setup_result;
+}
+esp_err_t esp_openclaw_setup_runtime_cancel(esp_openclaw_setup_runtime_handle_t runtime, uint64_t request)
+{
+    assert(runtime && request && display_depth > 0 && !critical_depth);
+    ++setup_cancels;
+    cancelled_request = request;
+    return ESP_OK;
+}
+esp_err_t esp_openclaw_setup_runtime_action(esp_openclaw_setup_runtime_handle_t runtime,
+    uint64_t request, uint64_t generation, uint64_t peer, esp_openclaw_setup_local_action_t action)
+{
+    assert(runtime && display_depth > 0 && !critical_depth);
+    ++setup_actions;
+    action_request = request; action_generation = generation; action_peer = peer; setup_action = action;
+    return setup_result;
+}
+bool esp_openclaw_setup_runtime_snapshot(esp_openclaw_setup_runtime_handle_t runtime,
+    esp_openclaw_setup_runtime_snapshot_t *snapshot)
+{
+    assert(runtime && display_depth > 0 && !critical_depth);
+    *snapshot = setup_snapshot;
+    return true;
+}
 void esp_openclaw_node_wifi_get_status(esp_openclaw_node_wifi_status_t *status)
 {
     assert(critical_depth == 0);
@@ -3752,6 +3789,117 @@ static void check_tab5_settings(const char *path)
     puts("tab5 settings: native controls, brightness failures and camera floor, stale approval, USB help, offline facts passed");
 }
 
+static void open_phone_setup(void)
+{
+    setup_snapshot = (esp_openclaw_setup_runtime_snapshot_t){.can_open = true};
+    assert(room_ui_watch_menu("settings") == ESP_OK);
+    lv_obj_t *entry = find_text(lv_layer_top(), LV_SYMBOL_BLUETOOTH "  Phone setup");
+    assert(entry);
+    lv_obj_scroll_to_view(lv_obj_get_parent(entry), LV_ANIM_OFF);
+    assert(lv_obj_is_visible(entry));
+    click_talk(lv_obj_get_parent(entry));
+    assert(visible_watch_text("Phone setup") && visible_watch_text("Start phone setup"));
+    assert(!room_face_is_visible());
+}
+
+static void canvas_load_started(lv_event_t *event)
+{
+    unsigned *before = lv_event_get_user_data(event);
+    assert(setup_cancels == *before + 1 && cancelled_request == setup_request);
+    assert(lv_indev_get_read_cb(touchscreen) == read_touch);
+}
+
+static void check_watch_phone_setup(void)
+{
+    assert(room_board_display_lock(100)); /* The LVGL task and board sample hold this recursive lock. */
+    room_ui_set_setup_runtime((esp_openclaw_setup_runtime_handle_t)&setup_snapshot);
+    room_ui_facts_t facts = {.wifi = ROOM_UI_WIFI_CONNECTED,
+        .gateway = ROOM_UI_GATEWAY_CONNECTED, .talk = ROOM_UI_TALK_READY};
+    room_ui_store_facts(&facts);
+    room_ui_set(ROOM_UI_IDLE, NULL);
+    assert(room_ui_watch_menu("phone-setup") == ESP_ERR_INVALID_ARG); /* local entry only */
+    open_phone_setup();
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), "Start phone setup")));
+    assert(setup_opens == 1 && setup_request == 1);
+    room_ui_boot_sample(false); /* Old request-0 snapshot cannot lose the new cancel ID. */
+    assert(room_ui_watch_menu("home") == ESP_OK);
+    assert(setup_cancels == 1 && cancelled_request == 1);
+
+    open_phone_setup();
+    setup_result = ESP_ERR_TIMEOUT;
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), "Start phone setup")));
+    assert(visible_watch_text("Action unavailable. Tap Retry or Cancel."));
+    room_ui_boot_sample(false);
+    assert(setup_opens == 2); /* Polling cannot replay a rejected open. */
+    setup_result = ESP_OK;
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), "Retry")));
+    assert(setup_opens == 3);
+    setup_snapshot = (esp_openclaw_setup_runtime_snapshot_t){.request_id = setup_request, .peer = 22,
+        .phase = ESP_OPENCLAW_SETUP_RUNTIME_ACTIVE,
+        .session = {.generation = 33, .phase = ESP_OPENCLAW_SETUP_COMPARISON}, .comparison = "ABCD 1234"};
+    assert(room_ui_boot_sample(false));
+    lv_refr_now(display);
+    touch_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), "Codes match")), false);
+    assert(setup_actions == 0); /* BOOT release sampled before paint is insufficient. */
+    assert(room_ui_boot_sample(false));
+    assert(setup_actions == 1 && setup_action == ESP_OPENCLAW_SETUP_LOCAL_NEUTRAL);
+    assert(action_request == setup_request && action_generation == 33 && action_peer == 22);
+    if (getenv("SETUP_WATCH_FRAME")) write_frame(getenv("SETUP_WATCH_FRAME"));
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), "Codes match")));
+    assert(setup_actions == 2 && setup_action == ESP_OPENCLAW_SETUP_LOCAL_CONFIRM);
+    unsigned cancelled = setup_cancels;
+    assert(room_ui_boot_sample(true)); /* BOOT cancels; it cannot confirm or toggle Canvas. */
+    assert(setup_cancels == cancelled + 1 && visible_watch_text("Settings"));
+    assert(!room_ui_boot_sample(false));
+    assert(setup_actions == 2);
+
+    open_phone_setup();
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), "Start phone setup")));
+    setup_snapshot = (esp_openclaw_setup_runtime_snapshot_t){.request_id = setup_request,
+        .phase = ESP_OPENCLAW_SETUP_RUNTIME_ERROR, .error = ESP_ERR_TIMEOUT,
+        .session = {.generation = 33}};
+    room_ui_boot_sample(false);
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), "Retry")));
+    assert(setup_actions == 3 && setup_action == ESP_OPENCLAW_SETUP_LOCAL_RETRY);
+    assert(action_request == setup_request && action_generation == 33 && action_peer == 0);
+    cancelled = setup_cancels;
+    assert(room_ui_apply_display_brightness(0) == ESP_OK);
+    assert(setup_cancels == cancelled + 1 && brightness == 0);
+    assert(!visible_watch_text("Phone setup") && lv_indev_get_read_cb(touchscreen) == read_touch);
+    assert(room_ui_apply_display_brightness(80) == ESP_OK);
+    assert(visible_watch_text("Settings") && !visible_watch_text("Phone setup"));
+    open_phone_setup();
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), "Start phone setup")));
+    cancelled = setup_cancels;
+    assert(room_ui_camera_indicator_begin() == ESP_OK);
+    assert(setup_cancels == cancelled + 1 && !visible_watch_text("Phone setup"));
+    room_ui_camera_indicator_end();
+    open_phone_setup();
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), "Start phone setup")));
+    cancelled = setup_cancels;
+    room_diagnostics_open();
+    assert(setup_cancels == cancelled + 1);
+    room_diagnostics_close();
+
+    open_phone_setup();
+    click_talk(lv_obj_get_parent(find_visible_text(lv_layer_top(), "Start phone setup")));
+    cancelled = setup_cancels;
+    lv_obj_t *status = lv_screen_active();
+    room_canvas_screen = lv_obj_create(NULL);
+    lv_obj_add_event_cb(room_canvas_screen, canvas_load_started, LV_EVENT_SCREEN_LOAD_START, &cancelled);
+    assert(room_board_display_lock(100));
+    room_canvas_activate_locked(); /* Actual production takeover, not the fixture Canvas adapter. */
+    assert(lv_screen_active() == room_canvas_screen && setup_cancels == cancelled + 1);
+    lv_screen_load(status);
+    lv_obj_delete(room_canvas_screen);
+    room_canvas_screen = NULL;
+    room_canvas_active = false;
+    room_board_display_unlock();
+    room_ui_refresh();
+    room_board_display_unlock();
+    puts("Watch phone setup: local entry, exact runtime IDs, explicit retry, fresh BOOT, power/overlay/real Canvas revocation passed");
+}
+
 int main(int argc, char **argv)
 {
     assert(argc >= 2);
@@ -3931,6 +4079,7 @@ int main(int argc, char **argv)
         check_watch_density(argc == 3 ? argv[2] : NULL);
         check_watch_help(argc == 3 ? argv[2] : NULL);
         check_live_talk(argc == 3 ? argv[2] : NULL);
+        check_watch_phone_setup();
         // This isolated fixture replaces and destroys the mascot singleton.
         check_watch_repaint();
     }

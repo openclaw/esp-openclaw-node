@@ -1254,6 +1254,17 @@ static void node_reconnect_timer_fired(void *arg)
     wake_talk_teardown();
 }
 
+static void setup_gateway_reconnect(void *context)
+{
+    (void)context;
+    node_reconnect_timer_fired(NULL);
+}
+
+bool esp_openclaw_room_node_boot_sample(bool pressed)
+{
+    return room_ui_boot_sample(pressed);
+}
+
 static void start_node_if_pending(void)
 {
     xSemaphoreTake(state_lock, portMAX_DELAY);
@@ -2449,6 +2460,16 @@ esp_err_t esp_openclaw_room_node_start(const esp_openclaw_room_node_config_t *co
     refresh_home_facts();
 
     ESP_ERROR_CHECK(start_node_client());
+    if (config->model_identifier && strcmp(config->model_identifier, "waveshare-esp32-s3-touch-amoled-1.8") == 0) {
+        esp_openclaw_setup_runtime_handle_t setup_runtime = NULL;
+        const esp_openclaw_setup_runtime_config_t setup = {
+            .node = node_client, .label = config->display_name, .model = config->model_identifier,
+            .gateway_reconnect = setup_gateway_reconnect,
+        };
+        esp_err_t setup_err = esp_openclaw_setup_runtime_create(&setup, &setup_runtime);
+        if (setup_err != ESP_OK) ESP_LOGW(TAG, "phone setup unavailable: %s", esp_err_to_name(setup_err));
+        room_ui_set_setup_runtime(setup_runtime);
+    }
     ESP_ERROR_CHECK(esp_openclaw_node_example_repl_start(node_client));
     ESP_ERROR_CHECK(register_room_console_commands());
 

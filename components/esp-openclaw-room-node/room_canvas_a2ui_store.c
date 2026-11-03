@@ -224,6 +224,7 @@ void room_canvas_show_placeholder(void)
 
 void room_canvas_activate_locked(void)
 {
+    room_ui_close_phone_setup();
     lv_screen_load(canvas_screen);
     canvas_active = true;
     taskENTER_CRITICAL(&diagnostics_mux);

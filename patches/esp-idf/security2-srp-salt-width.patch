@@ -1,0 +1,11 @@
+--- a/components/protocomm/src/crypto/srp6a/esp_srp.c
++++ b/components/protocomm/src/crypto/srp6a/esp_srp.c
+@@ -329,6 +329,7 @@
+     esp_mpi_get_rand(hd->s, 8 * salt_len, -1, 0);
+     hd->bytes_s = esp_mpi_to_bin(hd->s, &str_salt_len);
+-    if (!hd->bytes_s) {
++    /* MPI export omits leading zeros; callers require the requested width. */
++    if (!hd->bytes_s || str_salt_len != salt_len) {
+         ESP_LOGE(TAG, "Failed to generate salt of len %d", salt_len);
+         goto error;
+     }

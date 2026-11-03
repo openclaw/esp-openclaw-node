@@ -30,3 +30,21 @@ idf_component_register(
         espressif__cjson
         freertos
         nvs_flash)
+
+# Patch before compilation; the other targets never use native Security2 setup.
+if(NOT CMAKE_BUILD_EARLY_EXPANSION AND CONFIG_IDF_TARGET_ESP32S3 AND
+   CONFIG_BT_ENABLED AND CONFIG_BT_NIMBLE_ENABLED AND
+   CONFIG_ESP_PROTOCOMM_SUPPORT_SECURITY_VERSION_2 AND
+   NOT CONFIG_ESP_WIFI_REMOTE_ENABLED AND NOT CONFIG_ESP_HOST_WIFI_ENABLED)
+    idf_build_get_property(python PYTHON)
+    execute_process(
+        COMMAND "${python}" "${CMAKE_CURRENT_LIST_DIR}/../../scripts/idf_srp_salt.py"
+            --idf-path "$ENV{IDF_PATH}"
+        RESULT_VARIABLE srp_patch_result
+        OUTPUT_VARIABLE srp_patch_metadata
+        ERROR_VARIABLE srp_patch_error)
+    if(NOT srp_patch_result EQUAL 0)
+        message(FATAL_ERROR "Security2 SDK salt guard failed: ${srp_patch_error}")
+    endif()
+    message(STATUS "Security2 SDK salt guard: ${srp_patch_metadata}")
+endif()

@@ -60,6 +60,19 @@ idf.py set-target <target>
 idf.py build
 ```
 
+Existing `sdkconfig` files take precedence over `sdkconfig.defaults`.
+`idf.py set-target` regenerates the project-root `sdkconfig` from those defaults.
+On a later build, `idf.py build` alone keeps keys already present in `sdkconfig`;
+`idf.py fullclean` and a fresh `-B` build directory do not reset it.
+
+After upstream changes to `sdkconfig.defaults`:
+
+- New keys absent from `sdkconfig` are filled in on the next reconfigure or build.
+- Changed keys that already exist stay stale; update those symbols with
+  `idf.py menuconfig` (or a careful edit) to preserve other local settings.
+- For a clean slate, back up first (`cp sdkconfig sdkconfig.local.bak`), delete
+  `sdkconfig` and `sdkconfig.old` if present, then re-run `idf.py set-target <target>`.
+
 ## Flash
 
 ```bash

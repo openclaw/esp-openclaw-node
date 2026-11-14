@@ -14,7 +14,7 @@ device.
 
 ## Build and pair
 
-Use ESP-IDF 5.5.5 and the checked-in defaults:
+Use ESP-IDF 5.5.6 and the checked-in defaults:
 
 ```sh
 idf.py set-target esp32s3

@@ -52,7 +52,7 @@ jobs:
       - name: Build component test application
         uses: espressif/esp-idf-ci-action@9d38657f3d789ca759b2b37aaf5ceffbc42c4f0d # v1
         with:
-          esp_idf_version: v5.5.5
+          esp_idf_version: v5.5.6
           target: esp32s3
           path: components/esp-openclaw-node/test_apps/esp_openclaw_node_unity_tests
           command: idf.py build

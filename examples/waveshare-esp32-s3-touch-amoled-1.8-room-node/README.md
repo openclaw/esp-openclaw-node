@@ -12,7 +12,7 @@ compatible board; the wrong image can enter a boot loop during touch setup.
 
 ## Build and pair
 
-Use ESP-IDF 5.5.5 and initialize the repository's submodules before building.
+Use ESP-IDF 5.5.6 and initialize the repository's submodules before building.
 Back up the device before replacing factory firmware or its partition table.
 
 ```sh

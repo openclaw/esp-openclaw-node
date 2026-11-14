@@ -72,6 +72,8 @@ After upstream changes to `sdkconfig.defaults`:
   `idf.py menuconfig` (or a careful edit) to preserve other local settings.
 - For a clean slate, back up first (`cp sdkconfig sdkconfig.local.bak`), delete
   `sdkconfig` and `sdkconfig.old` if present, then re-run `idf.py set-target <target>`.
+  This discards local configuration changes; restore intentional overrides from
+  the backup before building.
 
 ## Flash
 

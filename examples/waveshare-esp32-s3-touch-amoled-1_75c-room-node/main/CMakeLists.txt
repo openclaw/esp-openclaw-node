@@ -1,0 +1,23 @@
+idf_component_register(
+    SRCS
+        "main.c"
+    INCLUDE_DIRS "."
+    REQUIRES
+        av_render
+        console
+        esp-openclaw-node
+        esp-openclaw-node-provisioning
+        esp-openclaw-room-node
+        esp-openclaw-talk
+        esp_event
+        esp_driver_gpio
+        esp_netif
+        esp_peer
+        esp_webrtc
+        esp_wifi
+        espressif__esp_codec_dev
+        espressif__esp_lcd_touch
+        freertos
+        lvgl__lvgl
+        media_lib_utils
+        waveshare__esp32_s3_touch_amoled_1_75c)

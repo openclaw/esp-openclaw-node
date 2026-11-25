@@ -8,7 +8,7 @@ from pathlib import Path
 import subprocess
 
 
-BASE_COMMIT = "b774170ff46c393eeb5e495ea37936038d3f4f4f"
+BASE_COMMIT = "880a203ae603d08a94d06aa01e0d6761958e5e9e"
 SOURCE_PATH = "components/protocomm/src/crypto/srp6a/esp_srp.c"
 ORIGINAL_SHA256 = "eca11a0e2e61913465971e43807cb000f08c018b2d46a23a3d0e8c24c6866001"
 PATCHED_SHA256 = "d0dea614c9a56800ab9e16f1362e410001cacb6299876169a2167580f8316e3d"
@@ -30,7 +30,7 @@ def inspect_sdk(idf):
     idf = Path(idf).resolve(strict=True)
     root = Path(git(idf, "rev-parse", "--show-toplevel").decode().strip()).resolve()
     if root != idf or git(idf, "rev-parse", "HEAD").decode().strip() != BASE_COMMIT:
-        raise ValueError("Select the approved ESP-IDF v5.5.5 repository root")
+        raise ValueError("Select the approved ESP-IDF v5.5.6 repository root")
     if PATCH_PATH.is_symlink() or digest(PATCH_PATH.read_bytes()) != PATCH_SHA256:
         raise ValueError("Tracked SRP patch has unexpected contents")
     if digest(git(idf, "show", f"HEAD:{SOURCE_PATH}")) != ORIGINAL_SHA256:

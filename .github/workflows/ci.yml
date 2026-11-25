@@ -42,8 +42,9 @@ jobs:
 
     name: ${{ matrix.name }} (${{ matrix.target }})
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           submodules: recursive
 
       - name: UI preference persistence tests
@@ -153,9 +154,9 @@ jobs:
           python3 -m unittest discover -s scripts/tests -p 'test_tab5_allocation_diagnostics.py' -v
 
       - name: Build
-        uses: espressif/esp-idf-ci-action@v1
+        uses: espressif/esp-idf-ci-action@9d38657f3d789ca759b2b37aaf5ceffbc42c4f0d # v1
         with:
-          esp_idf_version: ${{ matrix.idf_version || 'v5.5.5' }}
+          esp_idf_version: ${{ matrix.idf_version || 'v5.5.6' }}
           target: ${{ matrix.target }}
           path: ${{ matrix.path }}
           command: |
@@ -243,13 +244,13 @@ jobs:
                 --pr-head-sha "${{ github.event.pull_request.head.sha }}" \
                 --run-id "${{ github.run_id }}" \
                 --run-attempt "${{ github.run_attempt }}" \
-                --idf-image "espressif/idf:${{ matrix.idf_version || 'v5.5.5' }}" \
+                --idf-image "espressif/idf:${{ matrix.idf_version || 'v5.5.6' }}" \
                 $nvs_diagnostics $sdio_diagnostics $camera_compat
             fi
 
       - name: Upload firmware
         if: matrix.name != 'component-test-app-build'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: firmware-${{ matrix.name }}-${{ matrix.target }}-${{ github.sha }}-${{ github.run_attempt }}
           path: ${{ matrix.path }}/build/firmware/
@@ -281,7 +282,7 @@ jobs:
 
       - name: Upload Tab5 build symbols
         if: matrix.name == 'm5stack-tab5-room-node'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: symbols-${{ matrix.name }}-${{ matrix.target }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/tab5-build-symbols/

@@ -31,6 +31,8 @@ patches. Tab5 CI pins the qualified container image and records the actual SDK
 and patch identities in firmware provenance; this is not pristine release
 `5.5.5`. Other examples retain their own dependency requirements. An accepted
 SDK version or successful build does not establish hardware qualification.
+The other CI examples use ESP-IDF 5.5.6; native Watch and M5Dial builds require
+the [source-verified Security2 salt patch](../patches/esp-idf/README.md).
 
 ## Choose A Delivery Source
 

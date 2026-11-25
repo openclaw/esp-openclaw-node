@@ -7,9 +7,9 @@ Native ESP32-S3 NimBLE/Security2 builds apply
 provisioning component configuration, before compilation. This includes the
 Watch and M5Dial defaults. Remote-radio and other targets do not apply it.
 
-The approved base is ESP-IDF v5.5.5, commit
-`b774170ff46c393eeb5e495ea37936038d3f4f4f`. The SDK's
-[`esp_srp.c`](https://github.com/espressif/esp-idf/blob/b774170ff46c393eeb5e495ea37936038d3f4f4f/components/protocomm/src/crypto/srp6a/esp_srp.c)
+The approved base is ESP-IDF v5.5.6, commit
+`880a203ae603d08a94d06aa01e0d6761958e5e9e`. The SDK's
+[`esp_srp.c`](https://github.com/espressif/esp-idf/blob/880a203ae603d08a94d06aa01e0d6761958e5e9e/components/protocomm/src/crypto/srp6a/esp_srp.c)
 exports the random salt as a minimal-width MPI byte array. A leading zero can
 therefore produce fewer bytes than the requested salt length, which callers
 cannot discover through the public helper API. The patch rejects that result
@@ -30,7 +30,7 @@ python3 scripts/idf_srp_salt.py --idf-path /path/to/esp-idf --verify-only
 
 The Dial CI lane verifies the production patch and runs the actual SDK
 `esp_srp.c` and `esp_srp_mpi.c` with its pinned mbedTLS submodule
-(`9d669eadb1955d348986b9280156710aaaadf79f`). The host regression substitutes
+(`2b96dd8eebe880f304c69976b3c2fa0c5100cbb6`). The host regression substitutes
 only platform logging, allocation accounting and deterministic random input;
 SHA-512, MPI export and modular exponentiation use the vendor sources.
 ASan/UBSan and allocation accounting cover a full-width success and every

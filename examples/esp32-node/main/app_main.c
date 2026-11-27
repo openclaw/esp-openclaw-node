@@ -94,8 +94,13 @@ void app_main(void)
 {
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+#if CONFIG_EXAMPLE_BOARD_M5STICKC || CONFIG_EXAMPLE_BOARD_T_EMBED
+        ESP_LOGE(TAG, "NVS needs recovery; preserving saved Wi-Fi and device identity: %s", esp_err_to_name(err));
+        return;
+#else
         ESP_ERROR_CHECK(nvs_flash_erase());
         err = nvs_flash_init();
+#endif
     }
     ESP_ERROR_CHECK(err);
     ESP_ERROR_CHECK(esp_netif_init());

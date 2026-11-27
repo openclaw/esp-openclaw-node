@@ -109,3 +109,10 @@ These flags grant no permission and do not establish a command's parameter
 schema. A control must still verify the target adapter, live connection,
 and operator authority before submission. The field follows the
 [Gateway node-list type](https://github.com/openclaw/openclaw/blob/f4f3651/src/shared/node-list-types.ts).
+
+`esp_openclaw_display_receipt_parse` validates compact display responses to
+`node.invoke`. It checks the node ID, command, heading, text, and numeric
+generations before exposing a receipt. Acceptance and confirmed rendering
+remain separate. Both structured `payload` and encoded `payloadJSON` are
+supported; if both are present, they must agree. Malformed or mismatched
+responses clear the output and cannot establish completion.

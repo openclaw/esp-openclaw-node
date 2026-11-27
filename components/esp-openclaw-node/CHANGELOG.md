@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Validate remote display receipts against the target, command, content and render generation before reporting completion.
+
 - Let the M5StickC display share the system heap instead of reserving a separate 32 KiB pool, and report internal heap headroom through a USB reader diagnostic.
 
 - Retain advertised display commands in device inventory, and apply the shared bounded JSON validation before decoding device identities.

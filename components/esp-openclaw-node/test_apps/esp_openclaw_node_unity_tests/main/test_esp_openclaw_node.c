@@ -748,6 +748,8 @@ TEST_CASE("node create deep-copies tls cert pem", "[esp_openclaw_node][config]")
     config.tls_cert_pem = tls_cert_pem;
     config.tls_cert_len = 0;
     config.use_cert_bundle = false;
+    TEST_ASSERT_FALSE(config.compact_gateway_responses);
+    config.compact_gateway_responses = true;
 
     esp_openclaw_node_handle_t node = NULL;
     TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_create(&config, &node));
@@ -758,6 +760,8 @@ TEST_CASE("node create deep-copies tls cert pem", "[esp_openclaw_node][config]")
     TEST_ASSERT_EQUAL_UINT32(0, (uint32_t)node->config.tls_cert_len);
 
     tls_cert_pem[0] = 'X';
+    config.compact_gateway_responses = false;
+    TEST_ASSERT_TRUE(node->config.compact_gateway_responses);
     TEST_ASSERT_EQUAL_STRING(
         "-----BEGIN CERTIFICATE-----\n"
         "example-cert\n"

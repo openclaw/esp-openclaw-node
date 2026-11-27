@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Avoid temporary RPC payload trees and reserialization in the compact reader, reducing memory needed to open device lists while preserving callback ownership and validation. The opt-in Node configuration field is appended; consumers must rebuild against the updated header.
+
 - Request compact Gateway health and startup snapshots, without duplicate assistant-text events, on the compact boards' operator connection to reduce inbound memory pressure.
 
 - Add a target-checked Check conversation action to compact Activity, and cancel held selections when reply access changes.

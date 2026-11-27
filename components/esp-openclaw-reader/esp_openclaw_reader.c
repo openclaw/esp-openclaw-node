@@ -709,6 +709,7 @@ static esp_err_t create_client(void)
     config.role = "operator";
     config.event_cb = reader_event;
     config.gateway_event_cb = reply_event;
+    config.compact_gateway_responses = reader.compact_gateway_snapshots;
     esp_err_t err = esp_openclaw_node_create(&config, &reader.client);
     if (err == ESP_OK) {
         if (reader.compact_gateway_snapshots) {

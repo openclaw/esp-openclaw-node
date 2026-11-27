@@ -202,6 +202,46 @@ cJSON *esp_openclaw_node_parse_handshake(const char *json, size_t length)
     return materialize(fields, sizeof(fields) / sizeof(fields[0]));
 }
 
+esp_openclaw_response_parse_t esp_openclaw_node_parse_response(
+    const char *json, size_t length, cJSON **root)
+{
+    if (root == NULL) return ESP_OPENCLAW_RESPONSE_INVALID;
+    *root = NULL;
+    if (json == NULL || length == 0) return ESP_OPENCLAW_RESPONSE_NOT_APPLICABLE;
+    field_t fields[] = {{.name = "type"}, {.name = "id"}, {.name = "ok"}, {.name = "error"}, {.name = "payload"}};
+    cursor_t cursor = {.next = json, .end = json + length};
+    whitespace(&cursor);
+    bool valid = cursor.next < cursor.end && *cursor.next == '{' &&
+        value(&cursor, 0, fields, sizeof(fields) / sizeof(fields[0]));
+    whitespace(&cursor);
+    valid = valid && cursor.next == cursor.end;
+    bool type_known = fields[0].start != NULL && *fields[0].start == '"';
+    bool response = type_known && key_is(fields[0].start, fields[0].end, "res");
+    if (!valid && (!type_known || response)) return ESP_OPENCLAW_RESPONSE_INVALID;
+    if (!response)
+        return ESP_OPENCLAW_RESPONSE_NOT_APPLICABLE;
+    *root = materialize(fields, 4);
+    if (*root == NULL) return ESP_OPENCLAW_RESPONSE_NO_MEMORY;
+    if (fields[4].start == NULL) return ESP_OPENCLAW_RESPONSE_PARSED;
+
+    cJSON *payload = cJSON_CreateRaw("");
+    if (payload == NULL) return ESP_OPENCLAW_RESPONSE_NO_MEMORY;
+    cJSON_free(payload->valuestring);
+    size_t bytes = (size_t)(fields[4].end - fields[4].start);
+    payload->valuestring = cJSON_malloc(bytes + 1);
+    if (payload->valuestring == NULL) {
+        cJSON_Delete(payload);
+        return ESP_OPENCLAW_RESPONSE_NO_MEMORY;
+    }
+    memcpy(payload->valuestring, fields[4].start, bytes);
+    payload->valuestring[bytes] = '\0';
+    if (!cJSON_AddItemToObject(*root, "payload", payload)) {
+        cJSON_Delete(payload);
+        return ESP_OPENCLAW_RESPONSE_NO_MEMORY;
+    }
+    return ESP_OPENCLAW_RESPONSE_PARSED;
+}
+
 bool esp_openclaw_node_json_strings_valid(const char *json, size_t length)
 {
     if (json == NULL) return false;

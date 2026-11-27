@@ -9,23 +9,26 @@ static void button(compact_button_t *key, bool pressed, uint32_t now,
     if (pressed != key->raw) {
         key->raw = pressed;
         key->changed_at = now;
+        if (pressed && !key->pending) {
+            key->pending = true;
+            key->revision = revision;
+            key->consumed = false;
+        }
     }
     if (now - key->changed_at < DEBOUNCE_MS) return;
     if (pressed != key->pressed) {
         key->pressed = pressed;
         if (pressed) {
             key->pressed_at = now;
-            key->revision = revision;
-            key->consumed = false;
         } else {
-            if (key->armed && !key->consumed && key->revision == revision) {
+            if (key->armed && key->pending && !key->consumed && key->revision == revision) {
                 if (primary) event->select = true;
                 else event->move = 1;
             }
             key->armed = true;
         }
     }
-    if (!pressed) key->armed = true;
+    if (!pressed) { key->armed = true; key->pending = false; }
     if (pressed && key->armed && !key->consumed && key->revision == revision &&
         now - key->pressed_at >= HOLD_MS) {
         key->consumed = true;
@@ -48,6 +51,10 @@ compact_input_event_t compact_input_sample(compact_input_t *input, uint32_t now,
     button(&input->primary, primary, now, revision, true, &event);
     button(&input->secondary, secondary, now, revision, false, &event);
     if (encoder && input->encoder && quadrature != input->quadrature) {
+        if (input->primary.pending) {
+            input->primary.consumed = true;
+            event.select = false;
+        }
         static const int8_t transitions[16] = {
             0, -1, 1, 0, 1, 0, 0, -1, -1, 0, 0, 1, 0, 1, -1, 0
         };
@@ -61,5 +68,6 @@ compact_input_event_t compact_input_sample(compact_input_t *input, uint32_t now,
     }
     input->encoder = encoder;
     input->quadrature = quadrature;
+    if (event.move) event.select = false;
     return event;
 }

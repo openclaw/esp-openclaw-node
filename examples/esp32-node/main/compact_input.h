@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 typedef struct {
-    bool raw, pressed, armed, consumed;
+    bool raw, pressed, armed, consumed, pending;
     uint32_t changed_at, pressed_at, revision;
 } compact_button_t;
 

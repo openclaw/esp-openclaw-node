@@ -48,6 +48,19 @@ int main(void)
     sample(&input, 3700, 2, false, false);
     assert(!sample(&input, 3730, 2, false, false).move);
 
+    sample(&input, 3800, 2, true, true);
+    sample(&input, 3830, 2, true, true);
+    sample(&input, 3900, 2, false, false);
+    compact_input_event_t simultaneous = sample(&input, 3930, 2, false, false);
+    assert(simultaneous.move == 1 && !simultaneous.select);
+
+    // Ownership begins at the raw edge, not after debounce completes.
+    sample(&input, 4000, 2, true, false);
+    sample(&input, 4020, 3, true, false);
+    sample(&input, 4030, 3, true, false);
+    sample(&input, 4040, 3, false, false);
+    assert(!sample(&input, 4070, 3, false, false).select);
+
     input = (compact_input_t){0};
     compact_input_sample(&input, 0, 1, false, false, true, 3);
     compact_input_sample(&input, 30, 1, false, false, true, 3);
@@ -66,5 +79,14 @@ int main(void)
     assert(!compact_input_sample(&input, 61, 1, false, false, true, 3).move);
     assert(!compact_input_sample(&input, 62, 1, false, false, true, 1).move);
     assert(!compact_input_sample(&input, 63, 1, false, false, true, 3).move);
+    // Encoder movement during debounce also cancels the eventual click.
+    input = (compact_input_t){0};
+    compact_input_sample(&input, 0, 1, false, false, true, 3);
+    compact_input_sample(&input, 30, 1, false, false, true, 3);
+    compact_input_sample(&input, 40, 1, true, false, true, 3);
+    compact_input_sample(&input, 45, 1, true, false, true, 1);
+    compact_input_sample(&input, 70, 1, true, false, true, 1);
+    compact_input_sample(&input, 90, 1, false, false, true, 1);
+    assert(!compact_input_sample(&input, 120, 1, false, false, true, 1).select);
     puts("Compact input: debounce, startup holds, stale pages, long presses and quadrature passed");
 }

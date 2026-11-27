@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Release idle TLS buffers on T-Embed so concurrent node and reader sessions leave larger free heap blocks.
+
 - Refresh compact loading screens when an agent, conversation, preview or device request completes, and reject presses held across the result change.
 
 - Let the T-Embed display share the system heap so its reserved GUI pool cannot prevent a reader connection.

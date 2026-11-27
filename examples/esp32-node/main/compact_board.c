@@ -43,6 +43,7 @@ static unsigned s_input_count;
 static uint32_t s_workspace_revision;
 static compact_console_input_t s_console_input;
 static char s_console_selection[97];
+static char s_console_primary_action[12];
 static int s_message_line_height;
 static int64_t s_last_input_ms;
 static lv_display_t *s_lv_display;
@@ -247,6 +248,7 @@ static void display_task(void *ctx)
         snprintf(s_view, sizeof(s_view), "%s", compact_workspace_view());
         s_workspace_revision = compact_workspace_revision();
         snprintf(s_console_selection, sizeof(s_console_selection), "%s", compact_workspace_selection());
+        snprintf(s_console_primary_action, sizeof(s_console_primary_action), "%s", compact_workspace_primary_action());
         if (console.pending) compact_console_complete(&s_console_input, console.request_id, console_applied);
         xSemaphoreGive(s_state_mutex);
         ulTaskNotifyTake(pdTRUE, wait_ticks);
@@ -279,7 +281,8 @@ static esp_err_t display_status(char **out_payload_json, bool local_console)
         cJSON_AddBoolToObject(payload, "rendered", s_ready && s_message_visible && s_rendered_generation == s_content.generation) &&
         cJSON_AddNumberToObject(payload, "renderCount", s_render_count) &&
         cJSON_AddNumberToObject(payload, "lastRenderMs", (double)s_last_render_ms);
-    if (local_console) ok = ok && cJSON_AddStringToObject(payload, "selection", s_console_selection);
+    if (local_console) ok = ok && cJSON_AddStringToObject(payload, "selection", s_console_selection) &&
+        cJSON_AddStringToObject(payload, "primaryAction", s_console_primary_action);
     xSemaphoreGive(s_state_mutex);
     ok = ok && cJSON_AddNumberToObject(payload, "headingMaxLength", COMPACT_TEXT_COLUMNS) &&
         cJSON_AddNumberToObject(payload, "textMaxLength", large_text ? COMPACT_LARGE_COLUMNS * COMPACT_LARGE_ROWS : COMPACT_TEXT_MAX) &&

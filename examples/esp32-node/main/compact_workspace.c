@@ -65,6 +65,15 @@ static const char *const draft_characters[] = {
     "abcdefghijklm", "nopqrstuvwxyz", "ABCDEFGHIJKLM", "NOPQRSTUVWXYZ", "0123456789", ".,!?'-:;()/@_+=&%\"",
 };
 
+typedef enum { CREATE_SUBMIT, CREATE_OPEN, CREATE_ACCESS, CREATE_BACK } create_action_t;
+
+static create_action_t create_action(void)
+{
+    if (ui.creation.can_create) return CREATE_SUBMIT;
+    if (ui.creation.can_open) return CREATE_OPEN;
+    return ui.messaging.state != ESP_OPENCLAW_READER_MESSAGING_READY ? CREATE_ACCESS : CREATE_BACK;
+}
+
 static const lv_font_t *font(void)
 {
     return ui.small ? (ui.large ? &lv_font_montserrat_14 : &lv_font_montserrat_12) :
@@ -571,6 +580,7 @@ void compact_workspace_poll(const esp_openclaw_node_wifi_status_t *wifi, bool co
         esp_openclaw_reader_state_t old_preview_state = ui.conversations.preview_state;
         esp_openclaw_devices_state_t old_devices_state = ui.devices.state;
         bool old_identify_send = ui.identify.can_send;
+        create_action_t old_create_action = create_action();
         ui.wifi = *wifi; ui.connected = connected;
         esp_openclaw_reader_agents_copy(&ui.agents);
         esp_openclaw_reader_conversations_copy(&ui.conversations);
@@ -598,7 +608,7 @@ void compact_workspace_poll(const esp_openclaw_node_wifi_status_t *wifi, bool co
             ((ui.view == REPLY_REVIEW || ui.view == REPLY_CONFIRM || ui.view == ACTIVITY) && old_reply != ui.reply.revision) ||
             ((ui.view == DRAFT_MENU || ui.view == DRAFT_CHARS || ui.view == DRAFT_PREVIEW || ui.view == DRAFT_CHOICE) &&
                 (sessions_changed || preview_changed || old_reader_ready != ui.reader_ready)) ||
-            (ui.view == CREATE && old_creation != ui.creation.revision) ||
+            (ui.view == CREATE && (old_creation != ui.creation.revision || old_create_action != create_action())) ||
             (ui.view == MESSAGING && old_messaging != ui.messaging.revision) ||
             (ui.view == DEVICE_ACTIONS && old_messaging != ui.messaging.revision) ||
             ((ui.view == DEVICES || ui.view == DEVICE || ui.view == DEVICE_ACTIONS) && devices_changed) ||
@@ -781,9 +791,9 @@ void compact_workspace_input(compact_input_event_t event)
         else if (ui.messaging.state != ESP_OPENCLAW_READER_MESSAGING_READY) { ui.messaging_parent = REPLY_REVIEW; open_view(MESSAGING); }
         else open_view(READ);
     } else if (ui.view == CREATE) {
-        if (ui.creation.can_create) failure(esp_openclaw_reader_creation_submit(ui.creation.revision));
-        else if (ui.creation.can_open) { failure(esp_openclaw_reader_creation_open(ui.creation.revision)); if (!ui.note[0]) open_view(READ); }
-        else if (ui.messaging.state != ESP_OPENCLAW_READER_MESSAGING_READY) { ui.messaging_parent = CREATE; open_view(MESSAGING); }
+        if (create_action() == CREATE_SUBMIT) failure(esp_openclaw_reader_creation_submit(ui.creation.revision));
+        else if (create_action() == CREATE_OPEN) { failure(esp_openclaw_reader_creation_open(ui.creation.revision)); if (!ui.note[0]) open_view(READ); }
+        else if (create_action() == CREATE_ACCESS) { ui.messaging_parent = CREATE; open_view(MESSAGING); }
         else open_view(SESSIONS);
     } else if (ui.view == MESSAGING) {
         if (ui.messaging.state == ESP_OPENCLAW_READER_MESSAGING_READY) open_view(ui.messaging_parent);
@@ -824,6 +834,11 @@ const char *compact_workspace_view(void) { return view_names[ui.view]; }
 const char *compact_workspace_selection(void)
 {
     return list_view() && ui.focus >= 0 && ui.focus < ui.count ? ui.rows[ui.focus].name : "";
+}
+const char *compact_workspace_primary_action(void)
+{
+    static const char *const names[] = {"create", "open", "messaging", "back"};
+    return ui.view == CREATE ? names[create_action()] : "";
 }
 int compact_workspace_message_line_height(void)
 {

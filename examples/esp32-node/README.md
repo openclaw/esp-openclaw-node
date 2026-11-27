@@ -146,6 +146,11 @@ the input as stale. Inspect the actual review/result screen before proceeding.
 `consoleInputCount` and `physicalInputCount` remain separate.
 USB status includes the selected row label for local navigation. Node-command
 `display.status` omits that label, which can contain private conversation titles.
+On the creation screen, USB status also reports `primaryAction`: `create`,
+`open`, `messaging`, or `back`. Check this value with `workspaceRevision` before
+selecting; an applied Create input alone does not prove the conversation exists.
+Changes to the primary action invalidate earlier input revisions. Other screens
+report an empty value. Gateway display status omits this local control field.
 
 Approve only the expected existing device's `operator.read` role request on the
 Gateway. If the first attempt was rejected while awaiting approval, run

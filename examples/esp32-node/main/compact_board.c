@@ -42,6 +42,7 @@ typedef struct {
     char text[COMPACT_TEXT_MAX + 1];
     char lines[COMPACT_TEXT_ROWS][COMPACT_TEXT_COLUMNS + 1];
     bool large_text;
+    bool custom_message;
     uint32_t generation;
 } compact_board_content_t;
 static compact_board_content_t s_content;
@@ -177,7 +178,16 @@ static void display_task(void *ctx)
     for (;;) {
         esp_openclaw_node_wifi_status_t wifi;
         esp_openclaw_node_wifi_get_status(&wifi);
+        bool connected = wifi.connected && atomic_load(&s_connected);
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+        if (!s_content.custom_message) {
+            const char *home = compact_board_home_text(wifi.connected, connected);
+            if (strcmp(home, s_content.text) != 0) {
+                snprintf(s_content.text, sizeof(s_content.text), "%s", home);
+                compact_board_text_layout(home, COMPACT_TEXT_ROWS, s_content.lines);
+                ++s_content.generation;
+            }
+        }
         compact_board_content_t content = s_content;
         xSemaphoreGive(s_state_mutex);
         memset(s_pixels, 0, WIDTH * HEIGHT * sizeof(*s_pixels));
@@ -192,7 +202,7 @@ static void display_task(void *ctx)
         char network[COMPACT_TEXT_COLUMNS + 1];
         snprintf(network, sizeof(network), "WIFI %s", wifi.connected ? wifi.ip : "OFFLINE");
         draw_text(6, network, wifi.connected ? 0x07e0 : 0xfd20);
-        draw_text(7, atomic_load(&s_connected) ? "GATEWAY CONNECTED" : "GATEWAY OFFLINE", 0xffff);
+        draw_text(7, connected ? "GATEWAY CONNECTED" : "GATEWAY OFFLINE", 0xffff);
         esp_err_t err = esp_lcd_panel_draw_bitmap(s_panel, 0, 0, WIDTH, HEIGHT, s_pixels);
         if (err != ESP_OK || xSemaphoreTake(s_flush_done, pdMS_TO_TICKS(2000)) != pdTRUE) {
             // An incomplete DMA transfer still owns the framebuffer. Do not overwrite it.
@@ -222,6 +232,7 @@ static esp_err_t display_status(char **out_payload_json)
         cJSON_AddStringToObject(payload, "heading", s_content.heading) &&
         cJSON_AddStringToObject(payload, "text", s_content.text) &&
         cJSON_AddStringToObject(payload, "textSize", large_text ? "large" : "normal") &&
+        cJSON_AddStringToObject(payload, "view", s_content.custom_message ? "message" : "status") &&
         cJSON_AddNumberToObject(payload, "generation", s_content.generation) &&
         cJSON_AddNumberToObject(payload, "renderedGeneration", s_rendered_generation) &&
         cJSON_AddBoolToObject(payload, "rendered", s_ready && s_rendered_generation == s_content.generation) &&
@@ -269,6 +280,7 @@ static esp_err_t handle_display_show(esp_openclaw_node_handle_t node, void *cont
         return ESP_ERR_INVALID_ARG;
     }
     content.large_text = size != NULL && strcmp(size->valuestring, "large") == 0;
+    content.custom_message = true;
     size_t rows = content.large_text ? COMPACT_LARGE_ROWS : COMPACT_TEXT_ROWS;
     size_t columns = content.large_text ? COMPACT_LARGE_COLUMNS : COMPACT_TEXT_COLUMNS;
     char heading_line[1][COMPACT_TEXT_COLUMNS + 1];
@@ -320,8 +332,8 @@ esp_err_t compact_board_start(void)
     s_state_mutex = xSemaphoreCreateMutex();
     s_pixels = heap_caps_calloc(WIDTH * HEIGHT, sizeof(*s_pixels), MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
     if (!s_flush_done || !s_state_mutex || !s_pixels) return ESP_ERR_NO_MEM;
-    snprintf(s_content.heading, sizeof(s_content.heading), "OPENCLAW");
-    snprintf(s_content.text, sizeof(s_content.text), "%s", BOARD_NAME);
+    snprintf(s_content.heading, sizeof(s_content.heading), "%s", BOARD_NAME);
+    snprintf(s_content.text, sizeof(s_content.text), "%s", compact_board_home_text(false, false));
     compact_board_text_layout(s_content.text, COMPACT_TEXT_ROWS, s_content.lines);
 
     const spi_bus_config_t spi = {

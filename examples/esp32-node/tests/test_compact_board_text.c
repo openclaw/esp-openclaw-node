@@ -7,6 +7,14 @@
 int main(void)
 {
     char lines[COMPACT_TEXT_ROWS][COMPACT_TEXT_COLUMNS + 1];
+    for (int wifi = 0; wifi <= 1; ++wifi) {
+        for (int gateway = 0; gateway <= 1; ++gateway) {
+            const char *home = compact_board_home_text(wifi, gateway);
+            assert(compact_board_text_layout(home, COMPACT_TEXT_ROWS, lines));
+            assert(strstr(home, !wifi ? "help" : !gateway ? "gateway" : "display.show") != NULL);
+        }
+    }
+    assert(strcmp(compact_board_home_text(false, false), compact_board_home_text(false, true)) == 0);
     assert(compact_board_text_layout("", 1, lines));
     assert(lines[0][0] == '\0');
     assert(compact_board_text_layout("Hello, OpenClaw!", 1, lines));

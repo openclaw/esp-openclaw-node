@@ -93,6 +93,12 @@ power rails and uses its ST7735 panel. The T-Embed enables its board power and
 ST7789 backlight. These profiles do not initialize audio, SD, or radio add-ons.
 They use the same serial provisioning commands as the generic example.
 
+Until the first `display.show` message after boot, the screen shows USB setup
+hints when Wi-Fi or the Gateway is offline, and command guidance when connected.
+`display.status` identifies this as `"view":"status"`. A received message
+switches to `"view":"message"` and remains visible through disconnections;
+the connection footer continues to update. Reboot returns to the status view.
+
 The compact profiles also accept display messages:
 
 ```sh

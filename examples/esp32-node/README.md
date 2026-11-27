@@ -24,6 +24,8 @@ Commands:
 - `adc.read`
 
 `adc.read` is only registered when the selected target supports ADC.
+The M5StickC and T-Embed profiles also expose the `display` capability with
+`display.show` and `display.status`.
 
 ## Prepare The Gateway
 
@@ -90,6 +92,34 @@ connectivity on the built-in screen. The M5StickC enables the AXP192 display
 power rails and uses its ST7735 panel. The T-Embed enables its board power and
 ST7789 backlight. These profiles do not initialize audio, SD, or radio add-ons.
 They use the same serial provisioning commands as the generic example.
+
+The compact profiles also accept display messages:
+
+```sh
+openclaw nodes invoke --node <node-id> --command display.show \
+  --params '{"heading":"OpenClaw ready","text":"Hello from the Gateway!"}' --json
+openclaw nodes invoke --node <node-id> --command display.status --json
+```
+
+Add `display.show` and `display.status` to the Gateway's existing command
+allowlist before pairing. For these boards, start with `device.info`,
+`device.status`, `wifi.status`, `display.show`, and `display.status`; GPIO
+commands are not needed to operate the display. Preserve existing entries
+when updating a shared Gateway.
+
+Messages have a heading of up to 25 characters and a body of up to 100
+characters, wrapped into four rows of 25 columns. Body newlines advance to the
+next row; input that exceeds four rows is rejected. The built-in font displays
+letters in uppercase and supports digits, spaces, and `. , - _ : ! ? / + % ( ) =`.
+Unsupported characters are rejected. Wi-Fi and Gateway status stay visible
+in the footer. Messages are kept in RAM and reset after reboot.
+
+`display.show` queues the latest message. Its response and `display.status`
+include `generation`, `renderedGeneration`, and `rendered`. A message is
+confirmed drawn only when `rendered` is true and both generations match; an
+accepted message can be replaced by a newer message before it is drawn.
+`ready` becomes false if the display transfer fails. `device.info` reports
+the selected board name and model identifier.
 
 Board pin references: [M5StickC](https://docs.m5stack.com/en/core/StickC) and
 [T-Embed factory pin map](https://github.com/Xinyuan-LilyGO/T-Embed/blob/main/examples/factory/pin_config.h).

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Let M5StickC and T-Embed nodes accept bounded display messages, report completed display generations, and return their board identity from `device.info`.
+
 - Package original ESP32 firmware for the M5StickC CI build while retaining each example's target restrictions and flash offsets.
 
 - Correct the compact displays' landscape orientation and the T-Embed's RGB channel order.

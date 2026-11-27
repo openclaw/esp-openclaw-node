@@ -72,6 +72,11 @@ jobs:
       - name: Dial, setup and reconnect host tests
         if: matrix.name == 'component-test-app-build'
         run: |
+          cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+            -I examples/esp32-node/main \
+            examples/esp32-node/tests/test_compact_board_text.c \
+            -o /tmp/compact_board_text_test
+          /tmp/compact_board_text_test
           cc -std=c11 -Wall -Wextra -Werror \
             -I examples/m5stack-dial-node/main \
             examples/m5stack-dial-node/main/dial_control.c \

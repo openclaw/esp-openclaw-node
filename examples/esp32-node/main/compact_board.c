@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 #include "compact_board.h"
+#include "compact_board_text.h"
 
 #include <stdatomic.h>
+#include <stdio.h>
 #include <string.h>
 
+#include "cJSON.h"
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "driver/spi_master.h"
@@ -14,6 +17,8 @@
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_panel_vendor.h"
 #include "esp_openclaw_node_wifi.h"
+#include "esp_openclaw_node_example_json.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -26,6 +31,19 @@ static esp_lcd_panel_handle_t s_panel;
 static SemaphoreHandle_t s_flush_done;
 static uint16_t *s_pixels;
 static atomic_bool s_connected;
+static SemaphoreHandle_t s_state_mutex;
+static TaskHandle_t s_display_task;
+static bool s_ready;
+static uint32_t s_rendered_generation;
+static uint32_t s_render_count;
+static int64_t s_last_render_ms;
+typedef struct {
+    char heading[COMPACT_TEXT_COLUMNS + 1];
+    char text[COMPACT_TEXT_MAX + 1];
+    char lines[COMPACT_TEXT_ROWS][COMPACT_TEXT_COLUMNS + 1];
+    uint32_t generation;
+} compact_board_content_t;
+static compact_board_content_t s_content;
 
 #if CONFIG_EXAMPLE_BOARD_M5STICKC
 enum { WIDTH = 160, HEIGHT = 80, SCALE = 1, MOSI = 15, SCLK = 13, CS = 5, DC = 23, RST = 18 };
@@ -102,6 +120,15 @@ static const uint8_t FONT[][5] = {
     {0x07,0x08,0x70,0x08,0x07}, {0x61,0x51,0x49,0x45,0x43},
 };
 
+static const char PUNCTUATION[] = " .,-_:!?/+%()=";
+static const uint8_t PUNCTUATION_FONT[][5] = {
+    {0,0,0,0,0}, {0,0x60,0x60,0,0}, {0,0x50,0x30,0,0},
+    {8,8,8,8,8}, {0x40,0x40,0x40,0x40,0x40}, {0,0x36,0x36,0,0},
+    {0,0,0x5f,0,0}, {2,1,0x51,9,6}, {0x20,0x10,8,4,2},
+    {8,8,0x3e,8,8}, {0x23,0x13,8,0x64,0x62}, {0,0x1c,0x22,0x41,0},
+    {0,0x41,0x22,0x1c,0}, {0x14,0x14,0x14,0x14,0x14},
+};
+
 static void draw_text(int row, const char *text, uint16_t color)
 {
     // esp_lcd transmits RGB565 most significant byte first.
@@ -113,8 +140,10 @@ static void draw_text(int row, const char *text, uint16_t color)
         const uint8_t *glyph = NULL;
         if (c >= '0' && c <= '9') glyph = FONT[c - '0'];
         if (c >= 'A' && c <= 'Z') glyph = FONT[10 + c - 'A'];
+        const char *punctuation = strchr(PUNCTUATION, c);
+        if (punctuation != NULL) glyph = PUNCTUATION_FONT[punctuation - PUNCTUATION];
         for (int col = 0; col < 5; ++col) {
-            uint8_t bits = glyph ? glyph[col] : c == '.' ? 0x60 : c == '-' ? 0x08 : 0;
+            uint8_t bits = glyph ? glyph[col] : 0;
             for (int bit = 0; bit < 7; ++bit) {
                 if (!(bits & (1U << bit))) continue;
                 for (int dy = 0; dy < SCALE; ++dy) {
@@ -143,20 +172,114 @@ static void display_task(void *ctx)
     for (;;) {
         esp_openclaw_node_wifi_status_t wifi;
         esp_openclaw_node_wifi_get_status(&wifi);
+        xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+        compact_board_content_t content = s_content;
+        xSemaphoreGive(s_state_mutex);
         memset(s_pixels, 0, WIDTH * HEIGHT * sizeof(*s_pixels));
-        draw_text(0, "OPENCLAW", 0x07ff);
-        draw_text(1, BOARD_NAME, 0xffff);
-        draw_text(3, wifi.connected ? "WIFI CONNECTED" : "WIFI OFFLINE", wifi.connected ? 0x07e0 : 0xfd20);
-        draw_text(4, wifi.connected ? wifi.ip : "USE USB WIFI SET", 0xffff);
-        draw_text(6, atomic_load(&s_connected) ? "GATEWAY CONNECTED" : "GATEWAY OFFLINE", 0xffff);
+        draw_text(0, content.heading, 0x07ff);
+        for (int row = 0; row < COMPACT_TEXT_ROWS; ++row) draw_text(row + 1, content.lines[row], 0xffff);
+        char network[COMPACT_TEXT_COLUMNS + 1];
+        snprintf(network, sizeof(network), "WIFI %s", wifi.connected ? wifi.ip : "OFFLINE");
+        draw_text(6, network, wifi.connected ? 0x07e0 : 0xfd20);
+        draw_text(7, atomic_load(&s_connected) ? "GATEWAY CONNECTED" : "GATEWAY OFFLINE", 0xffff);
         esp_err_t err = esp_lcd_panel_draw_bitmap(s_panel, 0, 0, WIDTH, HEIGHT, s_pixels);
         if (err != ESP_OK || xSemaphoreTake(s_flush_done, pdMS_TO_TICKS(2000)) != pdTRUE) {
             // An incomplete DMA transfer still owns the framebuffer. Do not overwrite it.
+            xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+            s_ready = false;
+            xSemaphoreGive(s_state_mutex);
             ESP_LOGE(TAG, "display transfer failed: %s", esp_err_to_name(err));
             vTaskDelete(NULL);
         }
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+        s_ready = true;
+        s_rendered_generation = content.generation;
+        ++s_render_count;
+        s_last_render_ms = esp_timer_get_time() / 1000;
+        xSemaphoreGive(s_state_mutex);
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
     }
+}
+
+static esp_err_t display_status(char **out_payload_json)
+{
+    cJSON *payload = cJSON_CreateObject();
+    if (payload == NULL) return ESP_ERR_NO_MEM;
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    bool ok = cJSON_AddBoolToObject(payload, "ready", s_ready) &&
+        cJSON_AddStringToObject(payload, "heading", s_content.heading) &&
+        cJSON_AddStringToObject(payload, "text", s_content.text) &&
+        cJSON_AddNumberToObject(payload, "generation", s_content.generation) &&
+        cJSON_AddNumberToObject(payload, "renderedGeneration", s_rendered_generation) &&
+        cJSON_AddBoolToObject(payload, "rendered", s_ready && s_rendered_generation == s_content.generation) &&
+        cJSON_AddNumberToObject(payload, "renderCount", s_render_count) &&
+        cJSON_AddNumberToObject(payload, "lastRenderMs", (double)s_last_render_ms);
+    xSemaphoreGive(s_state_mutex);
+    ok = ok && cJSON_AddNumberToObject(payload, "headingMaxLength", COMPACT_TEXT_COLUMNS) &&
+        cJSON_AddNumberToObject(payload, "textMaxLength", COMPACT_TEXT_MAX) &&
+        cJSON_AddNumberToObject(payload, "textColumns", COMPACT_TEXT_COLUMNS) &&
+        cJSON_AddNumberToObject(payload, "textRows", COMPACT_TEXT_ROWS) &&
+        cJSON_AddNumberToObject(payload, "width", WIDTH) &&
+        cJSON_AddNumberToObject(payload, "height", HEIGHT);
+    if (!ok) {
+        cJSON_Delete(payload);
+        return ESP_ERR_NO_MEM;
+    }
+    return esp_openclaw_node_example_take_json_payload(payload, out_payload_json);
+}
+
+static esp_err_t handle_display_status(esp_openclaw_node_handle_t node, void *context,
+    const char *params_json, size_t params_len, char **out_payload_json,
+    esp_openclaw_node_error_t *out_error)
+{
+    (void)node; (void)context; (void)params_json; (void)params_len; (void)out_error;
+    return display_status(out_payload_json);
+}
+
+static esp_err_t handle_display_show(esp_openclaw_node_handle_t node, void *context,
+    const char *params_json, size_t params_len, char **out_payload_json,
+    esp_openclaw_node_error_t *out_error)
+{
+    (void)node; (void)context; (void)params_len;
+    cJSON *params = NULL;
+    ESP_RETURN_ON_ERROR(esp_openclaw_node_example_parse_json_params(params_json, &params, out_error),
+                        TAG, "invalid display params");
+    cJSON *heading = cJSON_GetObjectItemCaseSensitive(params, "heading");
+    cJSON *text = cJSON_GetObjectItemCaseSensitive(params, "text");
+    compact_board_content_t content = {0};
+    char heading_line[1][COMPACT_TEXT_COLUMNS + 1];
+    if (!cJSON_IsObject(params) || !cJSON_IsString(heading) || !cJSON_IsString(text) ||
+        !compact_board_text_layout(heading->valuestring, 1, heading_line) ||
+        !compact_board_text_layout(text->valuestring, COMPACT_TEXT_ROWS, content.lines)) {
+        cJSON_Delete(params);
+        out_error->code = "INVALID_PARAMS";
+        out_error->message = "heading must fit 25 columns and text 4 rows of 25; use supported ASCII characters";
+        return ESP_ERR_INVALID_ARG;
+    }
+    memcpy(content.heading, heading_line[0], sizeof(content.heading));
+    snprintf(content.text, sizeof(content.text), "%s", text->valuestring);
+    cJSON_Delete(params);
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    if (!s_ready) {
+        xSemaphoreGive(s_state_mutex);
+        out_error->code = "UNAVAILABLE";
+        out_error->message = "display renderer is not ready";
+        return ESP_ERR_INVALID_STATE;
+    }
+    content.generation = s_content.generation + 1;
+    s_content = content;
+    xSemaphoreGive(s_state_mutex);
+    xTaskNotifyGive(s_display_task);
+    return display_status(out_payload_json);
+}
+
+esp_err_t compact_board_register_commands(esp_openclaw_node_handle_t node)
+{
+    const esp_openclaw_node_command_t show = {.name = "display.show", .handler = handle_display_show};
+    const esp_openclaw_node_command_t status = {.name = "display.status", .handler = handle_display_status};
+    ESP_RETURN_ON_ERROR(esp_openclaw_node_register_capability(node, "display"), TAG, "display capability");
+    ESP_RETURN_ON_ERROR(esp_openclaw_node_register_command(node, &show), TAG, "display.show");
+    return esp_openclaw_node_register_command(node, &status);
 }
 
 void compact_board_set_connected(bool connected)
@@ -168,8 +291,12 @@ esp_err_t compact_board_start(void)
 {
     ESP_RETURN_ON_ERROR(board_power_on(), TAG, "board power");
     s_flush_done = xSemaphoreCreateBinary();
+    s_state_mutex = xSemaphoreCreateMutex();
     s_pixels = heap_caps_calloc(WIDTH * HEIGHT, sizeof(*s_pixels), MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-    if (!s_flush_done || !s_pixels) return ESP_ERR_NO_MEM;
+    if (!s_flush_done || !s_state_mutex || !s_pixels) return ESP_ERR_NO_MEM;
+    snprintf(s_content.heading, sizeof(s_content.heading), "OPENCLAW");
+    snprintf(s_content.text, sizeof(s_content.text), "%s", BOARD_NAME);
+    compact_board_text_layout(s_content.text, COMPACT_TEXT_ROWS, s_content.lines);
 
     const spi_bus_config_t spi = {
         .mosi_io_num = MOSI, .miso_io_num = -1, .sclk_io_num = SCLK,
@@ -212,7 +339,7 @@ esp_err_t compact_board_start(void)
 #if CONFIG_EXAMPLE_BOARD_T_EMBED
     ESP_RETURN_ON_ERROR(gpio_set_level(15, 1), TAG, "backlight on");
 #endif
-    if (xTaskCreate(display_task, "board_display", 4096, NULL, 3, NULL) != pdPASS) return ESP_ERR_NO_MEM;
+    if (xTaskCreate(display_task, "board_display", 4096, NULL, 3, &s_display_task) != pdPASS) return ESP_ERR_NO_MEM;
     ESP_LOGI(TAG, "%s status display ready", BOARD_NAME);
     return ESP_OK;
 }

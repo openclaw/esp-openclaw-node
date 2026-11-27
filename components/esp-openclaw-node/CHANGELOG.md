@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Add a compact on-device workspace with physical button/encoder navigation, shared agent and conversation browsing, reviewed replies, device inventory, Activity, and saved display settings. Compact profiles retain NVS offsets and use a 3 MiB factory app partition.
+
+- Preserve saved Wi-Fi and identity on compact boards when NVS initialization needs recovery; report the error instead of erasing storage automatically.
+
 - Share the Dial's agent, conversation, reviewed-reply, and device-reader backend with other board applications, including configurable reader identity and TLS server name.
 
 - Show USB setup and command hints on compact displays before the first message, and keep the Gateway footer offline when Wi-Fi is lost.

@@ -1,4 +1,5 @@
 dependencies:
+  lvgl/lvgl: "^9.6.0"
   waveshare/esp_lcd_st7735:
     version: "2.0.0"
     rules:

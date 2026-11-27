@@ -2,6 +2,11 @@
 
 #include "compact_board.h"
 #include "compact_board_text.h"
+#include "compact_workspace.h"
+#include "compact_input.h"
+#include "lvgl.h"
+#include "esp_openclaw_reader.h"
+#include "driver/ledc.h"
 
 #include <stdatomic.h>
 #include <stdio.h>
@@ -30,6 +35,13 @@ static const char *TAG = "compact_board";
 static esp_lcd_panel_handle_t s_panel;
 static SemaphoreHandle_t s_flush_done;
 static uint16_t *s_pixels;
+static bool s_message_visible;
+static char s_view[24] = "home";
+static unsigned s_input_count;
+static int s_message_line_height;
+static int64_t s_last_input_ms;
+static lv_display_t *s_lv_display;
+static int s_brightness;
 static atomic_bool s_connected;
 static SemaphoreHandle_t s_state_mutex;
 static TaskHandle_t s_display_task;
@@ -50,6 +62,8 @@ static compact_board_content_t s_content;
 #if CONFIG_EXAMPLE_BOARD_M5STICKC
 enum { WIDTH = 160, HEIGHT = 80, SCALE = 1, MOSI = 15, SCLK = 13, CS = 5, DC = 23, RST = 18 };
 static const char *BOARD_NAME = "M5STICKC";
+static i2c_master_bus_handle_t s_power_bus;
+static i2c_master_dev_handle_t s_power_chip;
 
 static esp_err_t board_power_on(void)
 {
@@ -80,9 +94,21 @@ static esp_err_t board_power_on(void)
         const uint8_t enable[] = {0x12, rails | 0x0c};
         err = i2c_master_transmit(axp, enable, sizeof(enable), 100);
     }
-    i2c_master_bus_rm_device(axp);
-    i2c_del_master_bus(bus);
+    if (err == ESP_OK) { s_power_bus = bus; s_power_chip = axp; }
+    else { i2c_master_bus_rm_device(axp); i2c_del_master_bus(bus); }
     return err;
+}
+static esp_err_t board_brightness(int percent)
+{
+    uint8_t reg = 0x28, voltage = 0;
+    ESP_RETURN_ON_ERROR(i2c_master_transmit_receive(s_power_chip, &reg, 1, &voltage, 1, 100), TAG, "backlight voltage");
+    uint8_t level = (uint8_t)(2 + percent / 10);
+    const uint8_t value[] = {0x28, (uint8_t)((voltage & 0x0f) | (level << 4))};
+    ESP_RETURN_ON_ERROR(i2c_master_transmit(s_power_chip, value, sizeof(value), 100), TAG, "backlight brightness");
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    s_brightness = percent;
+    xSemaphoreGive(s_state_mutex);
+    return ESP_OK;
 }
 #else
 enum { WIDTH = 320, HEIGHT = 170, SCALE = 2, MOSI = 11, SCLK = 12, CS = 10, DC = 13, RST = 9 };
@@ -96,129 +122,107 @@ static esp_err_t board_power_on(void)
     };
     ESP_RETURN_ON_ERROR(gpio_config(&pins), TAG, "power pins");
     ESP_RETURN_ON_ERROR(gpio_set_level(15, 0), TAG, "backlight off");
-    return gpio_set_level(46, 1);
+    ESP_RETURN_ON_ERROR(gpio_set_level(46, 1), TAG, "power on");
+    const ledc_timer_config_t timer = {.speed_mode = LEDC_LOW_SPEED_MODE, .duty_resolution = LEDC_TIMER_10_BIT,
+        .timer_num = LEDC_TIMER_0, .freq_hz = 5000, .clk_cfg = LEDC_AUTO_CLK};
+    ESP_RETURN_ON_ERROR(ledc_timer_config(&timer), TAG, "backlight timer");
+    const ledc_channel_config_t channel = {.gpio_num = 15, .speed_mode = LEDC_LOW_SPEED_MODE,
+        .channel = LEDC_CHANNEL_0, .timer_sel = LEDC_TIMER_0, .duty = 0};
+    return ledc_channel_config(&channel);
+}
+static esp_err_t board_brightness(int percent)
+{
+    ESP_RETURN_ON_ERROR(ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, (uint32_t)percent * 1023 / 100), TAG, "backlight duty");
+    ESP_RETURN_ON_ERROR(ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0), TAG, "backlight update");
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    s_brightness = percent;
+    xSemaphoreGive(s_state_mutex);
+    return ESP_OK;
 }
 #endif
 
-// Five columns per glyph, least significant bit at the top.
-static const uint8_t FONT[][5] = {
-    {0x3e,0x51,0x49,0x45,0x3e}, {0x00,0x42,0x7f,0x40,0x00},
-    {0x42,0x61,0x51,0x49,0x46}, {0x21,0x41,0x45,0x4b,0x31},
-    {0x18,0x14,0x12,0x7f,0x10}, {0x27,0x45,0x45,0x45,0x39},
-    {0x3c,0x4a,0x49,0x49,0x30}, {0x01,0x71,0x09,0x05,0x03},
-    {0x36,0x49,0x49,0x49,0x36}, {0x06,0x49,0x49,0x29,0x1e},
-    {0x7e,0x11,0x11,0x11,0x7e}, {0x7f,0x49,0x49,0x49,0x36},
-    {0x3e,0x41,0x41,0x41,0x22}, {0x7f,0x41,0x41,0x22,0x1c},
-    {0x7f,0x49,0x49,0x49,0x41}, {0x7f,0x09,0x09,0x09,0x01},
-    {0x3e,0x41,0x49,0x49,0x7a}, {0x7f,0x08,0x08,0x08,0x7f},
-    {0x00,0x41,0x7f,0x41,0x00}, {0x20,0x40,0x41,0x3f,0x01},
-    {0x7f,0x08,0x14,0x22,0x41}, {0x7f,0x40,0x40,0x40,0x40},
-    {0x7f,0x02,0x0c,0x02,0x7f}, {0x7f,0x04,0x08,0x10,0x7f},
-    {0x3e,0x41,0x41,0x41,0x3e}, {0x7f,0x09,0x09,0x09,0x06},
-    {0x3e,0x41,0x51,0x21,0x5e}, {0x7f,0x09,0x19,0x29,0x46},
-    {0x46,0x49,0x49,0x49,0x31}, {0x01,0x01,0x7f,0x01,0x01},
-    {0x3f,0x40,0x40,0x40,0x3f}, {0x1f,0x20,0x40,0x20,0x1f},
-    {0x3f,0x40,0x38,0x40,0x3f}, {0x63,0x14,0x08,0x14,0x63},
-    {0x07,0x08,0x70,0x08,0x07}, {0x61,0x51,0x49,0x45,0x43},
-};
-
-static const char PUNCTUATION[] = " .,-_:!?/+%()=";
-static const uint8_t PUNCTUATION_FONT[][5] = {
-    {0,0,0,0,0}, {0,0x60,0x60,0,0}, {0,0x50,0x30,0,0},
-    {8,8,8,8,8}, {0x40,0x40,0x40,0x40,0x40}, {0,0x36,0x36,0,0},
-    {0,0,0x5f,0,0}, {2,1,0x51,9,6}, {0x20,0x10,8,4,2},
-    {8,8,0x3e,8,8}, {0x23,0x13,8,0x64,0x62}, {0,0x1c,0x22,0x41,0},
-    {0,0x41,0x22,0x1c,0}, {0x14,0x14,0x14,0x14,0x14},
-};
-
-static void draw_text_at(int x, int y, int scale, const char *text, uint16_t color)
-{
-    // esp_lcd transmits RGB565 most significant byte first.
-    color = (uint16_t)((color << 8) | (color >> 8));
-    for (; *text && x + 5 * scale < WIDTH; ++text, x += 6 * scale) {
-        unsigned char c = (unsigned char)*text;
-        if (c >= 'a' && c <= 'z') c -= 'a' - 'A';
-        const uint8_t *glyph = NULL;
-        if (c >= '0' && c <= '9') glyph = FONT[c - '0'];
-        if (c >= 'A' && c <= 'Z') glyph = FONT[10 + c - 'A'];
-        const char *punctuation = strchr(PUNCTUATION, c);
-        if (punctuation != NULL) glyph = PUNCTUATION_FONT[punctuation - PUNCTUATION];
-        for (int col = 0; col < 5; ++col) {
-            uint8_t bits = glyph ? glyph[col] : 0;
-            for (int bit = 0; bit < 7; ++bit) {
-                if (!(bits & (1U << bit))) continue;
-                for (int dy = 0; dy < scale; ++dy) {
-                    for (int dx = 0; dx < scale; ++dx) {
-                        int px = x + col * scale + dx, py = y + bit * scale + dy;
-                        if (py < HEIGHT) s_pixels[py * WIDTH + px] = color;
-                    }
-                }
-            }
-        }
-    }
-}
-
-static void draw_text(int row, const char *text, uint16_t color)
-{
-    draw_text_at(3 * SCALE, (3 + row * 10) * SCALE, SCALE, text, color);
-}
-
 static bool flush_done(esp_lcd_panel_io_handle_t io, esp_lcd_panel_io_event_data_t *event, void *ctx)
 {
-    (void)io;
-    (void)event;
+    (void)io; (void)event;
     BaseType_t wake = pdFALSE;
     xSemaphoreGiveFromISR((SemaphoreHandle_t)ctx, &wake);
     return wake == pdTRUE;
 }
 
+static uint32_t tick_ms(void) { return (uint32_t)(esp_timer_get_time() / 1000); }
+
+static void flush(lv_display_t *display, const lv_area_t *area, uint8_t *pixels)
+{
+    size_t count = (size_t)(area->x2 - area->x1 + 1) * (area->y2 - area->y1 + 1);
+    lv_draw_sw_rgb565_swap(pixels, count);
+    esp_err_t err = esp_lcd_panel_draw_bitmap(s_panel, area->x1, area->y1, area->x2 + 1, area->y2 + 1, pixels);
+    if (err != ESP_OK || xSemaphoreTake(s_flush_done, pdMS_TO_TICKS(2000)) != pdTRUE) {
+        xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+        s_ready = false;
+        xSemaphoreGive(s_state_mutex);
+        ESP_LOGE(TAG, "display transfer failed: %s", esp_err_to_name(err));
+        vTaskDelete(NULL);
+    }
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    ++s_render_count;
+    s_last_render_ms = esp_timer_get_time() / 1000;
+    xSemaphoreGive(s_state_mutex);
+    lv_display_flush_ready(display);
+}
+
 static void display_task(void *ctx)
 {
     (void)ctx;
+    lv_init();
+    lv_tick_set_cb(tick_ms);
+    s_lv_display = lv_display_create(WIDTH, HEIGHT);
+    if (s_lv_display == NULL) { vTaskDelete(NULL); return; }
+    lv_display_set_color_format(s_lv_display, LV_COLOR_FORMAT_RGB565);
+    lv_display_set_buffers(s_lv_display, s_pixels, NULL, WIDTH * 20 * sizeof(*s_pixels), LV_DISPLAY_RENDER_MODE_PARTIAL);
+    lv_display_set_flush_cb(s_lv_display, flush);
+#if CONFIG_EXAMPLE_BOARD_T_EMBED
+    compact_workspace_start(WIDTH, HEIGHT, true, board_brightness);
+#else
+    compact_workspace_start(WIDTH, HEIGHT, false, board_brightness);
+#endif
+    compact_input_t input = {0};
     for (;;) {
         esp_openclaw_node_wifi_status_t wifi;
         esp_openclaw_node_wifi_get_status(&wifi);
         bool connected = wifi.connected && atomic_load(&s_connected);
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
-        if (!s_content.custom_message) {
-            const char *home = compact_board_home_text(wifi.connected, connected);
-            if (strcmp(home, s_content.text) != 0) {
-                snprintf(s_content.text, sizeof(s_content.text), "%s", home);
-                compact_board_text_layout(home, COMPACT_TEXT_ROWS, s_content.lines);
-                ++s_content.generation;
-            }
-        }
         compact_board_content_t content = s_content;
         xSemaphoreGive(s_state_mutex);
-        memset(s_pixels, 0, WIDTH * HEIGHT * sizeof(*s_pixels));
-        draw_text(0, content.heading, 0x07ff);
-        if (content.large_text) {
-            for (int row = 0; row < COMPACT_LARGE_ROWS; ++row) {
-                draw_text_at(3 * SCALE, (14 + row * 20) * SCALE, 2 * SCALE, content.lines[row], 0xffff);
-            }
-        } else {
-            for (int row = 0; row < COMPACT_TEXT_ROWS; ++row) draw_text(row + 1, content.lines[row], 0xffff);
-        }
-        char network[COMPACT_TEXT_COLUMNS + 1];
-        snprintf(network, sizeof(network), "WIFI %s", wifi.connected ? wifi.ip : "OFFLINE");
-        draw_text(6, network, wifi.connected ? 0x07e0 : 0xfd20);
-        draw_text(7, connected ? "GATEWAY CONNECTED" : "GATEWAY OFFLINE", 0xffff);
-        esp_err_t err = esp_lcd_panel_draw_bitmap(s_panel, 0, 0, WIDTH, HEIGHT, s_pixels);
-        if (err != ESP_OK || xSemaphoreTake(s_flush_done, pdMS_TO_TICKS(2000)) != pdTRUE) {
-            // An incomplete DMA transfer still owns the framebuffer. Do not overwrite it.
+        if (content.custom_message) compact_workspace_message(content.heading, content.text, content.large_text, content.generation);
+        uint32_t now = tick_ms();
+        compact_workspace_poll(&wifi, connected, now);
+#if CONFIG_EXAMPLE_BOARD_M5STICKC
+        bool a = !gpio_get_level(37), b = !gpio_get_level(39);
+        bool encoder = false;
+        uint8_t quadrature = 3;
+#else
+        bool a = !gpio_get_level(0), b = false;
+        bool encoder = true;
+        uint8_t quadrature = (gpio_get_level(2) << 1) | gpio_get_level(1);
+#endif
+        compact_input_event_t event = compact_input_sample(&input, now, compact_workspace_revision(), a, b, encoder, quadrature);
+        if (event.move || event.select || event.home) {
+            compact_workspace_input(event);
             xSemaphoreTake(s_state_mutex, portMAX_DELAY);
-            s_ready = false;
+            ++s_input_count; s_last_input_ms = now;
             xSemaphoreGive(s_state_mutex);
-            ESP_LOGE(TAG, "display transfer failed: %s", esp_err_to_name(err));
-            vTaskDelete(NULL);
         }
+        compact_workspace_poll(&wifi, connected, now);
+        lv_timer_handler();
+        lv_refr_now(s_lv_display);
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
         s_ready = true;
-        s_rendered_generation = content.generation;
-        ++s_render_count;
-        s_last_render_ms = esp_timer_get_time() / 1000;
+        s_message_visible = content.custom_message && compact_workspace_message_visible();
+        s_message_line_height = compact_workspace_message_line_height();
+        if (s_message_visible) s_rendered_generation = content.generation;
+        snprintf(s_view, sizeof(s_view), "%s", compact_workspace_view());
         xSemaphoreGive(s_state_mutex);
-        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000));
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(5));
     }
 }
 
@@ -232,10 +236,15 @@ static esp_err_t display_status(char **out_payload_json)
         cJSON_AddStringToObject(payload, "heading", s_content.heading) &&
         cJSON_AddStringToObject(payload, "text", s_content.text) &&
         cJSON_AddStringToObject(payload, "textSize", large_text ? "large" : "normal") &&
-        cJSON_AddStringToObject(payload, "view", s_content.custom_message ? "message" : "status") &&
+        cJSON_AddStringToObject(payload, "view", s_view) &&
+        cJSON_AddNumberToObject(payload, "physicalInputCount", s_input_count) &&
+        cJSON_AddNumberToObject(payload, "lastInputMs", (double)s_last_input_ms) &&
+        cJSON_AddNumberToObject(payload, "brightness", s_brightness) &&
+        cJSON_AddStringToObject(payload, "layout", "scroll") &&
+        cJSON_AddNumberToObject(payload, "lineHeight", s_message_line_height) &&
         cJSON_AddNumberToObject(payload, "generation", s_content.generation) &&
         cJSON_AddNumberToObject(payload, "renderedGeneration", s_rendered_generation) &&
-        cJSON_AddBoolToObject(payload, "rendered", s_ready && s_rendered_generation == s_content.generation) &&
+        cJSON_AddBoolToObject(payload, "rendered", s_ready && s_message_visible && s_rendered_generation == s_content.generation) &&
         cJSON_AddNumberToObject(payload, "renderCount", s_render_count) &&
         cJSON_AddNumberToObject(payload, "lastRenderMs", (double)s_last_render_ms);
     xSemaphoreGive(s_state_mutex);
@@ -317,12 +326,23 @@ esp_err_t compact_board_register_commands(esp_openclaw_node_handle_t node)
     const esp_openclaw_node_command_t status = {.name = "display.status", .handler = handle_display_status};
     ESP_RETURN_ON_ERROR(esp_openclaw_node_register_capability(node, "display"), TAG, "display capability");
     ESP_RETURN_ON_ERROR(esp_openclaw_node_register_command(node, &show), TAG, "display.show");
-    return esp_openclaw_node_register_command(node, &status);
+    ESP_RETURN_ON_ERROR(esp_openclaw_node_register_command(node, &status), TAG, "display.status");
+    const esp_openclaw_reader_config_t reader = {.display_name = BOARD_NAME,
+#if CONFIG_EXAMPLE_BOARD_M5STICKC
+        .model_identifier = "m5stack-m5stickc",
+#else
+        .model_identifier = "lilygo-t-embed",
+#endif
+        .tls_server_name = CONFIG_EXAMPLE_GATEWAY_TLS_SERVER_NAME};
+    esp_err_t err = esp_openclaw_reader_start(node, &reader);
+    if (err != ESP_OK) ESP_LOGW(TAG, "reader unavailable: %s", esp_err_to_name(err));
+    return ESP_OK;
 }
 
 void compact_board_set_connected(bool connected)
 {
     atomic_store(&s_connected, connected);
+    esp_openclaw_reader_node_event(connected ? ESP_OPENCLAW_NODE_EVENT_CONNECTED : ESP_OPENCLAW_NODE_EVENT_DISCONNECTED);
 }
 
 esp_err_t compact_board_start(void)
@@ -330,7 +350,7 @@ esp_err_t compact_board_start(void)
     ESP_RETURN_ON_ERROR(board_power_on(), TAG, "board power");
     s_flush_done = xSemaphoreCreateBinary();
     s_state_mutex = xSemaphoreCreateMutex();
-    s_pixels = heap_caps_calloc(WIDTH * HEIGHT, sizeof(*s_pixels), MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    s_pixels = heap_caps_calloc(WIDTH * 20, sizeof(*s_pixels), MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
     if (!s_flush_done || !s_state_mutex || !s_pixels) return ESP_ERR_NO_MEM;
     snprintf(s_content.heading, sizeof(s_content.heading), "%s", BOARD_NAME);
     snprintf(s_content.text, sizeof(s_content.text), "%s", compact_board_home_text(false, false));
@@ -374,10 +394,18 @@ esp_err_t compact_board_start(void)
 #endif
     ESP_RETURN_ON_ERROR(esp_lcd_panel_invert_color(s_panel, true), TAG, "display inversion");
     ESP_RETURN_ON_ERROR(esp_lcd_panel_disp_on_off(s_panel, true), TAG, "display on");
-#if CONFIG_EXAMPLE_BOARD_T_EMBED
-    ESP_RETURN_ON_ERROR(gpio_set_level(15, 1), TAG, "backlight on");
+    const gpio_config_t input = {
+#if CONFIG_EXAMPLE_BOARD_M5STICKC
+        .pin_bit_mask = (1ULL << 37) | (1ULL << 39),
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+#else
+        .pin_bit_mask = (1ULL << 0) | (1ULL << 1) | (1ULL << 2),
+        .pull_up_en = GPIO_PULLUP_ENABLE,
 #endif
-    if (xTaskCreate(display_task, "board_display", 4096, NULL, 3, &s_display_task) != pdPASS) return ESP_ERR_NO_MEM;
+        .mode = GPIO_MODE_INPUT,
+    };
+    ESP_RETURN_ON_ERROR(gpio_config(&input), TAG, "board inputs");
+    if (xTaskCreate(display_task, "board_display", 8192, NULL, 3, &s_display_task) != pdPASS) return ESP_ERR_NO_MEM;
     ESP_LOGI(TAG, "%s status display ready", BOARD_NAME);
     return ESP_OK;
 }

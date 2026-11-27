@@ -88,5 +88,20 @@ int main(void)
     compact_input_sample(&input, 70, 1, true, false, true, 1);
     compact_input_sample(&input, 90, 1, false, false, true, 1);
     assert(!compact_input_sample(&input, 120, 1, false, false, true, 1).select);
+    input = (compact_input_t){0};
+    sample(&input, 0, 1, false, false); sample(&input, 30, 1, false, false);
+    sample(&input, 40, 1, true, false); sample(&input, 70, 1, true, false);
+    sample(&input, 80, 1, true, true); sample(&input, 110, 1, true, true);
+    sample(&input, 150, 1, true, false);
+    assert(sample(&input, 180, 1, true, false).move == 1);
+    sample(&input, 200, 1, false, false);
+    assert(!sample(&input, 230, 1, false, false).select);
+    input = (compact_input_t){0};
+    compact_input_sample(&input, 0, 1, false, false, true, 3);
+    compact_input_sample(&input, 30, 1, false, false, true, 3);
+    compact_input_sample(&input, 40, 1, true, false, true, 3);
+    compact_input_sample(&input, 70, 1, true, false, true, 3);
+    compact_input_sample(&input, 100, 1, false, false, true, 3);
+    assert(!compact_input_sample(&input, 130, 1, false, false, true, 1).select);
     puts("Compact input: debounce, startup holds, stale pages, long presses and quadrature passed");
 }

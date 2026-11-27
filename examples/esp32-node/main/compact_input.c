@@ -51,7 +51,7 @@ compact_input_event_t compact_input_sample(compact_input_t *input, uint32_t now,
     button(&input->primary, primary, now, revision, true, &event);
     button(&input->secondary, secondary, now, revision, false, &event);
     if (encoder && input->encoder && quadrature != input->quadrature) {
-        if (input->primary.pending) {
+        if (input->primary.pending || event.select) {
             input->primary.consumed = true;
             event.select = false;
         }
@@ -68,6 +68,9 @@ compact_input_event_t compact_input_sample(compact_input_t *input, uint32_t now,
     }
     input->encoder = encoder;
     input->quadrature = quadrature;
-    if (event.move) event.select = false;
+    if (event.move) {
+        event.select = false;
+        if (input->primary.pending) input->primary.consumed = true;
+    }
     return event;
 }

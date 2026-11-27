@@ -250,7 +250,10 @@ static void rows(void)
         if (ui.conversations.agent.id[0] && (ui.conversations.state == ESP_OPENCLAW_READER_READY ||
             ui.conversations.state == ESP_OPENCLAW_READER_EMPTY)) row("New conversation", NEW_THREAD, 0);
         if (ui.conversations.page.has_more) row("Next conversations", PAGE_SESSIONS, (int)ui.conversations.page.next_offset);
-        if (ui.conversations.page.offset) row("Previous conversations", PAGE_SESSIONS, (int)(ui.conversations.page.offset > 8 ? ui.conversations.page.offset - 8 : 0));
+        if (ui.conversations.page.offset) {
+            size_t size = ui.conversations.page_size ? ui.conversations.page_size : ESP_OPENCLAW_DIRECTORY_PAGE_SIZE;
+            row("Previous conversations", PAGE_SESSIONS, (int)(ui.conversations.page.offset > size ? ui.conversations.page.offset - size : 0));
+        }
         row("Refresh", REFRESH_SESSIONS, 0); row("Change agent", OPEN_VIEW, AGENTS);
         row("Back", GO_BACK, ui.sessions_parent);
         break;

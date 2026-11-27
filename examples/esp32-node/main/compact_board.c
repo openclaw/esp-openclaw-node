@@ -382,7 +382,8 @@ esp_err_t compact_board_register_commands(esp_openclaw_node_handle_t node)
 #else
         .model_identifier = "lilygo-t-embed",
 #endif
-        .tls_server_name = CONFIG_EXAMPLE_GATEWAY_TLS_SERVER_NAME};
+        .tls_server_name = CONFIG_EXAMPLE_GATEWAY_TLS_SERVER_NAME,
+        .session_page_size = 2};
     esp_err_t err = esp_openclaw_reader_start(node, &reader);
     if (err != ESP_OK) ESP_LOGW(TAG, "reader unavailable: %s", esp_err_to_name(err));
     ESP_RETURN_ON_ERROR(compact_reader_console_register(), TAG, "reader console");

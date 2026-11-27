@@ -1664,6 +1664,14 @@ int main(int argc, char **argv)
     assert(navigation.view == DIAL_NAV_SESSIONS && navigation.focus == 1);
     assert(strncmp(lv_label_get_text(navigation.names[1]), "A quest", 7) == 0);
     assert(strcmp(conversations.page.sessions[navigation.focus].title, "A question for Beta") == 0);
+    conversations.page_size = 4;
+    dial_navigation_conversations_update(&navigation, &conversations);
+    for (unsigned i = 0; i < 12 && strcmp(lv_label_get_text(navigation.names[navigation.focus - navigation.first]), "Previous page") != 0; ++i)
+        dial_navigation_move(&navigation, 1);
+    assert(strcmp(lv_label_get_text(navigation.names[navigation.focus - navigation.first]), "Previous page") == 0);
+    dial_navigation_activate(&navigation);
+    assert(requested_offset == 4);
+    while (navigation.focus != 1) dial_navigation_move(&navigation, -1);
     dial_navigation_activate(&navigation);
     assert(navigation.view == DIAL_NAV_PREVIEW && requested_offset == 1);
     touch(68, 44, true); touch(68, 44, false);

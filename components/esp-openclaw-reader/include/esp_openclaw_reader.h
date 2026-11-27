@@ -10,6 +10,8 @@ typedef struct {
     const char *display_name;
     const char *model_identifier;
     const char *tls_server_name;
+    /* Zero keeps the default; otherwise 1..ESP_OPENCLAW_DIRECTORY_PAGE_SIZE. */
+    size_t session_page_size;
 } esp_openclaw_reader_config_t;
 
 /* One reader per application. Configuration strings are copied during start.

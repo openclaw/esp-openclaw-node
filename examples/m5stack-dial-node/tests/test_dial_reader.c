@@ -568,6 +568,7 @@ int main(int argc, char **argv) {
     assert(strcmp(last_method, "sessions.list") == 0);
     cJSON *params = cJSON_Parse(last_params);
     assert(strcmp(cJSON_GetObjectItem(params, "agentId")->valuestring, "beta") == 0);
+    assert(strcmp(cJSON_GetObjectItem(params, "rowMode")->valuestring, "dashboard") == 0);
     assert(cJSON_GetObjectItem(params, "limit")->valueint == 8);
     assert(cJSON_IsFalse(cJSON_GetObjectItem(params, "includeGlobal")));
     cJSON_Delete(params);

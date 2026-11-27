@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Request the Gateway's smaller session-list projection so conversation pickers do not receive unrelated runtime metadata.
+
 - Release idle TLS buffers on T-Embed so concurrent node and reader sessions leave larger free heap blocks.
 
 - Refresh compact loading screens when an agent, conversation, preview or device request completes, and reject presses held across the result change.

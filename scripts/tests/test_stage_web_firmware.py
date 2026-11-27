@@ -4,7 +4,9 @@ import copy
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 
@@ -153,6 +155,104 @@ class WebFirmwareTests(unittest.TestCase):
         self.output.mkdir()
         with self.assertRaises(ValueError):
             self.stage()
+
+    def test_publication_rechecks_authority_before_each_write(self):
+        self.stage()
+        site = self.root / "site"
+        site.mkdir()
+        remote = self.root / "pages.git"
+        api = self.root / "api"
+        api.mkdir()
+        stub = api / "gh"
+        stub.write_text('''#!/bin/sh
+set -eu
+case "$*" in
+  "api repos/$GITHUB_REPOSITORY/pages --jq "*) echo true ;;
+  "api repos/$GITHUB_REPOSITORY/actions/runs/123/attempts/1") cat "$FIXTURE_API/run" ;;
+  "api repos/$GITHUB_REPOSITORY/git/ref/tags/v1.3.1") cat "$FIXTURE_API/tag" ;;
+  "api repos/$GITHUB_REPOSITORY/releases/tags/v1.3.1") cat "$FIXTURE_API/release" ;;
+  "api --method POST repos/$GITHUB_REPOSITORY/pages/builds --silent") echo build >> "$FIXTURE_API/writes" ;;
+  *) echo "unexpected fixture API request" >&2; exit 1 ;;
+esac
+''')
+        stub.chmod(0o755)
+        env = {"PATH": str(api) + os.pathsep + os.environ["PATH"], "HOME": str(self.root),
+               "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
+               "PAYLOAD": str(self.root), "GITHUB_REPOSITORY": web.REPOSITORY,
+               "VERSION": "v1.3.1", "COMMIT": COMMIT, "RELEASE_ID": "42",
+               "TAG_OID": "c" * 40, "RUN_ID": "123", "ATTEMPT": "1", "FIXTURE_API": str(api)}
+
+        def git(*args):
+            return subprocess.check_output(["git", *args], cwd=site, env=env,
+                                           stderr=subprocess.PIPE, text=True).strip()
+
+        git("init", "--bare", str(remote))
+        git("init", "-b", "gh-pages")
+        (site / "index.html").write_text("Launchpad")
+        git("add", "index.html")
+        git("-c", "user.name=fixture", "-c", "user.email=fixture@example.org",
+            "commit", "-m", "existing Pages site")
+        git("remote", "add", "origin", str(remote))
+        git("push", "origin", "HEAD:gh-pages")
+        start = git("rev-parse", "HEAD")
+
+        refs = {"tag": {"ref": "refs/tags/v1.3.1", "object": {"type": "tag", "sha": env["TAG_OID"]}},
+                "run": {"id": 123, "run_attempt": 1, "path": ".github/workflows/ci.yml",
+                        "event": "push", "head_branch": "main", "head_sha": COMMIT,
+                        "repository": {"full_name": web.REPOSITORY},
+                        "head_repository": {"full_name": web.REPOSITORY},
+                        "status": "completed", "conclusion": "success"},
+                "release": {"id": 42, "tag_name": "v1.3.1", "draft": False, "prerelease": False,
+                            "published_at": "2026-01-01T00:00:00Z"}}
+        for name, value in refs.items():
+            (api / name).write_text(json.dumps(value))
+        publisher = Path(__file__).resolve().parents[1] / "publish_web_firmware.sh"
+
+        def publish():
+            # Each publish job checks out the current Pages branch before running.
+            git("reset", "--hard", pages_head())
+            return subprocess.run(["bash", str(publisher)], cwd=site, env=env,
+                                  capture_output=True, text=True)
+
+        def pages_head():
+            return git("--git-dir", str(remote), "rev-parse", "refs/heads/gh-pages")
+
+        for name, change in (("release", {"draft": True}), ("release", {"id": 43}),
+                             ("tag", {"object": {"type": "tag", "sha": "d" * 40}}),
+                             ("run", {"event": "pull_request"})):
+            with self.subTest(name=name, change=change):
+                (api / name).write_text(json.dumps({**refs[name], **change}))
+                self.assertNotEqual(publish().returncode, 0)
+                self.assertEqual(pages_head(), start)
+                self.assertFalse((api / "writes").exists())
+                (api / name).write_text(json.dumps(refs[name]))
+
+        # A withdrawal between the push and the build must also stop the build request.
+        hook = remote / "hooks" / "post-receive"
+        hook.write_text('#!/bin/sh\ncp "$FIXTURE_API/withdrawn" "$FIXTURE_API/release"\n')
+        hook.chmod(0o755)
+        (api / "withdrawn").write_text(json.dumps({**refs["release"], "draft": True}))
+        self.assertNotEqual(publish().returncode, 0)
+        self.assertNotEqual(pages_head(), start)
+        self.assertFalse((api / "writes").exists())
+
+        hook.unlink()
+        (api / "release").write_text(json.dumps(refs["release"]))
+        published = pages_head()
+        retry = publish()
+        self.assertEqual(retry.returncode, 0, retry.stderr)
+        self.assertEqual(pages_head(), published)
+        self.assertEqual((api / "writes").read_text().splitlines(), ["build"])
+
+        # A fresh eligible publication also completes both writes in a single job.
+        git("--git-dir", str(remote), "update-ref", "refs/heads/gh-pages", start)
+        (api / "writes").unlink()
+        result = publish()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((api / "writes").read_text().splitlines(), ["build"])
+        self.assertEqual(git("--git-dir", str(remote), "show", "gh-pages:index.html"), "Launchpad")
+        self.assertEqual(json.loads(git("--git-dir", str(remote), "show", "gh-pages:web-flash/manifest.json")),
+                         json.loads((self.output / "manifest.json").read_text()))
 
 
 if __name__ == "__main__":

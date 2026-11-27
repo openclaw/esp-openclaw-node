@@ -37,6 +37,11 @@ release, deploy Pages, or flash a device. Serve the extracted artifact over a
 local HTTP server for installer development, or map the fixed manifest/image
 requests to it in a browser test.
 
+Queueing preserves the staged release ID, signed tag object, source commit and
+successful main CI attempt. The publisher checks those identities again before
+pushing the Pages branch and before requesting its build. Withdrawing the
+release or moving the tag stops the next write.
+
 With a separately authorized `publish=true` dispatch, the publish job adds only
 `web-flash/` on `gh-pages`, retaining the existing Launchpad index, configuration,
 and historical firmware versions. It refuses version rollback and mutation of

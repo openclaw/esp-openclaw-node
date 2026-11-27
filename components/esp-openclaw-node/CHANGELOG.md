@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Add staged browser USB firmware manifests for ESP32-S3, ESP-BOX-3, and M5Dial, with exact stable-release CI provenance and opt-in Pages publication.
+- Add staged browser USB firmware manifests for ESP32-S3, ESP-BOX-3, and M5Dial, with exact stable-release CI provenance and opt-in Pages publication that rechecks release eligibility before each remote write.
 
 - Parse device inventories one node at a time to reduce peak memory when opening Devices after composing a message.
 

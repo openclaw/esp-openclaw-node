@@ -24,6 +24,10 @@ jobs:
     outputs:
       version: ${{ steps.release.outputs.version }}
       commit: ${{ steps.release.outputs.commit }}
+      tag_oid: ${{ steps.release.outputs.tag_oid }}
+      release_id: ${{ steps.release.outputs.release_id }}
+      run_id: ${{ steps.release.outputs.run_id }}
+      attempt: ${{ steps.release.outputs.attempt }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -68,6 +72,10 @@ jobs:
           done
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          tag_oid=$(git rev-parse "refs/tags/$version")
+          release_id=$(jq -er '.id | numbers | select(. > 0)' "$RUNNER_TEMP/web-release.json")
+          echo "tag_oid=$tag_oid" >> "$GITHUB_OUTPUT"
+          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
           echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
           echo "attempt=$attempt" >> "$GITHUB_OUTPUT"
 
@@ -109,53 +117,30 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.sha }}
+          path: publisher
+          sparse-checkout: scripts
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
           ref: gh-pages
+          path: site
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: web-flash-${{ needs.stage.outputs.version }}-${{ needs.stage.outputs.commit }}
           path: ${{ runner.temp }}/web-flash-payload
       - name: Preserve the site and publish the versioned firmware subtree
+        working-directory: site
         env:
           GH_TOKEN: ${{ github.token }}
           PAYLOAD: ${{ runner.temp }}/web-flash-payload
-        run: |
-          set -euo pipefail
-          gh api "repos/$GITHUB_REPOSITORY/pages" \
-            --jq '.build_type == "legacy" and .source.branch == "gh-pages" and .source.path == "/"' | grep -qx true
-          python3 - <<'PYCODE'
-          import json
-          import os
-          from pathlib import Path
-          import shutil
-          incoming = Path(os.environ["PAYLOAD"]) / "web-flash"
-          new = json.loads((incoming / "manifest.json").read_text())
-          existing = Path("web-flash/manifest.json")
-          if existing.exists():
-              old = json.loads(existing.read_text())
-              version = lambda value: tuple(map(int, value.removeprefix("v").split(".")))
-              if version(old["version"]) > version(new["version"]):
-                  raise SystemExit("Refusing to move the latest firmware backwards")
-              if old["version"] == new["version"] and old != new:
-                  raise SystemExit("Refusing to change an already published firmware version")
-          for source in incoming.rglob("*"):
-              if not source.is_file():
-                  continue
-              relative = source.relative_to(incoming)
-              target = Path("web-flash") / relative
-              if relative.as_posix() != "manifest.json" and target.exists() and target.read_bytes() != source.read_bytes():
-                  raise SystemExit("Refusing to overwrite immutable firmware bytes")
-          # Only this subtree changes; keep the existing Launchpad index and old versions.
-          shutil.copytree(incoming, "web-flash", dirs_exist_ok=True)
-          PYCODE
-          git add -- web-flash
-          if ! git diff --cached --quiet; then
-            git -c user.name=github-actions[bot] \
-              -c user.email=41898282+github-actions[bot]@users.noreply.github.com \
-              commit -m "chore(firmware): publish web installer ${{ needs.stage.outputs.version }}"
-            git push origin HEAD:gh-pages
-          fi
-          # GITHUB_TOKEN branch pushes do not trigger Pages; request the existing legacy build.
-          gh api --method POST "repos/$GITHUB_REPOSITORY/pages/builds" --silent
+          VERSION: ${{ needs.stage.outputs.version }}
+          COMMIT: ${{ needs.stage.outputs.commit }}
+          TAG_OID: ${{ needs.stage.outputs.tag_oid }}
+          RELEASE_ID: ${{ needs.stage.outputs.release_id }}
+          RUN_ID: ${{ needs.stage.outputs.run_id }}
+          ATTEMPT: ${{ needs.stage.outputs.attempt }}
+        run: bash "$GITHUB_WORKSPACE/publisher/scripts/publish_web_firmware.sh"
       - name: Verify published manifest and public image bytes
         env:
           PAYLOAD: ${{ runner.temp }}/web-flash-payload

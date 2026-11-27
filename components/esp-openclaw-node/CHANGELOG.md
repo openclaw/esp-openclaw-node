@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add a reviewed Identify command lifecycle for supported compact displays, with current inventory and write-access checks and separate accepted, rendered and unknown outcomes.
+
 - Handle empty initial WebSocket data notifications without restarting a frame, and report inbound allocation failures with their original memory error and numeric diagnostics.
 
 - Validate remote display receipts against the target, command, content and render generation before reporting completion.

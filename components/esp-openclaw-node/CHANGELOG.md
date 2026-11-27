@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Distinguish Create from Open in local USB workspace status and invalidate stale inputs when the creation action changes.
+
 - Add a compact message editor with character groups, draft preview, deletion, and explicit Send/Edit/Cancel review on both button and encoder boards.
 
 - Let applications prepare custom UTF-8 reader drafts with the existing recipient, review and single-send checks.

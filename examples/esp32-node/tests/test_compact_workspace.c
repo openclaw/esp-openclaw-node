@@ -19,6 +19,7 @@ static unsigned identifies;
 static char identify_target[129];
 static esp_openclaw_reader_home_t home_context;
 static unsigned refreshes, opens, previews, sends;
+static unsigned create_submits, created_opens;
 static unsigned text_drafts;
 static uint32_t now;
 static int width, height, brightness;
@@ -94,9 +95,19 @@ void esp_openclaw_reader_reply_close(unsigned revision) {
     reply.state = ESP_OPENCLAW_READER_REPLY_IDLE; reply.can_send = false; ++reply.revision;
 }
 esp_err_t esp_openclaw_reader_reply_read(unsigned revision) { (void)revision; return ESP_OK; }
-esp_err_t esp_openclaw_reader_creation_begin(unsigned revision) { (void)revision; return ESP_OK; }
-esp_err_t esp_openclaw_reader_creation_submit(unsigned revision) { (void)revision; return ESP_OK; }
-esp_err_t esp_openclaw_reader_creation_open(unsigned revision) { (void)revision; return ESP_OK; }
+esp_err_t esp_openclaw_reader_creation_begin(unsigned revision) {
+    assert(revision == conversations.revision);
+    creation.state = ESP_OPENCLAW_READER_CREATION_REVIEW;
+    creation.can_create = true; creation.can_open = false; ++creation.revision; return ESP_OK;
+}
+esp_err_t esp_openclaw_reader_creation_submit(unsigned revision) {
+    assert(revision == creation.revision && creation.can_create); ++create_submits;
+    creation.state = ESP_OPENCLAW_READER_CREATION_CREATING;
+    creation.can_create = false; ++creation.revision; return ESP_OK;
+}
+esp_err_t esp_openclaw_reader_creation_open(unsigned revision) {
+    assert(revision == creation.revision && creation.can_open); ++created_opens; return ESP_OK;
+}
 esp_err_t esp_openclaw_reader_messaging_request(unsigned revision) { (void)revision; return ESP_OK; }
 esp_err_t esp_openclaw_reader_messaging_cancel(unsigned revision) { (void)revision; return ESP_OK; }
 
@@ -320,6 +331,34 @@ int main(int argc, char **argv) {
     assert(text_drafts == drafts_before);
     reader_connected = true; step(); choose("Write message");
     assert(strcmp(compact_workspace_view(), "draft") == 0);
+    assert(strcmp(compact_workspace_primary_action(), "") == 0);
+    home(); move(1); choose("Conversations"); choose("New conversation");
+    assert(strcmp(compact_workspace_view(), "create") == 0);
+    assert(strcmp(compact_workspace_primary_action(), "create") == 0);
+    revision = compact_workspace_revision();
+    creation.can_create = false; step();
+    assert(compact_workspace_revision() != revision);
+    assert(strcmp(compact_workspace_primary_action(), "back") == 0);
+    revision = compact_workspace_revision(); messaging.state = ESP_OPENCLAW_READER_MESSAGING_OFF; step();
+    assert(compact_workspace_revision() != revision);
+    assert(strcmp(compact_workspace_primary_action(), "messaging") == 0);
+    messaging.state = ESP_OPENCLAW_READER_MESSAGING_READY; creation.can_create = true; step();
+    select_item(); assert(create_submits == 1 && created_opens == 0);
+    revision = compact_workspace_revision();
+    held = (compact_input_t){0};
+    compact_input_sample(&held, 190, revision, false, false, width == 320, 3);
+    compact_input_sample(&held, 200, revision, true, false, width == 320, 3);
+    compact_input_sample(&held, 230, revision, true, false, width == 320, 3);
+    creation.can_open = true; step();
+    assert(compact_workspace_revision() != revision);
+    assert(strcmp(compact_workspace_primary_action(), "open") == 0);
+    compact_input_sample(&held, 240, compact_workspace_revision(), false, false, width == 320, 3);
+    release = compact_input_sample(&held, 270, compact_workspace_revision(), false, false, width == 320, 3);
+    compact_workspace_input(release); step();
+    assert(!release.select && create_submits == 1 && created_opens == 0);
+    select_item(); assert(create_submits == 1 && created_opens == 1);
+    assert(strcmp(compact_workspace_view(), "reader") == 0);
+    assert(strcmp(compact_workspace_primary_action(), "") == 0);
     printf("Compact workspace %dx%d: async results, owned drafts, reviewed actions and retained outcomes passed\n", width, height);
     lv_deinit();
 }

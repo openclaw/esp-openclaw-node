@@ -18,4 +18,6 @@ bool compact_workspace_message_visible(void);
 const char *compact_workspace_view(void);
 /* UI-owner access after poll/render. Never publish this label through node commands. */
 const char *compact_workspace_selection(void);
+/* Local USB action for the creation screen, from the same UI snapshot as revision. */
+const char *compact_workspace_primary_action(void);
 int compact_workspace_message_line_height(void);

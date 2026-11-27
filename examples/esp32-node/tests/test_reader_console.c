@@ -10,10 +10,12 @@
 #include <unistd.h>
 #include "esp_console.h"
 #include "esp_openclaw_reader.h"
+#include "esp_heap_caps.h"
 
 static const char *input;
 static size_t consumed, expire_at;
 static int flags, submitted;
+static int status_calls, heap_calls;
 static bool hard_error;
 static int64_t now;
 static char received[ESP_OPENCLAW_NODE_BOOTSTRAP_CODE_MAX_LENGTH + 1];
@@ -39,7 +41,12 @@ const char *esp_err_to_name(esp_err_t err) { (void)err; return "rejected"; }
 esp_err_t esp_openclaw_reader_setup_code(const char *code) {
     ++submitted; strcpy(received, code); return ESP_OK;
 }
-cJSON *esp_openclaw_reader_status(void) { return cJSON_CreateObject(); }
+cJSON *esp_openclaw_reader_status(void) { ++status_calls; return cJSON_CreateObject(); }
+void heap_caps_get_info(multi_heap_info_t *info, unsigned caps) {
+    assert(caps == (MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
+    ++heap_calls;
+    *info = (multi_heap_info_t){12345, 6789, 2345};
+}
 void esp_openclaw_reader_messaging_copy(esp_openclaw_reader_messaging_snapshot_t *snapshot) {
     memset(snapshot, 0, sizeof(*snapshot));
     snapshot->state = 2; snapshot->revision = 7;
@@ -89,5 +96,14 @@ int main(void) {
     assert(cJSON_GetObjectItem(status, "messagingRevision")->valueint == 7);
     assert(strcmp(cJSON_GetObjectItem(status, "messagingRequestId")->valuestring, "approval-test") == 0);
     cJSON_Delete(status);
-    puts("Reader console: hidden input, timeout/cancel quarantine and oversize rejection passed");
+    capture = tmpfile(); assert(capture);
+    saved = dup(STDOUT_FILENO); assert(saved >= 0);
+    fflush(stdout); assert(dup2(fileno(capture), STDOUT_FILENO) >= 0);
+    int previous_status_calls = status_calls;
+    char *heap_argv[] = {"reader", "heap"}; assert(reader_command(2, heap_argv) == 0);
+    fflush(stdout); assert(dup2(saved, STDOUT_FILENO) >= 0); close(saved);
+    rewind(capture); assert(fgets(output, sizeof(output), capture)); fclose(capture);
+    assert(strcmp(output, "internalFreeBytes=12345 internalLargestBlockBytes=6789 internalMinimumFreeBytes=2345\n") == 0);
+    assert(heap_calls == 1 && status_calls == previous_status_calls);
+    puts("Reader console: hidden input, timeout/cancel quarantine, oversize rejection and heap diagnostic passed");
 }

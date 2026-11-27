@@ -131,6 +131,19 @@ int main(void)
     assert(esp_openclaw_identify_begin("test-node", 4) == ESP_ERR_INVALID_STATE);
     reply(true); assert(snapshot().state == ESP_OPENCLAW_IDENTIFY_UNKNOWN && queries == before);
 
+    // A callback that reaches the worker after its deadline is also unknown,
+    // even when the timer has not been polled yet.
+    assert(esp_openclaw_identify_begin("test-node", 4) == ESP_OK);
+    assert(esp_openclaw_identify_send(snapshot().revision) == ESP_OK);
+    esp_openclaw_identify_poll(false); now += 15000000;
+    reply(true); assert(snapshot().state == ESP_OPENCLAW_IDENTIFY_UNKNOWN);
+
+    assert(esp_openclaw_identify_begin("test-node", 4) == ESP_OK);
+    assert(esp_openclaw_identify_send(snapshot().revision) == ESP_OK);
+    esp_openclaw_identify_poll(false); immediate_owner = false;
+    reply(true); assert(snapshot().state == ESP_OPENCLAW_IDENTIFY_UNKNOWN);
+    immediate_owner = true;
+
     assert(esp_openclaw_identify_begin("test-node", 4) == ESP_OK);
     assert(esp_openclaw_identify_send(snapshot().revision) == ESP_OK);
     esp_openclaw_identify_poll(false); owner(true, 2);

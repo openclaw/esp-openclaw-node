@@ -197,6 +197,12 @@ void esp_openclaw_identify_poll(bool defer_request)
             state(!valid ? ESP_OPENCLAW_IDENTIFY_UNKNOWN : receipt.rendered ?
                 ESP_OPENCLAW_IDENTIFY_RENDERED : ESP_OPENCLAW_IDENTIFY_ACCEPTED);
             esp_timer_stop(identify.timer);
+        } else if (identify.snapshot.state == ESP_OPENCLAW_IDENTIFY_SENDING &&
+                   identify.snapshot.revision == done->revision) {
+            /* Completion still proves submission even if its authority or
+             * deadline expired before this worker consumed the callback. */
+            state(ESP_OPENCLAW_IDENTIFY_UNKNOWN);
+            esp_timer_stop(identify.timer);
         }
         free(done->json);
         free(done);

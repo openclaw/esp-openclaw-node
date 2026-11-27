@@ -110,8 +110,10 @@ int main(int argc, char **argv) {
     compact_workspace_start(width, height, width == 320, backlight); step();
     assert(brightness == 80); assert(strcmp(compact_workspace_view(), "home") == 0); snapshot("home");
     move(1); assert(strcmp(compact_workspace_view(), "menu") == 0);
+    assert(strcmp(compact_workspace_selection(), "Agents") == 0);
     compact_workspace_input((compact_input_event_t){.move = 1, .select = true}); step();
     assert(strcmp(compact_workspace_view(), "menu") == 0 && opens == 0);
+    assert(strcmp(compact_workspace_selection(), "Conversations") == 0);
     move(2); select_item();
     assert(strcmp(compact_workspace_view(), "activity") == 0 && !compact_workspace_message_visible());
     home(); move(1); move(2); select_item();

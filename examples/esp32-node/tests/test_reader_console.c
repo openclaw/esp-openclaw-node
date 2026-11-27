@@ -40,6 +40,11 @@ esp_err_t esp_openclaw_reader_setup_code(const char *code) {
     ++submitted; strcpy(received, code); return ESP_OK;
 }
 cJSON *esp_openclaw_reader_status(void) { return cJSON_CreateObject(); }
+void esp_openclaw_reader_messaging_copy(esp_openclaw_reader_messaging_snapshot_t *snapshot) {
+    memset(snapshot, 0, sizeof(*snapshot));
+    snapshot->state = 2; snapshot->revision = 7;
+    strcpy(snapshot->request_id, "approval-test");
+}
 esp_err_t esp_console_cmd_register(const esp_console_cmd_t *cmd) { (void)cmd; return ESP_OK; }
 
 #define read test_read
@@ -73,5 +78,16 @@ int main(void) {
     memset(oversized, 'A', sizeof(oversized) - 2);
     oversized[sizeof(oversized) - 2] = '\n'; oversized[sizeof(oversized) - 1] = 0;
     run(oversized, 0, false);
+    FILE *capture = tmpfile(); assert(capture);
+    int saved = dup(STDOUT_FILENO); assert(saved >= 0);
+    fflush(stdout); assert(dup2(fileno(capture), STDOUT_FILENO) >= 0);
+    char *argv[] = {"reader", "status"}; assert(reader_command(2, argv) == 0);
+    fflush(stdout); assert(dup2(saved, STDOUT_FILENO) >= 0); close(saved);
+    rewind(capture); char output[1024] = {0}; assert(fgets(output, sizeof(output), capture)); fclose(capture);
+    cJSON *status = cJSON_Parse(output); assert(status);
+    assert(cJSON_GetObjectItem(status, "messagingState")->valueint == 2);
+    assert(cJSON_GetObjectItem(status, "messagingRevision")->valueint == 7);
+    assert(strcmp(cJSON_GetObjectItem(status, "messagingRequestId")->valuestring, "approval-test") == 0);
+    cJSON_Delete(status);
     puts("Reader console: hidden input, timeout/cancel quarantine and oversize rejection passed");
 }

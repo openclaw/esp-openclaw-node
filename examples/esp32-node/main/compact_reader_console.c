@@ -24,6 +24,15 @@ static int reader_command(int argc, char **argv)
 {
     if (argc == 2 && strcmp(argv[1], "status") == 0) {
         cJSON *status = esp_openclaw_reader_status();
+        esp_openclaw_reader_messaging_snapshot_t messaging;
+        esp_openclaw_reader_messaging_copy(&messaging);
+        if (status != NULL &&
+            (cJSON_AddNumberToObject(status, "messagingState", messaging.state) == NULL ||
+             cJSON_AddNumberToObject(status, "messagingRevision", messaging.revision) == NULL ||
+             cJSON_AddStringToObject(status, "messagingRequestId", messaging.request_id) == NULL)) {
+            cJSON_Delete(status);
+            status = NULL;
+        }
         char *json = status != NULL ? cJSON_PrintUnformatted(status) : NULL;
         bool printed = json != NULL;
         if (json != NULL) puts(json);

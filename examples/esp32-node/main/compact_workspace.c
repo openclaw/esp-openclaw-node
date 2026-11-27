@@ -560,6 +560,10 @@ void compact_workspace_message(const char *heading, const char *text, bool large
 unsigned compact_workspace_revision(void) { return ui.revision; }
 bool compact_workspace_message_visible(void) { return ui.view == ACTIVITY && ui.has_message; }
 const char *compact_workspace_view(void) { return view_names[ui.view]; }
+const char *compact_workspace_selection(void)
+{
+    return list_view() && ui.focus >= 0 && ui.focus < ui.count ? ui.rows[ui.focus].name : "";
+}
 int compact_workspace_message_line_height(void)
 {
     if (ui.has_message) return ui.message_large ?

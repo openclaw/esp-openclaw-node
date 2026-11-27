@@ -111,8 +111,21 @@ and run `reader setup-code` without an argument. Enter a Gateway bootstrap setup
 code at the hidden prompt within 30 seconds. The code is not echoed or added to
 REPL history. It must target the same exact Gateway URI used by the node. Run
 `reader status` to inspect the connection without exposing credentials.
+It also reports the pending messaging request ID and revision so an operator
+can match the exact Gateway approval before granting access.
 Expired or cancelled input stays hidden until Enter ends the line. To cancel
 an empty prompt, press Ctrl-C and then Enter.
+
+For USB navigation, run `workspace status`, then use `workspace next <revision>`,
+`workspace previous <revision>`, `workspace select <revision>`, or
+`workspace home <revision>` with the returned `workspaceRevision`. Commands
+queue one input at a time for the display owner. Status reports the request ID
+and `queued`, `applied`, or `stale` outcome; `applied` means the input reached the
+UI, not that a remote action completed. A view change before delivery rejects
+the input as stale. Inspect the actual review/result screen before proceeding.
+`consoleInputCount` and `physicalInputCount` remain separate.
+USB status includes the selected row label for local navigation. Node-command
+`display.status` omits that label, which can contain private conversation titles.
 
 Approve only the expected existing device's `operator.read` role request on the
 Gateway. If the first attempt was rejected while awaiting approval, run

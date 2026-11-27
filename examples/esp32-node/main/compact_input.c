@@ -1,7 +1,41 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "compact_input.h"
+#include <stddef.h>
+
+bool compact_console_submit(compact_console_input_t *input, compact_input_event_t event,
+    uint32_t expected_revision, uint32_t current_revision, uint32_t *request_id)
+{
+    if (request_id == NULL) return false;
+    *request_id = 0;
+    int actions = (event.move != 0) + event.select + event.home;
+    if (input == NULL || input->pending || input->request_id == UINT32_MAX ||
+        expected_revision == 0 || expected_revision != current_revision || actions != 1 ||
+        event.move < -1 || event.move > 1) return false;
+    input->event = event;
+    input->revision = expected_revision;
+    input->pending = true;
+    input->outcome = COMPACT_CONSOLE_QUEUED;
+    *request_id = ++input->request_id;
+    return true;
+}
+
+bool compact_console_complete(compact_console_input_t *input, uint32_t request_id, bool applied)
+{
+    if (input == NULL || !input->pending || input->request_id != request_id) return false;
+    input->pending = false;
+    input->outcome = applied ? COMPACT_CONSOLE_APPLIED : COMPACT_CONSOLE_STALE;
+    if (applied) ++input->applied_count;
+    return true;
+}
 
 enum { DEBOUNCE_MS = 25, HOLD_MS = 650 };
+
+void compact_input_cancel_pending(compact_input_t *input)
+{
+    input->primary.consumed = true;
+    input->secondary.consumed = true;
+    input->steps = 0;
+}
 
 static void button(compact_button_t *key, bool pressed, uint32_t now,
                    uint32_t revision, bool primary, compact_input_event_t *event)

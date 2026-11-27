@@ -5,6 +5,7 @@
 #include "compact_workspace.h"
 #include "compact_input.h"
 #include "compact_reader_console.h"
+#include "compact_workspace_console.h"
 #include "lvgl.h"
 #include "esp_openclaw_reader.h"
 #include "driver/ledc.h"
@@ -39,6 +40,9 @@ static uint16_t *s_pixels;
 static bool s_message_visible;
 static char s_view[24] = "home";
 static unsigned s_input_count;
+static uint32_t s_workspace_revision;
+static compact_console_input_t s_console_input;
+static char s_console_selection[97];
 static int s_message_line_height;
 static int64_t s_last_input_ms;
 static lv_display_t *s_lv_display;
@@ -207,11 +211,20 @@ static void display_task(void *ctx)
         uint8_t quadrature = (gpio_get_level(2) << 1) | gpio_get_level(1);
 #endif
         compact_input_event_t event = compact_input_sample(&input, now, compact_workspace_revision(), a, b, encoder, quadrature);
-        if (event.move || event.select || event.home) {
+        bool physical_event = event.move || event.select || event.home;
+        if (physical_event) {
             compact_workspace_input(event);
             xSemaphoreTake(s_state_mutex, portMAX_DELAY);
             ++s_input_count; s_last_input_ms = now;
             xSemaphoreGive(s_state_mutex);
+        }
+        xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+        compact_console_input_t console = s_console_input;
+        xSemaphoreGive(s_state_mutex);
+        bool console_applied = console.pending && !physical_event && console.revision == compact_workspace_revision();
+        if (console_applied) {
+            compact_input_cancel_pending(&input);
+            compact_workspace_input(console.event);
         }
         compact_workspace_poll(&wifi, connected, now);
         lv_timer_handler();
@@ -222,23 +235,31 @@ static void display_task(void *ctx)
         s_message_line_height = compact_workspace_message_line_height();
         if (s_message_visible) s_rendered_generation = content.generation;
         snprintf(s_view, sizeof(s_view), "%s", compact_workspace_view());
+        s_workspace_revision = compact_workspace_revision();
+        snprintf(s_console_selection, sizeof(s_console_selection), "%s", compact_workspace_selection());
+        if (console.pending) compact_console_complete(&s_console_input, console.request_id, console_applied);
         xSemaphoreGive(s_state_mutex);
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(5));
     }
 }
 
-static esp_err_t display_status(char **out_payload_json)
+static esp_err_t display_status(char **out_payload_json, bool local_console)
 {
     cJSON *payload = cJSON_CreateObject();
     if (payload == NULL) return ESP_ERR_NO_MEM;
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
     bool large_text = s_content.large_text;
+    static const char *const console_outcomes[] = {"none", "queued", "applied", "stale"};
     bool ok = cJSON_AddBoolToObject(payload, "ready", s_ready) &&
         cJSON_AddStringToObject(payload, "heading", s_content.heading) &&
         cJSON_AddStringToObject(payload, "text", s_content.text) &&
         cJSON_AddStringToObject(payload, "textSize", large_text ? "large" : "normal") &&
         cJSON_AddStringToObject(payload, "view", s_view) &&
         cJSON_AddNumberToObject(payload, "physicalInputCount", s_input_count) &&
+        cJSON_AddNumberToObject(payload, "workspaceRevision", s_workspace_revision) &&
+        cJSON_AddNumberToObject(payload, "consoleInputCount", s_console_input.applied_count) &&
+        cJSON_AddNumberToObject(payload, "consoleRequestId", s_console_input.request_id) &&
+        cJSON_AddStringToObject(payload, "consoleOutcome", console_outcomes[s_console_input.outcome]) &&
         cJSON_AddNumberToObject(payload, "lastInputMs", (double)s_last_input_ms) &&
         cJSON_AddNumberToObject(payload, "brightness", s_brightness) &&
         cJSON_AddStringToObject(payload, "layout", "scroll") &&
@@ -248,6 +269,7 @@ static esp_err_t display_status(char **out_payload_json)
         cJSON_AddBoolToObject(payload, "rendered", s_ready && s_message_visible && s_rendered_generation == s_content.generation) &&
         cJSON_AddNumberToObject(payload, "renderCount", s_render_count) &&
         cJSON_AddNumberToObject(payload, "lastRenderMs", (double)s_last_render_ms);
+    if (local_console) ok = ok && cJSON_AddStringToObject(payload, "selection", s_console_selection);
     xSemaphoreGive(s_state_mutex);
     ok = ok && cJSON_AddNumberToObject(payload, "headingMaxLength", COMPACT_TEXT_COLUMNS) &&
         cJSON_AddNumberToObject(payload, "textMaxLength", large_text ? COMPACT_LARGE_COLUMNS * COMPACT_LARGE_ROWS : COMPACT_TEXT_MAX) &&
@@ -262,12 +284,25 @@ static esp_err_t display_status(char **out_payload_json)
     return esp_openclaw_node_example_take_json_payload(payload, out_payload_json);
 }
 
+esp_err_t compact_board_console_status(char **out_json) { return display_status(out_json, true); }
+
+esp_err_t compact_board_console_input(compact_input_event_t event, uint32_t revision, uint32_t *request_id)
+{
+    if (request_id == NULL) return ESP_ERR_INVALID_ARG;
+    *request_id = 0;
+    xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    bool accepted = s_ready && compact_console_submit(&s_console_input, event, revision, s_workspace_revision, request_id);
+    if (accepted) xTaskNotifyGive(s_display_task);
+    xSemaphoreGive(s_state_mutex);
+    return accepted ? ESP_OK : ESP_ERR_INVALID_STATE;
+}
+
 static esp_err_t handle_display_status(esp_openclaw_node_handle_t node, void *context,
     const char *params_json, size_t params_len, char **out_payload_json,
     esp_openclaw_node_error_t *out_error)
 {
     (void)node; (void)context; (void)params_json; (void)params_len; (void)out_error;
-    return display_status(out_payload_json);
+    return display_status(out_payload_json, false);
 }
 
 static esp_err_t handle_display_show(esp_openclaw_node_handle_t node, void *context,
@@ -318,7 +353,7 @@ static esp_err_t handle_display_show(esp_openclaw_node_handle_t node, void *cont
     // The renderer publishes failure under this lock before deleting its task.
     xTaskNotifyGive(s_display_task);
     xSemaphoreGive(s_state_mutex);
-    return display_status(out_payload_json);
+    return display_status(out_payload_json, false);
 }
 
 esp_err_t compact_board_register_commands(esp_openclaw_node_handle_t node)
@@ -337,7 +372,8 @@ esp_err_t compact_board_register_commands(esp_openclaw_node_handle_t node)
         .tls_server_name = CONFIG_EXAMPLE_GATEWAY_TLS_SERVER_NAME};
     esp_err_t err = esp_openclaw_reader_start(node, &reader);
     if (err != ESP_OK) ESP_LOGW(TAG, "reader unavailable: %s", esp_err_to_name(err));
-    return compact_reader_console_register();
+    ESP_RETURN_ON_ERROR(compact_reader_console_register(), TAG, "reader console");
+    return compact_workspace_console_register();
 }
 
 void compact_board_set_connected(bool connected)

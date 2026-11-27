@@ -24,6 +24,8 @@ Commands:
 - `adc.read`
 
 `adc.read` is only registered when the selected target supports ADC.
+The M5StickC and T-Embed profiles also expose the `display` capability with
+`display.show` and `display.status`.
 
 ## Prepare The Gateway
 
@@ -59,6 +61,82 @@ cd /path/to/repo/examples/esp32-node
 idf.py set-target <target>
 idf.py build
 ```
+
+### M5StickC and T-Embed
+
+Use the original M5StickC profile for the ESP32-PICO-D4 with its 80×160 display.
+It does not cover the StickC Plus, Plus2, or StickS3. The T-Embed profile
+targets the ESP32-S3 model with 16 MB flash; it does not cover the T-Embed
+CC1101 or CC1101 Plus.
+
+Build each profile with a separate configuration and output directory:
+
+```sh
+idf.py -B build-m5stickc -D SDKCONFIG=sdkconfig.m5stickc.local \
+  -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.m5stickc" \
+  -D IDF_TARGET=esp32 build
+idf.py -B build-t-embed -D SDKCONFIG=sdkconfig.t-embed.local \
+  -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.lilygo-t-embed" \
+  -D IDF_TARGET=esp32s3 build
+```
+
+The M5StickC uses its USB-to-UART adapter at 115200 baud. The T-Embed
+uses native USB Serial/JTAG. Select the matching build directory and serial
+port when flashing. Back up the existing flash before installing either image.
+The profiles set board identity, flash size, and console transport; provision
+Wi-Fi through the REPL after boot. No Wi-Fi or Gateway credentials belong in
+the profile files.
+
+Both profiles show Wi-Fi connectivity, the assigned IPv4 address, and Gateway
+connectivity on the built-in screen. The M5StickC enables the AXP192 display
+power rails and uses its ST7735 panel. The T-Embed enables its board power and
+ST7789 backlight. These profiles do not initialize audio, SD, or radio add-ons.
+They use the same serial provisioning commands as the generic example.
+
+The compact profiles also accept display messages:
+
+```sh
+openclaw nodes invoke --node <node-id> --command display.show \
+  --params '{"heading":"OpenClaw ready","text":"Hello from the Gateway!"}' --json
+openclaw nodes invoke --node <node-id> --command display.status --json
+```
+
+Add `display.show` and `display.status` to the Gateway's existing command
+allowlist before pairing. For these boards, start with `device.info`,
+`device.status`, `wifi.status`, `display.show`, and `display.status`; GPIO
+commands are not needed to operate the display. Preserve existing entries
+when updating a shared Gateway.
+
+Messages have a heading of up to 25 characters and a body of up to 100
+characters, wrapped into four rows of 25 columns. Body newlines advance to the
+next row; input that exceeds four rows is rejected. The built-in font displays
+letters in uppercase and supports digits, spaces, and `. , - _ : ! ? / + % ( ) =`.
+Unsupported characters are rejected. Wi-Fi and Gateway status stay visible
+in the footer. Messages are kept in RAM and reset after reboot.
+
+`display.show` queues the latest message. Its response and `display.status`
+include `generation`, `renderedGeneration`, and `rendered`. A message is
+confirmed drawn only when `rendered` is true and both generations match; an
+accepted message can be replaced by a newer message before it is drawn.
+`ready` becomes false if the display transfer fails. `device.info` reports
+the selected board name and model identifier.
+
+Both compact profiles synchronize their clock through SNTP after Wi-Fi obtains
+an address and validate TLS certificate dates for `wss://` connections. Wait
+for `clock synchronized for TLS certificate validation` in the serial console
+before sending the first setup code. Synchronization runs in the background;
+the console remains usable if the time server cannot be reached. Saved-session
+reconnect can fail certificate validation until the clock is synchronized and
+then retry normally. Existing local `sdkconfig` files must also enable
+`CONFIG_MBEDTLS_HAVE_TIME_DATE=y`; profile defaults do not override saved values.
+For a raw TLS passthrough relay, set `CONFIG_EXAMPLE_GATEWAY_TLS_SERVER_NAME`
+in the untracked local configuration to the upstream certificate's DNS name.
+This sets certificate name verification and SNI without disabling validation.
+Leave it empty for a direct connection using the hostname in the Gateway URL.
+See [LAN TLS passthrough](../../docs/lan-tls-relay.md) for the optional macOS relay.
+
+Board pin references: [M5StickC](https://docs.m5stack.com/en/core/StickC) and
+[T-Embed factory pin map](https://github.com/Xinyuan-LilyGO/T-Embed/blob/main/examples/factory/pin_config.h).
 
 Existing `sdkconfig` files take precedence over `sdkconfig.defaults`.
 `idf.py set-target` regenerates the project-root `sdkconfig` from those defaults.

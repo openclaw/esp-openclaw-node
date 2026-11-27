@@ -26,12 +26,12 @@ from tab5_camera_compat import (
 
 
 EXAMPLES = {
-    "esp32-node": "esp32s3",
-    "esp-box-3-display": "esp32s3",
-    "m5stack-dial-node": "esp32s3",
-    "waveshare-esp32-s3-touch-amoled-1.8-room-node": "esp32s3",
-    "waveshare-esp32-s3-touch-amoled-2.06-room-node": "esp32s3",
-    "m5stack-tab5-room-node": "esp32p4",
+    "esp32-node": ("esp32", "esp32s3"),
+    "esp-box-3-display": ("esp32s3",),
+    "m5stack-dial-node": ("esp32s3",),
+    "waveshare-esp32-s3-touch-amoled-1.8-room-node": ("esp32s3",),
+    "waveshare-esp32-s3-touch-amoled-2.06-room-node": ("esp32s3",),
+    "m5stack-tab5-room-node": ("esp32p4",),
 }
 SECURITY_CONFIG = {
     "CONFIG_SECURE_BOOT",
@@ -176,8 +176,8 @@ def package_firmware(project, build, output, target, provenance, dependencies,
                      camera_compat=False):
     project, build, output = project.resolve(), build.resolve(), output.resolve()
     repo = Path(git(project, "rev-parse", "--show-toplevel")).resolve()
-    if project.parent != repo / "examples" or EXAMPLES.get(project.name) != target:
-        raise ValueError("Only the four CI example/target combinations may be packaged")
+    if project.parent != repo / "examples" or target not in EXAMPLES.get(project.name, ()):
+        raise ValueError("Only supported CI example/target combinations may be packaged")
     if output.exists() or not output.is_relative_to(build):
         raise ValueError("Output must be a new directory inside the build directory")
     roots = (project, build)
@@ -388,7 +388,7 @@ def package_firmware(project, build, output, target, provenance, dependencies,
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--target", required=True, choices=("esp32s3", "esp32p4"))
+    parser.add_argument("--target", required=True, choices=sorted({target for targets in EXAMPLES.values() for target in targets}))
     for name in ("repository", "event", "event-sha", "run-id", "run-attempt", "idf-image"):
         parser.add_argument("--" + name, required=True)
     parser.add_argument("--pr-head-sha", default="")

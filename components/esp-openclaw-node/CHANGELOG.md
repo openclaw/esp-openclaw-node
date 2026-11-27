@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- Add an optional macOS LAN TLS passthrough helper with exact node source admission, router identity checks, bounded connections, and automatic rebinding within the configured LAN.
+
+- Synchronize M5StickC and T-Embed clocks asynchronously after Wi-Fi connects and validate TLS certificate dates without blocking serial provisioning. Allow an explicit certificate/SNI name for end-to-end TLS passthrough relays.
+
+- Let M5StickC and T-Embed nodes accept bounded display messages, report completed display generations, and return their board identity from `device.info`.
+
+- Package original ESP32 firmware for the M5StickC CI build while retaining each example's target restrictions and flash offsets.
+
+- Correct the compact displays' landscape orientation and the T-Embed's RGB channel order.
+
+- Show Wi-Fi, IP, and Gateway status on the M5StickC and T-Embed displays, with board-specific power control and CI builds for both profiles.
+
+- Add explicit M5StickC and LILYGO T-Embed example profiles with board identity, flash size, and the matching USB console transport.
+
 - Update non-Tab5 builds to ESP-IDF 5.5.6 and requalify the source-verified Security2 salt guard while retaining the separate Tab5 SDK contract.
 
 - Explain saved `sdkconfig` precedence and safe selective updates or backed-up regeneration for repeat example builds. Thanks @DonnieFi (#235).

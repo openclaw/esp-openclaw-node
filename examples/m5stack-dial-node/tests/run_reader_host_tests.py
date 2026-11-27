@@ -80,6 +80,7 @@ esp_err_t esp_timer_stop(esp_timer_handle_t);
             str(cjson_object), "-lm", "-o", str(binary),
         ], check=True)
         subprocess.run([str(binary)], check=True)
+        subprocess.run([str(binary), "bootstrap"], check=True)
         parser_test = work / "directory-test"
         subprocess.run(["cc", "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-g",
                         "-fsanitize=address,undefined", "-fno-sanitize-recover=all",

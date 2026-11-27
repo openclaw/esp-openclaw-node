@@ -60,6 +60,11 @@ static struct {
     reader_phase_t phase;
     reader_status_t status;
     bool retry;
+    char *setup_code;
+    unsigned setup_generation;
+    int64_t setup_started;
+    esp_openclaw_node_connect_lease_t setup_lease;
+    esp_openclaw_node_connect_attempt_id_t setup_attempt;
     bool devices_initialized, devices_available;
     bool directory_enabled, directory_pending, force_disconnect;
     size_t directory_offset;
@@ -87,6 +92,15 @@ static struct {
     uint32_t creation_connection, creation_review_connection;
     bool creation_pending, creation_submitted;
 } reader;
+
+static void wipe_free(char *value)
+{
+    if (value == NULL) return;
+    volatile char *cursor = value;
+    size_t remaining = strlen(value);
+    while (remaining--) *cursor++ = 0;
+    free(value);
+}
 
 static void messaging_state(esp_openclaw_reader_messaging_state_t state)
 {
@@ -133,6 +147,7 @@ static bool current_node(void)
 static bool current_reader(void)
 {
     return current_node() && reader.phase == CONNECTED && !reader.force_disconnect &&
+        reader.setup_lease == 0 &&
         atomic_load(&pending_event) == NONE &&
         reader.status == READY && reader.attempt == reader.generation &&
         reader.reader_id != 0 && reader.reader_id == esp_openclaw_node_get_connection_id(reader.client);
@@ -358,6 +373,8 @@ static void refresh_node(void)
     reader.uri = uri;
     reader.node_id = id;
     if (reader.generation != generation) {
+        wipe_free(reader.setup_code);
+        reader.setup_code = NULL;
         invalidate_directory();
         reset_messaging(ESP_OPENCLAW_READER_MESSAGING_OFF);
     }
@@ -815,7 +832,7 @@ static void reset_idle_client(void)
 {
     xSemaphoreTake(reader.lock, portMAX_DELAY);
     bool reset = reader.reset_client && reader.phase == IDLE &&
-        reader.inflight == NULL && reader.approval == NULL;
+        reader.inflight == NULL && reader.approval == NULL && reader.setup_lease == 0;
     if (reset && reader.devices_available)
         esp_openclaw_devices_set_owner_locked(NULL, reader.generation, 0, false);
     xSemaphoreGive(reader.lock);
@@ -831,9 +848,69 @@ static void reset_idle_client(void)
     xSemaphoreGive(reader.lock);
 }
 
+static bool setup_authorized(void *context)
+{
+    (void)context;
+    /* Immutable until the tracked attempt is terminal. The primary callback
+     * revokes this generation on any connection change, including a new URI.
+     * Never acquire reader/node locks from this node-worker callback. */
+    int64_t elapsed = esp_timer_get_time() - reader.setup_started;
+    return reader.setup_generation == atomic_load(&node_generation) && elapsed >= 0 && elapsed < 60000000;
+}
+
+static void poll_setup(void)
+{
+    if (reader.setup_lease == 0) return;
+    if (reader.setup_attempt != 0) {
+        esp_openclaw_node_connect_attempt_t attempt;
+        if (esp_openclaw_node_connect_snapshot(reader.client, reader.setup_lease,
+                reader.setup_attempt, &attempt) != ESP_OK) return;
+        bool terminal = attempt.state == ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_SUCCEEDED ||
+            attempt.state == ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_FAILED;
+        if (!terminal) {
+            if (!setup_authorized(NULL))
+                esp_openclaw_node_connect_cancel(reader.client, reader.setup_lease, reader.setup_attempt);
+            return;
+        }
+    }
+    if (esp_openclaw_node_connect_lease_release(reader.client, reader.setup_lease) == ESP_OK) {
+        xSemaphoreTake(reader.lock, portMAX_DELAY);
+        reader.setup_lease = 0;
+        reader.setup_attempt = 0;
+        xSemaphoreGive(reader.lock);
+    }
+}
+
 static esp_err_t connect_reader(void)
 {
+    xSemaphoreTake(reader.lock, portMAX_DELAY);
+    char *code = reader.setup_code;
+    reader.setup_code = NULL;
+    xSemaphoreGive(reader.lock);
     esp_err_t err = reader.client != NULL ? ESP_OK : create_client();
+    if (code != NULL) {
+        if (err == ESP_OK) {
+            reader.setup_started = esp_timer_get_time();
+            if (!setup_authorized(NULL)) err = ESP_ERR_INVALID_STATE;
+        }
+        if (err == ESP_OK) {
+            esp_openclaw_node_connect_lease_t lease = 0;
+            err = esp_openclaw_node_connect_lease_acquire(reader.client, &lease);
+            xSemaphoreTake(reader.lock, portMAX_DELAY);
+            reader.setup_lease = lease;
+            xSemaphoreGive(reader.lock);
+        }
+        if (err == ESP_OK) {
+            const esp_openclaw_node_connect_request_t request = {
+                .source = ESP_OPENCLAW_NODE_CONNECT_SOURCE_SETUP_CODE, .value = code,
+            };
+            err = esp_openclaw_node_connect_begin_authorized(reader.client, reader.setup_lease,
+                &request, setup_authorized, NULL, &reader.setup_attempt);
+        }
+        wipe_free(code);
+        poll_setup();
+        return err;
+    }
     if (err != ESP_OK) return err;
     xSemaphoreTake(reader.lock, portMAX_DELAY);
     bool has_token = reader.approved_token != NULL;
@@ -893,6 +970,7 @@ static void reader_task(void *context)
         consume_event();
         poll_creation();
         poll_reply();
+        poll_setup();
         reset_idle_client();
         xSemaphoreTake(reader.lock, portMAX_DELAY);
         if ((reader.messaging.state == ESP_OPENCLAW_READER_MESSAGING_REQUESTING ||
@@ -929,7 +1007,7 @@ static void reader_task(void *context)
         bool stop = reader.phase != IDLE && reader.phase != STOPPING &&
             (stale || reader.force_disconnect || (reader.phase == CONNECTED && reader.status != READY));
         bool start = reader.phase == IDLE && reader.retry && current_node() &&
-            !reader.reset_client && reader.inflight == NULL && reader.approval == NULL;
+            !reader.reset_client && reader.inflight == NULL && reader.approval == NULL && reader.setup_lease == 0;
         unsigned attempt = reader.attempt;
         if (start) {
             reader.attempt = reader.generation;
@@ -1020,10 +1098,12 @@ cJSON *esp_openclaw_reader_status(void)
 {
     const char *state = "unavailable";
     bool ready = false;
+    bool setup_pending = false;
     if (reader.lock != NULL) {
         static const char *states[] = {"offline", "connecting", "ready", "access-needed", "error"};
         xSemaphoreTake(reader.lock, portMAX_DELAY);
         ready = current_reader();
+        setup_pending = reader.setup_code != NULL || reader.setup_lease != 0;
         state = reader.generation != atomic_load(&node_generation) || reader.node_id == 0 ||
             reader.node_id != esp_openclaw_node_get_connection_id(reader.node) ? "offline" : reader.status == READY && !ready ? "connecting" : states[reader.status];
         xSemaphoreGive(reader.lock);
@@ -1031,11 +1111,39 @@ cJSON *esp_openclaw_reader_status(void)
     cJSON *status = cJSON_CreateObject();
     if (status == NULL) return NULL;
     if (cJSON_AddStringToObject(status, "state", state) == NULL ||
-        cJSON_AddBoolToObject(status, "readConnected", ready) == NULL) {
+        cJSON_AddBoolToObject(status, "readConnected", ready) == NULL ||
+        cJSON_AddBoolToObject(status, "setupPending", setup_pending) == NULL) {
         cJSON_Delete(status);
         return NULL;
     }
     return status;
+}
+
+esp_err_t esp_openclaw_reader_setup_code(const char *code)
+{
+    if (code == NULL || strnlen(code, ESP_OPENCLAW_NODE_BOOTSTRAP_CODE_MAX_LENGTH + 1) >
+        ESP_OPENCLAW_NODE_BOOTSTRAP_CODE_MAX_LENGTH) return ESP_ERR_INVALID_ARG;
+    if (reader.lock == NULL) return ESP_ERR_INVALID_STATE;
+    xSemaphoreTake(reader.lock, portMAX_DELAY);
+    esp_err_t err = ESP_ERR_INVALID_STATE;
+    if (current_node() && reader.phase == IDLE && reader.status != READY &&
+        reader.setup_code == NULL && reader.setup_lease == 0 && !reader.reset_client &&
+        reader.inflight == NULL && reader.approval == NULL && !messaging_pending() &&
+        !reader.write_registered && !reply_active() && !reader.reply_prepare && !reader.reply_send &&
+        !reader.creation_pending && !reader.creation_submitted) {
+        err = esp_openclaw_node_validate_bootstrap_code(code, reader.uri);
+        if (err == ESP_OK) {
+            reader.setup_code = strdup(code);
+            if (reader.setup_code == NULL) err = ESP_ERR_NO_MEM;
+            else {
+                reader.setup_generation = reader.generation;
+                reader.retry = true;
+            }
+        }
+    }
+    xSemaphoreGive(reader.lock);
+    if (err == ESP_OK) wake_reader();
+    return err;
 }
 
 void esp_openclaw_reader_messaging_copy(esp_openclaw_reader_messaging_snapshot_t *snapshot)

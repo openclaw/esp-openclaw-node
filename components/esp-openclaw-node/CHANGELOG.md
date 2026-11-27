@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add a one-attempt compact reader setup command with hidden USB input and connection-generation checks through token persistence.
+
 - Add credential-free validation of bounded bootstrap codes for one exact Gateway, and wipe temporary decoded authentication material.
 
 - Add a compact on-device workspace with physical button/encoder navigation, shared agent and conversation browsing, reviewed replies, device inventory, Activity, and saved display settings. Compact profiles retain NVS offsets and use a 3 MiB factory app partition.

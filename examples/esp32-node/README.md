@@ -106,6 +106,22 @@ new conversations require messaging access and an explicit review/submit action.
 Device inventory is read-only; This device opens the local display and connection
 settings. Display brightness, reading size, and list spacing are saved locally.
 
+To add reader access to an already paired compact board, connect its USB console
+and run `reader setup-code` without an argument. Enter a Gateway bootstrap setup
+code at the hidden prompt within 30 seconds. The code is not echoed or added to
+REPL history. It must target the same exact Gateway URI used by the node. Run
+`reader status` to inspect the connection without exposing credentials.
+Expired or cancelled input stays hidden until Enter ends the line. To cancel
+an empty prompt, press Ctrl-C and then Enter.
+
+Approve only the expected existing device's `operator.read` role request on the
+Gateway. If the first attempt was rejected while awaiting approval, run
+`reader setup-code` again explicitly before the code expires. After connection,
+discard the code; subsequent reconnects use the saved operator token. The node
+identity and its independent connection remain in place. Settings → Messaging
+access requests the separate read/write upgrade needed for reviewed Send and
+Create actions. Reader setup itself does not request write, admin, or Talk access.
+
 On the M5StickC, press A to select and B to move forward. Hold B to move backward;
 hold A to return Home. On the T-Embed, turn the encoder to move and press to select;
 hold it to return Home. Reading pages scroll with these same movement controls.

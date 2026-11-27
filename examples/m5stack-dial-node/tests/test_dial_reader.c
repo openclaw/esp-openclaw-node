@@ -37,6 +37,49 @@ static void *approval_context;
 static int write_scopes;
 static bool registered_write;
 static esp_openclaw_node_connect_source_t last_source;
+static bool lease_held;
+static unsigned bootstrap_calls, bootstrap_cancels;
+static esp_openclaw_node_connect_attempt_t bootstrap_attempt;
+static esp_openclaw_node_connect_authorize_t bootstrap_authorize;
+static void *bootstrap_context;
+esp_err_t esp_openclaw_node_validate_bootstrap_code(const char *code, const char *uri) {
+    return strcmp(code, "test-bootstrap") == 0 && strcmp(uri, node.uri) == 0 ? ESP_OK : ESP_ERR_INVALID_ARG;
+}
+esp_err_t esp_openclaw_node_connect_lease_acquire(esp_openclaw_node_handle_t handle, esp_openclaw_node_connect_lease_t *lease) {
+    assert(handle == &client && !lease_held && !locked); lease_held = true; *lease = 1; return ESP_OK;
+}
+esp_err_t esp_openclaw_node_connect_lease_release(esp_openclaw_node_handle_t handle, esp_openclaw_node_connect_lease_t lease) {
+    assert(handle == &client && lease == 1 && lease_held && !locked);
+    assert(bootstrap_attempt.state == ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_SUCCEEDED ||
+           bootstrap_attempt.state == ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_FAILED);
+    lease_held = false; return ESP_OK;
+}
+esp_err_t esp_openclaw_node_connect_begin_authorized(esp_openclaw_node_handle_t handle,
+    esp_openclaw_node_connect_lease_t lease, const esp_openclaw_node_connect_request_t *request,
+    esp_openclaw_node_connect_authorize_t authorize, void *context, esp_openclaw_node_connect_attempt_id_t *attempt) {
+    assert(handle == &client && lease == 1 && lease_held && !locked && !registered_write);
+    assert(request->source == ESP_OPENCLAW_NODE_CONNECT_SOURCE_SETUP_CODE && request->gateway_uri == NULL);
+    assert(strcmp(request->value, "test-bootstrap") == 0 && authorize(context));
+    bootstrap_authorize = authorize; bootstrap_context = context;
+    bootstrap_attempt = (esp_openclaw_node_connect_attempt_t){.id = ++bootstrap_calls,
+        .state = ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_CONNECTING};
+    *attempt = bootstrap_attempt.id; return ESP_OK;
+}
+esp_err_t esp_openclaw_node_connect_snapshot(esp_openclaw_node_handle_t handle,
+    esp_openclaw_node_connect_lease_t lease, esp_openclaw_node_connect_attempt_id_t attempt,
+    esp_openclaw_node_connect_attempt_t *snapshot) {
+    assert(handle == &client && lease == 1 && lease_held && attempt == bootstrap_attempt.id && !locked);
+    *snapshot = bootstrap_attempt; return ESP_OK;
+}
+esp_err_t esp_openclaw_node_connect_cancel(esp_openclaw_node_handle_t handle,
+    esp_openclaw_node_connect_lease_t lease, esp_openclaw_node_connect_attempt_id_t attempt) {
+    assert(handle == &client && lease == 1 && lease_held && attempt == bootstrap_attempt.id && !locked);
+    assert(!bootstrap_authorize(bootstrap_context)); ++bootstrap_cancels;
+    bootstrap_attempt.state = ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_FAILED;
+    esp_openclaw_node_connect_failed_event_t failure = {.reason = ESP_OPENCLAW_NODE_CONNECT_FAILURE_CANCELED};
+    event_cb(&client, ESP_OPENCLAW_NODE_EVENT_CONNECT_FAILED, &failure, NULL);
+    return ESP_OK;
+}
 static struct fake_timer { void (*callback)(void *); void *arg; int64_t deadline; } timer;
 int64_t esp_timer_get_time(void) { return now; }
 esp_err_t esp_timer_create(const esp_timer_create_args_t *args, esp_timer_handle_t *out) {
@@ -263,7 +306,34 @@ static void disconnected(esp_openclaw_node_disconnected_reason_t reason) {
     in_callback = false; locked = 0;
 }
 
-int main(void) {
+static void test_bootstrap(void) {
+    const esp_openclaw_reader_config_t config = {
+        .display_name = "Test Reader", .model_identifier = "test-board", .tls_server_name = "gateway.example"};
+    assert(esp_openclaw_reader_start(&node, &config) == ESP_OK);
+    step(); node_connected(11); step(); status("access-needed", false);
+    assert(esp_openclaw_reader_setup_code("wrong-code") == ESP_ERR_INVALID_ARG);
+    assert(esp_openclaw_reader_setup_code("test-bootstrap") == ESP_OK);
+    assert(esp_openclaw_reader_setup_code("test-bootstrap") == ESP_ERR_INVALID_STATE);
+    node_connected(12); step(); assert(bootstrap_calls == 0); // Queued authority was revoked.
+    assert(esp_openclaw_reader_setup_code("test-bootstrap") == ESP_OK);
+    step(); assert(bootstrap_calls == 1 && lease_held && bootstrap_authorize(bootstrap_context));
+    node_connected(13); assert(!bootstrap_authorize(bootstrap_context));
+    step(); step(); assert(bootstrap_cancels == 1 && !lease_held);
+    unsigned previous = bootstrap_calls; step(); step(); assert(bootstrap_calls == previous);
+    assert(esp_openclaw_reader_setup_code("test-bootstrap") == ESP_OK);
+    step(); assert(bootstrap_calls == 2 && lease_held);
+    now += 60000000; assert(!bootstrap_authorize(bootstrap_context));
+    step(); step(); assert(bootstrap_cancels == 2 && !lease_held);
+    assert(esp_openclaw_reader_setup_code("test-bootstrap") == ESP_OK);
+    step(); assert(bootstrap_calls == 3 && bootstrap_authorize(bootstrap_context));
+    bootstrap_attempt.state = ESP_OPENCLAW_NODE_CONNECT_ATTEMPT_SUCCEEDED;
+    connected(71); step(); assert(!lease_held); status("ready", true);
+    assert(esp_openclaw_reader_setup_code("test-bootstrap") == ESP_ERR_INVALID_STATE);
+    puts("Reader bootstrap: one-shot admission, revocation, deadline and lease completion passed");
+}
+
+int main(int argc, char **argv) {
+    if (argc == 2 && strcmp(argv[1], "bootstrap") == 0) { test_bootstrap(); return 0; }
     status("unavailable", false);
     esp_openclaw_devices_snapshot_t devices;
     esp_openclaw_reader_devices_copy(&devices);

@@ -17,6 +17,11 @@ esp_err_t esp_openclaw_reader_start(esp_openclaw_node_handle_t node,
                                    const esp_openclaw_reader_config_t *config);
 void esp_openclaw_reader_node_event(esp_openclaw_node_event_t event);
 cJSON *esp_openclaw_reader_status(void);
+/* Queue one local bootstrap attempt for the current primary Gateway. Requires
+ * an idle, unavailable reader with no work in flight. Never replays the code;
+ * after manual pairing approval, explicitly submit again if the first attempt
+ * was rejected. The existing node session is not replaced. */
+esp_err_t esp_openclaw_reader_setup_code(const char *code);
 void esp_openclaw_reader_messaging_copy(esp_openclaw_reader_messaging_snapshot_t *snapshot);
 esp_err_t esp_openclaw_reader_messaging_request(unsigned revision);
 esp_err_t esp_openclaw_reader_messaging_cancel(unsigned revision);

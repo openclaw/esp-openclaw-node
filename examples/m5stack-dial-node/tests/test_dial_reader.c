@@ -21,6 +21,9 @@ void esp_fill_random(void *buffer, size_t length) { memset(buffer, ++random_sequ
 static void (*worker)(void *);
 static jmp_buf idle;
 static int waits, locked, creates, connects, disconnects, destroys, scopes, delays;
+static unsigned snapshot_caps;
+static bool expect_snapshot_caps;
+static int fail_snapshot_cap = -1;
 static esp_err_t create_result = ESP_OK, connect_result = ESP_ERR_NOT_FOUND, disconnect_result = ESP_OK;
 static bool disconnect_during_delay, in_callback;
 static esp_openclaw_node_handle_t fail_uri;
@@ -159,7 +162,18 @@ esp_err_t esp_openclaw_node_create(const esp_openclaw_node_config_t *config, esp
     assert(strcmp(config->tls_common_name, "gateway.example") == 0);
     ++creates;
     if (create_result != ESP_OK) { esp_err_t err = create_result; create_result = ESP_OK; return err; }
+    snapshot_caps = 0;
     event_cb = config->event_cb; gateway_event_cb = config->gateway_event_cb; *out = &client; return ESP_OK;
+}
+esp_err_t esp_openclaw_node_register_capability(esp_openclaw_node_handle_t handle, const char *cap) {
+    assert(handle == &client && client.id == 0 && expect_snapshot_caps);
+    const char *const expected[] = {"health-summary", "hello-health-on-demand", "hello-presence-self", "chat-only-assistant-text"};
+    unsigned index = 0;
+    while (index < 4 && strcmp(cap, expected[index]) != 0) ++index;
+    assert(index < 4 && !(snapshot_caps & (1U << index)));
+    if ((int)index == fail_snapshot_cap) return ESP_ERR_NO_MEM;
+    snapshot_caps |= 1U << index;
+    return ESP_OK;
 }
 esp_err_t esp_openclaw_node_register_scope(esp_openclaw_node_handle_t handle, const char *scope) {
     assert(handle == &client && client.id == 0);
@@ -172,6 +186,7 @@ esp_err_t esp_openclaw_node_destroy(esp_openclaw_node_handle_t handle) {
 }
 esp_err_t esp_openclaw_node_request_connect(esp_openclaw_node_handle_t handle, const esp_openclaw_node_connect_request_t *request) {
     assert(!locked && handle == &client);
+    assert(snapshot_caps == (expect_snapshot_caps ? 15U : 0U));
     last_source = request->source;
     if (request->source == ESP_OPENCLAW_NODE_CONNECT_SOURCE_DEVICE_TOKEN) {
         assert(registered_write && strcmp(request->gateway_uri, node.uri) == 0);
@@ -477,7 +492,23 @@ static void test_text_draft(void) {
     puts("Reader text drafts: UTF-8 boundaries, immutable input, stale review and single Send passed");
 }
 
+static void test_snapshot_cap_failure(void) {
+    expect_snapshot_caps = true;
+    esp_openclaw_reader_config_t config = {.display_name = "Test Reader", .model_identifier = "test-board",
+        .tls_server_name = "gateway.example", .compact_gateway_snapshots = true};
+    assert(esp_openclaw_reader_start(&node, &config) == ESP_OK);
+    config.compact_gateway_snapshots = false;
+    fail_snapshot_cap = 1;
+    node_connected(11); step();
+    assert(creates == 1 && destroys == 1 && scopes == 0 && connects == 0);
+    fail_snapshot_cap = -1; step();
+    assert(creates == 2 && snapshot_caps == 15 && scopes == 1 && connects == 1);
+    puts("Compact snapshots: partial registration is discarded; retry preserves copied config");
+}
+
 int main(int argc, char **argv) {
+    if (argc == 2 && strcmp(argv[1], "compact-snapshot-failure") == 0) { test_snapshot_cap_failure(); return 0; }
+    expect_snapshot_caps = argc == 2 && strcmp(argv[1], "compact-snapshots") == 0;
     size_t page_size = argc == 2 && strcmp(argv[1], "small-pages") == 0 ? 4 :
         argc == 2 && strcmp(argv[1], "compact-pages") == 0 ? 2 : 8;
     if (argc == 2 && strcmp(argv[1], "text-draft") == 0) { test_text_draft(); return 0; }
@@ -502,8 +533,10 @@ int main(int argc, char **argv) {
     char name[] = "Test Reader", model[] = "test-board", tls[] = "gateway.example";
     config = (esp_openclaw_reader_config_t){.display_name = name, .model_identifier = model, .tls_server_name = tls};
     config.session_page_size = page_size == 8 ? 0 : page_size;
+    config.compact_gateway_snapshots = expect_snapshot_caps;
     assert(esp_openclaw_reader_start(&node, &config) == ESP_OK);
     config.session_page_size = 1;
+    config.compact_gateway_snapshots = false;
     memset(name, 'x', sizeof(name) - 1); memset(model, 'x', sizeof(model) - 1); memset(tls, 'x', sizeof(tls) - 1);
     assert(esp_openclaw_reader_start(&node, &config) == ESP_ERR_INVALID_STATE);
     step(); status("offline", false); assert(creates == 0);

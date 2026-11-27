@@ -16,6 +16,17 @@ eight-row default; values from one to eight are accepted and copied at start.
 Compact boards request two rows to leave room for response parsing and copying.
 Pagination continues from the Gateway's returned `nextOffset`.
 
+Set `compact_gateway_snapshots` to request the Gateway's `health-summary`,
+`hello-health-on-demand`, `hello-presence-self`, and `chat-only-assistant-text`
+capabilities on the operator connection. The reader does not use the full health
+or startup presence snapshots;
+these options reduce incoming messages on boards with limited contiguous heap.
+Duplicate assistant-text events are omitted; canonical chat events remain
+available.
+The option defaults to false and is copied at start. Compact boards enable it.
+The primary node's capabilities, commands, and approval remain unchanged. These
+options are supported by Gateway 2026.11.6; older Gateways may send full snapshots.
+
 Forward primary-node connection events to `esp_openclaw_reader_node_event`.
 Keep the primary node alive for the reader's lifetime. The reader has no display
 dependency and does not own the board's Wi-Fi or node command registration.

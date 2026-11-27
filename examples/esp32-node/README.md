@@ -101,8 +101,10 @@ Gateway connection; reader access is checked separately before browsing.
 The compact profiles use a local workspace with Home, Agents, Conversations,
 Devices, Activity, and Settings. Agent and conversation browsing use the shared
 reader with two conversations per page to limit temporary JSON memory. Use
-Next conversations to continue through the list. They
-require a separately approved operator session. A node-only
+Next conversations to continue through the list. The reader requests compact
+health and startup snapshots, and omit duplicate assistant-text events to reduce
+temporary memory use. Both profiles require a separately approved operator
+session. A node-only
 session still accepts node commands but cannot read conversations. Replies and
 new conversations require messaging access and an explicit review/submit action.
 In a conversation, choose Reply → Write message to compose up to 159 ASCII

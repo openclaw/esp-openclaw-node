@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Request compact Gateway health and startup snapshots, without duplicate assistant-text events, on the compact boards' operator connection to reduce inbound memory pressure.
+
 - Add a target-checked Check conversation action to compact Activity, and cancel held selections when reply access changes.
 
 - Request two conversations per page on compact boards to reduce temporary response memory, with a configurable reader page size and unchanged pagination.

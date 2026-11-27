@@ -12,6 +12,8 @@ typedef struct {
     const char *tls_server_name;
     /* Zero keeps the default; otherwise 1..ESP_OPENCLAW_DIRECTORY_PAGE_SIZE. */
     size_t session_page_size;
+    /* Request compact hello/health data and canonical chat text without duplicate agent text. */
+    bool compact_gateway_snapshots;
 } esp_openclaw_reader_config_t;
 
 /* One reader per application. Configuration strings are copied during start.

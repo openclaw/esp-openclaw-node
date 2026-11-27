@@ -566,6 +566,7 @@ static char *request_params(const reader_request_t *request)
             cJSON_AddStringToObject(root, "idempotencyKey", request->key) != NULL;
     } else if (request->kind == SESSIONS) {
         ok = cJSON_AddStringToObject(root, "agentId", request->agent_id) != NULL &&
+            cJSON_AddStringToObject(root, "rowMode", "dashboard") != NULL &&
             cJSON_AddNumberToObject(root, "limit", ESP_OPENCLAW_DIRECTORY_PAGE_SIZE) != NULL &&
             cJSON_AddNumberToObject(root, "offset", request->offset) != NULL &&
             cJSON_AddBoolToObject(root, "includeGlobal", false) != NULL &&

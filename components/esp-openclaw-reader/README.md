@@ -47,6 +47,14 @@ Replaced connections and selections invalidate stale snapshots and requests.
 The public operations preserve the Dial's existing request limits and outcome
 states, including unknown outcomes after an accepted request loses its response.
 
+Conversation lists request the Gateway's `dashboard` row projection. It keeps
+the identity, title, preview and pagination fields the reader consumes while
+omitting unrelated runtime details that can exceed the device's receive limit.
+The eight-row page and existing response-size checks remain unchanged. This
+is validated with Gateway 2026.11.6. Older Gateways without this row mode
+can reject the request; the reader does not retry with a larger projection. See
+[session row modes](https://github.com/openclaw/openclaw/blob/f4f3651/packages/gateway-protocol/src/schema/sessions-list.ts).
+
 The existing host suite exercises the shared implementation and the Dial's UI
 contract:
 

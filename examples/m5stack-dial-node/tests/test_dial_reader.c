@@ -345,7 +345,7 @@ static void test_bootstrap(void) {
     puts("Reader bootstrap: one-shot admission, revocation, deadline and lease completion passed");
 }
 
-static void test_write_restore(bool denied, bool missing, bool retry, bool cancel) {
+static void test_write_restore(bool denied, bool missing, bool retry, bool cancel, bool uri_failure) {
     const esp_openclaw_reader_config_t config = {
         .display_name = "Test Reader", .model_identifier = "test-board", .tls_server_name = "gateway.example"};
     saved_session_present = true;
@@ -387,6 +387,16 @@ static void test_write_restore(bool denied, bool missing, bool retry, bool cance
         puts("Reader restore: insufficient scope falls back read-only once without approval");
         return;
     }
+    if (uri_failure) {
+        connected(71); fail_uri = &client; step(); status("error", false);
+        assert(registered_write && write_scopes == 1);
+        disconnected(ESP_OPENCLAW_NODE_DISCONNECTED_REASON_REQUESTED); step();
+        assert(registered_write && write_scopes == 1 && connects == 2);
+        connected(72); step(); status("ready", true); messaging(ESP_OPENCLAW_READER_MESSAGING_READY);
+        assert(queries == 0 && bootstrap_calls == 0);
+        puts("Reader restore: failed connected URI copy retains the saved write grant");
+        return;
+    }
     connected(71); step(); status("ready", true); messaging(ESP_OPENCLAW_READER_MESSAGING_READY);
     assert(queries == 0 && bootstrap_calls == 0);
     node_connected(12); step(); disconnected(ESP_OPENCLAW_NODE_DISCONNECTED_REASON_REQUESTED); step();
@@ -400,7 +410,8 @@ int main(int argc, char **argv) {
     if (argc == 2 && strcmp(argv[1], "bootstrap") == 0) { test_bootstrap(); return 0; }
     if (argc == 2 && strncmp(argv[1], "restore", 7) == 0) {
         test_write_restore(strcmp(argv[1], "restore-denied") == 0, strcmp(argv[1], "restore-missing") == 0,
-            strcmp(argv[1], "restore-retry") == 0, strcmp(argv[1], "restore-cancel") == 0); return 0;
+            strcmp(argv[1], "restore-retry") == 0, strcmp(argv[1], "restore-cancel") == 0,
+            strcmp(argv[1], "restore-uri") == 0); return 0;
     }
     status("unavailable", false);
     esp_openclaw_devices_snapshot_t devices;

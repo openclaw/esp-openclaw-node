@@ -411,7 +411,7 @@ static void consume_event(void)
                 reader.restore_write = true;
                 reader.probing_write = false;
             }
-            if (reader.probing_write && reader.status != READY) {
+            if (reader.probing_write && reader.status == ACCESS_NEEDED) {
                 reader.restore_write = reader.probing_write = false;
                 reset_messaging(ESP_OPENCLAW_READER_MESSAGING_OFF);
                 reader.force_disconnect = reader.retry = true;

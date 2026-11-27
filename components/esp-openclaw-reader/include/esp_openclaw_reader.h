@@ -51,6 +51,8 @@ void esp_openclaw_reader_home_copy(esp_openclaw_reader_home_t *context);
 
 /* A draft is bound to the visible preview; Send is an explicit revision-fenced intent. */
 esp_err_t esp_openclaw_reader_reply_begin(esp_openclaw_reader_reply_preset_t preset, unsigned preview_revision);
+/* Prepare at most 159 UTF-8 bytes for the captured preview. Does not send. */
+esp_err_t esp_openclaw_reader_reply_begin_text(const char *text, size_t length, unsigned preview_revision);
 esp_err_t esp_openclaw_reader_reply_send(unsigned revision);
 void esp_openclaw_reader_reply_close(unsigned revision);
 void esp_openclaw_reader_reply_copy(esp_openclaw_reader_reply_snapshot_t *snapshot);

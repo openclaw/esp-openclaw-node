@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Let applications prepare custom UTF-8 reader drafts with the existing recipient, review and single-send checks.
+
 - Request the Gateway's smaller session-list projection so conversation pickers do not receive unrelated runtime metadata.
 
 - Release idle TLS buffers on T-Embed so concurrent node and reader sessions leave larger free heap blocks.

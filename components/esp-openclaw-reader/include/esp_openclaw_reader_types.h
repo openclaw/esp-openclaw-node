@@ -3,6 +3,8 @@
 #include <stdbool.h>
 #include "esp_openclaw_directory.h"
 
+#define ESP_OPENCLAW_READER_TEXT_BYTES 160U
+
 typedef enum {
     ESP_OPENCLAW_READER_IDLE, ESP_OPENCLAW_READER_LOADING, ESP_OPENCLAW_READER_READY, ESP_OPENCLAW_READER_EMPTY,
     ESP_OPENCLAW_READER_OFFLINE, ESP_OPENCLAW_READER_CONNECTING, ESP_OPENCLAW_READER_ACCESS_NEEDED,
@@ -63,7 +65,7 @@ typedef struct {
     esp_openclaw_reader_reply_state_t state;
     unsigned revision, preview_revision;
     esp_openclaw_agent_t agent;
-    char title[97], text[160], detail[128];
+    char title[97], text[ESP_OPENCLAW_READER_TEXT_BYTES], detail[128];
     bool can_send, can_read;
 } esp_openclaw_reader_reply_snapshot_t;
 

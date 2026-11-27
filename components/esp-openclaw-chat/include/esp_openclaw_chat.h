@@ -11,6 +11,11 @@ extern "C" {
 #define ESP_OPENCLAW_CHAT_KEY_BYTES 513U
 #define ESP_OPENCLAW_CHAT_ID_BYTES 129U
 
+/* Validate a nonempty UTF-8 message without allocation. length excludes the
+ * terminator. Reject embedded NUL and text containing only spaces, tabs or
+ * line breaks. */
+bool esp_openclaw_chat_text_valid(const char *text, size_t length);
+
 typedef struct esp_openclaw_chat *esp_openclaw_chat_handle_t;
 
 typedef enum {

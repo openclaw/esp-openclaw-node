@@ -237,8 +237,10 @@ void esp_openclaw_identify_poll(bool defer_request)
     if (error != ESP_OK) {
         /* A rejected local queue never submitted the command. */
         xSemaphoreTake(identify.lock, portMAX_DELAY);
-        if (identify.snapshot.state == ESP_OPENCLAW_IDENTIFY_SENDING && identify.snapshot.revision == request->revision)
+        if (identify.snapshot.state == ESP_OPENCLAW_IDENTIFY_SENDING && identify.snapshot.revision == request->revision) {
             state(ESP_OPENCLAW_IDENTIFY_FAILED);
+            esp_timer_stop(identify.timer);
+        }
         xSemaphoreGive(identify.lock);
         atomic_store(&completed, request);
         identify.wake();

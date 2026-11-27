@@ -12,7 +12,7 @@ static esp_openclaw_node_gateway_request_cb_t callback;
 static void *callback_context;
 static char params[1024];
 static esp_openclaw_devices_snapshot_t page;
-struct fake_timer { int unused; };
+struct fake_timer { bool armed; };
 static struct fake_timer timers[2];
 static unsigned timer_count;
 static esp_openclaw_node_handle_t client = (esp_openclaw_node_handle_t)&queries;
@@ -21,8 +21,8 @@ int64_t esp_timer_get_time(void) { return now; }
 esp_err_t esp_timer_create(const esp_timer_create_args_t *args, esp_timer_handle_t *out)
 { (void)args; assert(timer_count < 2); *out = &timers[timer_count++]; return ESP_OK; }
 esp_err_t esp_timer_start_once(esp_timer_handle_t timer, uint64_t delay)
-{ assert(timer && delay); return ESP_OK; }
-esp_err_t esp_timer_stop(esp_timer_handle_t timer) { assert(timer); return ESP_OK; }
+{ assert(timer && delay); if (timer->armed) return ESP_ERR_INVALID_STATE; timer->armed = true; return ESP_OK; }
+esp_err_t esp_timer_stop(esp_timer_handle_t timer) { assert(timer); timer->armed = false; return ESP_OK; }
 void esp_fill_random(void *buffer, size_t length) { memset(buffer, 0x42, length); }
 void xSemaphoreTake(SemaphoreHandle_t lock, uint32_t timeout)
 { assert(lock == &locked && !locked && timeout == portMAX_DELAY); locked = 1; }
@@ -162,6 +162,11 @@ int main(void)
     assert(esp_openclaw_identify_send(snapshot().revision) == ESP_OK);
     esp_openclaw_identify_poll(false); esp_openclaw_identify_poll(false);
     assert(snapshot().state == ESP_OPENCLAW_IDENTIFY_FAILED);
+    queue_result = ESP_OK;
+    assert(esp_openclaw_identify_begin("test-node", 4) == ESP_OK);
+    assert(esp_openclaw_identify_send(snapshot().revision) == ESP_OK);
+    esp_openclaw_identify_poll(false); reply(true);
+    assert(snapshot().state == ESP_OPENCLAW_IDENTIFY_RENDERED);
     puts("Identify: authority, target, revision, exact-once admission, receipt and loss checks passed");
     return 0;
 }

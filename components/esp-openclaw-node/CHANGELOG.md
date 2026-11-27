@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Handle empty initial WebSocket data notifications without restarting a frame, and report inbound allocation failures with their original memory error and numeric diagnostics.
+
 - Validate remote display receipts against the target, command, content and render generation before reporting completion.
 
 - Let the M5StickC display share the system heap instead of reserving a separate 32 KiB pool, and report internal heap headroom through a USB reader diagnostic.

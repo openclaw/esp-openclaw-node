@@ -16,6 +16,7 @@
 #endif
 #include "esp_check.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 
 __attribute__((weak)) void esp_openclaw_node_transport_start_begin(const char *role)
 {
@@ -37,22 +38,40 @@ static void websocket_event_handler(
 static void enqueue_fatal_message_error(
     esp_openclaw_node_handle_t node,
     uint32_t transport_id,
+    esp_err_t error,
     const char *reason)
 {
-    ESP_LOGE(ESP_OPENCLAW_NODE_TAG, "%s", reason);
+    bool publish = false;
     esp_openclaw_node_lock_state(node);
     if (esp_openclaw_node_should_accept_callback_transport_id_locked(
-            node, transport_id)) {
+            node, transport_id) && node->failed_receive_transport_id != transport_id) {
+        node->failed_receive_transport_id = transport_id;
         node->fatal_transport_id = transport_id;
-        node->fatal_transport_err = ESP_ERR_INVALID_SIZE;
+        node->fatal_transport_err = error;
+        publish = true;
     }
     esp_openclaw_node_unlock_state(node);
+    if (!publish) return;
+    ESP_LOGE(ESP_OPENCLAW_NODE_TAG, "%s", reason);
     esp_openclaw_node_work_message_t message = {
         .type = ESP_OPENCLAW_NODE_WORK_MSG_WS_FATAL,
         .transport_id = transport_id,
-        .local_err = ESP_ERR_INVALID_SIZE,
+        .local_err = error,
     };
     esp_openclaw_node_enqueue_work_message_from_callback(node, &message);
+}
+
+static void log_receive_failure(esp_openclaw_node_handle_t node,
+    const esp_websocket_event_data_t *data, size_t requested, esp_err_t error)
+{
+    multi_heap_info_t heap;
+    heap_caps_get_info(&heap, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    ESP_LOGE(ESP_OPENCLAW_NODE_TAG,
+        "receive_diag transport=%" PRIu32 " error=%d opcode=%d fin=%d bytes=%d payload=%d offset=%d started=%d assembled=%zu frame=%zu received=%zu requested=%zu limit=%u internal_free=%zu internal_largest=%zu",
+        node->active_transport_id, error, data->op_code, data->fin, data->data_len,
+        data->payload_len, data->payload_offset, node->rx_message_started,
+        node->rx_buffer_len, node->rx_frame_len, node->rx_frame_received, requested,
+        (unsigned)ESP_OPENCLAW_NODE_MAX_INBOUND_MESSAGE_SIZE, heap.total_free_bytes, heap.largest_free_block);
 }
 
 bool esp_openclaw_node_should_accept_callback_transport_id_locked(
@@ -83,6 +102,7 @@ static void clear_active_transport_fields_locked(esp_openclaw_node_handle_t node
     node->transport_connected = false;
     node->client_started = false;
     node->active_transport_id = 0;
+    node->failed_receive_transport_id = 0;
     esp_openclaw_node_clear_session_wait_state_locked(node);
     esp_openclaw_node_clear_connect_source_struct(&node->active_connect_source);
 }
@@ -218,6 +238,7 @@ esp_err_t esp_openclaw_node_start_transport_for_active_source(
     node->transport_ctx = transport_ctx;
     node->transport_gateway_uri = gateway_uri_copy;
     node->active_transport_id = transport_id;
+    node->failed_receive_transport_id = 0;
     node->ws = ws;
     node->client_started = false;
     node->transport_connected = false;
@@ -370,6 +391,7 @@ static void websocket_event_handler(
             enqueue_fatal_message_error(
                 node,
                 transport_ctx->transport_id,
+                ESP_ERR_INVALID_SIZE,
                 "websocket delivered a data event without metadata");
             break;
         }
@@ -398,6 +420,7 @@ static void websocket_event_handler(
                 enqueue_fatal_message_error(
                     node,
                     transport_ctx->transport_id,
+                    ESP_ERR_INVALID_SIZE,
                     "non-continuation data frame interrupted a fragmented text message");
                 break;
             }
@@ -411,16 +434,18 @@ static void websocket_event_handler(
         esp_openclaw_node_lock_state(node);
         if (!esp_openclaw_node_should_accept_callback_transport_id_locked(
                 node,
-                transport_ctx->transport_id)) {
+                transport_ctx->transport_id) || node->failed_receive_transport_id == transport_ctx->transport_id) {
             esp_openclaw_node_unlock_state(node);
             break;
         }
 
         bool malformed = false;
         bool oversized = false;
-        if (data->payload_offset == 0) {
+        if (data->payload_offset == 0 && node->rx_frame_len == 0) {
             /* payload_offset is per frame in esp_websocket_client. A TEXT
-             * frame begins a message and each CONTINUATION frame extends it. */
+             * frame begins a message and each CONTINUATION frame extends it.
+             * An empty first notification leaves offset zero on the next
+             * notification; the active frame then uses validation below. */
             if (node->rx_frame_received != 0 || data->payload_len < 0 ||
                 data->data_len < 0) {
                 malformed = true;
@@ -444,9 +469,11 @@ static void websocket_event_handler(
                 size_t capacity = node->rx_buffer_len + (size_t)data->payload_len + 1U;
                 char *grown = realloc(node->rx_buffer, capacity);
                 if (grown == NULL) {
+                    log_receive_failure(node, data, capacity, ESP_ERR_NO_MEM);
                     esp_openclaw_node_clear_data_buffer_locked(node);
                     esp_openclaw_node_unlock_state(node);
-                    ESP_LOGE(ESP_OPENCLAW_NODE_TAG, "failed growing inbound message buffer");
+                    enqueue_fatal_message_error(node, transport_ctx->transport_id,
+                        ESP_ERR_NO_MEM, "failed growing inbound message buffer");
                     break;
                 }
                 node->rx_buffer = grown;
@@ -472,11 +499,13 @@ static void websocket_event_handler(
         }
 
         if (malformed || oversized) {
+            log_receive_failure(node, data, 0, ESP_ERR_INVALID_SIZE);
             esp_openclaw_node_clear_data_buffer_locked(node);
             esp_openclaw_node_unlock_state(node);
             enqueue_fatal_message_error(
                 node,
                 transport_ctx->transport_id,
+                ESP_ERR_INVALID_SIZE,
                 oversized
                     ? "assembled inbound websocket message exceeds configured limit"
                     : "malformed websocket continuation ordering");

@@ -180,6 +180,8 @@ struct esp_openclaw_node {
     uint32_t next_transport_id;
     uint32_t active_transport_id;
     uint32_t fatal_transport_id;
+    /* Remains latched after the worker consumes the pending fatal event. */
+    uint32_t failed_receive_transport_id;
     esp_err_t fatal_transport_err;
     bool transport_connected; /* True after the active websocket transport reports CONNECTED. */
     bool client_started; /* True after client_start() succeeds; cleanup should stop before destroy. */

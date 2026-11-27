@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Show USB setup and command hints on compact displays before the first message, and keep the Gateway footer offline when Wi-Fi is lost.
+
 - Add optional large text to compact display messages while keeping the heading and connection footer visible.
 
 - Wrap compact display messages at word boundaries so sentences remain readable on M5StickC and T-Embed screens.

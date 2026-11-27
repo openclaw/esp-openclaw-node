@@ -9,6 +9,13 @@
 enum { COMPACT_TEXT_COLUMNS = 25, COMPACT_TEXT_ROWS = 4, COMPACT_TEXT_MAX = 100 };
 enum { COMPACT_LARGE_COLUMNS = 12, COMPACT_LARGE_ROWS = 2 };
 
+static inline const char *compact_board_home_text(bool wifi_connected, bool gateway_connected)
+{
+    if (!wifi_connected) return "Connect USB at 115200\nType help to set up Wi-Fi";
+    if (!gateway_connected) return "Wi-Fi connected\nType gateway over USB\nfor connection options";
+    return "Ready for commands\nUse display.show to send\na message from OpenClaw";
+}
+
 // Keep accepted characters aligned with the small built-in font.
 static inline bool compact_board_text_character(unsigned char c)
 {

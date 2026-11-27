@@ -14,6 +14,9 @@ static esp_openclaw_reader_reply_snapshot_t reply;
 static esp_openclaw_reader_creation_snapshot_t creation;
 static esp_openclaw_reader_messaging_snapshot_t messaging;
 static esp_openclaw_devices_snapshot_t devices;
+static esp_openclaw_identify_snapshot_t identify;
+static unsigned identifies;
+static char identify_target[129];
 static esp_openclaw_reader_home_t home_context;
 static unsigned refreshes, opens, previews, sends;
 static uint32_t now;
@@ -35,6 +38,21 @@ void esp_openclaw_reader_reply_copy(esp_openclaw_reader_reply_snapshot_t *value)
 void esp_openclaw_reader_creation_copy(esp_openclaw_reader_creation_snapshot_t *value) { *value = creation; }
 void esp_openclaw_reader_messaging_copy(esp_openclaw_reader_messaging_snapshot_t *value) { *value = messaging; }
 void esp_openclaw_reader_devices_copy(esp_openclaw_devices_snapshot_t *value) { *value = devices; }
+void esp_openclaw_reader_identify_copy(esp_openclaw_identify_snapshot_t *value) { *value = identify; }
+esp_err_t esp_openclaw_reader_identify_begin(const char *id, unsigned revision) {
+    assert(revision == devices.revision);
+    size_t index = 0;
+    while (index < devices.count && strcmp(id, devices.devices[index].id) != 0) ++index;
+    assert(index < devices.count); strcpy(identify_target, id);
+    identify.target = devices.devices[index]; identify.state = ESP_OPENCLAW_IDENTIFY_REVIEW;
+    identify.can_send = true; strcpy(identify.text, "Code: 0123456789abcdef"); ++identify.revision;
+    return ESP_OK;
+}
+esp_err_t esp_openclaw_reader_identify_send(unsigned revision) {
+    assert(identify.can_send && revision == identify.revision); ++identifies;
+    identify.state = ESP_OPENCLAW_IDENTIFY_RENDERED; identify.can_send = false; ++identify.revision;
+    return ESP_OK;
+}
 void esp_openclaw_reader_home_copy(esp_openclaw_reader_home_t *value) { *value = home_context; }
 esp_err_t esp_openclaw_reader_agents_refresh(size_t offset) { assert(offset == 0); ++refreshes; return ESP_OK; }
 esp_err_t esp_openclaw_reader_conversations_open(const char *id, unsigned revision) {
@@ -165,6 +183,38 @@ int main(int argc, char **argv) {
     select_item(); assert(strcmp(compact_workspace_view(), "reader") == 0);
     select_item(); move(3); select_item(); assert(strcmp(compact_workspace_view(), "conversations") == 0);
     move(4); select_item(); assert(strcmp(compact_workspace_view(), "home") == 0);
-    printf("Compact workspace %dx%d: navigation, exact selection, explicit Send and unknown-outcome guard passed\n", width, height);
+    devices.state = ESP_OPENCLAW_DEVICES_READY; devices.revision = 1; devices.count = 1;
+    strcpy(devices.devices[0].id, "test-node"); strcpy(devices.devices[0].name, "Display board");
+    strcpy(devices.devices[0].model, "m5stack-m5stickc");
+    devices.devices[0].connected = devices.devices[0].connected_known = true;
+    devices.devices[0].paired = devices.devices[0].paired_known = true;
+    devices.devices[0].commands_known = devices.devices[0].display_show = true;
+    home(); move(1); move(2); select_item(); move(1); select_item();
+    assert(strcmp(compact_workspace_view(), "device") == 0); select_item();
+    assert(strcmp(compact_workspace_view(), "device-actions") == 0);
+    assert(strcmp(compact_workspace_selection(), "Identify") == 0); select_item();
+    assert(strcmp(compact_workspace_view(), "identify") == 0 && identifies == 0); snapshot("identify-review");
+    select_item(); assert(strcmp(compact_workspace_view(), "identify-confirm") == 0 && identifies == 0);
+    move(2); select_item(); assert(strcmp(compact_workspace_view(), "device-actions") == 0 && identifies == 0);
+    select_item(); select_item(); select_item();
+    assert(strcmp(compact_workspace_view(), "identify") == 0 && identifies == 1); snapshot("identify-rendered");
+    // Reviewing and cancelling B preserves the submitted result and owner A.
+    devices.devices[1] = devices.devices[0]; devices.count = 2; ++devices.revision;
+    strcpy(devices.devices[1].id, "second-node"); strcpy(devices.devices[1].name, "Other board");
+    home(); move(1); move(2); select_item(); move(2); select_item(); select_item(); select_item();
+    assert(strcmp(identify_target, "second-node") == 0 && identifies == 1);
+    select_item(); move(2); select_item();
+    home(); move(1); move(3); select_item(); select_item(); select_item();
+    assert(strcmp(compact_workspace_view(), "identify") == 0 && identifies == 1);
+    select_item(); select_item();
+    assert(strcmp(identify_target, "test-node") == 0 && identifies == 1);
+    devices.count = 0; ++devices.revision; step(); select_item();
+    home(); move(1); move(2); select_item();
+    assert(strcmp(compact_workspace_view(), "devices") == 0 && identifies == 1);
+    home(); move(1); move(3); select_item(); select_item();
+    assert(strcmp(compact_workspace_view(), "activity-actions") == 0);
+    select_item(); assert(strcmp(compact_workspace_view(), "identify") == 0 && identifies == 1);
+    select_item(); assert(strcmp(compact_workspace_view(), "devices") == 0 && identifies == 1);
+    printf("Compact workspace %dx%d: navigation, reviewed Send/Identify, cancellation and stale-target guard passed\n", width, height);
     lv_deinit();
 }

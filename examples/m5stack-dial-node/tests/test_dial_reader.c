@@ -85,17 +85,19 @@ esp_err_t esp_openclaw_node_connect_cancel(esp_openclaw_node_handle_t handle,
     event_cb(&client, ESP_OPENCLAW_NODE_EVENT_CONNECT_FAILED, &failure, NULL);
     return ESP_OK;
 }
-static struct fake_timer { void (*callback)(void *); void *arg; int64_t deadline; } timer;
+static struct fake_timer { void (*callback)(void *); void *arg; int64_t deadline; } timers[2];
+static unsigned timer_count;
 int64_t esp_timer_get_time(void) { return now; }
 esp_err_t esp_timer_create(const esp_timer_create_args_t *args, esp_timer_handle_t *out) {
-    assert(timer.callback == NULL); timer.callback = args->callback; timer.arg = args->arg;
-    *out = &timer; return ESP_OK;
+    assert(timer_count < 2); struct fake_timer *timer = &timers[timer_count++];
+    timer->callback = args->callback; timer->arg = args->arg;
+    *out = timer; return ESP_OK;
 }
 esp_err_t esp_timer_start_once(esp_timer_handle_t handle, uint64_t delay) {
-    assert(handle == &timer); timer.deadline = now + delay; return ESP_OK;
+    assert(handle >= timers && handle < timers + 2); handle->deadline = now + delay; return ESP_OK;
 }
 esp_err_t esp_timer_stop(esp_timer_handle_t handle) {
-    assert(handle == &timer); timer.deadline = 0; return ESP_OK;
+    assert(handle >= timers && handle < timers + 2); handle->deadline = 0; return ESP_OK;
 }
 esp_err_t esp_openclaw_node_gateway_request_on_connection(esp_openclaw_node_handle_t handle,
     uint32_t connection, const char *method, const char *params,
@@ -406,7 +408,39 @@ static void test_write_restore(bool denied, bool missing, bool retry, bool cance
     puts("Reader restore: saved write access and primary reconnect need no new approval");
 }
 
+static void test_identify(void) {
+    const esp_openclaw_reader_config_t config = {
+        .display_name = "Test Reader", .model_identifier = "test-board", .tls_server_name = "gateway.example"};
+    saved_session_present = true; connect_result = ESP_OK;
+    assert(esp_openclaw_reader_start(&node, &config) == ESP_OK);
+    step(); node_connected(11); step(); connected(71); step();
+    messaging(ESP_OPENCLAW_READER_MESSAGING_READY);
+    assert(esp_openclaw_reader_devices_refresh() == ESP_OK); step();
+    respond_devices("{\"nodes\":[{\"nodeId\":\"test-node\",\"displayName\":\"Board\","
+        "\"modelIdentifier\":\"m5stack-m5stickc\",\"connected\":true,\"paired\":true,"
+        "\"commands\":[\"display.show\"]}]}"); step();
+    esp_openclaw_devices_snapshot_t devices; esp_openclaw_reader_devices_copy(&devices);
+    assert(esp_openclaw_reader_identify_begin("test-node", devices.revision) == ESP_OK);
+    esp_openclaw_identify_snapshot_t identify; esp_openclaw_reader_identify_copy(&identify);
+    assert(identify.can_send && identify.state == ESP_OPENCLAW_IDENTIFY_REVIEW);
+    assert(esp_openclaw_reader_identify_send(identify.revision) == ESP_OK); step();
+    assert(strcmp(last_method, "node.invoke") == 0);
+    char receipt[512];
+    snprintf(receipt, sizeof(receipt), "{\"ok\":true,\"nodeId\":\"test-node\","
+        "\"command\":\"display.show\",\"payload\":{\"ready\":true,\"heading\":\"Identify\","
+        "\"text\":\"%s\",\"generation\":7,\"renderedGeneration\":7,\"rendered\":true}}", identify.text);
+    respond(receipt); step(); esp_openclaw_reader_identify_copy(&identify);
+    assert(identify.state == ESP_OPENCLAW_IDENTIFY_RENDERED);
+    assert(esp_openclaw_reader_identify_begin("test-node", devices.revision) == ESP_OK);
+    esp_openclaw_reader_identify_copy(&identify);
+    node_connected(12); // SDK invalidation must fence Send before the worker runs.
+    assert(esp_openclaw_reader_identify_send(identify.revision) == ESP_ERR_INVALID_STATE);
+    esp_openclaw_reader_identify_copy(&identify); assert(!identify.can_send);
+    puts("Reader Identify: approved write dispatch, rendered result and immediate SDK invalidation passed");
+}
+
 int main(int argc, char **argv) {
+    if (argc == 2 && strcmp(argv[1], "identify") == 0) { test_identify(); return 0; }
     if (argc == 2 && strcmp(argv[1], "bootstrap") == 0) { test_bootstrap(); return 0; }
     if (argc == 2 && strncmp(argv[1], "restore", 7) == 0) {
         test_write_restore(strcmp(argv[1], "restore-denied") == 0, strcmp(argv[1], "restore-missing") == 0,
@@ -706,7 +740,7 @@ int main(int argc, char **argv) {
     assert(esp_openclaw_reader_devices_refresh() == ESP_OK); step();
     esp_openclaw_reader_devices_close();
     assert(esp_openclaw_reader_devices_refresh() == ESP_OK);
-    now += 15000000; timer.callback(timer.arg);
+    now += 15000000; timers[0].callback(timers[0].arg);
     before = disconnects; step();
     esp_openclaw_reader_devices_copy(&devices);
     assert(devices.state == ESP_OPENCLAW_DEVICES_TIMEOUT && disconnects == before);

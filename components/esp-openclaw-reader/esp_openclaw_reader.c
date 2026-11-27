@@ -65,7 +65,7 @@ static struct {
     int64_t setup_started;
     esp_openclaw_node_connect_lease_t setup_lease;
     esp_openclaw_node_connect_attempt_id_t setup_attempt;
-    bool devices_initialized, devices_available;
+    bool devices_initialized, devices_available, identify_available;
     bool directory_enabled, directory_pending, force_disconnect;
     size_t directory_offset;
     esp_openclaw_reader_state_t directory_state;
@@ -151,6 +151,11 @@ static bool current_reader(void)
         atomic_load(&pending_event) == NONE &&
         reader.status == READY && reader.attempt == reader.generation &&
         reader.reader_id != 0 && reader.reader_id == esp_openclaw_node_get_connection_id(reader.client);
+}
+
+static bool identify_current(bool write)
+{
+    return current_reader() && (!write || reader.messaging.state == ESP_OPENCLAW_READER_MESSAGING_READY);
 }
 
 static bool reply_active(void)
@@ -992,6 +997,8 @@ static void reader_task(void *context)
     xSemaphoreTake(reader.lock, portMAX_DELAY);
     if (!reader.devices_initialized) {
         reader.devices_available = esp_openclaw_devices_init(reader.lock, wake_reader) == ESP_OK;
+        if (reader.devices_available)
+            reader.identify_available = esp_openclaw_identify_init(reader.lock, wake_reader, identify_current) == ESP_OK;
         reader.devices_initialized = true;
     }
     xSemaphoreGive(reader.lock);
@@ -1054,6 +1061,10 @@ static void reader_task(void *context)
         if (reader.devices_available)
             esp_openclaw_devices_set_owner_locked(reader.client, reader.generation,
                 reader.reader_id, !stop && !start && current_reader());
+        if (reader.identify_available)
+            esp_openclaw_identify_set_owner_locked(reader.client, reader.generation,
+                reader.reader_id, !stop && !start && current_reader(),
+                reader.messaging.state == ESP_OPENCLAW_READER_MESSAGING_READY);
         xSemaphoreGive(reader.lock);
 
         if (stop) {
@@ -1089,8 +1100,10 @@ static void reader_task(void *context)
         xSemaphoreTake(reader.lock, portMAX_DELAY);
         bool defer_devices = reader.inflight != NULL;
         bool devices_available = reader.devices_available;
+        bool identify_available = reader.identify_available;
         xSemaphoreGive(reader.lock);
         if (devices_available) esp_openclaw_devices_poll(defer_devices);
+        if (identify_available) esp_openclaw_identify_poll(defer_devices);
     }
 }
 
@@ -1357,6 +1370,34 @@ void esp_openclaw_reader_devices_copy(esp_openclaw_devices_snapshot_t *snapshot)
     if (!current_reader() || generation != reader.generation)
         *snapshot = (esp_openclaw_devices_snapshot_t){.state = ESP_OPENCLAW_DEVICES_OFFLINE};
     xSemaphoreGive(reader.lock);
+}
+
+esp_err_t esp_openclaw_reader_identify_begin(const char *node_id, unsigned inventory_revision)
+{
+    if (reader.lock == NULL) return ESP_ERR_INVALID_STATE;
+    xSemaphoreTake(reader.lock, portMAX_DELAY);
+    bool available = reader.identify_available;
+    xSemaphoreGive(reader.lock);
+    return available ? esp_openclaw_identify_begin(node_id, inventory_revision) : ESP_ERR_INVALID_STATE;
+}
+
+esp_err_t esp_openclaw_reader_identify_send(unsigned revision)
+{
+    if (reader.lock == NULL) return ESP_ERR_INVALID_STATE;
+    xSemaphoreTake(reader.lock, portMAX_DELAY);
+    bool available = reader.identify_available;
+    xSemaphoreGive(reader.lock);
+    return available ? esp_openclaw_identify_send(revision) : ESP_ERR_INVALID_STATE;
+}
+
+void esp_openclaw_reader_identify_copy(esp_openclaw_identify_snapshot_t *snapshot)
+{
+    *snapshot = (esp_openclaw_identify_snapshot_t){0};
+    if (reader.lock == NULL) return;
+    xSemaphoreTake(reader.lock, portMAX_DELAY);
+    bool available = reader.identify_available;
+    xSemaphoreGive(reader.lock);
+    if (available) esp_openclaw_identify_copy(snapshot);
 }
 
 esp_err_t esp_openclaw_reader_agents_refresh(size_t offset)

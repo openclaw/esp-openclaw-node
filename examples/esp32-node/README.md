@@ -103,8 +103,14 @@ Devices, Activity, and Settings. Agent and conversation browsing use the shared
 reader component; they require a separately approved operator session. A node-only
 session still accepts node commands but cannot read conversations. Replies and
 new conversations require messaging access and an explicit review/submit action.
-Device inventory is read-only; This device opens the local display and connection
-settings. Display brightness, reading size, and list spacing are saved locally.
+This device opens the local display and connection settings. Display brightness,
+reading size, and list spacing are saved locally. Supported remote M5StickC and
+T-Embed devices also offer Identify when connected, paired, and advertising
+`display.show`. Open the device details, then actions, review the exact target
+and replacement display code, and choose Show code. Messaging access is required.
+The result distinguishes acceptance from confirmed rendering; an unknown outcome
+is never retried automatically. Activity retains the latest Identify result and
+returns to that captured target even after navigating elsewhere.
 
 To add reader access to an already paired compact board, connect its USB console
 and run `reader setup-code` without an argument. Enter a Gateway bootstrap setup

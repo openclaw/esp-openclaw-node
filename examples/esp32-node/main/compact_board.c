@@ -185,7 +185,13 @@ esp_err_t compact_board_start(void)
     };
     ESP_RETURN_ON_ERROR(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)SPI2_HOST, &io_config, &io), TAG, "display IO");
     const esp_lcd_panel_dev_config_t panel_config = {
-        .reset_gpio_num = RST, .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_BGR, .bits_per_pixel = 16,
+        .reset_gpio_num = RST,
+#if CONFIG_EXAMPLE_BOARD_M5STICKC
+        .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_BGR,
+#else
+        .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,
+#endif
+        .bits_per_pixel = 16,
     };
 #if CONFIG_EXAMPLE_BOARD_M5STICKC
     ESP_RETURN_ON_ERROR(esp_lcd_new_panel_st7735(io, &panel_config, &s_panel), TAG, "ST7735");
@@ -195,7 +201,7 @@ esp_err_t compact_board_start(void)
     ESP_RETURN_ON_ERROR(esp_lcd_panel_reset(s_panel), TAG, "display reset");
     ESP_RETURN_ON_ERROR(esp_lcd_panel_init(s_panel), TAG, "display init");
     ESP_RETURN_ON_ERROR(esp_lcd_panel_swap_xy(s_panel, true), TAG, "display rotation");
-    ESP_RETURN_ON_ERROR(esp_lcd_panel_mirror(s_panel, true, false), TAG, "display mirror");
+    ESP_RETURN_ON_ERROR(esp_lcd_panel_mirror(s_panel, false, true), TAG, "display mirror");
 #if CONFIG_EXAMPLE_BOARD_M5STICKC
     ESP_RETURN_ON_ERROR(esp_lcd_panel_set_gap(s_panel, 1, 26), TAG, "display gap");
 #else

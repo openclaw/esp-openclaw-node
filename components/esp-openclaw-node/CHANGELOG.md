@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Correct the compact displays' landscape orientation and the T-Embed's RGB channel order.
+
 - Show Wi-Fi, IP, and Gateway status on the M5StickC and T-Embed displays, with board-specific power control and CI builds for both profiles.
 
 - Add explicit M5StickC and LILYGO T-Embed example profiles with board identity, flash size, and the matching USB console transport.

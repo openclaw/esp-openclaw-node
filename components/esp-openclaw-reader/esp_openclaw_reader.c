@@ -6,6 +6,7 @@
 
 #include "esp_timer.h"
 #include "esp_random.h"
+#include "esp_log.h"
 #include "esp_openclaw_chat.h"
 
 #include "freertos/FreeRTOS.h"
@@ -20,6 +21,14 @@ static atomic_uint node_generation;
 static atomic_uint pending_event;
 
 typedef enum { AGENTS, SESSIONS, PREVIEW, CREATE } request_kind_t;
+typedef enum { REQUEST_ALLOC = 1, RESPONSE_MISSING, RESPONSE_COPY, RESPONSE_PARSE,
+               REQUEST_QUEUE, RESPONSE_LIMIT } response_stage_t;
+
+static void response_diagnostic(request_kind_t kind, response_stage_t stage, int result, size_t bytes)
+{
+    ESP_LOGW("openclaw_reader", "reader_response_diag kind=%d stage=%d result=%d bytes=%u",
+             (int)kind, stage, result, (unsigned)bytes);
+}
 
 typedef struct {
     request_kind_t kind;
@@ -468,12 +477,15 @@ static void reader_response(esp_openclaw_node_handle_t client,
         (strcmp(result->error_code, "INVALID_REQUEST") == 0 ||
          strcmp(result->error_code, "FORBIDDEN") == 0 ||
          strcmp(result->error_code, "STALE_CONNECTION") == 0);
+    if (!request->ok) response_diagnostic(request->kind, RESPONSE_MISSING, result->ok ? 1 : 0, 0);
     if (request->ok) {
         size_t length = strnlen(result->payload_json, ESP_OPENCLAW_DIRECTORY_MAX_JSON_BYTES + 1);
         request->too_large = length > ESP_OPENCLAW_DIRECTORY_MAX_JSON_BYTES;
+        if (request->too_large) response_diagnostic(request->kind, RESPONSE_LIMIT, 0, length);
         if (!request->too_large) {
             request->json = malloc(length + 1);
             if (request->json != NULL) memcpy(request->json, result->payload_json, length + 1);
+            else response_diagnostic(request->kind, RESPONSE_COPY, ESP_ERR_NO_MEM, length + 1);
         }
     }
     /* One outstanding request owns this mailbox. JSON is parsed on the worker,
@@ -508,6 +520,7 @@ static void consume_response(void)
             if (parsed == ESP_OPENCLAW_DIRECTORY_OK) state = ESP_OPENCLAW_READER_READY;
         }
         if (parsed == ESP_OPENCLAW_DIRECTORY_TOO_LARGE) state = ESP_OPENCLAW_READER_TOO_LARGE;
+        if (parsed != ESP_OPENCLAW_DIRECTORY_OK) response_diagnostic(request->kind, RESPONSE_PARSE, parsed, length);
     }
     xSemaphoreTake(reader.lock, portMAX_DELAY);
     reader.inflight = NULL;
@@ -604,6 +617,7 @@ static void request_next(void)
     }
     reader_request_t *request = calloc(1, sizeof(*request));
     if (request == NULL) {
+        response_diagnostic(kind, REQUEST_ALLOC, ESP_ERR_NO_MEM, sizeof(*request));
         if (kind == CREATE) {
             reader.creation_pending = false;
             creation_state(ESP_OPENCLAW_READER_CREATION_FAILED, "Could not queue. Review and try again.");
@@ -676,6 +690,7 @@ static void request_next(void)
     }
     free(params);
     if (err != ESP_OK) {
+        response_diagnostic(kind, REQUEST_QUEUE, err, 0);
         /* Immediate rejection owns no callback; use the same completion path. */
         atomic_store(&completed_request, request);
         xTaskNotifyGive(reader.task);

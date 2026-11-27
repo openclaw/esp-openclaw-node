@@ -60,6 +60,7 @@ esp_err_t esp_timer_start_once(esp_timer_handle_t, uint64_t);
 esp_err_t esp_timer_stop(esp_timer_handle_t);
 """)
         (work / "esp_random.h").write_text("#pragma once\n#include <stddef.h>\nvoid esp_fill_random(void *, size_t);\n")
+        (work / "esp_log.h").write_text('#pragma once\n#include <stdio.h>\n#define ESP_LOGW(tag, format, ...) fprintf(stderr, format "\\n", ##__VA_ARGS__)\n')
         directory = root / "components/esp-openclaw-directory"
         chat = root / "components/esp-openclaw-chat"
         binary = work / "reader-test"

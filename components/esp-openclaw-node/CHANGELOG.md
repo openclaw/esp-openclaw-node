@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Report bounded, content-free diagnostics for reader request, response-copy, and parse failures, including Gateway response serialization allocation failures.
+
 - Distinguish Create from Open in local USB workspace status and invalidate stale inputs when the creation action changes.
 
 - Add a compact message editor with character groups, draft preview, deletion, and explicit Send/Edit/Cancel review on both button and encoder boards.

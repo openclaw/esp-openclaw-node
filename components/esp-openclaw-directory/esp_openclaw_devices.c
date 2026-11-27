@@ -1,4 +1,5 @@
 #include "esp_openclaw_devices.h"
+#include "esp_openclaw_directory_json.h"
 
 #include <stdatomic.h>
 #include <stdlib.h>
@@ -131,9 +132,33 @@ static void copy_label(char *out, size_t capacity, const char *value)
     out[length] = '\0';
 }
 
+static void parse_commands(const cJSON *node, esp_openclaw_device_t *device)
+{
+    const cJSON *commands = NULL, *field;
+    cJSON_ArrayForEach(field, node) {
+        if (field->string != NULL && strcmp(field->string, "commands") == 0) {
+            if (commands != NULL) return;
+            commands = field;
+        }
+    }
+    if (!cJSON_IsArray(commands) || cJSON_GetArraySize(commands) > 256) return;
+    bool show = false, status = false;
+    const cJSON *command;
+    cJSON_ArrayForEach(command, commands) {
+        if (!cJSON_IsString(command) || command->valuestring[0] == '\0' ||
+            strlen(command->valuestring) > 128) return;
+        show |= strcmp(command->valuestring, "display.show") == 0;
+        status |= strcmp(command->valuestring, "display.status") == 0;
+    }
+    device->commands_known = true;
+    device->display_show = show;
+    device->display_status = status;
+}
+
 static esp_openclaw_devices_state_t parse(const char *json, esp_openclaw_devices_snapshot_t *page)
 {
-    cJSON *root = cJSON_ParseWithLengthOpts(json, strlen(json) + 1, NULL, true);
+    esp_openclaw_directory_result_t parsed;
+    cJSON *root = esp_openclaw_directory_parse_payload(json, strlen(json), &parsed);
     cJSON *nodes = cJSON_GetObjectItemCaseSensitive(root, "nodes");
     esp_openclaw_devices_state_t state = ESP_OPENCLAW_DEVICES_ERROR;
     if (!cJSON_IsObject(root) || !cJSON_IsArray(nodes)) goto done;
@@ -160,6 +185,7 @@ static esp_openclaw_devices_state_t parse(const char *json, esp_openclaw_devices
         device->connected = cJSON_IsTrue(connected);
         device->paired_known = paired != NULL;
         device->paired = cJSON_IsTrue(paired);
+        parse_commands(node, device);
     }
     state = page->count == 0 ? ESP_OPENCLAW_DEVICES_EMPTY : ESP_OPENCLAW_DEVICES_READY;
 done:

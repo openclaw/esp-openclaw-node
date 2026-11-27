@@ -1,4 +1,5 @@
 #include "esp_openclaw_directory.h"
+#include "esp_openclaw_directory_json.h"
 
 #include <stdbool.h>
 #include <string.h>
@@ -83,7 +84,7 @@ static bool bounded_depth(const char *json, size_t length)
     return depth == 0 && !quoted;
 }
 
-static cJSON *parse_payload(const char *json, size_t length,
+cJSON *esp_openclaw_directory_parse_payload(const char *json, size_t length,
                             esp_openclaw_directory_result_t *result)
 {
     *result = ESP_OPENCLAW_DIRECTORY_INVALID;
@@ -111,7 +112,7 @@ esp_openclaw_directory_result_t esp_openclaw_directory_parse(
     if (page == NULL) return ESP_OPENCLAW_DIRECTORY_INVALID;
     memset(page, 0, sizeof(*page));
     esp_openclaw_directory_result_t result;
-    cJSON *root = parse_payload(json, length, &result);
+    cJSON *root = esp_openclaw_directory_parse_payload(json, length, &result);
     if (root == NULL) return result;
     const cJSON *agents = cJSON_GetObjectItemCaseSensitive(root, "agents");
     bool valid = cJSON_IsArray(agents);
@@ -178,7 +179,7 @@ esp_openclaw_directory_result_t esp_openclaw_sessions_parse(
     memset(page, 0, sizeof(*page));
     if (!valid_id(agent_id) || offset > 2147483647u) return ESP_OPENCLAW_DIRECTORY_INVALID;
     esp_openclaw_directory_result_t result;
-    cJSON *root = parse_payload(json, length, &result);
+    cJSON *root = esp_openclaw_directory_parse_payload(json, length, &result);
     if (root == NULL) return result;
     const cJSON *rows = cJSON_GetObjectItemCaseSensitive(root, "sessions");
     bool valid = cJSON_IsArray(rows);
@@ -239,7 +240,7 @@ esp_openclaw_directory_result_t esp_openclaw_preview_parse(
     if (key == NULL || key[0] == '\0' || strlen(key) >= ESP_OPENCLAW_SESSION_KEY_BYTES)
         return ESP_OPENCLAW_DIRECTORY_INVALID;
     esp_openclaw_directory_result_t result;
-    cJSON *root = parse_payload(json, length, &result);
+    cJSON *root = esp_openclaw_directory_parse_payload(json, length, &result);
     if (root == NULL) return result;
     const cJSON *rows = cJSON_GetObjectItemCaseSensitive(root, "previews");
     const cJSON *row = cJSON_GetArrayItem(rows, 0);
@@ -304,7 +305,7 @@ esp_openclaw_directory_result_t esp_openclaw_session_created_parse(
     memset(created, 0, sizeof(*created));
     if (!valid_id(agent_id)) return ESP_OPENCLAW_DIRECTORY_INVALID;
     esp_openclaw_directory_result_t result;
-    cJSON *root = parse_payload(json, length, &result);
+    cJSON *root = esp_openclaw_directory_parse_payload(json, length, &result);
     if (root == NULL) return result;
     const cJSON *key = single_field(root, "key");
     const cJSON *id = single_field(root, "sessionId");

@@ -629,6 +629,70 @@ int main(int argc, char **argv) {
     assert(devices.state == ESP_OPENCLAW_DEVICES_READY && devices.count == 1);
     assert(strcmp(devices.devices[0].name, "Studio Dial") == 0);
     assert(!devices.devices[0].paired_known);
+    assert(!devices.devices[0].commands_known && !devices.devices[0].display_show && !devices.devices[0].display_status);
+
+    assert(esp_openclaw_reader_devices_refresh() == ESP_OK); step();
+    respond_devices("{\"nodes\":[{\"nodeId\":\"display-node\",\"commands\":[\"device.info\",\"display.show\",\"display.status\"]}]}"); step();
+    esp_openclaw_reader_devices_copy(&devices);
+    assert(devices.state == ESP_OPENCLAW_DEVICES_READY && devices.count == 1);
+    assert(devices.devices[0].commands_known && devices.devices[0].display_show && devices.devices[0].display_status);
+
+    const char *unknown_commands[] = {
+        "null", "42", "\"display.show\"", "[\"display.show\",false]",
+        "[\"display.show\",\"\"]", "[\"display.show\"],\"commands\":[]",
+    };
+    for (size_t i = 0; i < sizeof(unknown_commands) / sizeof(unknown_commands[0]); ++i) {
+        char json[256];
+        snprintf(json, sizeof(json), "{\"nodes\":[{\"nodeId\":\"display-node\",\"commands\":%s}]}", unknown_commands[i]);
+        assert(esp_openclaw_reader_devices_refresh() == ESP_OK); step();
+        respond_devices(json); step();
+        esp_openclaw_reader_devices_copy(&devices);
+        assert(devices.state == ESP_OPENCLAW_DEVICES_READY && devices.count == 1);
+        assert(!devices.devices[0].commands_known && !devices.devices[0].display_show && !devices.devices[0].display_status);
+    }
+    const char *no_display_commands[] = {"[]", "[\"display.show.extra\",\"Display.Show\",\"display.status \"]"};
+    for (size_t i = 0; i < sizeof(no_display_commands) / sizeof(no_display_commands[0]); ++i) {
+        char json[256];
+        snprintf(json, sizeof(json), "{\"nodes\":[{\"nodeId\":\"display-node\",\"commands\":%s}]}", no_display_commands[i]);
+        assert(esp_openclaw_reader_devices_refresh() == ESP_OK); step();
+        respond_devices(json); step();
+        esp_openclaw_reader_devices_copy(&devices);
+        assert(devices.devices[0].commands_known && !devices.devices[0].display_show && !devices.devices[0].display_status);
+    }
+    for (int oversized = 0; oversized < 2; ++oversized) {
+        cJSON *root = cJSON_CreateObject(), *array = cJSON_AddArrayToObject(root, "nodes");
+        cJSON *device = cJSON_CreateObject();
+        cJSON_AddItemToArray(array, device);
+        cJSON_AddStringToObject(device, "nodeId", "display-node");
+        cJSON *commands = cJSON_AddArrayToObject(device, "commands");
+        cJSON_AddItemToArray(commands, cJSON_CreateString("display.show"));
+        if (oversized == 0) {
+            for (int i = 0; i < 256; ++i) cJSON_AddItemToArray(commands, cJSON_CreateString("other"));
+        } else {
+            char command[130]; memset(command, 'x', sizeof(command) - 1); command[sizeof(command) - 1] = '\0';
+            cJSON_AddItemToArray(commands, cJSON_CreateString(command));
+        }
+        char *json = cJSON_PrintUnformatted(root);
+        assert(json != NULL);
+        assert(esp_openclaw_reader_devices_refresh() == ESP_OK); step();
+        respond_devices(json); cJSON_free(json); cJSON_Delete(root); step();
+        esp_openclaw_reader_devices_copy(&devices);
+        assert(devices.state == ESP_OPENCLAW_DEVICES_READY && devices.count == 1);
+        assert(!devices.devices[0].commands_known && !devices.devices[0].display_show && !devices.devices[0].display_status);
+    }
+    const char *invalid_device_json[] = {
+        "{\"nodes\":[{\"nodeId\":\"display-node\",\"commands\":[\"display.show\\u0000.extra\"]}]}",
+        "{\"nodes\":[{\"nodeId\":\"display-node\\u0000other\"}]}",
+        "{\"nodes\":[{\"nodeId\":\"display-node\",\"displayName\":\"\x80\"}]}",
+        "{\"nodes\":[],\"extra\":[[[[[[[[[[[[[[[[]]]]]]]]]]]]]]]]}",
+    };
+    for (size_t i = 0; i < sizeof(invalid_device_json) / sizeof(invalid_device_json[0]); ++i) {
+        assert(esp_openclaw_reader_devices_refresh() == ESP_OK); step();
+        respond_devices(invalid_device_json[i]); step();
+        esp_openclaw_reader_devices_copy(&devices);
+        assert(devices.state == ESP_OPENCLAW_DEVICES_ERROR && devices.count == 0);
+    }
+    assert(scopes == before);
 
     /* Agent browsing can finish while a canceled inventory callback drains. */
     assert(esp_openclaw_reader_devices_refresh() == ESP_OK); step();

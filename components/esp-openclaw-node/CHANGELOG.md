@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Retain advertised display commands in device inventory, and apply the shared bounded JSON validation before decoding device identities.
+
 - Yield the compact display task at low FreeRTOS tick rates and limit Wi-Fi status polling to four times per second.
 
 - Release idle TLS buffers in the M5StickC profile to reduce memory held by concurrent node and reader connections.

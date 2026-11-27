@@ -93,11 +93,30 @@ power rails and uses its ST7735 panel. The T-Embed enables its board power and
 ST7789 backlight. These profiles do not initialize audio, SD, or radio add-ons.
 They use the same serial provisioning commands as the generic example.
 
-Until the first `display.show` message after boot, the screen shows USB setup
-hints when Wi-Fi or the Gateway is offline, and command guidance when connected.
-`display.status` identifies this as `"view":"status"`. A received message
-switches to `"view":"message"` and remains visible through disconnections;
-the connection footer continues to update. Reboot returns to the status view.
+Home opens the current conversation when one is selected, or the agent browser
+when reader access is ready. Connection details and Help remain available
+without Gateway access. The status strip distinguishes Wi-Fi from the Node's
+Gateway connection; reader access is checked separately before browsing.
+
+The compact profiles use a local workspace with Home, Agents, Conversations,
+Devices, Activity, and Settings. Agent and conversation browsing use the shared
+reader component; they require a separately approved operator session. A node-only
+session still accepts node commands but cannot read conversations. Replies and
+new conversations require messaging access and an explicit review/submit action.
+Device inventory is read-only; This device opens the local display and connection
+settings. Display brightness, reading size, and list spacing are saved locally.
+
+On the M5StickC, press A to select and B to move forward. Hold B to move backward;
+hold A to return Home. On the T-Embed, turn the encoder to move and press to select;
+hold it to return Home. Reading pages scroll with these same movement controls.
+Back entries return to the previous view. A held key or a press whose view changes
+before release cannot select a replacement action.
+
+These profiles use a 3 MiB factory app partition. NVS remains at `0x9000`, PHY
+data at `0xf000`, and the application at `0x10000`. Back up the current flash,
+then flash the matching partition table and application when upgrading from the
+earlier compact profile. Do not erase the whole chip; saved Wi-Fi and role tokens
+remain in NVS. A separate partial display buffer leaves RAM for the reader.
 
 The compact profiles also accept display messages:
 
@@ -117,15 +136,21 @@ Messages have a heading of up to 25 characters and a body of up to 100
 characters, wrapped at word boundaries into four rows of 25 columns. Words
 wider than a row are split; spaces at a wrap boundary are omitted. Body newlines
 advance to the next row; input that exceeds four rows is rejected. The built-in
-font displays letters in uppercase and supports digits, spaces, and `. , - _ : ! ? / + % ( ) =`.
-Unsupported characters are rejected. Wi-Fi and Gateway status stay visible
-in the footer. Messages are kept in RAM and reset after reboot.
+input accepts letters, digits, spaces, and `. , - _ : ! ? / + % ( ) =`.
+Unsupported characters are rejected. Incoming messages open Activity, where they
+can be scrolled. A reply review, conversation-creation review, or access request
+keeps its focus; open Activity to read a message received during one of those flows.
+Messages are kept in RAM and reset after reboot. Home and the menu remain available.
 
 For short messages, add `"textSize":"large"` to `display.show`. This doubles
 the body font size and fits two rows of 12 characters (24 characters total).
-The heading and connection footer retain their normal size. Omit `textSize`
+The heading and connection strip retain their normal size. Omit `textSize`
 or use `"normal"` for the four-row layout. `display.status` reports the current
-`textSize`, `textColumns`, `textRows`, and `textMaxLength`.
+`textSize`, `textColumns`, `textRows`, and `textMaxLength`. Column and row values
+describe the accepted input bounds. The workspace reflows messages with a
+proportional font in a scrollable view; `layout: "scroll"` and `lineHeight` report
+that presentation. `view`, `physicalInputCount`, and `lastInputMs` help verify
+navigation without treating synthetic input as a physical press.
 
 ```sh
 openclaw nodes invoke --node <node-id> --command display.show \
@@ -134,7 +159,7 @@ openclaw nodes invoke --node <node-id> --command display.show \
 
 `display.show` queues the latest message. Its response and `display.status`
 include `generation`, `renderedGeneration`, and `rendered`. A message is
-confirmed drawn only when `rendered` is true and both generations match; an
+confirmed drawn only when Activity is visible, `rendered` is true, and both generations match; an
 accepted message can be replaced by a newer message before it is drawn.
 `ready` becomes false if the display transfer fails. `device.info` reports
 the selected board name and model identifier.

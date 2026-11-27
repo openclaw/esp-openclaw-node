@@ -15,6 +15,12 @@ changing defaults alone does not update configured builds or installed devices.
 - [Waveshare AMOLED Room Node](./waveshare-esp32-s3-touch-amoled-2.06-room-node/README.md) An always-on room client with WakeNet, device AEC, WebRTC Talk, an A2UI/image Canvas, separate node/operator sessions, and an AMOLED-off idle state.
 - [M5Stack Tab5 Room Node](./m5stack-tab5-room-node/README.md) An ESP32-P4 room client using the Tab5 display revisions, C6 remote Wi-Fi, four-slot TDM audio, camera, sensors, SD, and USB-host/RS-485 status.
 
+## Browser USB installation
+
+The [web USB installer](../docs/web-usb-install.md) stages stable-release firmware
+for the generic ESP32-S3, ESP-BOX-3, and M5Dial profiles. Availability requires an
+authorized installer publication; other example firmware remains available below.
+
 ## CI Firmware Downloads
 
 Successful example jobs in the repository's **Actions > CI** runs upload a

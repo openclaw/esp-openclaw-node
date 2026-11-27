@@ -3,6 +3,7 @@
 #include "cJSON.h"
 #include "esp_openclaw_node.h"
 #include "esp_openclaw_devices.h"
+#include "esp_openclaw_identify.h"
 #include "esp_openclaw_reader_types.h"
 
 typedef struct {
@@ -30,6 +31,9 @@ esp_err_t esp_openclaw_reader_messaging_cancel(unsigned revision);
 esp_err_t esp_openclaw_reader_devices_refresh(void);
 void esp_openclaw_reader_devices_close(void);
 void esp_openclaw_reader_devices_copy(esp_openclaw_devices_snapshot_t *snapshot);
+esp_err_t esp_openclaw_reader_identify_begin(const char *node_id, unsigned inventory_revision);
+esp_err_t esp_openclaw_reader_identify_send(unsigned revision);
+void esp_openclaw_reader_identify_copy(esp_openclaw_identify_snapshot_t *snapshot);
 esp_err_t esp_openclaw_reader_agents_refresh(size_t offset);
 void esp_openclaw_reader_agents_copy(esp_openclaw_reader_agents_t *snapshot);
 

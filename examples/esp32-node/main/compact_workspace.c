@@ -12,13 +12,13 @@
 typedef enum {
     HOME, MENU, AGENTS, SESSIONS, READ, READ_ACTIONS, REPLY_PICK, REPLY_REVIEW,
     CREATE, DEVICES, DEVICE, SETTINGS, DISPLAY, BRIGHTNESS, CONNECTION,
-    MESSAGING, HELP, ACTIVITY, LOCAL_DEVICE,
+    MESSAGING, HELP, ACTIVITY, LOCAL_DEVICE, DEVICE_ACTIONS, IDENTIFY, IDENTIFY_CONFIRM, ACTIVITY_ACTIONS,
 } view_t;
 
 typedef enum {
     OPEN_VIEW, GO_BACK, OPEN_AGENT, OPEN_SESSION, REFRESH_AGENTS, PAGE_AGENTS,
     REFRESH_SESSIONS, PAGE_SESSIONS, OPEN_REPLY, NEW_THREAD, OPEN_DEVICE,
-    REFRESH_DEVICES, TOGGLE_READING, TOGGLE_DENSITY,
+    REFRESH_DEVICES, TOGGLE_READING, TOGGLE_DENSITY, BEGIN_IDENTIFY, SEND_IDENTIFY, CONTROL_ACCESS, IDENTIFY_RESULT,
 } action_t;
 
 typedef struct { char name[97]; action_t action; int value; } row_t;
@@ -27,7 +27,7 @@ static struct {
     int width, height, focus, count, device_index, brightness, saved_brightness;
     unsigned revision, message_generation;
     uint32_t refreshed_at, brightness_changed_at;
-    bool small, encoder, dirty, connected, reader_ready, large, comfortable, brightness_save_failed, message_large, has_message;
+    bool small, encoder, dirty, connected, reader_ready, large, comfortable, brightness_save_failed, message_large, has_message, identify_history;
     view_t view, messaging_parent, simple_parent, display_parent, sessions_parent;
     int simple_parent_focus, display_parent_focus, sessions_parent_focus;
     compact_brightness_fn set_brightness;
@@ -39,6 +39,7 @@ static struct {
     esp_openclaw_reader_reply_snapshot_t reply;
     esp_openclaw_reader_creation_snapshot_t creation;
     esp_openclaw_reader_messaging_snapshot_t messaging;
+    esp_openclaw_identify_snapshot_t identify, last_identify;
     row_t rows[24];
     char message_heading[26], message[101], note[128];
     char device_id[129];
@@ -49,7 +50,7 @@ static struct {
 static const char *const view_names[] = {
     "home", "menu", "agents", "conversations", "reader", "reader-actions", "reply-picker", "reply-review",
     "create", "devices", "device", "settings", "display", "brightness", "connection",
-    "messaging", "help", "activity", "local-device",
+    "messaging", "help", "activity", "local-device", "device-actions", "identify", "identify-confirm", "activity-actions",
 };
 
 static const lv_font_t *font(void)
@@ -71,6 +72,12 @@ static lv_obj_t *label(lv_obj_t *parent, const char *text, int x, int y, int wid
 
 static void open_view(view_t view)
 {
+    if (view == DEVICE || view == DEVICE_ACTIONS) {
+        size_t index = 0;
+        while (index < ui.devices.count && strcmp(ui.devices.devices[index].id, ui.device_id) != 0) ++index;
+        if (ui.devices.state != ESP_OPENCLAW_DEVICES_READY || index == ui.devices.count) view = DEVICES;
+        else ui.device_index = (int)index;
+    }
     if (view == SESSIONS && (ui.view == HOME || ui.view == MENU || ui.view == AGENTS)) {
         ui.sessions_parent = ui.view;
         ui.sessions_parent_focus = ui.focus;
@@ -120,7 +127,40 @@ static bool list_view(void)
 {
     return ui.view == MENU || ui.view == AGENTS || ui.view == SESSIONS ||
         ui.view == READ_ACTIONS || ui.view == REPLY_PICK || ui.view == DEVICES ||
-        ui.view == SETTINGS || ui.view == DISPLAY || ui.view == LOCAL_DEVICE;
+        ui.view == SETTINGS || ui.view == DISPLAY || ui.view == LOCAL_DEVICE ||
+        ui.view == DEVICE_ACTIONS || ui.view == IDENTIFY_CONFIRM || ui.view == ACTIVITY_ACTIONS;
+}
+
+static const char *identify_state(const esp_openclaw_identify_snapshot_t *identify)
+{
+    static const char *states[] = {"No action", "Review before sending", "Sending...",
+        "Accepted; render not confirmed", "Rendered on target", "Outcome unknown. Check the target before retrying.",
+        "Not sent. Reopen device actions."};
+    return states[identify->state];
+}
+
+static bool has_identify_result(void)
+{
+    return ui.last_identify.state >= ESP_OPENCLAW_IDENTIFY_SENDING;
+}
+
+static void remember_identify(void)
+{
+    bool same = strcmp(ui.identify.target.id, ui.last_identify.target.id) == 0 &&
+        strcmp(ui.identify.text, ui.last_identify.text) == 0;
+    if (ui.identify.state == ESP_OPENCLAW_IDENTIFY_SENDING ||
+        (same && has_identify_result() && ui.identify.state >= ESP_OPENCLAW_IDENTIFY_ACCEPTED))
+        ui.last_identify = ui.identify;
+}
+
+static bool identifiable(void)
+{
+    if (ui.devices.state != ESP_OPENCLAW_DEVICES_READY || ui.device_index < 0 ||
+        (size_t)ui.device_index >= ui.devices.count) return false;
+    const esp_openclaw_device_t *device = &ui.devices.devices[ui.device_index];
+    return strcmp(device->id, ui.device_id) == 0 && device->connected_known && device->connected &&
+        device->paired_known && device->paired && device->commands_known && device->display_show &&
+        (strcmp(device->model, "m5stack-m5stickc") == 0 || strcmp(device->model, "lilygo-t-embed") == 0);
 }
 
 static void rows(void)
@@ -180,6 +220,22 @@ static void rows(void)
         }
         row("Refresh", REFRESH_DEVICES, 0); row("Back", OPEN_VIEW, MENU);
         break;
+    case DEVICE_ACTIONS:
+        if (identifiable()) {
+            if (ui.messaging.state == ESP_OPENCLAW_READER_MESSAGING_READY) row("Identify", BEGIN_IDENTIFY, 0);
+            else row("Messaging access", CONTROL_ACCESS, 0);
+        }
+        row("Details", OPEN_VIEW, DEVICE); row("Back to devices", OPEN_VIEW, DEVICES);
+        break;
+    case IDENTIFY_CONFIRM:
+        if (ui.identify.can_send) row("Show code", SEND_IDENTIFY, 0);
+        row("Back", OPEN_VIEW, IDENTIFY);
+        row("Cancel", OPEN_VIEW, DEVICE_ACTIONS);
+        break;
+    case ACTIVITY_ACTIONS:
+        if (has_identify_result()) row("Device result", IDENTIFY_RESULT, 0);
+        row("Back to activity", OPEN_VIEW, ACTIVITY); row("Menu", OPEN_VIEW, MENU);
+        break;
     case SETTINGS:
         row("Display", OPEN_VIEW, DISPLAY); row("Connection", OPEN_VIEW, CONNECTION);
         row("Messaging access", OPEN_VIEW, MESSAGING); row("Help", OPEN_VIEW, HELP);
@@ -223,6 +279,10 @@ static const char *title(void)
     case HELP: return "Help";
     case ACTIVITY: return ui.message_heading[0] ? ui.message_heading : "Activity";
     case LOCAL_DEVICE: return "This device";
+    case DEVICE_ACTIONS: return "Device actions";
+    case IDENTIFY: return "Identify device";
+    case IDENTIFY_CONFIRM: return "Replace display?";
+    case ACTIVITY_ACTIONS: return "Activity actions";
     }
     return "OpenClaw";
 }
@@ -337,13 +397,25 @@ static void render(void)
     } else if (ui.view == DEVICE) {
         const esp_openclaw_device_t *device = &ui.devices.devices[ui.device_index];
         char text[400];
-        snprintf(text, sizeof(text), "%s\n%s\n\nConnection: %s\nPaired: %s\n\n%s\n\nPress to return", device->name, device->model,
+        snprintf(text, sizeof(text), "%s\n%s\n\nConnection: %s\nPaired: %s\n\n%s\n\nPress for actions", device->name, device->model,
             device->connected_known ? device->connected ? "online" : "offline" : "unknown",
             device->paired_known ? device->paired ? "yes" : "no" : "unknown", device->id);
         reading(text);
+    } else if (ui.view == IDENTIFY) {
+        const esp_openclaw_identify_snapshot_t *identify = ui.identify_history ? &ui.last_identify : &ui.identify;
+        char text[420];
+        snprintf(text, sizeof(text), "%s\n%s\n\n%s\n\n%s\n\n%s", identify->target.name,
+            identify->target.id, identify->text, identify_state(identify),
+            identify->state == ESP_OPENCLAW_IDENTIFY_REVIEW ?
+                "Replaces the target's displayed message. Press for Show / Cancel." :
+                identify->state == ESP_OPENCLAW_IDENTIFY_SENDING ? "Hold for Home." : "Press for device actions.");
+        reading(text);
     } else if (ui.view == ACTIVITY) {
-        char text[350];
-        snprintf(text, sizeof(text), "%s\n\n%s", ui.has_message ? ui.message : "No incoming messages", ui.reply.detail);
+        char text[512];
+        snprintf(text, sizeof(text), "%s\n\n%s\n\n%s%s%s\n\nPress for actions.",
+            ui.has_message ? ui.message : "No incoming messages", ui.reply.detail,
+            has_identify_result() ? ui.last_identify.target.name : "", has_identify_result() ? "\n" : "",
+            has_identify_result() ? identify_state(&ui.last_identify) : "");
         reading(text);
         if (ui.has_message) {
             lv_obj_t *message = lv_obj_get_child(ui.body, 0);
@@ -398,7 +470,8 @@ void compact_workspace_poll(const esp_openclaw_node_wifi_status_t *wifi, bool co
         unsigned old_agents = ui.agents.revision, old_sessions = ui.conversations.revision;
         unsigned old_preview = ui.conversations.preview_revision, old_reply = ui.reply.revision;
         unsigned old_creation = ui.creation.revision, old_messaging = ui.messaging.revision;
-        unsigned old_devices = ui.devices.revision;
+        unsigned old_devices = ui.devices.revision, old_identify = ui.identify.revision;
+        bool old_identify_send = ui.identify.can_send;
         ui.wifi = *wifi; ui.connected = connected;
         esp_openclaw_reader_agents_copy(&ui.agents);
         esp_openclaw_reader_conversations_copy(&ui.conversations);
@@ -407,6 +480,8 @@ void compact_workspace_poll(const esp_openclaw_node_wifi_status_t *wifi, bool co
         esp_openclaw_reader_creation_copy(&ui.creation);
         esp_openclaw_reader_messaging_copy(&ui.messaging);
         esp_openclaw_reader_devices_copy(&ui.devices);
+        esp_openclaw_reader_identify_copy(&ui.identify);
+        remember_identify();
         cJSON *status = esp_openclaw_reader_status();
         ui.reader_ready = status != NULL && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(status, "readConnected"));
         cJSON_Delete(status);
@@ -423,8 +498,11 @@ void compact_workspace_poll(const esp_openclaw_node_wifi_status_t *wifi, bool co
             ((ui.view == REPLY_REVIEW || ui.view == ACTIVITY) && old_reply != ui.reply.revision) ||
             (ui.view == CREATE && old_creation != ui.creation.revision) ||
             (ui.view == MESSAGING && old_messaging != ui.messaging.revision) ||
-            ((ui.view == DEVICES || ui.view == DEVICE) && old_devices != ui.devices.revision);
-        if (ui.view == DEVICE && old_devices != ui.devices.revision) {
+            (ui.view == DEVICE_ACTIONS && old_messaging != ui.messaging.revision) ||
+            ((ui.view == DEVICES || ui.view == DEVICE || ui.view == DEVICE_ACTIONS) && old_devices != ui.devices.revision) ||
+            ((ui.view == IDENTIFY || ui.view == IDENTIFY_CONFIRM || ui.view == ACTIVITY || ui.view == ACTIVITY_ACTIONS) &&
+                (old_identify != ui.identify.revision || old_identify_send != ui.identify.can_send));
+        if ((ui.view == DEVICE || ui.view == DEVICE_ACTIONS) && old_devices != ui.devices.revision) {
             size_t index = 0;
             while (index < ui.devices.count && strcmp(ui.devices.devices[index].id, ui.device_id) != 0) ++index;
             if (index < ui.devices.count) ui.device_index = (int)index;
@@ -516,6 +594,29 @@ void compact_workspace_input(compact_input_event_t event)
             ui.device_index = item.value;
             snprintf(ui.device_id, sizeof(ui.device_id), "%s", ui.devices.devices[item.value].id);
             open_view(DEVICE); break;
+        case BEGIN_IDENTIFY:
+            failure(esp_openclaw_reader_identify_begin(ui.device_id, ui.devices.revision));
+            if (!ui.note[0]) { ui.identify_history = false; esp_openclaw_reader_identify_copy(&ui.identify); open_view(IDENTIFY); }
+            break;
+        case SEND_IDENTIFY:
+            failure(esp_openclaw_reader_identify_send(ui.identify.revision));
+            if (!ui.note[0]) {
+                /* The worker can finish before copy observes SENDING. Retain
+                 * the admitted review first, then apply its current result. */
+                ui.last_identify = ui.identify;
+                ui.last_identify.state = ESP_OPENCLAW_IDENTIFY_SENDING;
+                ui.last_identify.can_send = false;
+                esp_openclaw_reader_identify_copy(&ui.identify);
+                remember_identify();
+                open_view(IDENTIFY);
+            }
+            break;
+        case CONTROL_ACCESS:
+            ui.messaging_parent = DEVICE_ACTIONS; open_view(MESSAGING); break;
+        case IDENTIFY_RESULT:
+            snprintf(ui.device_id, sizeof(ui.device_id), "%s", ui.last_identify.target.id);
+            ui.identify_history = true;
+            open_view(IDENTIFY); break;
         case TOGGLE_READING:
             if (openclaw_preferences_save(OPENCLAW_PREFERENCE_READING, !ui.large) == ESP_OK) ui.large = !ui.large;
             else snprintf(ui.note, sizeof(ui.note), "Text size not saved");
@@ -542,8 +643,13 @@ void compact_workspace_input(compact_input_event_t event)
                  ui.messaging.state == ESP_OPENCLAW_READER_MESSAGING_CONNECTING) failure(esp_openclaw_reader_messaging_cancel(ui.messaging.revision));
         else failure(esp_openclaw_reader_messaging_request(ui.messaging.revision));
     } else if (ui.view == BRIGHTNESS) open_view(DISPLAY);
-    else if (ui.view == DEVICE) open_view(DEVICES);
-    else if (ui.view == ACTIVITY) open_view(MENU);
+    else if (ui.view == DEVICE) open_view(DEVICE_ACTIONS);
+    else if (ui.view == IDENTIFY) {
+        if (ui.identify_history) open_view(DEVICE_ACTIONS);
+        else if (ui.identify.state == ESP_OPENCLAW_IDENTIFY_REVIEW && ui.identify.can_send) open_view(IDENTIFY_CONFIRM);
+        else if (ui.identify.state != ESP_OPENCLAW_IDENTIFY_SENDING) open_view(DEVICE_ACTIONS);
+    }
+    else if (ui.view == ACTIVITY) open_view(ACTIVITY_ACTIONS);
     else if (ui.view == CONNECTION || ui.view == HELP) {
         view_t parent = ui.simple_parent;
         int focus = ui.simple_parent_focus;

@@ -77,10 +77,12 @@ esp_err_t esp_timer_stop(esp_timer_handle_t);
             "-I", str(args.cjson_dir), str(tests / "test_dial_reader.c"),
             str(root / "components/esp-openclaw-reader/esp_openclaw_reader.c"), str(directory / "esp_openclaw_directory.c"),
             str(directory / "esp_openclaw_devices.c"), str(chat / "src/esp_openclaw_chat.c"),
+            str(directory / "esp_openclaw_identify.c"), str(directory / "esp_openclaw_device_control.c"),
             str(cjson_object), "-lm", "-o", str(binary),
         ], check=True)
         subprocess.run([str(binary)], check=True)
         subprocess.run([str(binary), "bootstrap"], check=True)
+        subprocess.run([str(binary), "identify"], check=True)
         for case in ("restore", "restore-denied", "restore-missing", "restore-retry", "restore-cancel", "restore-uri"):
             subprocess.run([str(binary), case], check=True)
         parser_test = work / "directory-test"

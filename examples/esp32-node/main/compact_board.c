@@ -268,8 +268,9 @@ static esp_err_t handle_display_show(esp_openclaw_node_handle_t node, void *cont
     }
     content.generation = s_content.generation + 1;
     s_content = content;
-    xSemaphoreGive(s_state_mutex);
+    // The renderer publishes failure under this lock before deleting its task.
     xTaskNotifyGive(s_display_task);
+    xSemaphoreGive(s_state_mutex);
     return display_status(out_payload_json);
 }
 

@@ -471,6 +471,10 @@ void compact_workspace_poll(const esp_openclaw_node_wifi_status_t *wifi, bool co
         unsigned old_preview = ui.conversations.preview_revision, old_reply = ui.reply.revision;
         unsigned old_creation = ui.creation.revision, old_messaging = ui.messaging.revision;
         unsigned old_devices = ui.devices.revision, old_identify = ui.identify.revision;
+        esp_openclaw_reader_state_t old_agents_state = ui.agents.state;
+        esp_openclaw_reader_state_t old_sessions_state = ui.conversations.state;
+        esp_openclaw_reader_state_t old_preview_state = ui.conversations.preview_state;
+        esp_openclaw_devices_state_t old_devices_state = ui.devices.state;
         bool old_identify_send = ui.identify.can_send;
         ui.wifi = *wifi; ui.connected = connected;
         esp_openclaw_reader_agents_copy(&ui.agents);
@@ -485,24 +489,25 @@ void compact_workspace_poll(const esp_openclaw_node_wifi_status_t *wifi, bool co
         cJSON *status = esp_openclaw_reader_status();
         ui.reader_ready = status != NULL && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(status, "readConnected"));
         cJSON_Delete(status);
-        bool context_changed = old_agents != ui.agents.revision || old_sessions != ui.conversations.revision ||
-            old_preview != ui.conversations.preview_revision || old_reply != ui.reply.revision ||
-            old_creation != ui.creation.revision || old_messaging != ui.messaging.revision || old_devices != ui.devices.revision;
+        bool agents_changed = old_agents != ui.agents.revision || old_agents_state != ui.agents.state;
+        bool sessions_changed = old_sessions != ui.conversations.revision || old_sessions_state != ui.conversations.state;
+        bool preview_changed = old_preview != ui.conversations.preview_revision || old_preview_state != ui.conversations.preview_state;
+        bool devices_changed = old_devices != ui.devices.revision || old_devices_state != ui.devices.state;
         bool home_action_changed = ui.view == HOME && (old_connected != ui.connected ||
             old_reader_ready != ui.reader_ready || old_home_available != ui.home.available ||
             old_home_preview != ui.home.preview);
         bool relevant = home_action_changed || (ui.view == CONNECTION && old_reader_ready != ui.reader_ready) ||
-            (ui.view == AGENTS && old_agents != ui.agents.revision) ||
+            (ui.view == AGENTS && agents_changed) ||
             ((ui.view == HOME || ui.view == SESSIONS || ui.view == READ || ui.view == READ_ACTIONS || ui.view == REPLY_PICK) &&
-                (old_sessions != ui.conversations.revision || old_preview != ui.conversations.preview_revision)) ||
+                (sessions_changed || preview_changed)) ||
             ((ui.view == REPLY_REVIEW || ui.view == ACTIVITY) && old_reply != ui.reply.revision) ||
             (ui.view == CREATE && old_creation != ui.creation.revision) ||
             (ui.view == MESSAGING && old_messaging != ui.messaging.revision) ||
             (ui.view == DEVICE_ACTIONS && old_messaging != ui.messaging.revision) ||
-            ((ui.view == DEVICES || ui.view == DEVICE || ui.view == DEVICE_ACTIONS) && old_devices != ui.devices.revision) ||
+            ((ui.view == DEVICES || ui.view == DEVICE || ui.view == DEVICE_ACTIONS) && devices_changed) ||
             ((ui.view == IDENTIFY || ui.view == IDENTIFY_CONFIRM || ui.view == ACTIVITY || ui.view == ACTIVITY_ACTIONS) &&
                 (old_identify != ui.identify.revision || old_identify_send != ui.identify.can_send));
-        if ((ui.view == DEVICE || ui.view == DEVICE_ACTIONS) && old_devices != ui.devices.revision) {
+        if ((ui.view == DEVICE || ui.view == DEVICE_ACTIONS) && devices_changed) {
             size_t index = 0;
             while (index < ui.devices.count && strcmp(ui.devices.devices[index].id, ui.device_id) != 0) ++index;
             if (index < ui.devices.count) ui.device_index = (int)index;
@@ -510,7 +515,6 @@ void compact_workspace_poll(const esp_openclaw_node_wifi_status_t *wifi, bool co
         }
         if (relevant) ++ui.revision;
         ui.dirty |= changed || relevant;
-        (void)context_changed;
         ui.refreshed_at = now;
     }
     if (!ui.brightness_save_failed && ui.brightness != ui.saved_brightness && now - ui.brightness_changed_at >= 750) {

@@ -215,6 +215,46 @@ int main(int argc, char **argv) {
     assert(strcmp(compact_workspace_view(), "activity-actions") == 0);
     select_item(); assert(strcmp(compact_workspace_view(), "identify") == 0 && identifies == 1);
     select_item(); assert(strcmp(compact_workspace_view(), "devices") == 0 && identifies == 1);
-    printf("Compact workspace %dx%d: navigation, reviewed Send/Identify, cancellation and stale-target guard passed\n", width, height);
+    // A request revision identifies its owner, not completion. The same
+    // revision must repaint when an asynchronous result becomes available.
+    home(); move(1); select_item();
+    agents.state = ESP_OPENCLAW_READER_LOADING; agents.page.count = agents.page.offset = 0; ++agents.revision; step();
+    revision = compact_workspace_revision();
+    compact_input_t held = {0};
+    compact_input_sample(&held, 0, revision, false, false, width == 320, 3);
+    compact_input_sample(&held, 30, revision, false, false, width == 320, 3);
+    compact_input_sample(&held, 40, revision, true, false, width == 320, 3);
+    compact_input_sample(&held, 70, revision, true, false, width == 320, 3);
+    agents.state = ESP_OPENCLAW_READER_READY; agents.page.count = agents.page.total = 1; step();
+    assert(compact_workspace_revision() != revision);
+    assert(strcmp(compact_workspace_selection(), "Assistant") == 0);
+    compact_input_sample(&held, 100, compact_workspace_revision(), false, false, width == 320, 3);
+    compact_input_event_t release = compact_input_sample(&held, 130, compact_workspace_revision(), false, false, width == 320, 3);
+    unsigned before_opens = opens;
+    compact_workspace_input(release); step();
+    assert(!release.select && opens == before_opens && strcmp(compact_workspace_view(), "agents") == 0);
+    revision = compact_workspace_revision(); step(); assert(compact_workspace_revision() == revision);
+    agents.state = ESP_OPENCLAW_READER_EMPTY; agents.page.count = agents.page.total = 0; step();
+    assert(compact_workspace_revision() != revision && strcmp(compact_workspace_selection(), "Refresh") == 0);
+    revision = compact_workspace_revision(); agents.state = ESP_OPENCLAW_READER_ERROR; step();
+    assert(compact_workspace_revision() != revision);
+    agents.state = ESP_OPENCLAW_READER_READY; agents.page.count = agents.page.total = 1; step();
+    select_item();
+    conversations.state = ESP_OPENCLAW_READER_LOADING; conversations.page.count = 0; ++conversations.revision; step();
+    revision = compact_workspace_revision();
+    conversations.state = ESP_OPENCLAW_READER_READY; conversations.page.count = 1; step();
+    assert(compact_workspace_revision() != revision);
+    assert(strcmp(compact_workspace_selection(), "Planning a good day") == 0);
+    select_item();
+    conversations.preview_state = ESP_OPENCLAW_READER_LOADING; ++conversations.preview_revision; step();
+    revision = compact_workspace_revision();
+    conversations.preview_state = ESP_OPENCLAW_READER_READY; step();
+    assert(compact_workspace_revision() != revision);
+    home(); move(1); move(2); select_item();
+    devices.state = ESP_OPENCLAW_DEVICES_LOADING; devices.count = 0; ++devices.revision; step();
+    revision = compact_workspace_revision();
+    devices.state = ESP_OPENCLAW_DEVICES_READY; devices.count = 1; step();
+    assert(compact_workspace_revision() != revision);
+    printf("Compact workspace %dx%d: navigation, async results, reviewed actions and retained outcomes passed\n", width, height);
     lv_deinit();
 }

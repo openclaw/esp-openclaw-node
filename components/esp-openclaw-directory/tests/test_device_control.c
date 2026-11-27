@@ -118,6 +118,18 @@ int main(void)
     };
     for (size_t i = 0; i < sizeof(bad_json) / sizeof(bad_json[0]); ++i)
         assert(!parse(bad_json[i], "display.show", &receipt));
+    char nul_target[1024];
+    snprintf(nul_target, sizeof(nul_target), "{\"ok\":true,\"nodeId\":\"target-node\\u0000other\","
+        "\"command\":\"display.show\",\"payload\":%s}", payload);
+    assert(!parse(nul_target, "display.show", &receipt));
+    root = envelope(false);
+    cJSON *nested = cJSON_AddArrayToObject(root, "extra");
+    for (int i = 0; i < 16; ++i) {
+        cJSON *next = cJSON_CreateArray();
+        cJSON_AddItemToArray(nested, next);
+        nested = next;
+    }
+    invalid(root);
     root = envelope(true);
     json = cJSON_PrintUnformatted(root);
     assert(!parse(json, "other.command", &receipt));

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add credential-free validation of bounded bootstrap codes for one exact Gateway, and wipe temporary decoded authentication material.
+
 - Add a compact on-device workspace with physical button/encoder navigation, shared agent and conversation browsing, reviewed replies, device inventory, Activity, and saved display settings. Compact profiles retain NVS offsets and use a 3 MiB factory app partition.
 
 - Preserve saved Wi-Fi and identity on compact boards when NVS initialization needs recovery; report the error instead of erasing storage automatically.

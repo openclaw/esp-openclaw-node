@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add an optional macOS LAN TLS passthrough helper with exact node source admission, router identity checks, bounded connections, and automatic rebinding within the configured LAN.
+
 - Synchronize M5StickC and T-Embed clocks asynchronously after Wi-Fi connects and validate TLS certificate dates without blocking serial provisioning. Allow an explicit certificate/SNI name for end-to-end TLS passthrough relays.
 
 - Let M5StickC and T-Embed nodes accept bounded display messages, report completed display generations, and return their board identity from `device.info`.

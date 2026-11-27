@@ -133,6 +133,7 @@ For a raw TLS passthrough relay, set `CONFIG_EXAMPLE_GATEWAY_TLS_SERVER_NAME`
 in the untracked local configuration to the upstream certificate's DNS name.
 This sets certificate name verification and SNI without disabling validation.
 Leave it empty for a direct connection using the hostname in the Gateway URL.
+See [LAN TLS passthrough](../../docs/lan-tls-relay.md) for the optional macOS relay.
 
 Board pin references: [M5StickC](https://docs.m5stack.com/en/core/StickC) and
 [T-Embed factory pin map](https://github.com/Xinyuan-LilyGO/T-Embed/blob/main/examples/factory/pin_config.h).

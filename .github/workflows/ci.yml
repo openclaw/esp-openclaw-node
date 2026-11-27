@@ -77,6 +77,7 @@ jobs:
             examples/esp32-node/tests/test_compact_board_text.c \
             -o /tmp/compact_board_text_test
           /tmp/compact_board_text_test
+          python3 -B -m unittest discover -s scripts/tests -p test_lan_tls_relay.py -v
           cc -std=c11 -Wall -Wextra -Werror \
             -I examples/m5stack-dial-node/main \
             examples/m5stack-dial-node/main/dial_control.c \

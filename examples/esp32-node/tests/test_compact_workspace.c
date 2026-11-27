@@ -20,6 +20,7 @@ static char identify_target[129];
 static esp_openclaw_reader_home_t home_context;
 static unsigned refreshes, opens, previews, sends;
 static unsigned create_submits, created_opens;
+static size_t refresh_offset;
 static unsigned text_drafts;
 static uint32_t now;
 static int width, height, brightness;
@@ -64,7 +65,7 @@ esp_err_t esp_openclaw_reader_conversations_open(const char *id, unsigned revisi
 esp_err_t esp_openclaw_reader_preview_open(size_t index, unsigned revision) {
     assert(index == 0 && revision == conversations.revision); ++previews; return ESP_OK;
 }
-esp_err_t esp_openclaw_reader_conversations_refresh(size_t offset) { (void)offset; return ESP_OK; }
+esp_err_t esp_openclaw_reader_conversations_refresh(size_t offset) { refresh_offset = offset; return ESP_OK; }
 esp_err_t esp_openclaw_reader_devices_refresh(void) { return ESP_OK; }
 esp_err_t esp_openclaw_reader_reply_begin(esp_openclaw_reader_reply_preset_t preset, unsigned revision) {
     assert(preset == ESP_OPENCLAW_READER_REPLY_CONTINUE && revision == conversations.preview_revision);
@@ -359,6 +360,15 @@ int main(int argc, char **argv) {
     select_item(); assert(create_submits == 1 && created_opens == 1);
     assert(strcmp(compact_workspace_view(), "reader") == 0);
     assert(strcmp(compact_workspace_primary_action(), "") == 0);
+    conversations.page.offset = 8; conversations.page.count = 1; conversations.page_size = 4;
+    home(); move(1); choose("Conversations"); choose("Previous conversations");
+    assert(refresh_offset == 4);
+    conversations.page.offset = 4; ++conversations.revision; step(); choose("Previous conversations");
+    assert(refresh_offset == 0);
+    conversations.page.offset = 4; conversations.page_size = 2; ++conversations.revision;
+    step(); choose("Previous conversations"); assert(refresh_offset == 2);
+    conversations.page.offset = 2; ++conversations.revision;
+    step(); choose("Previous conversations"); assert(refresh_offset == 0);
     printf("Compact workspace %dx%d: async results, owned drafts, reviewed actions and retained outcomes passed\n", width, height);
     lv_deinit();
 }

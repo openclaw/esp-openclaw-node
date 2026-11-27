@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Request two conversations per page on compact boards to reduce temporary response memory, with a configurable reader page size and unchanged pagination.
+
 - Report bounded, content-free diagnostics for reader request, response-copy, and parse failures, including Gateway response serialization allocation failures.
 
 - Distinguish Create from Open in local USB workspace status and invalidate stale inputs when the creation action changes.

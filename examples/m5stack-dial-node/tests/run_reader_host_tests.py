@@ -82,6 +82,8 @@ esp_err_t esp_timer_stop(esp_timer_handle_t);
             str(cjson_object), "-lm", "-o", str(binary),
         ], check=True)
         subprocess.run([str(binary)], check=True)
+        subprocess.run([str(binary), "small-pages"], check=True)
+        subprocess.run([str(binary), "compact-pages"], check=True)
         subprocess.run([str(binary), "bootstrap"], check=True)
         subprocess.run([str(binary), "identify"], check=True)
         subprocess.run([str(binary), "text-draft"], check=True)

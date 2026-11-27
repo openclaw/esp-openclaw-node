@@ -26,6 +26,7 @@ typedef struct {
     esp_openclaw_session_page_t page;
     esp_openclaw_session_preview_t preview;
     size_t selected;
+    size_t page_size;
 } esp_openclaw_reader_conversations_t;
 
 /* Small Home projection; selection remains owned by the reader. */

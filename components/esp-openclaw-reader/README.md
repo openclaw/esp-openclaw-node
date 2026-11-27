@@ -11,6 +11,10 @@ creating the primary node. The configuration supplies the reader display name,
 model, and optional expected TLS server name. Strings are copied during start;
 omitting the configuration uses a generic reader identity. Pass the same TLS
 server name as the primary node when using an encrypted passthrough relay.
+`session_page_size` limits conversation rows per request. Zero preserves the
+eight-row default; values from one to eight are accepted and copied at start.
+Compact boards request two rows to leave room for response parsing and copying.
+Pagination continues from the Gateway's returned `nextOffset`.
 
 Forward primary-node connection events to `esp_openclaw_reader_node_event`.
 Keep the primary node alive for the reader's lifetime. The reader has no display

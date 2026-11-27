@@ -77,6 +77,7 @@ static struct {
     bool devices_initialized, devices_available, identify_available;
     bool directory_enabled, directory_pending, force_disconnect;
     size_t directory_offset;
+    size_t session_page_size;
     esp_openclaw_reader_state_t directory_state;
     unsigned directory_revision;
     esp_openclaw_agent_page_t *directory_page;
@@ -580,7 +581,7 @@ static char *request_params(const reader_request_t *request)
     } else if (request->kind == SESSIONS) {
         ok = cJSON_AddStringToObject(root, "agentId", request->agent_id) != NULL &&
             cJSON_AddStringToObject(root, "rowMode", "dashboard") != NULL &&
-            cJSON_AddNumberToObject(root, "limit", ESP_OPENCLAW_DIRECTORY_PAGE_SIZE) != NULL &&
+            cJSON_AddNumberToObject(root, "limit", reader.session_page_size) != NULL &&
             cJSON_AddNumberToObject(root, "offset", request->offset) != NULL &&
             cJSON_AddBoolToObject(root, "includeGlobal", false) != NULL &&
             cJSON_AddBoolToObject(root, "includeDerivedTitles", true) != NULL &&
@@ -1132,13 +1133,17 @@ esp_err_t esp_openclaw_reader_start(esp_openclaw_node_handle_t node,
         config->display_name : "OpenClaw Reader";
     const char *model = config != NULL && config->model_identifier != NULL ? config->model_identifier : "";
     const char *tls = config != NULL && config->tls_server_name != NULL ? config->tls_server_name : "";
+    size_t page_size = config != NULL && config->session_page_size != 0 ?
+        config->session_page_size : ESP_OPENCLAW_DIRECTORY_PAGE_SIZE;
     if (strlen(name) >= sizeof(reader.display_name) ||
-        strlen(model) >= sizeof(reader.model_identifier) || strlen(tls) >= sizeof(reader.tls_server_name)) {
+        strlen(model) >= sizeof(reader.model_identifier) || strlen(tls) >= sizeof(reader.tls_server_name) ||
+        page_size > ESP_OPENCLAW_DIRECTORY_PAGE_SIZE) {
         return ESP_ERR_INVALID_ARG;
     }
     strcpy(reader.display_name, name);
     strcpy(reader.model_identifier, model);
     strcpy(reader.tls_server_name, tls);
+    reader.session_page_size = page_size;
     reader.lock = xSemaphoreCreateMutex();
     if (reader.lock == NULL) return ESP_ERR_NO_MEM;
     reader.node = node;
@@ -1553,6 +1558,7 @@ void esp_openclaw_reader_conversations_copy(esp_openclaw_reader_conversations_t 
             reader.status == ACCESS_NEEDED ? ESP_OPENCLAW_READER_ACCESS_NEEDED :
             reader.status == ERROR ? ESP_OPENCLAW_READER_ERROR : ESP_OPENCLAW_READER_CONNECTING;
     }
+    snapshot->page_size = reader.session_page_size;
     xSemaphoreGive(reader.lock);
 }
 

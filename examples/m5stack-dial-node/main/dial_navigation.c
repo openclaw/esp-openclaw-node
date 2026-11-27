@@ -1322,7 +1322,9 @@ void dial_navigation_activate(dial_navigation_t *nav)
     if (has_previous(nav)) {
         if (index == 0) {
             size_t offset = nav->view == DIAL_NAV_SESSIONS ? nav->conversations->page.offset : nav->snapshot->page.offset;
-            nav->handler(nav->view == DIAL_NAV_SESSIONS ? DIAL_NAV_SESSIONS_REFRESH : DIAL_NAV_REFRESH, offset > ESP_OPENCLAW_DIRECTORY_PAGE_SIZE ? offset - ESP_OPENCLAW_DIRECTORY_PAGE_SIZE : 0, nav->context);
+            size_t size = nav->view == DIAL_NAV_SESSIONS && nav->conversations->page_size ?
+                nav->conversations->page_size : ESP_OPENCLAW_DIRECTORY_PAGE_SIZE;
+            nav->handler(nav->view == DIAL_NAV_SESSIONS ? DIAL_NAV_SESSIONS_REFRESH : DIAL_NAV_REFRESH, offset > size ? offset - size : 0, nav->context);
             return;
         }
         --index;

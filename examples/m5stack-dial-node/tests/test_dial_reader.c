@@ -478,6 +478,8 @@ static void test_text_draft(void) {
 }
 
 int main(int argc, char **argv) {
+    size_t page_size = argc == 2 && strcmp(argv[1], "small-pages") == 0 ? 4 :
+        argc == 2 && strcmp(argv[1], "compact-pages") == 0 ? 2 : 8;
     if (argc == 2 && strcmp(argv[1], "text-draft") == 0) { test_text_draft(); return 0; }
     if (argc == 2 && strcmp(argv[1], "identify") == 0) { test_identify(); return 0; }
     if (argc == 2 && strcmp(argv[1], "bootstrap") == 0) { test_bootstrap(); return 0; }
@@ -495,9 +497,13 @@ int main(int argc, char **argv) {
     char long_name[129]; memset(long_name, 'a', sizeof(long_name) - 1); long_name[128] = '\0';
     esp_openclaw_reader_config_t config = {.display_name = long_name};
     assert(esp_openclaw_reader_start(&node, &config) == ESP_ERR_INVALID_ARG);
+    config = (esp_openclaw_reader_config_t){.session_page_size = ESP_OPENCLAW_DIRECTORY_PAGE_SIZE + 1};
+    assert(esp_openclaw_reader_start(&node, &config) == ESP_ERR_INVALID_ARG);
     char name[] = "Test Reader", model[] = "test-board", tls[] = "gateway.example";
     config = (esp_openclaw_reader_config_t){.display_name = name, .model_identifier = model, .tls_server_name = tls};
+    config.session_page_size = page_size == 8 ? 0 : page_size;
     assert(esp_openclaw_reader_start(&node, &config) == ESP_OK);
+    config.session_page_size = 1;
     memset(name, 'x', sizeof(name) - 1); memset(model, 'x', sizeof(model) - 1); memset(tls, 'x', sizeof(tls) - 1);
     assert(esp_openclaw_reader_start(&node, &config) == ESP_ERR_INVALID_STATE);
     step(); status("offline", false); assert(creates == 0);
@@ -608,7 +614,7 @@ int main(int argc, char **argv) {
     cJSON *params = cJSON_Parse(last_params);
     assert(strcmp(cJSON_GetObjectItem(params, "agentId")->valuestring, "beta") == 0);
     assert(strcmp(cJSON_GetObjectItem(params, "rowMode")->valuestring, "dashboard") == 0);
-    assert(cJSON_GetObjectItem(params, "limit")->valueint == 8);
+    assert(cJSON_GetObjectItem(params, "limit")->valueint == (int)page_size);
     assert(cJSON_IsFalse(cJSON_GetObjectItem(params, "includeGlobal")));
     cJSON_Delete(params);
     respond("{\"sessions\":[{\"key\":\"agent:beta:thread:one\",\"label\":\"One\"},{\"key\":\"agent:beta:thread:two\",\"label\":\"Two\"}],\"offset\":0,\"hasMore\":true,\"nextOffset\":2}"); step();
@@ -616,6 +622,7 @@ int main(int argc, char **argv) {
     assert(view != NULL);
     esp_openclaw_reader_conversations_copy(view);
     assert(view->state == ESP_OPENCLAW_READER_READY && view->page.count == 2);
+    assert(view->page_size == page_size);
     assert(strcmp(view->agent.id, "beta") == 0 && view->page.next_offset == 2);
     esp_openclaw_reader_home_copy(&home);
     assert(home.available && !home.preview && strcmp(home.agent.name, "beta") == 0);
@@ -646,6 +653,7 @@ int main(int argc, char **argv) {
     assert(home.available && !home.preview && home.preview_revision != home_revision);
     params = cJSON_Parse(last_params);
     assert(cJSON_GetObjectItem(params, "offset")->valueint == 2);
+    assert(cJSON_GetObjectItem(params, "limit")->valueint == (int)page_size);
     cJSON_Delete(params);
     assert(esp_openclaw_reader_conversations_open("alpha", snapshot.revision) == ESP_OK);
     respond("{\"sessions\":[{\"key\":\"agent:beta:old\"}],\"offset\":2}"); step();

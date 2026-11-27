@@ -78,6 +78,7 @@ static struct {
     bool directory_enabled, directory_pending, force_disconnect;
     size_t directory_offset;
     size_t session_page_size;
+    bool compact_gateway_snapshots;
     esp_openclaw_reader_state_t directory_state;
     unsigned directory_revision;
     esp_openclaw_agent_page_t *directory_page;
@@ -710,7 +711,15 @@ static esp_err_t create_client(void)
     config.gateway_event_cb = reply_event;
     esp_err_t err = esp_openclaw_node_create(&config, &reader.client);
     if (err == ESP_OK) {
-        err = esp_openclaw_node_register_scope(reader.client, "operator.read");
+        if (reader.compact_gateway_snapshots) {
+            static const char *const caps[] = {
+                "health-summary", "hello-health-on-demand", "hello-presence-self", "chat-only-assistant-text",
+            };
+            for (size_t i = 0; i < sizeof(caps) / sizeof(caps[0]) && err == ESP_OK; ++i)
+                err = esp_openclaw_node_register_capability(reader.client, caps[i]);
+        }
+        if (err == ESP_OK)
+            err = esp_openclaw_node_register_scope(reader.client, "operator.read");
         if (err != ESP_OK) {
             esp_openclaw_node_destroy(reader.client);
             reader.client = NULL;
@@ -1144,6 +1153,7 @@ esp_err_t esp_openclaw_reader_start(esp_openclaw_node_handle_t node,
     strcpy(reader.model_identifier, model);
     strcpy(reader.tls_server_name, tls);
     reader.session_page_size = page_size;
+    reader.compact_gateway_snapshots = config != NULL && config->compact_gateway_snapshots;
     reader.lock = xSemaphoreCreateMutex();
     if (reader.lock == NULL) return ESP_ERR_NO_MEM;
     reader.node = node;

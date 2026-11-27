@@ -1,4 +1,5 @@
 #include "esp_openclaw_devices.h"
+#include "esp_openclaw_devices_internal.h"
 #include "esp_openclaw_directory_json.h"
 
 #include <stdatomic.h>
@@ -112,6 +113,24 @@ void esp_openclaw_devices_copy(esp_openclaw_devices_snapshot_t *snapshot)
     snapshot->state = directory.state;
     snapshot->revision = directory.revision;
     xSemaphoreGive(directory.lock);
+}
+
+bool esp_openclaw_devices_identify_target_locked(const char *node_id,
+    unsigned revision, esp_openclaw_device_t *target)
+{
+    if (node_id == NULL || target == NULL || !directory.ready || !directory.interested ||
+        directory.state != ESP_OPENCLAW_DEVICES_READY || directory.page == NULL ||
+        directory.revision != revision) return false;
+    for (size_t i = 0; i < directory.page->count; ++i) {
+        const esp_openclaw_device_t *device = &directory.page->devices[i];
+        if (strcmp(device->id, node_id) != 0) continue;
+        if (!device->connected_known || !device->connected || !device->paired_known || !device->paired ||
+            !device->commands_known || !device->display_show ||
+            (strcmp(device->model, "m5stack-m5stickc") != 0 && strcmp(device->model, "lilygo-t-embed") != 0)) return false;
+        *target = *device;
+        return true;
+    }
+    return false;
 }
 
 static bool current(const device_request_t *request)

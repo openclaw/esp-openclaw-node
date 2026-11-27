@@ -100,6 +100,17 @@ esp_err_t esp_timer_stop(esp_timer_handle_t);
                         str(directory / "tests/test_device_control.c"), str(cjson_object),
                         "-lm", "-o", str(control_test)], check=True)
         subprocess.run([str(control_test)], check=True)
+        identify_test = work / "identify-test"
+        subprocess.run(["cc", "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-g",
+                        "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
+                        "-I", str(work), "-I", str(directory / "include"),
+                        "-I", str(root / "components/esp-openclaw-node/include"),
+                        "-I", str(args.cjson_dir), str(directory / "esp_openclaw_identify.c"),
+                        str(directory / "esp_openclaw_directory.c"),
+                        str(directory / "esp_openclaw_device_control.c"),
+                        str(directory / "tests/test_identify.c"), str(cjson_object),
+                        "-lm", "-o", str(identify_test)], check=True)
+        subprocess.run([str(identify_test)], check=True)
 
 
 if __name__ == "__main__":

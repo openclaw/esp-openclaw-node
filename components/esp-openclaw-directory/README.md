@@ -116,3 +116,24 @@ generations before exposing a receipt. Acceptance and confirmed rendering
 remain separate. Both structured `payload` and encoded `payloadJSON` are
 supported; if both are present, they must agree. Malformed or mismatched
 responses clear the output and cannot establish completion.
+
+## Identify command lifecycle
+
+`esp_openclaw_identify` prepares a short display code for a reviewed target.
+The owner supplies the same mutex used by the device directory, publishes
+connection and write readiness while holding it, and polls from one worker.
+Begin and Send are separate calls. Send requires the current review revision,
+an unchanged inventory revision, a connected and paired compact board, an
+advertised `display.show` command, and an active writable operator connection.
+Only the M5StickC and T-Embed display adapters are supported. The Gateway still
+enforces its command allowlist and permissions.
+
+A submission calls `node.invoke` once with a unique idempotency key. It does
+not bind an agent or conversation. The response must match the target and
+display code. Accepted and rendered are separate states. A lost connection,
+deadline, or invalid receipt after submission produces an unknown outcome;
+the module never retries. The callback retains its slot until completion,
+even after a timeout. A failed local queue admission means nothing was sent.
+
+This component supplies the lifecycle API; applications must provide the
+review and result screens before exposing the action.

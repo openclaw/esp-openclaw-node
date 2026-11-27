@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "esp_openclaw_directory.c" "esp_openclaw_avatar.c" "esp_openclaw_devices.c" "esp_openclaw_device_control.c"
+    SRCS "esp_openclaw_directory.c" "esp_openclaw_avatar.c" "esp_openclaw_devices.c" "esp_openclaw_device_control.c" "esp_openclaw_identify.c"
     INCLUDE_DIRS "include"
     REQUIRES espressif__cjson esp-openclaw-node esp_timer freertos
 )

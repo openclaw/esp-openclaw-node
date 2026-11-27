@@ -21,6 +21,11 @@ session for the same Gateway; node-only pairing does not supply read access.
 It never grants itself access. Sending replies and creating conversations
 remain explicit, revision-checked actions after messaging access is approved.
 Neither reconnect nor a lost response automatically resends a message.
+When a saved operator session exists, the reader tries to restore previously
+granted read/write access. The Gateway checks this request against the saved
+device token; it does not create an approval request. If authentication rejects
+the requested scopes, the reader retries read-only once. A board with no saved
+operator session still requires explicit read-only bootstrap setup.
 
 For a node-only installation, `esp_openclaw_reader_setup_code(code)` queues one
 bootstrap attempt without changing the primary node connection. The code must

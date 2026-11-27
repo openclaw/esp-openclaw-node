@@ -79,7 +79,7 @@ static struct {
     approval_request_t *approval;
     int64_t approval_started;
     char *approved_token;
-    bool write_registered, reset_client;
+    bool write_registered, reset_client, restore_write, probing_write;
     esp_openclaw_chat_handle_t chat;
     esp_openclaw_reader_reply_snapshot_t reply;
     char reply_key[ESP_OPENCLAW_SESSION_KEY_BYTES];
@@ -377,6 +377,7 @@ static void refresh_node(void)
         reader.setup_code = NULL;
         invalidate_directory();
         reset_messaging(ESP_OPENCLAW_READER_MESSAGING_OFF);
+        reader.probing_write = false;
     }
     reader.generation = generation;
     reader.reader_id = 0;
@@ -407,9 +408,18 @@ static void consume_event(void)
                 reader.write_registered && !reader.reset_client && reader.status == READY) {
                 clear_approved_token();
                 messaging_state(ESP_OPENCLAW_READER_MESSAGING_READY);
+                reader.restore_write = true;
+                reader.probing_write = false;
+            }
+            if (reader.probing_write && reader.status != READY) {
+                reader.restore_write = reader.probing_write = false;
+                reset_messaging(ESP_OPENCLAW_READER_MESSAGING_OFF);
+                reader.force_disconnect = reader.retry = true;
             }
         }
     } else {
+        bool restore_denied = reader.probing_write && event == AUTH_REJECTED;
+        if (event == AUTH_REJECTED && reader.write_registered) reader.restore_write = false;
         invalidate_directory();
         reader.force_disconnect = false;
         reader.phase = IDLE;
@@ -429,6 +439,12 @@ static void consume_event(void)
                 reset_messaging(ESP_OPENCLAW_READER_MESSAGING_ERROR);
                 reader.retry = current_node();
             }
+        }
+        if (restore_denied) {
+            reader.probing_write = false;
+            reset_messaging(ESP_OPENCLAW_READER_MESSAGING_OFF);
+            reader.status = current_node() ? STARTING : OFFLINE;
+            reader.retry = current_node();
         }
     }
     xSemaphoreGive(reader.lock);
@@ -844,6 +860,7 @@ static void reset_idle_client(void)
     if (err == ESP_OK) {
         reader.client = NULL;
         reader.write_registered = reader.reset_client = false;
+        reader.force_disconnect = false;
     }
     xSemaphoreGive(reader.lock);
 }
@@ -916,17 +933,27 @@ static esp_err_t connect_reader(void)
     bool has_token = reader.approved_token != NULL;
     char *token = has_token ? strdup(reader.approved_token) : NULL;
     unsigned revision = reader.messaging.revision;
+    bool restore = !has_token && !reader.write_registered && reader.restore_write;
     xSemaphoreGive(reader.lock);
     if (has_token && token == NULL) return ESP_ERR_NO_MEM;
-    if (token != NULL) {
+    if (restore && !esp_openclaw_node_has_saved_session(reader.client)) {
+        xSemaphoreTake(reader.lock, portMAX_DELAY);
+        reader.restore_write = false;
+        xSemaphoreGive(reader.lock);
+        restore = false;
+    }
+    if (token != NULL || restore) {
         err = esp_openclaw_node_register_scope(reader.client, "operator.write");
         xSemaphoreTake(reader.lock, portMAX_DELAY);
         if (err == ESP_OK) reader.write_registered = true;
-        bool current = current_node() && revision == reader.messaging.revision &&
-            reader.messaging.state == ESP_OPENCLAW_READER_MESSAGING_CONNECTING;
+        bool current = current_node() && (restore ? reader.attempt == reader.generation :
+            revision == reader.messaging.revision && reader.messaging.state == ESP_OPENCLAW_READER_MESSAGING_CONNECTING);
         if (!current) {
             reader.reset_client = reader.write_registered;
             err = ESP_ERR_INVALID_STATE;
+        } else if (restore && err == ESP_OK) {
+            reader.probing_write = true;
+            messaging_state(ESP_OPENCLAW_READER_MESSAGING_CONNECTING);
         }
         xSemaphoreGive(reader.lock);
     }
@@ -938,6 +965,14 @@ static esp_err_t connect_reader(void)
             .value = token,
         };
         err = esp_openclaw_node_request_connect(reader.client, &request);
+    }
+    if (restore && err != ESP_OK) {
+        xSemaphoreTake(reader.lock, portMAX_DELAY);
+        reader.restore_write = reader.restore_write &&
+            (err == ESP_ERR_NO_MEM || err == ESP_ERR_INVALID_STATE || err == ESP_FAIL);
+        reader.probing_write = false;
+        reset_messaging(ESP_OPENCLAW_READER_MESSAGING_OFF);
+        xSemaphoreGive(reader.lock);
     }
     if (token != NULL) {
         memset(token, 0, strlen(token));
@@ -1078,6 +1113,7 @@ esp_err_t esp_openclaw_reader_start(esp_openclaw_node_handle_t node,
     reader.lock = xSemaphoreCreateMutex();
     if (reader.lock == NULL) return ESP_ERR_NO_MEM;
     reader.node = node;
+    reader.restore_write = true;
     if (xTaskCreate(reader_task, "openclaw_reader", 4096, NULL, 5, &reader.task) != pdPASS) {
         vSemaphoreDelete(reader.lock);
         reader.lock = NULL;
@@ -1189,6 +1225,7 @@ esp_err_t esp_openclaw_reader_messaging_cancel(unsigned revision)
         xSemaphoreGive(reader.lock);
         return ESP_ERR_INVALID_STATE;
     }
+    reader.restore_write = reader.probing_write = false;
     reset_messaging(ESP_OPENCLAW_READER_MESSAGING_OFF);
     /* Closing only the operator completes the outstanding wait callback. It
      * cannot revoke a grant the administrator may already have approved. */

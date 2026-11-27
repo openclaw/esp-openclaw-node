@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <setjmp.h>
 #include <stdarg.h>
+#include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -11,6 +12,25 @@
 #include "esp_timer.h"
 
 static unsigned device_timeouts;
+static size_t json_allocated, json_peak, json_alloc_calls, json_fail_after = SIZE_MAX;
+typedef union { max_align_t alignment; size_t bytes; } json_allocation_t;
+static void *limited_json_malloc(size_t bytes)
+{
+    if (json_alloc_calls++ >= json_fail_after || bytes > 8192 - json_allocated) return NULL;
+    json_allocation_t *block = malloc(sizeof(*block) + bytes);
+    if (block == NULL) return NULL;
+    block->bytes = bytes;
+    json_allocated += bytes;
+    if (json_allocated > json_peak) json_peak = json_allocated;
+    return block + 1;
+}
+static void limited_json_free(void *value)
+{
+    if (value == NULL) return;
+    json_allocation_t *block = (json_allocation_t *)value - 1;
+    json_allocated -= block->bytes;
+    free(block);
+}
 void test_log_warning(const char *format, ...)
 {
     va_list args;
@@ -764,6 +784,49 @@ int main(int argc, char **argv) {
     assert(!devices.devices[0].paired_known);
     assert(!devices.devices[0].commands_known && !devices.devices[0].display_show && !devices.devices[0].display_status);
 
+    /* Full inventory DOMs exceed this budget; one node at a time fits. */
+    char inventory[20000], padding[701];
+    memset(padding, 'x', sizeof(padding) - 1); padding[sizeof(padding) - 1] = '\0';
+    size_t used = (size_t)snprintf(inventory, sizeof(inventory), "{\"nodes\":[");
+    for (unsigned n = 0; n < 10; ++n) {
+        used += (size_t)snprintf(inventory + used, sizeof(inventory) - used,
+            "%s{\"nodeId\":\"node-%u\",\"displayName\":\"Display %u\",\"modelIdentifier\":\"lilygo-t-embed\","
+            "\"connected\":true,\"paired\":true,\"commands\":[\"display.show\",\"display.status\"],\"extra\":[", n ? "," : "", n, n);
+        for (unsigned k = 0; k < 12; ++k)
+            used += (size_t)snprintf(inventory + used, sizeof(inventory) - used,
+                "%s{\"name\":\"ignored\",\"value\":123}", k ? "," : "");
+        used += (size_t)snprintf(inventory + used, sizeof(inventory) - used, "],\"padding\":\"%s\"}", padding);
+    }
+    used += (size_t)snprintf(inventory + used, sizeof(inventory) - used, "]}");
+    assert(used < sizeof(inventory));
+    cJSON_Hooks json_hooks = {.malloc_fn = limited_json_malloc, .free_fn = limited_json_free};
+    cJSON_InitHooks(&json_hooks);
+    assert(cJSON_Parse(inventory) == NULL && json_allocated == 0);
+    json_peak = json_alloc_calls = 0;
+    assert(esp_openclaw_reader_devices_refresh() == ESP_OK); step();
+    respond_devices(inventory); step();
+    cJSON_InitHooks(NULL);
+    esp_openclaw_reader_devices_copy(&devices);
+    assert(devices.state == ESP_OPENCLAW_DEVICES_READY && devices.count == 10);
+    assert(devices.devices[9].display_show && devices.devices[9].display_status);
+    assert(json_allocated == 0 && json_peak < 8192);
+    printf("Device inventory: %zu-byte ten-node list, peak JSON allocation %zu bytes\n", used, json_peak);
+    size_t allocations_per_node = json_alloc_calls / 10;
+    assert(allocations_per_node > 0 && json_alloc_calls % 10 == 0);
+    for (size_t node_index = 0; node_index < 10; ++node_index) {
+        assert(esp_openclaw_reader_devices_refresh() == ESP_OK); step();
+        json_alloc_calls = 0; json_fail_after = node_index * allocations_per_node;
+        cJSON_InitHooks(&json_hooks);
+        respond_devices(inventory); step();
+        cJSON_InitHooks(NULL); json_fail_after = SIZE_MAX;
+        esp_openclaw_reader_devices_copy(&devices);
+        assert(devices.state == ESP_OPENCLAW_DEVICES_ERROR && devices.count == 0 && json_allocated == 0);
+        assert(esp_openclaw_reader_devices_refresh() == ESP_OK); step();
+        respond_devices(inventory); step();
+        esp_openclaw_reader_devices_copy(&devices);
+        assert(devices.state == ESP_OPENCLAW_DEVICES_READY && devices.count == 10);
+    }
+
     assert(esp_openclaw_reader_devices_refresh() == ESP_OK); step();
     respond_devices("{\"nodes\":[{\"nodeId\":\"display-node\",\"commands\":[\"device.info\",\"display.show\",\"display.status\"]}]}"); step();
     esp_openclaw_reader_devices_copy(&devices);
@@ -814,6 +877,10 @@ int main(int argc, char **argv) {
         assert(!devices.devices[0].commands_known && !devices.devices[0].display_show && !devices.devices[0].display_status);
     }
     const char *invalid_device_json[] = {
+        "{\"nodes\":[{\"nodeId\":\"same\"},{\"nodeId\":\"same\"}]}",
+        "{\"nodes\":null,\"nodes\":[]}",
+        "{\"nodes\":[{\"nodeId\":\"valid\"}],\"ignored\":[1,]}",
+        "{\"nodes\":[{\"nodeId\":\"valid\"}]} trailing",
         "{\"nodes\":[{\"nodeId\":\"display-node\",\"commands\":[\"display.show\\u0000.extra\"]}]}",
         "{\"nodes\":[{\"nodeId\":\"display-node\\u0000other\"}]}",
         "{\"nodes\":[{\"nodeId\":\"display-node\",\"displayName\":\"\x80\"}]}",
@@ -825,6 +892,35 @@ int main(int argc, char **argv) {
         esp_openclaw_reader_devices_copy(&devices);
         assert(devices.state == ESP_OPENCLAW_DEVICES_ERROR && devices.count == 0);
     }
+    for (unsigned count = 0; count <= 17; count += count == 0 ? 16 : 1) {
+        used = (size_t)snprintf(inventory, sizeof(inventory), "{\"nodes\":[");
+        for (unsigned n = 0; n < count; ++n)
+            used += (size_t)snprintf(inventory + used, sizeof(inventory) - used,
+                "%s{\"nodeId\":\"node-%u\"}", n ? "," : "", n);
+        snprintf(inventory + used, sizeof(inventory) - used, "]}");
+        assert(esp_openclaw_reader_devices_refresh() == ESP_OK); step();
+        respond_devices(inventory); step();
+        esp_openclaw_reader_devices_copy(&devices);
+        assert(devices.state == (count == 0 ? ESP_OPENCLAW_DEVICES_EMPTY :
+            count == 16 ? ESP_OPENCLAW_DEVICES_READY : ESP_OPENCLAW_DEVICES_TOO_LARGE));
+        assert(devices.count == (count <= 16 ? count : 0));
+    }
+    for (unsigned depth = 16; depth <= 17; ++depth) {
+        used = (size_t)snprintf(inventory, sizeof(inventory), "{\"nodes\":[{\"nodeId\":\"depth\"}],\"extra\":");
+        for (unsigned i = 1; i < depth; ++i) inventory[used++] = '[';
+        inventory[used++] = '0';
+        for (unsigned i = 1; i < depth; ++i) inventory[used++] = ']';
+        inventory[used++] = '}'; inventory[used] = '\0';
+        assert(esp_openclaw_reader_devices_refresh() == ESP_OK); step();
+        respond_devices(inventory); step();
+        esp_openclaw_reader_devices_copy(&devices);
+        assert(devices.state == (depth == 16 ? ESP_OPENCLAW_DEVICES_READY : ESP_OPENCLAW_DEVICES_ERROR));
+    }
+    assert(esp_openclaw_reader_devices_refresh() == ESP_OK); step();
+    respond_devices("{\"n\\u006fdes\":[{\"nodeId\":\"first\",\"nodeId\":\"second\"}],\"nodes\":[]}"); step();
+    esp_openclaw_reader_devices_copy(&devices);
+    assert(devices.state == ESP_OPENCLAW_DEVICES_READY && devices.count == 1);
+    assert(strcmp(devices.devices[0].id, "first") == 0);
     assert(scopes == before);
 
     /* Agent browsing can finish while a canceled inventory callback drains. */

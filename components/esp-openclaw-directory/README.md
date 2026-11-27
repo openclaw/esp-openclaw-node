@@ -99,8 +99,8 @@ Failed device loads emit `devices_response_diag` with a numeric stage, result,
 and byte count. Stages are request allocation (1), missing or rejected response
 (2), response size limit (3), response copy (4), page allocation (5), parsing (6),
 request queueing (7), and timeout (8). Parsing reports the directory result enum;
-other stages report `esp_err_t`. A parse result of `OK` with a failed load means
-the JSON was valid but did not satisfy the device-list schema. No payload,
+other stages report `esp_err_t`. A parse result of `INVALID` covers malformed
+JSON, invalid device fields, or failure to allocate a node's JSON tree. No payload,
 device identity, address, or credential is logged.
 
 Compact displays show the device load state in the list heading and keep the
@@ -108,7 +108,11 @@ Refresh action available. Local USB workspace status includes `deviceState`,
 using the `esp_openclaw_devices_state_t` values above, from the same rendered
 snapshot as `workspaceRevision`. This field is not added to remote commands.
 
-The inventory retains at most 16 devices from a 32 KiB response. Each device
+The inventory retains at most 16 devices from a 32 KiB response. It validates
+the entire document and its 16-level nesting bound before parsing one node at
+a time. Only that node's JSON tree is allocated; unrelated root metadata is
+validated without a tree. A failed node discards the complete candidate page.
+A single large node can still exceed available memory. Each device
 keeps its canonical ID, display name, model, and separate known flags for
 connection and pairing. Missing optional facts remain unknown. Discovery
 confers no control authority and changes no agent selection.

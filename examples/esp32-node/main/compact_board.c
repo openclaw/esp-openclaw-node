@@ -42,6 +42,7 @@ static char s_view[24] = "home";
 static unsigned s_input_count;
 static uint32_t s_workspace_revision;
 static compact_console_input_t s_console_input;
+static char s_console_selection[97];
 static int s_message_line_height;
 static int64_t s_last_input_ms;
 static lv_display_t *s_lv_display;
@@ -235,13 +236,14 @@ static void display_task(void *ctx)
         if (s_message_visible) s_rendered_generation = content.generation;
         snprintf(s_view, sizeof(s_view), "%s", compact_workspace_view());
         s_workspace_revision = compact_workspace_revision();
+        snprintf(s_console_selection, sizeof(s_console_selection), "%s", compact_workspace_selection());
         if (console.pending) compact_console_complete(&s_console_input, console.request_id, console_applied);
         xSemaphoreGive(s_state_mutex);
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(5));
     }
 }
 
-static esp_err_t display_status(char **out_payload_json)
+static esp_err_t display_status(char **out_payload_json, bool local_console)
 {
     cJSON *payload = cJSON_CreateObject();
     if (payload == NULL) return ESP_ERR_NO_MEM;
@@ -267,6 +269,7 @@ static esp_err_t display_status(char **out_payload_json)
         cJSON_AddBoolToObject(payload, "rendered", s_ready && s_message_visible && s_rendered_generation == s_content.generation) &&
         cJSON_AddNumberToObject(payload, "renderCount", s_render_count) &&
         cJSON_AddNumberToObject(payload, "lastRenderMs", (double)s_last_render_ms);
+    if (local_console) ok = ok && cJSON_AddStringToObject(payload, "selection", s_console_selection);
     xSemaphoreGive(s_state_mutex);
     ok = ok && cJSON_AddNumberToObject(payload, "headingMaxLength", COMPACT_TEXT_COLUMNS) &&
         cJSON_AddNumberToObject(payload, "textMaxLength", large_text ? COMPACT_LARGE_COLUMNS * COMPACT_LARGE_ROWS : COMPACT_TEXT_MAX) &&
@@ -281,7 +284,7 @@ static esp_err_t display_status(char **out_payload_json)
     return esp_openclaw_node_example_take_json_payload(payload, out_payload_json);
 }
 
-esp_err_t compact_board_console_status(char **out_json) { return display_status(out_json); }
+esp_err_t compact_board_console_status(char **out_json) { return display_status(out_json, true); }
 
 esp_err_t compact_board_console_input(compact_input_event_t event, uint32_t revision, uint32_t *request_id)
 {
@@ -299,7 +302,7 @@ static esp_err_t handle_display_status(esp_openclaw_node_handle_t node, void *co
     esp_openclaw_node_error_t *out_error)
 {
     (void)node; (void)context; (void)params_json; (void)params_len; (void)out_error;
-    return display_status(out_payload_json);
+    return display_status(out_payload_json, false);
 }
 
 static esp_err_t handle_display_show(esp_openclaw_node_handle_t node, void *context,
@@ -350,7 +353,7 @@ static esp_err_t handle_display_show(esp_openclaw_node_handle_t node, void *cont
     // The renderer publishes failure under this lock before deleting its task.
     xTaskNotifyGive(s_display_task);
     xSemaphoreGive(s_state_mutex);
-    return display_status(out_payload_json);
+    return display_status(out_payload_json, false);
 }
 
 esp_err_t compact_board_register_commands(esp_openclaw_node_handle_t node)

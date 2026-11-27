@@ -122,6 +122,8 @@ and `queued`, `applied`, or `stale` outcome; `applied` means the input reached t
 UI, not that a remote action completed. A view change before delivery rejects
 the input as stale. Inspect the actual review/result screen before proceeding.
 `consoleInputCount` and `physicalInputCount` remain separate.
+USB status includes the selected row label for local navigation. Node-command
+`display.status` omits that label, which can contain private conversation titles.
 
 Approve only the expected existing device's `operator.read` role request on the
 Gateway. If the first attempt was rejected while awaiting approval, run

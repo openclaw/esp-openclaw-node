@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Include the selected workspace row in local USB diagnostics without exposing conversation titles through Gateway display commands.
+
 - Add revision-checked USB workspace navigation with delivery receipts and counters separate from physical input.
 
 - Add a one-attempt compact reader setup command with hidden USB input and connection-generation checks through token persistence.

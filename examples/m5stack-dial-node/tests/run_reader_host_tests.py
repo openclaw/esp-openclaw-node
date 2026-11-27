@@ -71,10 +71,11 @@ esp_err_t esp_timer_stop(esp_timer_handle_t);
             "cc", "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-g",
             "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
             "-I", str(work), "-I", str(tests.parent / "main"),
+            "-I", str(root / "components/esp-openclaw-reader/include"),
             "-I", str(root / "components/esp-openclaw-node/include"),
             "-I", str(directory / "include"), "-I", str(chat / "include"),
             "-I", str(args.cjson_dir), str(tests / "test_dial_reader.c"),
-            str(tests.parent / "main/dial_reader.c"), str(directory / "esp_openclaw_directory.c"),
+            str(root / "components/esp-openclaw-reader/esp_openclaw_reader.c"), str(directory / "esp_openclaw_directory.c"),
             str(directory / "esp_openclaw_devices.c"), str(chat / "src/esp_openclaw_chat.c"),
             str(cjson_object), "-lm", "-o", str(binary),
         ], check=True)

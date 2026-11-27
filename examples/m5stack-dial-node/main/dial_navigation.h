@@ -4,10 +4,7 @@
 #include "dial_input.h"
 #include "openclaw_setup.h"
 #include "openclaw_status_bar.h"
-#include "dial_directory.h"
-#include "dial_messaging.h"
-#include "dial_reply.h"
-#include "dial_creation.h"
+#include "esp_openclaw_reader_types.h"
 #include "esp_openclaw_device_types.h"
 #include "lvgl.h"
 #include "esp_openclaw_node_wifi.h"
@@ -36,8 +33,8 @@ typedef struct {
     unsigned help_topic;
     esp_openclaw_devices_state_t device_state;
     dial_navigation_view_t settings_parent;
-    dial_agents_state_t conversation_state, preview_state;
-    dial_agents_state_t state;
+    esp_openclaw_reader_state_t conversation_state, preview_state;
+    esp_openclaw_reader_state_t state;
     lv_point_t press_point;
     bool moved;
     int brightness;
@@ -46,16 +43,16 @@ typedef struct {
     bool connection_home;
     esp_openclaw_node_wifi_status_t wifi;
     dial_activity_t activity;
-    dial_messaging_snapshot_t messaging;
+    esp_openclaw_reader_messaging_snapshot_t messaging;
     bool messaging_action_failed;
-    dial_reply_snapshot_t reply;
+    esp_openclaw_reader_reply_snapshot_t reply;
     unsigned reply_preview_revision;
     bool reply_action_failed;
-    dial_creation_snapshot_t creation;
+    esp_openclaw_reader_creation_snapshot_t creation;
     bool creation_action_failed;
     /* Owned by the application and refreshed only on the LVGL task. */
-    const dial_agents_snapshot_t *snapshot;
-    const dial_conversations_snapshot_t *conversations;
+    const esp_openclaw_reader_agents_t *snapshot;
+    const esp_openclaw_reader_conversations_t *conversations;
     const esp_openclaw_devices_snapshot_t *devices;
     dial_navigation_handler_t handler;
     void *context;
@@ -64,14 +61,14 @@ typedef struct {
 void dial_navigation_create(dial_navigation_t *nav, lv_obj_t *parent,
                             dial_navigation_handler_t handler, void *context);
 void dial_navigation_open(dial_navigation_t *nav, bool agents);
-void dial_navigation_update(dial_navigation_t *nav, const dial_agents_snapshot_t *snapshot);
-void dial_navigation_conversations_update(dial_navigation_t *nav, const dial_conversations_snapshot_t *snapshot);
+void dial_navigation_update(dial_navigation_t *nav, const esp_openclaw_reader_agents_t *snapshot);
+void dial_navigation_conversations_update(dial_navigation_t *nav, const esp_openclaw_reader_conversations_t *snapshot);
 bool dial_navigation_has_devices(const dial_navigation_t *nav);
 void dial_navigation_open_devices(dial_navigation_t *nav);
 void dial_navigation_open_local_device(dial_navigation_t *nav);
 void dial_navigation_devices_update(dial_navigation_t *nav, const esp_openclaw_devices_snapshot_t *snapshot);
-bool dial_navigation_show_reader(dial_navigation_t *nav, const dial_agents_snapshot_t *agents,
-                                 const dial_conversations_snapshot_t *view, bool preview);
+bool dial_navigation_show_reader(dial_navigation_t *nav, const esp_openclaw_reader_agents_t *agents,
+                                 const esp_openclaw_reader_conversations_t *view, bool preview);
 void dial_navigation_move(dial_navigation_t *nav, int direction);
 void dial_navigation_activate(dial_navigation_t *nav);
 
@@ -80,11 +77,11 @@ void dial_navigation_open_settings(dial_navigation_t *nav, dial_navigation_view_
 void dial_navigation_open_home_connection(dial_navigation_t *nav);
 void dial_navigation_set_brightness(dial_navigation_t *nav, int percent, bool failed, bool temporary);
 void dial_navigation_set_connection(dial_navigation_t *nav, const esp_openclaw_node_wifi_status_t *wifi, bool gateway);
-void dial_navigation_messaging_update(dial_navigation_t *nav, const dial_messaging_snapshot_t *snapshot);
+void dial_navigation_messaging_update(dial_navigation_t *nav, const esp_openclaw_reader_messaging_snapshot_t *snapshot);
 void dial_navigation_messaging_result(dial_navigation_t *nav, bool accepted);
-void dial_navigation_reply_update(dial_navigation_t *nav, const dial_reply_snapshot_t *snapshot);
+void dial_navigation_reply_update(dial_navigation_t *nav, const esp_openclaw_reader_reply_snapshot_t *snapshot);
 void dial_navigation_reply_result(dial_navigation_t *nav, bool accepted);
-void dial_navigation_creation_update(dial_navigation_t *nav, const dial_creation_snapshot_t *snapshot);
+void dial_navigation_creation_update(dial_navigation_t *nav, const esp_openclaw_reader_creation_snapshot_t *snapshot);
 void dial_navigation_creation_result(dial_navigation_t *nav, bool accepted);
 void dial_navigation_open_activity(dial_navigation_t *nav);
 void dial_navigation_activity_update(dial_navigation_t *nav, const dial_activity_t *activity);

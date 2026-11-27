@@ -124,7 +124,7 @@ void dial_home_animate(dial_home_t *home, const char *mood, uint32_t now)
 }
 
 void dial_home_render(dial_home_t *home, const openclaw_status_facts_t *status, bool assigned,
-                      const char *activity, const dial_home_context_t *context)
+                      const char *activity, const esp_openclaw_reader_home_t *context)
 {
     openclaw_status_bar_set(&home->status, status);
     bool connected = status->gateway_connected;

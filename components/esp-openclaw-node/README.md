@@ -21,6 +21,11 @@ frames with a configurable 2 MiB default ceiling. The ceiling is checked
 cumulatively before buffer growth. Oversize or malformed continuation ordering
 closes only the affected transport and reports `ESP_ERR_INVALID_SIZE` through
 `CONNECT_FAILED` during handshake or `DISCONNECTED` after the session is ready.
+An empty progress notification does not restart an active frame. Buffer
+allocation failure closes the transport with `ESP_ERR_NO_MEM`; later chunks
+cannot replace that first failure with an ordering error. Numeric
+`receive_diag` records describe the frame, configured limit and internal heap
+headroom without including message content.
 
 During connection, the SDK validates the complete JSON frame before retaining
 only the fields used for the challenge, response correlation, authentication,

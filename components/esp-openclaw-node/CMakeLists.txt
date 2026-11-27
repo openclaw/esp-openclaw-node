@@ -11,6 +11,7 @@ set(esp_openclaw_node_component_args
         "src/esp_openclaw_node_runtime.c"
     INCLUDE_DIRS "include"
     PRIV_INCLUDE_DIRS "private_include"
+    PRIV_REQUIRES heap
     REQUIRES
         espressif__cjson
         esp_app_format

@@ -24,7 +24,7 @@ def main():
         subprocess.run([
             "cc", "-std=c11", "-g", "-Wall", "-Wextra", "-Werror",
             "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
-            "-I", str(component / "private_include"), "-I", str(args.cjson_dir),
+            "-I", str(component / "private_include"), "-I", str(component / "include"), "-I", str(args.cjson_dir),
             str(component / "src/esp_openclaw_node_handshake.c"),
             str(component / "tests/test_handshake.c"), str(cjson), "-lm", "-o", str(executable),
         ], check=True)
@@ -39,7 +39,7 @@ def main():
         subprocess.run([
             "cc", "-std=c11", "-g", "-Wall", "-Wextra", "-Werror",
             "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
-            "-I", str(work), "-I", str(component / "private_include"), "-I", str(args.cjson_dir),
+            "-I", str(work), "-I", str(component / "private_include"), "-I", str(component / "include"), "-I", str(args.cjson_dir),
             str(component / "src/esp_openclaw_node_handshake.c"),
             str(component / "tests/test_response.c"), str(cjson), "-lm", "-o", str(response_test),
         ], check=True)

@@ -1,4 +1,5 @@
 #include "esp_openclaw_node_handshake.h"
+#include "esp_openclaw_json.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -187,6 +188,36 @@ static cJSON *materialize(field_t *fields, size_t count)
 fail:
     cJSON_Delete(object);
     return NULL;
+}
+
+bool esp_openclaw_json_visit_array(const char *json, size_t length, const char *key,
+                                 esp_openclaw_json_value_fn visit, void *context)
+{
+    if (json == NULL || length == 0 || key == NULL || visit == NULL) return false;
+    for (const unsigned char *p = (const unsigned char *)key; *p != '\0'; ++p)
+        if (*p < 0x20 || *p > 0x7e) return false;
+    field_t field = {.name = key};
+    cursor_t cursor = {.next = json, .end = json + length};
+    whitespace(&cursor);
+    if (cursor.next == cursor.end || *cursor.next != '{' || !value(&cursor, 0, &field, 1)) return false;
+    whitespace(&cursor);
+    if (cursor.next != cursor.end || field.start == NULL || *field.start != '[') return false;
+
+    cursor = (cursor_t){.next = field.start + 1, .end = field.end};
+    whitespace(&cursor);
+    if (cursor.next == cursor.end) return false;
+    if (*cursor.next == ']') return true;
+    for (;;) {
+        const char *start = cursor.next;
+        if (!value(&cursor, 0, NULL, 0) || !visit(start, (size_t)(cursor.next - start), context)) return false;
+        whitespace(&cursor);
+        if (cursor.next == cursor.end) return false;
+        char separator = *cursor.next++;
+        if (separator == ']') return cursor.next == cursor.end;
+        if (separator != ',') return false;
+        /* The first pass already checked separators and the complete suffix. */
+        whitespace(&cursor);
+    }
 }
 
 cJSON *esp_openclaw_node_parse_handshake(const char *json, size_t length)

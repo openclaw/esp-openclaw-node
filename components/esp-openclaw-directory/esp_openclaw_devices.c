@@ -1,6 +1,7 @@
 #include "esp_openclaw_devices.h"
 #include "esp_openclaw_devices_internal.h"
 #include "esp_openclaw_directory_json.h"
+#include "esp_openclaw_json.h"
 
 #include <stdatomic.h>
 #include <stdlib.h>
@@ -184,46 +185,68 @@ static void parse_commands(const cJSON *node, esp_openclaw_device_t *device)
     device->display_status = status;
 }
 
+typedef struct {
+    struct { const char *json; size_t length; } nodes[ESP_OPENCLAW_DEVICES_MAX];
+    size_t count;
+    bool too_large;
+} parse_context_t;
+
+static bool collect_node(const char *json, size_t length, void *context)
+{
+    parse_context_t *parsed = context;
+    if (parsed->count == ESP_OPENCLAW_DEVICES_MAX) {
+        parsed->too_large = true;
+        return false;
+    }
+    parsed->nodes[parsed->count].json = json;
+    parsed->nodes[parsed->count++].length = length;
+    return true;
+}
+
+static bool parse_node(const char *json, size_t length, esp_openclaw_devices_snapshot_t *page)
+{
+    bool valid = false;
+    cJSON *node = cJSON_ParseWithLength(json, length);
+    const cJSON *id = cJSON_GetObjectItemCaseSensitive(node, "nodeId");
+    const cJSON *name = cJSON_GetObjectItemCaseSensitive(node, "displayName");
+    const cJSON *model = cJSON_GetObjectItemCaseSensitive(node, "modelIdentifier");
+    const cJSON *connected = cJSON_GetObjectItemCaseSensitive(node, "connected");
+    const cJSON *paired = cJSON_GetObjectItemCaseSensitive(node, "paired");
+    if (!cJSON_IsObject(node) || !cJSON_IsString(id) || id->valuestring[0] == '\0' ||
+        strlen(id->valuestring) >= sizeof(page->devices[0].id) ||
+        (name != NULL && !cJSON_IsString(name)) || (model != NULL && !cJSON_IsString(model)) ||
+        (connected != NULL && !cJSON_IsBool(connected)) || (paired != NULL && !cJSON_IsBool(paired))) goto done;
+    for (size_t i = 0; i < page->count; ++i)
+        if (strcmp(page->devices[i].id, id->valuestring) == 0) goto done;
+    esp_openclaw_device_t *device = &page->devices[page->count++];
+    strcpy(device->id, id->valuestring);
+    copy_label(device->name, sizeof(device->name), name != NULL && name->valuestring[0] != '\0'
+        ? name->valuestring : id->valuestring);
+    if (model != NULL) copy_label(device->model, sizeof(device->model), model->valuestring);
+    device->connected_known = connected != NULL;
+    device->connected = cJSON_IsTrue(connected);
+    device->paired_known = paired != NULL;
+    device->paired = cJSON_IsTrue(paired);
+    parse_commands(node, device);
+    valid = true;
+done:
+    cJSON_Delete(node);
+    return valid;
+}
+
 static esp_openclaw_devices_state_t parse(const char *json, esp_openclaw_devices_snapshot_t *page)
 {
-    esp_openclaw_directory_result_t parsed;
-    cJSON *root = esp_openclaw_directory_parse_payload(json, strlen(json), &parsed);
-    cJSON *nodes = cJSON_GetObjectItemCaseSensitive(root, "nodes");
-    esp_openclaw_devices_state_t state = ESP_OPENCLAW_DEVICES_ERROR;
-    if (!cJSON_IsObject(root) || !cJSON_IsArray(nodes)) goto done;
-    if (cJSON_GetArraySize(nodes) > ESP_OPENCLAW_DEVICES_MAX) { state = ESP_OPENCLAW_DEVICES_TOO_LARGE; goto done; }
-    const cJSON *node;
-    cJSON_ArrayForEach(node, nodes) {
-        const cJSON *id = cJSON_GetObjectItemCaseSensitive(node, "nodeId");
-        const cJSON *name = cJSON_GetObjectItemCaseSensitive(node, "displayName");
-        const cJSON *model = cJSON_GetObjectItemCaseSensitive(node, "modelIdentifier");
-        const cJSON *connected = cJSON_GetObjectItemCaseSensitive(node, "connected");
-        const cJSON *paired = cJSON_GetObjectItemCaseSensitive(node, "paired");
-        if (!cJSON_IsObject(node) || !cJSON_IsString(id) || id->valuestring[0] == '\0' ||
-            strlen(id->valuestring) >= sizeof(page->devices[0].id) ||
-            (name != NULL && !cJSON_IsString(name)) || (model != NULL && !cJSON_IsString(model)) ||
-            (connected != NULL && !cJSON_IsBool(connected)) || (paired != NULL && !cJSON_IsBool(paired))) goto done;
-        for (size_t i = 0; i < page->count; ++i)
-            if (strcmp(page->devices[i].id, id->valuestring) == 0) goto done;
-        esp_openclaw_device_t *device = &page->devices[page->count++];
-        strcpy(device->id, id->valuestring);
-        copy_label(device->name, sizeof(device->name), name != NULL && name->valuestring[0] != '\0'
-            ? name->valuestring : id->valuestring);
-        if (model != NULL) copy_label(device->model, sizeof(device->model), model->valuestring);
-        device->connected_known = connected != NULL;
-        device->connected = cJSON_IsTrue(connected);
-        device->paired_known = paired != NULL;
-        device->paired = cJSON_IsTrue(paired);
-        parse_commands(node, device);
-    }
-    state = page->count == 0 ? ESP_OPENCLAW_DEVICES_EMPTY : ESP_OPENCLAW_DEVICES_READY;
-done:
-    if (state == ESP_OPENCLAW_DEVICES_ERROR)
-        diagnostic(RESPONSE_PARSE, parsed, strlen(json));
-    else if (state == ESP_OPENCLAW_DEVICES_TOO_LARGE)
-        diagnostic(RESPONSE_PARSE, ESP_OPENCLAW_DIRECTORY_TOO_LARGE, strlen(json));
-    cJSON_Delete(root);
-    return state;
+    size_t length = strlen(json);
+    esp_openclaw_directory_result_t result;
+    parse_context_t context = {0};
+    bool valid = esp_openclaw_directory_payload_bounds(json, length, &result) &&
+        esp_openclaw_json_visit_array(json, length, "nodes", collect_node, &context);
+    for (size_t i = 0; valid && i < context.count; ++i)
+        valid = parse_node(context.nodes[i].json, context.nodes[i].length, page);
+    if (valid) return page->count == 0 ? ESP_OPENCLAW_DEVICES_EMPTY : ESP_OPENCLAW_DEVICES_READY;
+    if (context.too_large) result = ESP_OPENCLAW_DIRECTORY_TOO_LARGE;
+    diagnostic(RESPONSE_PARSE, result, length);
+    return result == ESP_OPENCLAW_DIRECTORY_TOO_LARGE ? ESP_OPENCLAW_DEVICES_TOO_LARGE : ESP_OPENCLAW_DEVICES_ERROR;
 }
 
 static void response(esp_openclaw_node_handle_t client,

@@ -84,16 +84,23 @@ static bool bounded_depth(const char *json, size_t length)
     return depth == 0 && !quoted;
 }
 
-cJSON *esp_openclaw_directory_parse_payload(const char *json, size_t length,
-                            esp_openclaw_directory_result_t *result)
+bool esp_openclaw_directory_payload_bounds(const char *json, size_t length,
+                                         esp_openclaw_directory_result_t *result)
 {
     *result = ESP_OPENCLAW_DIRECTORY_INVALID;
     if (length > ESP_OPENCLAW_DIRECTORY_MAX_JSON_BYTES) {
         *result = ESP_OPENCLAW_DIRECTORY_TOO_LARGE;
-        return NULL;
+        return false;
     }
     if (json == NULL || length == 0 || !valid_utf8(json, length) ||
-        !bounded_depth(json, length)) return NULL;
+        !bounded_depth(json, length)) return false;
+    return true;
+}
+
+cJSON *esp_openclaw_directory_parse_payload(const char *json, size_t length,
+                            esp_openclaw_directory_result_t *result)
+{
+    if (!esp_openclaw_directory_payload_bounds(json, length, result)) return NULL;
     const char *end = NULL;
     cJSON *root = cJSON_ParseWithLengthOpts(json, length, &end, false);
     while (end != NULL && end < json + length &&

@@ -11,7 +11,36 @@ static compact_input_event_t sample(compact_input_t *input, uint32_t now,
 
 int main(void)
 {
+    compact_console_input_t console = {0};
+    compact_input_event_t select = {.select = true};
+    uint32_t request = 123;
+    assert(!compact_console_submit(&console, select, 1, 2, &request) && request == 0);
+    assert(!compact_console_submit(&console, (compact_input_event_t){0}, 2, 2, &request));
+    assert(!compact_console_submit(&console, (compact_input_event_t){.select = true, .move = 1}, 2, 2, &request));
+    assert(!compact_console_submit(&console, (compact_input_event_t){.move = 5}, 2, 2, &request));
+    assert(compact_console_submit(&console, select, 2, 2, &request) && request == 1);
+    assert(console.pending && console.revision == 2 && console.event.select);
+    assert(!compact_console_submit(&console, (compact_input_event_t){.home = true}, 2, 2, &request));
+    assert(console.event.select && console.request_id == 1);
+    assert(!compact_console_complete(&console, 2, true) && console.pending);
+    assert(compact_console_complete(&console, 1, true) && console.applied_count == 1);
+    assert(!compact_console_complete(&console, 1, true) && console.applied_count == 1);
+    assert(compact_console_submit(&console, select, 3, 3, &request) && request == 2);
+    assert(compact_console_complete(&console, 2, false));
+    assert(console.outcome == COMPACT_CONSOLE_STALE && console.applied_count == 1);
+    console.request_id = UINT32_MAX;
+    assert(!compact_console_submit(&console, select, 3, 3, &request));
     compact_input_t input = {0};
+    sample(&input, 0, 1, false, false); sample(&input, 30, 1, false, false);
+    sample(&input, 40, 1, true, false); sample(&input, 70, 1, true, false);
+    compact_input_cancel_pending(&input); // USB scroll need not change view revision.
+    sample(&input, 90, 1, false, false);
+    assert(!sample(&input, 120, 1, false, false).select);
+    sample(&input, 130, 1, true, false); sample(&input, 160, 1, true, false);
+    compact_input_cancel_pending(&input);
+    assert(!sample(&input, 1000, 1, true, false).home);
+    input.steps = 3; compact_input_cancel_pending(&input); assert(input.steps == 0);
+    input = (compact_input_t){0};
     assert(!sample(&input, 0, 1, true, false).select);
     assert(!sample(&input, 1000, 1, true, false).home);
     sample(&input, 1010, 1, false, false);

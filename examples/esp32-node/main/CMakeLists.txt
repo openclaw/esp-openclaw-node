@@ -30,5 +30,5 @@ idf_component_register(
 )
 
 if(CONFIG_EXAMPLE_BOARD_M5STICKC OR CONFIG_EXAMPLE_BOARD_T_EMBED)
-    target_sources(${COMPONENT_LIB} PRIVATE "compact_board.c" "compact_workspace.c" "compact_input.c" "compact_reader_console.c")
+    target_sources(${COMPONENT_LIB} PRIVATE "compact_board.c" "compact_workspace.c" "compact_input.c" "compact_reader_console.c" "compact_workspace_console.c")
 endif()

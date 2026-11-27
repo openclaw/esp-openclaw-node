@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add revision-checked USB workspace navigation with delivery receipts and counters separate from physical input.
+
 - Add a one-attempt compact reader setup command with hidden USB input and connection-generation checks through token persistence.
 
 - Add credential-free validation of bounded bootstrap codes for one exact Gateway, and wipe temporary decoded authentication material.

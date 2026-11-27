@@ -115,6 +115,17 @@ font displays letters in uppercase and supports digits, spaces, and `. , - _ : !
 Unsupported characters are rejected. Wi-Fi and Gateway status stay visible
 in the footer. Messages are kept in RAM and reset after reboot.
 
+For short messages, add `"textSize":"large"` to `display.show`. This doubles
+the body font size and fits two rows of 12 characters (24 characters total).
+The heading and connection footer retain their normal size. Omit `textSize`
+or use `"normal"` for the four-row layout. `display.status` reports the current
+`textSize`, `textColumns`, `textRows`, and `textMaxLength`.
+
+```sh
+openclaw nodes invoke --node <node-id> --command display.show \
+  --params '{"heading":"OpenClaw","text":"Ready","textSize":"large"}' --json
+```
+
 `display.show` queues the latest message. Its response and `display.status`
 include `generation`, `renderedGeneration`, and `rendered`. A message is
 confirmed drawn only when `rendered` is true and both generations match; an

@@ -41,6 +41,7 @@ typedef struct {
     char heading[COMPACT_TEXT_COLUMNS + 1];
     char text[COMPACT_TEXT_MAX + 1];
     char lines[COMPACT_TEXT_ROWS][COMPACT_TEXT_COLUMNS + 1];
+    bool large_text;
     uint32_t generation;
 } compact_board_content_t;
 static compact_board_content_t s_content;
@@ -129,12 +130,11 @@ static const uint8_t PUNCTUATION_FONT[][5] = {
     {0,0x41,0x22,0x1c,0}, {0x14,0x14,0x14,0x14,0x14},
 };
 
-static void draw_text(int row, const char *text, uint16_t color)
+static void draw_text_at(int x, int y, int scale, const char *text, uint16_t color)
 {
     // esp_lcd transmits RGB565 most significant byte first.
     color = (uint16_t)((color << 8) | (color >> 8));
-    int x = 3 * SCALE, y = (3 + row * 10) * SCALE;
-    for (; *text && x + 5 * SCALE < WIDTH; ++text, x += 6 * SCALE) {
+    for (; *text && x + 5 * scale < WIDTH; ++text, x += 6 * scale) {
         unsigned char c = (unsigned char)*text;
         if (c >= 'a' && c <= 'z') c -= 'a' - 'A';
         const uint8_t *glyph = NULL;
@@ -146,15 +146,20 @@ static void draw_text(int row, const char *text, uint16_t color)
             uint8_t bits = glyph ? glyph[col] : 0;
             for (int bit = 0; bit < 7; ++bit) {
                 if (!(bits & (1U << bit))) continue;
-                for (int dy = 0; dy < SCALE; ++dy) {
-                    for (int dx = 0; dx < SCALE; ++dx) {
-                        int px = x + col * SCALE + dx, py = y + bit * SCALE + dy;
+                for (int dy = 0; dy < scale; ++dy) {
+                    for (int dx = 0; dx < scale; ++dx) {
+                        int px = x + col * scale + dx, py = y + bit * scale + dy;
                         if (py < HEIGHT) s_pixels[py * WIDTH + px] = color;
                     }
                 }
             }
         }
     }
+}
+
+static void draw_text(int row, const char *text, uint16_t color)
+{
+    draw_text_at(3 * SCALE, (3 + row * 10) * SCALE, SCALE, text, color);
 }
 
 static bool flush_done(esp_lcd_panel_io_handle_t io, esp_lcd_panel_io_event_data_t *event, void *ctx)
@@ -177,7 +182,13 @@ static void display_task(void *ctx)
         xSemaphoreGive(s_state_mutex);
         memset(s_pixels, 0, WIDTH * HEIGHT * sizeof(*s_pixels));
         draw_text(0, content.heading, 0x07ff);
-        for (int row = 0; row < COMPACT_TEXT_ROWS; ++row) draw_text(row + 1, content.lines[row], 0xffff);
+        if (content.large_text) {
+            for (int row = 0; row < COMPACT_LARGE_ROWS; ++row) {
+                draw_text_at(3 * SCALE, (14 + row * 20) * SCALE, 2 * SCALE, content.lines[row], 0xffff);
+            }
+        } else {
+            for (int row = 0; row < COMPACT_TEXT_ROWS; ++row) draw_text(row + 1, content.lines[row], 0xffff);
+        }
         char network[COMPACT_TEXT_COLUMNS + 1];
         snprintf(network, sizeof(network), "WIFI %s", wifi.connected ? wifi.ip : "OFFLINE");
         draw_text(6, network, wifi.connected ? 0x07e0 : 0xfd20);
@@ -206,9 +217,11 @@ static esp_err_t display_status(char **out_payload_json)
     cJSON *payload = cJSON_CreateObject();
     if (payload == NULL) return ESP_ERR_NO_MEM;
     xSemaphoreTake(s_state_mutex, portMAX_DELAY);
+    bool large_text = s_content.large_text;
     bool ok = cJSON_AddBoolToObject(payload, "ready", s_ready) &&
         cJSON_AddStringToObject(payload, "heading", s_content.heading) &&
         cJSON_AddStringToObject(payload, "text", s_content.text) &&
+        cJSON_AddStringToObject(payload, "textSize", large_text ? "large" : "normal") &&
         cJSON_AddNumberToObject(payload, "generation", s_content.generation) &&
         cJSON_AddNumberToObject(payload, "renderedGeneration", s_rendered_generation) &&
         cJSON_AddBoolToObject(payload, "rendered", s_ready && s_rendered_generation == s_content.generation) &&
@@ -216,9 +229,9 @@ static esp_err_t display_status(char **out_payload_json)
         cJSON_AddNumberToObject(payload, "lastRenderMs", (double)s_last_render_ms);
     xSemaphoreGive(s_state_mutex);
     ok = ok && cJSON_AddNumberToObject(payload, "headingMaxLength", COMPACT_TEXT_COLUMNS) &&
-        cJSON_AddNumberToObject(payload, "textMaxLength", COMPACT_TEXT_MAX) &&
-        cJSON_AddNumberToObject(payload, "textColumns", COMPACT_TEXT_COLUMNS) &&
-        cJSON_AddNumberToObject(payload, "textRows", COMPACT_TEXT_ROWS) &&
+        cJSON_AddNumberToObject(payload, "textMaxLength", large_text ? COMPACT_LARGE_COLUMNS * COMPACT_LARGE_ROWS : COMPACT_TEXT_MAX) &&
+        cJSON_AddNumberToObject(payload, "textColumns", large_text ? COMPACT_LARGE_COLUMNS : COMPACT_TEXT_COLUMNS) &&
+        cJSON_AddNumberToObject(payload, "textRows", large_text ? COMPACT_LARGE_ROWS : COMPACT_TEXT_ROWS) &&
         cJSON_AddNumberToObject(payload, "width", WIDTH) &&
         cJSON_AddNumberToObject(payload, "height", HEIGHT);
     if (!ok) {
@@ -246,14 +259,26 @@ static esp_err_t handle_display_show(esp_openclaw_node_handle_t node, void *cont
                         TAG, "invalid display params");
     cJSON *heading = cJSON_GetObjectItemCaseSensitive(params, "heading");
     cJSON *text = cJSON_GetObjectItemCaseSensitive(params, "text");
+    cJSON *size = cJSON_GetObjectItemCaseSensitive(params, "textSize");
     compact_board_content_t content = {0};
+    if (size != NULL && (!cJSON_IsString(size) ||
+        (strcmp(size->valuestring, "normal") != 0 && strcmp(size->valuestring, "large") != 0))) {
+        cJSON_Delete(params);
+        out_error->code = "INVALID_PARAMS";
+        out_error->message = "textSize must be normal or large";
+        return ESP_ERR_INVALID_ARG;
+    }
+    content.large_text = size != NULL && strcmp(size->valuestring, "large") == 0;
+    size_t rows = content.large_text ? COMPACT_LARGE_ROWS : COMPACT_TEXT_ROWS;
+    size_t columns = content.large_text ? COMPACT_LARGE_COLUMNS : COMPACT_TEXT_COLUMNS;
     char heading_line[1][COMPACT_TEXT_COLUMNS + 1];
     if (!cJSON_IsObject(params) || !cJSON_IsString(heading) || !cJSON_IsString(text) ||
         !compact_board_text_layout(heading->valuestring, 1, heading_line) ||
-        !compact_board_text_layout(text->valuestring, COMPACT_TEXT_ROWS, content.lines)) {
+        strlen(text->valuestring) > rows * columns ||
+        !compact_board_text_layout_width(text->valuestring, rows, columns, content.lines)) {
         cJSON_Delete(params);
         out_error->code = "INVALID_PARAMS";
-        out_error->message = "heading must fit 25 columns and text 4 rows of 25; use supported ASCII characters";
+        out_error->message = "heading must fit 25 columns; text must fit the selected size using supported ASCII characters";
         return ESP_ERR_INVALID_ARG;
     }
     memcpy(content.heading, heading_line[0], sizeof(content.heading));

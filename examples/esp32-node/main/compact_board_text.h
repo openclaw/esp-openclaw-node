@@ -7,6 +7,7 @@
 #include <string.h>
 
 enum { COMPACT_TEXT_COLUMNS = 25, COMPACT_TEXT_ROWS = 4, COMPACT_TEXT_MAX = 100 };
+enum { COMPACT_LARGE_COLUMNS = 12, COMPACT_LARGE_ROWS = 2 };
 
 // Keep accepted characters aligned with the small built-in font.
 static inline bool compact_board_text_character(unsigned char c)
@@ -16,10 +17,11 @@ static inline bool compact_board_text_character(unsigned char c)
 }
 
 // Prefer word boundaries; split only words wider than the screen.
-static inline bool compact_board_text_layout(const char *text, size_t rows,
-                                            char lines[][COMPACT_TEXT_COLUMNS + 1])
+static inline bool compact_board_text_layout_width(const char *text, size_t rows, size_t columns,
+                                                  char lines[][COMPACT_TEXT_COLUMNS + 1])
 {
-    if (text == NULL || rows == 0 || rows > COMPACT_TEXT_ROWS) return false;
+    if (text == NULL || rows == 0 || rows > COMPACT_TEXT_ROWS ||
+        columns == 0 || columns > COMPACT_TEXT_COLUMNS) return false;
     memset(lines, 0, rows * (COMPACT_TEXT_COLUMNS + 1));
     size_t row = 0, column = 0;
     for (size_t i = 0; text[i] != '\0'; ++i) {
@@ -37,13 +39,13 @@ static inline bool compact_board_text_layout(const char *text, size_t rows,
                    text[i + word_length] != ' ' && text[i + word_length] != '\n') {
                 ++word_length;
             }
-            if (word_length <= COMPACT_TEXT_COLUMNS && column + word_length > COMPACT_TEXT_COLUMNS) {
+            if (word_length <= columns && column + word_length > columns) {
                 while (column > 0 && lines[row][column - 1] == ' ') lines[row][--column] = '\0';
                 ++row;
                 column = 0;
             }
         }
-        if (column == COMPACT_TEXT_COLUMNS) {
+        if (column == columns) {
             if (rows > 1 && c == ' ') continue;
             ++row;
             column = 0;
@@ -52,4 +54,10 @@ static inline bool compact_board_text_layout(const char *text, size_t rows,
         lines[row][column++] = (char)c;
     }
     return true;
+}
+
+static inline bool compact_board_text_layout(const char *text, size_t rows,
+                                            char lines[][COMPACT_TEXT_COLUMNS + 1])
+{
+    return compact_board_text_layout_width(text, rows, COMPACT_TEXT_COLUMNS, lines);
 }

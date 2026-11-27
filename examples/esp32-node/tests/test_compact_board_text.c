@@ -67,6 +67,17 @@ int main(void)
     assert(strcmp(lines[1], "") == 0);
     assert(strcmp(lines[2], "two") == 0);
 
+    assert(compact_board_text_layout_width("Hello world again", 2, 12, lines));
+    assert(strcmp(lines[0], "Hello world") == 0);
+    assert(strcmp(lines[1], "again") == 0);
+    assert(compact_board_text_layout_width("123456789012345678901234", 2, 12, lines));
+    assert(strlen(lines[0]) == 12 && strlen(lines[1]) == 12);
+    assert(!compact_board_text_layout_width("1234567890123456789012345", 2, 12, lines));
+    assert(compact_board_text_layout_width("123456789012 \nB", 2, 12, lines));
+    assert(strcmp(lines[1], "B") == 0);
+    assert(!compact_board_text_layout_width("text", 2, 0, lines));
+    assert(!compact_board_text_layout_width("text", 2, 26, lines));
+
     memset(full, 'A', sizeof(full));
     full[COMPACT_TEXT_MAX] = '\0';
     assert(compact_board_text_layout(full, 4, lines));

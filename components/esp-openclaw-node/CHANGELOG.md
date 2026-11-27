@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add optional large text to compact display messages while keeping the heading and connection footer visible.
+
 - Wrap compact display messages at word boundaries so sentences remain readable on M5StickC and T-Embed screens.
 
 - Add an optional macOS LAN TLS passthrough helper with exact node source admission, router identity checks, bounded connections, and automatic rebinding within the configured LAN.

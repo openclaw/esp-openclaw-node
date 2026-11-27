@@ -15,7 +15,7 @@ static inline bool compact_board_text_character(unsigned char c)
            (c >= '0' && c <= '9') || (c != '\0' && strchr(" .,-_:!?/+%()=", c) != NULL);
 }
 
-// Wrap before the next character, so a newline after a full row does not skip a row.
+// Prefer word boundaries; split only words wider than the screen.
 static inline bool compact_board_text_layout(const char *text, size_t rows,
                                             char lines[][COMPACT_TEXT_COLUMNS + 1])
 {
@@ -31,7 +31,20 @@ static inline bool compact_board_text_layout(const char *text, size_t rows,
             continue;
         }
         if (!compact_board_text_character(c)) return false;
+        if (rows > 1 && c != ' ' && column > 0 && i > 0 && text[i - 1] == ' ') {
+            size_t word_length = 0;
+            while (i + word_length <= COMPACT_TEXT_MAX && text[i + word_length] != '\0' &&
+                   text[i + word_length] != ' ' && text[i + word_length] != '\n') {
+                ++word_length;
+            }
+            if (word_length <= COMPACT_TEXT_COLUMNS && column + word_length > COMPACT_TEXT_COLUMNS) {
+                while (column > 0 && lines[row][column - 1] == ' ') lines[row][--column] = '\0';
+                ++row;
+                column = 0;
+            }
+        }
         if (column == COMPACT_TEXT_COLUMNS) {
+            if (rows > 1 && c == ' ') continue;
             ++row;
             column = 0;
         }

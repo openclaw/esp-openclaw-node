@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add a target-checked Check conversation action to compact Activity, and cancel held selections when reply access changes.
+
 - Request two conversations per page on compact boards to reduce temporary response memory, with a configurable reader page size and unchanged pagination.
 
 - Report bounded, content-free diagnostics for reader request, response-copy, and parse failures, including Gateway response serialization allocation failures.

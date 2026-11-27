@@ -19,7 +19,7 @@ typedef enum {
 typedef enum {
     OPEN_VIEW, GO_BACK, OPEN_AGENT, OPEN_SESSION, REFRESH_AGENTS, PAGE_AGENTS,
     REFRESH_SESSIONS, PAGE_SESSIONS, OPEN_REPLY, NEW_THREAD, OPEN_DEVICE,
-    REFRESH_DEVICES, TOGGLE_READING, TOGGLE_DENSITY, BEGIN_IDENTIFY, SEND_IDENTIFY, CONTROL_ACCESS, IDENTIFY_RESULT,
+    REFRESH_DEVICES, TOGGLE_READING, TOGGLE_DENSITY, BEGIN_IDENTIFY, SEND_IDENTIFY, CONTROL_ACCESS, IDENTIFY_RESULT, READ_REPLY,
     BEGIN_DRAFT, DISCARD_DRAFT, DRAFT_GROUP, DRAFT_CHARACTER, DRAFT_DELETE, REVIEW_DRAFT, SEND_DRAFT, EDIT_DRAFT, CLOSE_DRAFT_REVIEW,
 } action_t;
 
@@ -72,6 +72,14 @@ static create_action_t create_action(void)
     if (ui.creation.can_create) return CREATE_SUBMIT;
     if (ui.creation.can_open) return CREATE_OPEN;
     return ui.messaging.state != ESP_OPENCLAW_READER_MESSAGING_READY ? CREATE_ACCESS : CREATE_BACK;
+}
+
+static bool activity_reply_readable(void)
+{
+    return ui.reply.can_read &&
+        (ui.reply.state == ESP_OPENCLAW_READER_REPLY_SENDING || ui.reply.state == ESP_OPENCLAW_READER_REPLY_ACCEPTED ||
+         ui.reply.state == ESP_OPENCLAW_READER_REPLY_SENT || ui.reply.state == ESP_OPENCLAW_READER_REPLY_UNKNOWN ||
+         ui.reply.state == ESP_OPENCLAW_READER_REPLY_FAILED);
 }
 
 static const lv_font_t *font(void)
@@ -319,6 +327,7 @@ static void rows(void)
         row("Cancel", OPEN_VIEW, DEVICE_ACTIONS);
         break;
     case ACTIVITY_ACTIONS:
+        if (activity_reply_readable()) row("Check conversation", READ_REPLY, 0);
         if (has_identify_result()) row("Device result", IDENTIFY_RESULT, 0);
         row("Back to activity", OPEN_VIEW, ACTIVITY); row("Menu", OPEN_VIEW, MENU);
         break;
@@ -576,6 +585,7 @@ void compact_workspace_poll(const esp_openclaw_node_wifi_status_t *wifi, bool co
         bool old_home_available = ui.home.available, old_home_preview = ui.home.preview;
         unsigned old_agents = ui.agents.revision, old_sessions = ui.conversations.revision;
         unsigned old_preview = ui.conversations.preview_revision, old_reply = ui.reply.revision;
+        bool old_reply_read = activity_reply_readable();
         unsigned old_creation = ui.creation.revision, old_messaging = ui.messaging.revision;
         unsigned old_devices = ui.devices.revision, old_identify = ui.identify.revision;
         esp_openclaw_reader_state_t old_agents_state = ui.agents.state;
@@ -609,6 +619,7 @@ void compact_workspace_poll(const esp_openclaw_node_wifi_status_t *wifi, bool co
             ((ui.view == HOME || ui.view == SESSIONS || ui.view == READ || ui.view == READ_ACTIONS || ui.view == REPLY_PICK) &&
                 (sessions_changed || preview_changed)) ||
             ((ui.view == REPLY_REVIEW || ui.view == REPLY_CONFIRM || ui.view == ACTIVITY) && old_reply != ui.reply.revision) ||
+            (ui.view == ACTIVITY_ACTIONS && (old_reply != ui.reply.revision || old_reply_read != activity_reply_readable())) ||
             ((ui.view == DRAFT_MENU || ui.view == DRAFT_CHARS || ui.view == DRAFT_PREVIEW || ui.view == DRAFT_CHOICE) &&
                 (sessions_changed || preview_changed || old_reader_ready != ui.reader_ready)) ||
             (ui.view == CREATE && (old_creation != ui.creation.revision || old_create_action != create_action())) ||
@@ -775,6 +786,10 @@ void compact_workspace_input(compact_input_event_t event)
             snprintf(ui.device_id, sizeof(ui.device_id), "%s", ui.last_identify.target.id);
             ui.identify_history = true;
             open_view(IDENTIFY); break;
+        case READ_REPLY:
+            failure(esp_openclaw_reader_reply_read(ui.reply.revision));
+            if (!ui.note[0]) open_view(READ);
+            break;
         case TOGGLE_READING:
             if (openclaw_preferences_save(OPENCLAW_PREFERENCE_READING, !ui.large) == ESP_OK) ui.large = !ui.large;
             else snprintf(ui.note, sizeof(ui.note), "Text size not saved");

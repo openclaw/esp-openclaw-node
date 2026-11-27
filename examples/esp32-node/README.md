@@ -122,6 +122,9 @@ and replacement display code, and choose Show code. Messaging access is required
 The result distinguishes acceptance from confirmed rendering; an unknown outcome
 is never retried automatically. Activity retains the latest Identify result and
 returns to that captured target even after navigating elsewhere.
+Activity also offers Check conversation while the submitted message's conversation is
+still selected and accessible. It refreshes that reply's conversation without
+sending another message; changing the selection removes the shortcut.
 
 To add reader access to an already paired compact board, connect its USB console
 and run `reader setup-code` without an argument. Enter a Gateway bootstrap setup

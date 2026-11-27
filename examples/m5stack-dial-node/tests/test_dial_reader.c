@@ -36,6 +36,11 @@ static esp_openclaw_node_gateway_request_cb_t approval_response;
 static void *approval_context;
 static int write_scopes;
 static bool registered_write;
+static bool saved_session_present;
+static bool cancel_restore_during_connect;
+bool esp_openclaw_node_has_saved_session(esp_openclaw_node_handle_t handle) {
+    assert(handle == &client && !locked); return saved_session_present;
+}
 static esp_openclaw_node_connect_source_t last_source;
 static bool lease_held;
 static unsigned bootstrap_calls, bootstrap_cancels;
@@ -173,7 +178,15 @@ esp_err_t esp_openclaw_node_request_connect(esp_openclaw_node_handle_t handle, c
         assert(request->source == ESP_OPENCLAW_NODE_CONNECT_SOURCE_SAVED_SESSION);
         assert(request->gateway_uri == NULL && request->value == NULL);
     }
-    ++connects; return connect_result;
+    ++connects;
+    if (cancel_restore_during_connect) {
+        cancel_restore_during_connect = false;
+        esp_openclaw_reader_messaging_snapshot_t snapshot;
+        esp_openclaw_reader_messaging_copy(&snapshot);
+        assert(snapshot.state == ESP_OPENCLAW_READER_MESSAGING_CONNECTING);
+        assert(esp_openclaw_reader_messaging_cancel(snapshot.revision) == ESP_OK);
+    }
+    return connect_result;
 }
 esp_err_t esp_openclaw_node_request_disconnect(esp_openclaw_node_handle_t handle) {
     assert(!locked && handle == &client); ++disconnects; return disconnect_result;
@@ -332,8 +345,74 @@ static void test_bootstrap(void) {
     puts("Reader bootstrap: one-shot admission, revocation, deadline and lease completion passed");
 }
 
+static void test_write_restore(bool denied, bool missing, bool retry, bool cancel, bool uri_failure) {
+    const esp_openclaw_reader_config_t config = {
+        .display_name = "Test Reader", .model_identifier = "test-board", .tls_server_name = "gateway.example"};
+    saved_session_present = true;
+    connect_result = retry || cancel ? ESP_ERR_NO_MEM : missing ? ESP_ERR_NOT_FOUND : ESP_OK;
+    cancel_restore_during_connect = cancel;
+    assert(esp_openclaw_reader_start(&node, &config) == ESP_OK);
+    step(); node_connected(11); step();
+    assert(connects == 1 && registered_write && write_scopes == 1 && queries == 0);
+    if (cancel) {
+        connect_result = ESP_OK;
+        step(); assert(!registered_write && write_scopes == 1 && connects == 2);
+        connected(71); step(); status("ready", true); messaging(ESP_OPENCLAW_READER_MESSAGING_OFF);
+        assert(queries == 0 && bootstrap_calls == 0);
+        puts("Reader restore: cancellation during a failed admission remains read-only");
+        return;
+    }
+    if (retry) {
+        connect_result = ESP_OK;
+        step(); assert(registered_write && write_scopes == 2 && connects == 2);
+        connected(71); step(); messaging(ESP_OPENCLAW_READER_MESSAGING_READY);
+        assert(queries == 0 && bootstrap_calls == 0);
+        puts("Reader restore: transient allocation failure retains write restoration intent");
+        return;
+    }
+    if (missing) {
+        step(); status("access-needed", false);
+        assert(!registered_write && connects == 2 && destroys == 1);
+        step(); assert(connects == 2 && bootstrap_calls == 0 && queries == 0);
+        puts("Reader restore: missing saved token falls back without bootstrap or approval");
+        return;
+    }
+    if (denied) {
+        esp_openclaw_node_connect_failed_event_t failure = {.reason = ESP_OPENCLAW_NODE_CONNECT_FAILURE_AUTH_REJECTED};
+        event_cb(&client, ESP_OPENCLAW_NODE_EVENT_CONNECT_FAILED, &failure, NULL);
+        step(); assert(!registered_write && connects == 2 && destroys == 1);
+        connected(71); step(); status("ready", true); messaging(ESP_OPENCLAW_READER_MESSAGING_OFF);
+        disconnected(ESP_OPENCLAW_NODE_DISCONNECTED_REASON_CONNECTION_LOST); step();
+        connected(72); step(); assert(write_scopes == 1 && queries == 0 && bootstrap_calls == 0);
+        puts("Reader restore: insufficient scope falls back read-only once without approval");
+        return;
+    }
+    if (uri_failure) {
+        connected(71); fail_uri = &client; step(); status("error", false);
+        assert(registered_write && write_scopes == 1);
+        disconnected(ESP_OPENCLAW_NODE_DISCONNECTED_REASON_REQUESTED); step();
+        assert(registered_write && write_scopes == 1 && connects == 2);
+        connected(72); step(); status("ready", true); messaging(ESP_OPENCLAW_READER_MESSAGING_READY);
+        assert(queries == 0 && bootstrap_calls == 0);
+        puts("Reader restore: failed connected URI copy retains the saved write grant");
+        return;
+    }
+    connected(71); step(); status("ready", true); messaging(ESP_OPENCLAW_READER_MESSAGING_READY);
+    assert(queries == 0 && bootstrap_calls == 0);
+    node_connected(12); step(); disconnected(ESP_OPENCLAW_NODE_DISCONNECTED_REASON_REQUESTED); step();
+    assert(registered_write && write_scopes == 2);
+    connected(72); step(); status("ready", true); messaging(ESP_OPENCLAW_READER_MESSAGING_READY);
+    assert(queries == 0 && bootstrap_calls == 0);
+    puts("Reader restore: saved write access and primary reconnect need no new approval");
+}
+
 int main(int argc, char **argv) {
     if (argc == 2 && strcmp(argv[1], "bootstrap") == 0) { test_bootstrap(); return 0; }
+    if (argc == 2 && strncmp(argv[1], "restore", 7) == 0) {
+        test_write_restore(strcmp(argv[1], "restore-denied") == 0, strcmp(argv[1], "restore-missing") == 0,
+            strcmp(argv[1], "restore-retry") == 0, strcmp(argv[1], "restore-cancel") == 0,
+            strcmp(argv[1], "restore-uri") == 0); return 0;
+    }
     status("unavailable", false);
     esp_openclaw_devices_snapshot_t devices;
     esp_openclaw_reader_devices_copy(&devices);

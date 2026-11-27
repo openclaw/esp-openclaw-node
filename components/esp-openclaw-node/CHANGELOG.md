@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Restore previously granted reader write access after reboot or primary reconnect, including retryable local URI-copy failures, with a read-only fallback and no automatic approval request.
+
 - Report the pending messaging approval ID in USB reader status for exact request matching.
 
 - Include the selected workspace row in local USB diagnostics without exposing conversation titles through Gateway display commands.

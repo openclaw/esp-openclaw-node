@@ -33,6 +33,7 @@ def main():
     includes = [
         tests / "host", tests.parent, tests.parent / "include", cjson,
         repo / "components/esp-openclaw-node/include",
+        repo / "components/esp-openclaw-node/private_include",
         repo / "components/esp-openclaw-node-provisioning/include",
         repo / "components/esp-openclaw-talk/include",
         repo / "components/esp-openclaw-chat/include",
@@ -91,6 +92,7 @@ def main():
             str(tests.parent / "room_agent_directory.c"),
             str(tests.parent / "room_voice_draft.c"),
             str(tests.parent / "room_messaging.c"),
+            str(repo / "components/esp-openclaw-node/src/esp_openclaw_node_handshake.c"),
             str(repo / "components/esp-openclaw-directory/esp_openclaw_devices.c"),
             str(repo / "components/esp-openclaw-directory/esp_openclaw_directory.c"),
             str(repo / "components/esp-openclaw-directory/esp_openclaw_avatar.c"),

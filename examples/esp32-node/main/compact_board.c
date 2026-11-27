@@ -191,9 +191,19 @@ static void display_task(void *ctx)
     compact_workspace_start(WIDTH, HEIGHT, false, board_brightness);
 #endif
     compact_input_t input = {0};
+    esp_openclaw_node_wifi_status_t wifi = {0};
+    uint32_t wifi_updated_at = 0;
+    bool wifi_refreshed = false;
+    TickType_t wait_ticks = pdMS_TO_TICKS(5);
+    /* The default 100 Hz scheduler rounds a 5 ms wait down to zero. */
+    if (wait_ticks == 0) wait_ticks = 1;
     for (;;) {
-        esp_openclaw_node_wifi_status_t wifi;
-        esp_openclaw_node_wifi_get_status(&wifi);
+        uint32_t wifi_now = tick_ms();
+        if (!wifi_refreshed || wifi_now - wifi_updated_at >= 250) {
+            esp_openclaw_node_wifi_get_status(&wifi);
+            wifi_updated_at = wifi_now;
+            wifi_refreshed = true;
+        }
         bool connected = wifi.connected && atomic_load(&s_connected);
         xSemaphoreTake(s_state_mutex, portMAX_DELAY);
         compact_board_content_t content = s_content;
@@ -239,7 +249,7 @@ static void display_task(void *ctx)
         snprintf(s_console_selection, sizeof(s_console_selection), "%s", compact_workspace_selection());
         if (console.pending) compact_console_complete(&s_console_input, console.request_id, console_applied);
         xSemaphoreGive(s_state_mutex);
-        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(5));
+        ulTaskNotifyTake(pdTRUE, wait_ticks);
     }
 }
 

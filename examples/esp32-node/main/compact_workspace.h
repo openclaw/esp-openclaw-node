@@ -16,6 +16,8 @@ void compact_workspace_message(const char *heading, const char *text, bool large
 unsigned compact_workspace_revision(void);
 bool compact_workspace_message_visible(void);
 const char *compact_workspace_view(void);
+/* Local USB diagnostic from the same rendered snapshot as revision. */
+unsigned compact_workspace_device_state(void);
 /* UI-owner access after poll/render. Never publish this label through node commands. */
 const char *compact_workspace_selection(void);
 /* Local USB action for the creation screen, from the same UI snapshot as revision. */

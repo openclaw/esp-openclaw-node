@@ -326,9 +326,27 @@ int main(int argc, char **argv) {
     assert(compact_workspace_revision() != revision);
     home(); move(1); move(2); select_item();
     devices.state = ESP_OPENCLAW_DEVICES_LOADING; devices.count = 0; ++devices.revision; step();
+    assert(compact_workspace_device_state() == ESP_OPENCLAW_DEVICES_LOADING);
+    assert(strstr(lv_label_get_text(lv_obj_get_child(lv_screen_active(), 1)), "Loading devices") != NULL);
     revision = compact_workspace_revision();
+    const struct { esp_openclaw_devices_state_t state; const char *heading; } failures[] = {
+        {ESP_OPENCLAW_DEVICES_OFFLINE, "Devices offline"},
+        {ESP_OPENCLAW_DEVICES_EMPTY, "No devices"},
+        {ESP_OPENCLAW_DEVICES_ERROR, "Load failed"},
+        {ESP_OPENCLAW_DEVICES_TOO_LARGE, "List too large"},
+        {ESP_OPENCLAW_DEVICES_TIMEOUT, "Load timed out"},
+    };
+    for (size_t i = 0; i < sizeof(failures) / sizeof(failures[0]); ++i) {
+        devices.state = failures[i].state; step();
+        assert(compact_workspace_device_state() == (unsigned)failures[i].state);
+        assert(compact_workspace_revision() != revision);
+        revision = compact_workspace_revision();
+        assert(strstr(lv_label_get_text(lv_obj_get_child(lv_screen_active(), 1)), failures[i].heading) != NULL);
+        assert(find_row("Refresh"));
+    }
     devices.state = ESP_OPENCLAW_DEVICES_READY; devices.count = 1; step();
     assert(compact_workspace_revision() != revision);
+    assert(find_row("Display board"));
     home(); move(1); choose("Conversations"); choose("Planning a good day"); select_item(); choose("Reply"); choose("Write message");
     assert(strcmp(compact_workspace_view(), "draft") == 0);
     choose("A-M"); choose("H"); choose("Back"); choose("a-m"); choose("i"); choose("Back");

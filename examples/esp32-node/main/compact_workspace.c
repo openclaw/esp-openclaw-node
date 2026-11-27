@@ -364,7 +364,16 @@ static const char *title(void)
     case REPLY_PICK: return "Quick reply";
     case REPLY_REVIEW: return "Review reply";
     case CREATE: return "New conversation";
-    case DEVICES: return "Devices";
+    case DEVICES:
+        switch (ui.devices.state) {
+        case ESP_OPENCLAW_DEVICES_OFFLINE: return "Devices offline";
+        case ESP_OPENCLAW_DEVICES_LOADING: return "Loading devices";
+        case ESP_OPENCLAW_DEVICES_EMPTY: return "No devices";
+        case ESP_OPENCLAW_DEVICES_ERROR: return "Load failed";
+        case ESP_OPENCLAW_DEVICES_TOO_LARGE: return "List too large";
+        case ESP_OPENCLAW_DEVICES_TIMEOUT: return "Load timed out";
+        default: return "Devices";
+        }
     case DEVICE: return "Device details";
     case SETTINGS: return "Settings";
     case DISPLAY: return "Display";
@@ -849,6 +858,7 @@ void compact_workspace_message(const char *heading, const char *text, bool large
 unsigned compact_workspace_revision(void) { return ui.revision; }
 bool compact_workspace_message_visible(void) { return ui.view == ACTIVITY && ui.has_message; }
 const char *compact_workspace_view(void) { return view_names[ui.view]; }
+unsigned compact_workspace_device_state(void) { return (unsigned)ui.devices.state; }
 const char *compact_workspace_selection(void)
 {
     return list_view() && ui.focus >= 0 && ui.focus < ui.count ? ui.rows[ui.focus].name : "";

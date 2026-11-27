@@ -7,8 +7,18 @@
 #include <string.h>
 #include "cJSON.h"
 #include "esp_timer.h"
+#include "esp_log.h"
 
 #define DEVICES_TIMEOUT_US (15 * 1000 * 1000)
+
+typedef enum { REQUEST_ALLOC = 1, RESPONSE_MISSING, RESPONSE_LIMIT, RESPONSE_COPY,
+               PAGE_ALLOC, RESPONSE_PARSE, REQUEST_QUEUE, RESPONSE_TIMEOUT } device_stage_t;
+
+static void diagnostic(device_stage_t stage, int result, size_t bytes)
+{
+    ESP_LOGW("openclaw_devices", "devices_response_diag stage=%d result=%d bytes=%u",
+             stage, result, (unsigned)bytes);
+}
 
 typedef struct {
     esp_openclaw_node_handle_t client;
@@ -208,6 +218,10 @@ static esp_openclaw_devices_state_t parse(const char *json, esp_openclaw_devices
     }
     state = page->count == 0 ? ESP_OPENCLAW_DEVICES_EMPTY : ESP_OPENCLAW_DEVICES_READY;
 done:
+    if (state == ESP_OPENCLAW_DEVICES_ERROR)
+        diagnostic(RESPONSE_PARSE, parsed, strlen(json));
+    else if (state == ESP_OPENCLAW_DEVICES_TOO_LARGE)
+        diagnostic(RESPONSE_PARSE, ESP_OPENCLAW_DIRECTORY_TOO_LARGE, strlen(json));
     cJSON_Delete(root);
     return state;
 }
@@ -219,12 +233,16 @@ static void response(esp_openclaw_node_handle_t client,
     device_request_t *request = context;
     if (result->ok && result->payload_json != NULL) {
         size_t length = strnlen(result->payload_json, ESP_OPENCLAW_DEVICES_MAX_JSON_BYTES + 1);
-        if (length > ESP_OPENCLAW_DEVICES_MAX_JSON_BYTES) request->state = ESP_OPENCLAW_DEVICES_TOO_LARGE;
+        if (length > ESP_OPENCLAW_DEVICES_MAX_JSON_BYTES) {
+            request->state = ESP_OPENCLAW_DEVICES_TOO_LARGE;
+            diagnostic(RESPONSE_LIMIT, ESP_ERR_INVALID_SIZE, length);
+        }
         else {
             request->json = malloc(length + 1);
             if (request->json != NULL) memcpy(request->json, result->payload_json, length + 1);
+            else diagnostic(RESPONSE_COPY, ESP_ERR_NO_MEM, length);
         }
-    }
+    } else diagnostic(RESPONSE_MISSING, result->ok ? ESP_ERR_INVALID_RESPONSE : ESP_FAIL, 0);
     atomic_store(&completed, request);
     directory.wake();
 }
@@ -236,11 +254,14 @@ void esp_openclaw_devices_poll(bool defer_request)
     if (done != NULL) {
         esp_openclaw_devices_snapshot_t *page = done->json != NULL ? calloc(1, sizeof(*page)) : NULL;
         if (page != NULL) done->state = parse(done->json, page);
+        else if (done->json != NULL) diagnostic(PAGE_ALLOC, ESP_ERR_NO_MEM, sizeof(*page));
         xSemaphoreTake(directory.lock, portMAX_DELAY);
         directory.inflight = NULL;
         if (current(done)) {
             esp_timer_stop(directory.timer);
             directory.state = esp_timer_get_time() >= done->deadline ? ESP_OPENCLAW_DEVICES_TIMEOUT : done->state;
+            if (directory.state == ESP_OPENCLAW_DEVICES_TIMEOUT)
+                diagnostic(RESPONSE_TIMEOUT, ESP_ERR_TIMEOUT, 0);
             if (directory.state == ESP_OPENCLAW_DEVICES_READY || directory.state == ESP_OPENCLAW_DEVICES_EMPTY) {
                 directory.page = page;
                 page = NULL;
@@ -255,6 +276,7 @@ void esp_openclaw_devices_poll(bool defer_request)
     if (directory.state == ESP_OPENCLAW_DEVICES_LOADING && directory.ready && directory.interested &&
         esp_timer_get_time() >= directory.deadline) {
         directory.state = ESP_OPENCLAW_DEVICES_TIMEOUT;
+        diagnostic(RESPONSE_TIMEOUT, ESP_ERR_TIMEOUT, 0);
         directory.pending = false;
         ++directory.revision;
         /* Keep the callback context until completion; the socket also owns Talk. */
@@ -267,6 +289,7 @@ void esp_openclaw_devices_poll(bool defer_request)
     device_request_t *request = calloc(1, sizeof(*request));
     if (request == NULL) {
         directory.state = ESP_OPENCLAW_DEVICES_ERROR;
+        diagnostic(REQUEST_ALLOC, ESP_ERR_NO_MEM, sizeof(*request));
         xSemaphoreGive(directory.lock);
         return;
     }
@@ -278,6 +301,7 @@ void esp_openclaw_devices_poll(bool defer_request)
     esp_err_t err = esp_openclaw_node_gateway_request_on_connection(request->client,
         request->connection, "node.list", "{}", response, request);
     if (err != ESP_OK) {
+        diagnostic(REQUEST_QUEUE, err, 0);
         atomic_store(&completed, request);
         directory.wake();
     }

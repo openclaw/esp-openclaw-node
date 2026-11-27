@@ -22,7 +22,9 @@ typedef int esp_err_t;
 #define ESP_FAIL -1
 #define ESP_ERR_NO_MEM 0x101
 #define ESP_ERR_INVALID_ARG 0x102
+#define ESP_ERR_INVALID_SIZE 0x104
 #define ESP_ERR_INVALID_STATE 0x103
+#define ESP_ERR_INVALID_RESPONSE 0x108
 #define ESP_ERR_NOT_FOUND 0x105
 #define ESP_ERR_TIMEOUT 0x107
 """)
@@ -60,7 +62,15 @@ esp_err_t esp_timer_start_once(esp_timer_handle_t, uint64_t);
 esp_err_t esp_timer_stop(esp_timer_handle_t);
 """)
         (work / "esp_random.h").write_text("#pragma once\n#include <stddef.h>\nvoid esp_fill_random(void *, size_t);\n")
-        (work / "esp_log.h").write_text('#pragma once\n#include <stdio.h>\n#define ESP_LOGW(tag, format, ...) fprintf(stderr, format "\\n", ##__VA_ARGS__)\n')
+        (work / "esp_log.h").write_text('''#pragma once
+#ifdef CAPTURE_DEVICE_DIAGNOSTICS
+void test_log_warning(const char *, ...);
+#define ESP_LOGW(tag, format, ...) test_log_warning(format, ##__VA_ARGS__)
+#else
+#include <stdio.h>
+#define ESP_LOGW(tag, format, ...) fprintf(stderr, format "\\n", ##__VA_ARGS__)
+#endif
+''')
         directory = root / "components/esp-openclaw-directory"
         chat = root / "components/esp-openclaw-chat"
         binary = work / "reader-test"
@@ -69,7 +79,7 @@ esp_err_t esp_timer_stop(esp_timer_handle_t);
                         "-Wno-deprecated-declarations", "-c", str(args.cjson_dir / "cJSON.c"),
                         "-o", str(cjson_object)], check=True)
         subprocess.run([
-            "cc", "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-g",
+            "cc", "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-g", "-DCAPTURE_DEVICE_DIAGNOSTICS",
             "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
             "-I", str(work), "-I", str(tests.parent / "main"),
             "-I", str(root / "components/esp-openclaw-reader/include"),

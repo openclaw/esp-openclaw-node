@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Let the T-Embed display share the system heap so its reserved GUI pool cannot prevent a reader connection.
+
 - Add compact device Identify review and confirmation screens, and retain the latest target-bound result in Activity.
 
 - Add a reviewed Identify command lifecycle for supported compact displays, with current inventory and write-access checks and separate accepted, rendered and unknown outcomes.

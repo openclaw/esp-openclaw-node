@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <setjmp.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -8,6 +9,22 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "esp_timer.h"
+
+static unsigned device_timeouts;
+void test_log_warning(const char *format, ...)
+{
+    va_list args;
+    va_start(args, format);
+    if (strcmp(format, "devices_response_diag stage=%d result=%d bytes=%u") == 0) {
+        va_list inspect;
+        va_copy(inspect, args);
+        if (va_arg(inspect, int) == 8) ++device_timeouts;
+        va_end(inspect);
+    }
+    vfprintf(stderr, format, args);
+    fputc('\n', stderr);
+    va_end(args);
+}
 
 struct esp_openclaw_node { uint32_t id; const char *uri; };
 static struct esp_openclaw_node node = {0, "ws://gateway-a.example"};
@@ -830,6 +847,16 @@ int main(int argc, char **argv) {
     respond_devices("{\"nodes\":[{\"nodeId\":\"late\"}]}"); step();
     assert(queries == before);
     esp_openclaw_reader_devices_copy(&devices); assert(devices.count == 0);
+
+    /* A response can arrive after its deadline but before the timeout poll. */
+    assert(esp_openclaw_reader_devices_refresh() == ESP_OK); step();
+    unsigned timeouts_before = device_timeouts;
+    now += 15000000;
+    respond_devices("{\"nodes\":[{\"nodeId\":\"late-before-poll\"}]}"); step();
+    esp_openclaw_reader_devices_copy(&devices);
+    assert(devices.state == ESP_OPENCLAW_DEVICES_TIMEOUT && devices.count == 0);
+    assert(device_timeouts == timeouts_before + 1);
+    step(); assert(device_timeouts == timeouts_before + 1);
 
     assert(esp_openclaw_reader_devices_refresh() == ESP_OK); step();
     node.id = 0; esp_openclaw_reader_node_event(ESP_OPENCLAW_NODE_EVENT_DISCONNECTED);

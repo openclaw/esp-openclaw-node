@@ -47,7 +47,13 @@ typedef struct {
 #define NODE_OFFSET(field) _Static_assert(offsetof(esp_openclaw_node_config_t, field) == \
     offsetof(baseline_node_config_t, field), "Node offset changed: " #field)
 SAME_LAYOUT(esp_openclaw_talk_signaling_config_t, baseline_talk_config_t);
-SAME_LAYOUT(esp_openclaw_node_config_t, baseline_node_config_t);
+typedef struct {
+    baseline_node_config_t legacy;
+    bool compact_gateway_responses;
+} extended_node_config_t;
+SAME_LAYOUT(esp_openclaw_node_config_t, extended_node_config_t);
+_Static_assert(offsetof(esp_openclaw_node_config_t, compact_gateway_responses) ==
+    sizeof(baseline_node_config_t), "Node response option must follow the legacy fields");
 TALK_OFFSET(operator_node);
 TALK_OFFSET(gateway_http_base_url);
 TALK_OFFSET(session_key);
@@ -93,10 +99,14 @@ int main(void)
         .session_key = "main", .provider = "provider", .model = "model", .voice = "voice",
         .setup_failed_cb = failure, .setup_failed_ctx = &context, .silence_duration_ms = 400,
     };
+    /* Keep the old initializer intact to prove omitted options remain disabled. */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
     const esp_openclaw_node_config_t node_positional = {
         "display", "platform", "family", "id", "mode", "operator", "model", "en", "example", "certificate",
         11, true, false, event, &context, gateway_event, &context,
     };
+#pragma GCC diagnostic pop
     const esp_openclaw_node_config_t node_designated = {
         .display_name = "display", .platform = "platform", .device_family = "family", .client_id = "id",
         .client_mode = "mode", .role = "operator", .model_identifier = "model", .locale = "en",
@@ -116,7 +126,9 @@ int main(void)
     NODE_STRING(tls_common_name); NODE_STRING(tls_cert_pem); NODE_VALUE(tls_cert_len);
     NODE_VALUE(use_cert_bundle); NODE_VALUE(skip_cert_common_name_check); NODE_VALUE(event_cb);
     NODE_VALUE(event_user_ctx); NODE_VALUE(gateway_event_cb); NODE_VALUE(gateway_event_user_ctx);
-    printf("legacy positional/designated ABI: Talk size=%zu align=%zu; Node size=%zu align=%zu; all offsets PASS\n",
+    assert(!node_positional.compact_gateway_responses);
+    assert(!node_designated.compact_gateway_responses);
+    printf("legacy positional/designated fields and default response option: Talk size=%zu align=%zu; Node size=%zu align=%zu; all offsets PASS\n",
         sizeof(talk_positional), _Alignof(esp_openclaw_talk_signaling_config_t),
         sizeof(node_positional), _Alignof(esp_openclaw_node_config_t));
     return 0;

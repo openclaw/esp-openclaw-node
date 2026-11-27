@@ -42,6 +42,31 @@ int main(void)
     assert(strcmp(lines[3], "four") == 0);
     assert(!compact_board_text_layout("one\ntwo\nthree\nfour\nfive", 4, lines));
 
+    assert(compact_board_text_layout("A message with a readable ending", 4, lines));
+    assert(strcmp(lines[0], "A message with a readable") == 0);
+    assert(strcmp(lines[1], "ending") == 0);
+    assert(compact_board_text_layout("1234567890123456789012345 next", 4, lines));
+    assert(strcmp(lines[0], "1234567890123456789012345") == 0);
+    assert(strcmp(lines[1], "next") == 0);
+    assert(compact_board_text_layout("1234567890123456789012345  next", 4, lines));
+    assert(strcmp(lines[1], "next") == 0);
+    assert(compact_board_text_layout("1234567890123456789012345  \nnext", 2, lines));
+    assert(strcmp(lines[1], "next") == 0);
+    assert(compact_board_text_layout("\n\n1234567890123456789012345  \nnext", 4, lines));
+    assert(strcmp(lines[2], "1234567890123456789012345") == 0);
+    assert(strcmp(lines[3], "next") == 0);
+    assert(compact_board_text_layout("one two three four five six seven eight nine ten eleven twelve", 4, lines));
+    assert(strcmp(lines[0], "one two three four five") == 0);
+    assert(strcmp(lines[1], "six seven eight nine ten") == 0);
+    assert(strcmp(lines[2], "eleven twelve") == 0);
+    assert(!compact_board_text_layout("one two three four five six seven eight nine ten eleven twelve", 2, lines));
+    assert(compact_board_text_layout("ABCDEFGHIJKLMNOPQRSTUVWXYZZ end", 4, lines));
+    assert(strcmp(lines[0], "ABCDEFGHIJKLMNOPQRSTUVWXY") == 0);
+    assert(strcmp(lines[1], "ZZ end") == 0);
+    assert(compact_board_text_layout("one\n\ntwo", 4, lines));
+    assert(strcmp(lines[1], "") == 0);
+    assert(strcmp(lines[2], "two") == 0);
+
     memset(full, 'A', sizeof(full));
     full[COMPACT_TEXT_MAX] = '\0';
     assert(compact_board_text_layout(full, 4, lines));

@@ -108,9 +108,10 @@ commands are not needed to operate the display. Preserve existing entries
 when updating a shared Gateway.
 
 Messages have a heading of up to 25 characters and a body of up to 100
-characters, wrapped into four rows of 25 columns. Body newlines advance to the
-next row; input that exceeds four rows is rejected. The built-in font displays
-letters in uppercase and supports digits, spaces, and `. , - _ : ! ? / + % ( ) =`.
+characters, wrapped at word boundaries into four rows of 25 columns. Words
+wider than a row are split; spaces at a wrap boundary are omitted. Body newlines
+advance to the next row; input that exceeds four rows is rejected. The built-in
+font displays letters in uppercase and supports digits, spaces, and `. , - _ : ! ? / + % ( ) =`.
 Unsupported characters are rejected. Wi-Fi and Gateway status stay visible
 in the footer. Messages are kept in RAM and reset after reboot.
 

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Add a compact message editor with character groups, draft preview, deletion, and explicit Send/Edit/Cancel review on both button and encoder boards.
+
 - Let applications prepare custom UTF-8 reader drafts with the existing recipient, review and single-send checks.
 
 - Request the Gateway's smaller session-list projection so conversation pickers do not receive unrelated runtime metadata.

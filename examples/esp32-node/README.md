@@ -103,6 +103,15 @@ Devices, Activity, and Settings. Agent and conversation browsing use the shared
 reader component; they require a separately approved operator session. A node-only
 session still accepts node commands but cannot read conversations. Replies and
 new conversations require messaging access and an explicit review/submit action.
+In a conversation, choose Reply → Write message to compose up to 159 ASCII
+characters. Choose a character group, select letters, and use Back for Space,
+Delete and Preview. Review shows the recipient, conversation and complete text;
+Send, Edit and Cancel remain separate choices. Home keeps an unsent draft while
+the same preview is selected. If that selection changes, the saved draft stays
+viewable but cannot be resumed or sent. Discard draft works even offline; choose
+Write message again to start for the new selection. Sending clears the local
+draft without automatically retrying it. A rejected local queue lets Edit restore
+the reviewed text.
 This device opens the local display and connection settings. Display brightness,
 reading size, and list spacing are saved locally. Supported remote M5StickC and
 T-Embed devices also offer Identify when connected, paired, and advertising

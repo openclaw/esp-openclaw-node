@@ -13,12 +13,14 @@ typedef enum {
     HOME, MENU, AGENTS, SESSIONS, READ, READ_ACTIONS, REPLY_PICK, REPLY_REVIEW,
     CREATE, DEVICES, DEVICE, SETTINGS, DISPLAY, BRIGHTNESS, CONNECTION,
     MESSAGING, HELP, ACTIVITY, LOCAL_DEVICE, DEVICE_ACTIONS, IDENTIFY, IDENTIFY_CONFIRM, ACTIVITY_ACTIONS,
+    DRAFT_MENU, DRAFT_CHARS, DRAFT_PREVIEW, DRAFT_CHOICE, REPLY_CONFIRM,
 } view_t;
 
 typedef enum {
     OPEN_VIEW, GO_BACK, OPEN_AGENT, OPEN_SESSION, REFRESH_AGENTS, PAGE_AGENTS,
     REFRESH_SESSIONS, PAGE_SESSIONS, OPEN_REPLY, NEW_THREAD, OPEN_DEVICE,
     REFRESH_DEVICES, TOGGLE_READING, TOGGLE_DENSITY, BEGIN_IDENTIFY, SEND_IDENTIFY, CONTROL_ACCESS, IDENTIFY_RESULT,
+    BEGIN_DRAFT, DISCARD_DRAFT, DRAFT_GROUP, DRAFT_CHARACTER, DRAFT_DELETE, REVIEW_DRAFT, SEND_DRAFT, EDIT_DRAFT, CLOSE_DRAFT_REVIEW,
 } action_t;
 
 typedef struct { char name[97]; action_t action; int value; } row_t;
@@ -28,6 +30,7 @@ static struct {
     unsigned revision, message_generation;
     uint32_t refreshed_at, brightness_changed_at;
     bool small, encoder, dirty, connected, reader_ready, large, comfortable, brightness_save_failed, message_large, has_message, identify_history;
+    bool draft_present, custom_reply;
     view_t view, messaging_parent, simple_parent, display_parent, sessions_parent;
     int simple_parent_focus, display_parent_focus, sessions_parent_focus;
     compact_brightness_fn set_brightness;
@@ -40,6 +43,9 @@ static struct {
     esp_openclaw_reader_creation_snapshot_t creation;
     esp_openclaw_reader_messaging_snapshot_t messaging;
     esp_openclaw_identify_snapshot_t identify, last_identify;
+    esp_openclaw_agent_t draft_agent;
+    unsigned draft_preview_revision, draft_group;
+    char draft[ESP_OPENCLAW_READER_TEXT_BYTES], draft_title[97], draft_heading[64];
     row_t rows[24];
     char message_heading[26], message[101], note[128];
     char device_id[129];
@@ -51,6 +57,12 @@ static const char *const view_names[] = {
     "home", "menu", "agents", "conversations", "reader", "reader-actions", "reply-picker", "reply-review",
     "create", "devices", "device", "settings", "display", "brightness", "connection",
     "messaging", "help", "activity", "local-device", "device-actions", "identify", "identify-confirm", "activity-actions",
+    "draft", "draft-characters", "draft-preview", "draft-choice", "reply-confirm",
+};
+
+static const char *const draft_groups[] = {"a-m", "n-z", "A-M", "N-Z", "0-9", "Symbols"};
+static const char *const draft_characters[] = {
+    "abcdefghijklm", "nopqrstuvwxyz", "ABCDEFGHIJKLM", "NOPQRSTUVWXYZ", "0123456789", ".,!?'-:;()/@_+=&%\"",
 };
 
 static const lv_font_t *font(void)
@@ -128,7 +140,42 @@ static bool list_view(void)
     return ui.view == MENU || ui.view == AGENTS || ui.view == SESSIONS ||
         ui.view == READ_ACTIONS || ui.view == REPLY_PICK || ui.view == DEVICES ||
         ui.view == SETTINGS || ui.view == DISPLAY || ui.view == LOCAL_DEVICE ||
-        ui.view == DEVICE_ACTIONS || ui.view == IDENTIFY_CONFIRM || ui.view == ACTIVITY_ACTIONS;
+        ui.view == DEVICE_ACTIONS || ui.view == IDENTIFY_CONFIRM || ui.view == ACTIVITY_ACTIONS ||
+        ui.view == DRAFT_MENU || ui.view == DRAFT_CHARS || ui.view == DRAFT_CHOICE || ui.view == REPLY_CONFIRM;
+}
+
+static bool draft_current(void)
+{
+    return ui.draft_present && ui.reader_ready && ui.conversations.state == ESP_OPENCLAW_READER_READY &&
+        ui.conversations.preview_state == ESP_OPENCLAW_READER_READY &&
+        ui.draft_preview_revision == ui.conversations.preview_revision &&
+        strcmp(ui.draft_agent.id, ui.conversations.agent.id) == 0;
+}
+
+static bool start_draft(void)
+{
+    if (!ui.reader_ready || ui.conversations.state != ESP_OPENCLAW_READER_READY ||
+        ui.conversations.preview_state != ESP_OPENCLAW_READER_READY ||
+        ui.conversations.selected >= ui.conversations.page.count) {
+        failure(ESP_ERR_INVALID_STATE);
+        return false;
+    }
+    ui.draft[0] = '\0';
+    ui.draft_present = true;
+    ui.draft_preview_revision = ui.conversations.preview_revision;
+    ui.draft_agent = ui.conversations.agent;
+    snprintf(ui.draft_title, sizeof(ui.draft_title), "%s", ui.conversations.page.sessions[ui.conversations.selected].title);
+    open_view(DRAFT_MENU);
+    return true;
+}
+
+static void append_draft(char character)
+{
+    size_t length = strlen(ui.draft);
+    if (length + 1 == sizeof(ui.draft)) snprintf(ui.note, sizeof(ui.note), "Message full (159 bytes)");
+    else { ui.draft[length] = character; ui.draft[length + 1] = '\0'; }
+    ++ui.revision;
+    ui.dirty = true;
 }
 
 static const char *identify_state(const esp_openclaw_identify_snapshot_t *identify)
@@ -209,7 +256,34 @@ static void rows(void)
         row("Continue", OPEN_REPLY, ESP_OPENCLAW_READER_REPLY_CONTINUE);
         row("Summarize", OPEN_REPLY, ESP_OPENCLAW_READER_REPLY_SUMMARIZE);
         row("Explain", OPEN_REPLY, ESP_OPENCLAW_READER_REPLY_EXPLAIN);
+        row("Write message", BEGIN_DRAFT, 0);
         row("Back", OPEN_VIEW, READ);
+        break;
+    case DRAFT_MENU:
+        row("Preview", OPEN_VIEW, DRAFT_PREVIEW);
+        for (unsigned i = 0; i < sizeof(draft_groups) / sizeof(draft_groups[0]); ++i)
+            row(draft_groups[i], DRAFT_GROUP, (int)i);
+        row("Space", DRAFT_CHARACTER, ' '); row("Delete", DRAFT_DELETE, 0);
+        if (draft_current()) row("Review", REVIEW_DRAFT, 0);
+        row("Back to messages", OPEN_VIEW, READ);
+        break;
+    case DRAFT_CHARS:
+        for (const char *p = draft_characters[ui.draft_group]; *p; ++p) {
+            char text[] = {*p, '\0'};
+            row(text, DRAFT_CHARACTER, *p);
+        }
+        row("Back", OPEN_VIEW, DRAFT_MENU);
+        break;
+    case DRAFT_CHOICE:
+        if (draft_current()) row("Resume draft", OPEN_VIEW, DRAFT_MENU);
+        row("Preview saved draft", OPEN_VIEW, DRAFT_PREVIEW);
+        row("Discard draft", DISCARD_DRAFT, 0);
+        row("Back", OPEN_VIEW, REPLY_PICK);
+        break;
+    case REPLY_CONFIRM:
+        if (ui.reply.can_send) row("Send", SEND_DRAFT, 0);
+        if (ui.reply.state == ESP_OPENCLAW_READER_REPLY_REVIEW) row("Edit", EDIT_DRAFT, 0);
+        row("Cancel", CLOSE_DRAFT_REVIEW, 0);
         break;
     case DEVICES:
         row("This device", OPEN_VIEW, LOCAL_DEVICE);
@@ -283,6 +357,16 @@ static const char *title(void)
     case IDENTIFY: return "Identify device";
     case IDENTIFY_CONFIRM: return "Replace display?";
     case ACTIVITY_ACTIONS: return "Activity actions";
+    case DRAFT_MENU: case DRAFT_CHARS:
+        if (!draft_current()) return "Draft: selection changed";
+        {
+            size_t length = strlen(ui.draft);
+            snprintf(ui.draft_heading, sizeof(ui.draft_heading), "%zu/159 %.12s", length, ui.draft + (length > 12 ? length - 12 : 0));
+            return ui.draft_heading;
+        }
+    case DRAFT_CHOICE: return "Saved draft";
+    case DRAFT_PREVIEW: return "Draft preview";
+    case REPLY_CONFIRM: return "Send this message?";
     }
     return "OpenClaw";
 }
@@ -363,10 +447,21 @@ static void render(void)
             reading(text);
         }
     } else if (ui.view == REPLY_REVIEW) {
-        char text[400];
-        snprintf(text, sizeof(text), "%s\n\n%s\n\n%s", ui.reply.text, ui.reply.detail,
-            ui.reply.can_send ? "Press to send" : ui.reply.can_read ? "Press to read reply" :
+        char text[640];
+        bool pending = ui.custom_reply && (ui.reply.state == ESP_OPENCLAW_READER_REPLY_PREPARING ||
+            ui.reply.state == ESP_OPENCLAW_READER_REPLY_SENDING || ui.reply.state == ESP_OPENCLAW_READER_REPLY_ACCEPTED);
+        snprintf(text, sizeof(text), "%s%s%s%s%s\n\n%s\n\n%s",
+            ui.custom_reply ? ui.reply.agent.name : "", ui.custom_reply ? "\n" : "", ui.custom_reply ? ui.reply.title : "",
+            ui.custom_reply ? "\n\n" : "",
+            ui.reply.text, ui.reply.detail,
+            ui.reply.can_send ? ui.custom_reply ? "Press for Send / Edit / Cancel" : "Press to send" : pending ? "Hold to go Home" : ui.reply.can_read ? "Press to read reply" :
             ui.messaging.state != ESP_OPENCLAW_READER_MESSAGING_READY ? "Press for messaging access" : "Hold to go Home");
+        reading(text);
+    } else if (ui.view == DRAFT_PREVIEW) {
+        char text[450];
+        snprintf(text, sizeof(text), "%s\n%s\n\n%s\n\n%s", ui.draft_agent.name, ui.draft_title,
+            ui.draft[0] ? ui.draft : "(empty)", draft_current() ? "Press to edit." :
+                "Selection changed. The saved draft will not be sent. Press to return.");
         reading(text);
     } else if (ui.view == CREATE) {
         char text[300];
@@ -500,7 +595,9 @@ void compact_workspace_poll(const esp_openclaw_node_wifi_status_t *wifi, bool co
             (ui.view == AGENTS && agents_changed) ||
             ((ui.view == HOME || ui.view == SESSIONS || ui.view == READ || ui.view == READ_ACTIONS || ui.view == REPLY_PICK) &&
                 (sessions_changed || preview_changed)) ||
-            ((ui.view == REPLY_REVIEW || ui.view == ACTIVITY) && old_reply != ui.reply.revision) ||
+            ((ui.view == REPLY_REVIEW || ui.view == REPLY_CONFIRM || ui.view == ACTIVITY) && old_reply != ui.reply.revision) ||
+            ((ui.view == DRAFT_MENU || ui.view == DRAFT_CHARS || ui.view == DRAFT_PREVIEW || ui.view == DRAFT_CHOICE) &&
+                (sessions_changed || preview_changed || old_reader_ready != ui.reader_ready)) ||
             (ui.view == CREATE && old_creation != ui.creation.revision) ||
             (ui.view == MESSAGING && old_messaging != ui.messaging.revision) ||
             (ui.view == DEVICE_ACTIONS && old_messaging != ui.messaging.revision) ||
@@ -570,9 +667,11 @@ void compact_workspace_input(compact_input_event_t event)
             {
                 bool display_back = ui.view == DISPLAY && item.value == (int)ui.display_parent;
                 bool sessions_back = item.action == GO_BACK;
+                bool draft_back = ui.view == DRAFT_CHARS && item.value == DRAFT_MENU;
                 open_view((view_t)item.value);
                 if (display_back) ui.focus = ui.display_parent_focus;
                 if (sessions_back) ui.focus = ui.sessions_parent_focus;
+                if (draft_back) ui.focus = (int)ui.draft_group + 1;
             }
             break;
         case OPEN_AGENT:
@@ -588,8 +687,50 @@ void compact_workspace_input(compact_input_event_t event)
         case REFRESH_DEVICES: failure(esp_openclaw_reader_devices_refresh()); break;
         case OPEN_REPLY:
             failure(esp_openclaw_reader_reply_begin((esp_openclaw_reader_reply_preset_t)item.value, ui.conversations.preview_revision));
-            if (!ui.note[0]) open_view(REPLY_REVIEW);
+            if (!ui.note[0]) { ui.custom_reply = false; open_view(REPLY_REVIEW); }
             break;
+        case BEGIN_DRAFT:
+            if (ui.draft_present) open_view(DRAFT_CHOICE);
+            else start_draft();
+            break;
+        case DISCARD_DRAFT:
+            ui.draft_present = false; ui.draft[0] = '\0'; open_view(REPLY_PICK); break;
+        case DRAFT_GROUP:
+            ui.draft_group = (unsigned)item.value; open_view(DRAFT_CHARS); break;
+        case DRAFT_CHARACTER: append_draft((char)item.value); break;
+        case DRAFT_DELETE:
+            if (ui.draft[0]) ui.draft[strlen(ui.draft) - 1] = '\0';
+            ++ui.revision; ui.dirty = true; break;
+        case REVIEW_DRAFT:
+            if (!draft_current()) failure(ESP_ERR_INVALID_STATE);
+            else if (strspn(ui.draft, " ") == strlen(ui.draft)) {
+                snprintf(ui.note, sizeof(ui.note), "Write a message first"); ui.dirty = true;
+            } else {
+                failure(esp_openclaw_reader_reply_begin_text(ui.draft, strlen(ui.draft), ui.draft_preview_revision));
+                if (!ui.note[0]) { ui.custom_reply = true; esp_openclaw_reader_reply_copy(&ui.reply); open_view(REPLY_REVIEW); }
+            }
+            break;
+        case SEND_DRAFT:
+            failure(esp_openclaw_reader_reply_send(ui.reply.revision));
+            if (!ui.note[0]) {
+                ui.draft_present = false; ui.draft[0] = '\0';
+                esp_openclaw_reader_reply_copy(&ui.reply);
+                open_view(REPLY_REVIEW);
+            }
+            break;
+        case EDIT_DRAFT:
+            if (ui.reply.state == ESP_OPENCLAW_READER_REPLY_REVIEW) {
+                snprintf(ui.draft, sizeof(ui.draft), "%s", ui.reply.text);
+                ui.draft_agent = ui.reply.agent;
+                snprintf(ui.draft_title, sizeof(ui.draft_title), "%s", ui.reply.title);
+                ui.draft_preview_revision = ui.reply.preview_revision;
+                ui.draft_present = true;
+                esp_openclaw_reader_reply_close(ui.reply.revision);
+                open_view(DRAFT_MENU);
+            }
+            break;
+        case CLOSE_DRAFT_REVIEW:
+            esp_openclaw_reader_reply_close(ui.reply.revision); open_view(READ); break;
         case NEW_THREAD:
             failure(esp_openclaw_reader_creation_begin(ui.conversations.revision));
             if (!ui.note[0]) open_view(CREATE);
@@ -632,7 +773,10 @@ void compact_workspace_input(compact_input_event_t event)
         }
     } else if (ui.view == READ) open_view(READ_ACTIONS);
     else if (ui.view == REPLY_REVIEW) {
-        if (ui.reply.can_send) failure(esp_openclaw_reader_reply_send(ui.reply.revision));
+        if (ui.custom_reply && ui.reply.state == ESP_OPENCLAW_READER_REPLY_REVIEW) open_view(REPLY_CONFIRM);
+        else if (ui.custom_reply && (ui.reply.state == ESP_OPENCLAW_READER_REPLY_PREPARING ||
+            ui.reply.state == ESP_OPENCLAW_READER_REPLY_SENDING || ui.reply.state == ESP_OPENCLAW_READER_REPLY_ACCEPTED)) return;
+        else if (ui.reply.can_send) failure(esp_openclaw_reader_reply_send(ui.reply.revision));
         else if (ui.reply.can_read) { failure(esp_openclaw_reader_reply_read(ui.reply.revision)); if (!ui.note[0]) open_view(READ); }
         else if (ui.messaging.state != ESP_OPENCLAW_READER_MESSAGING_READY) { ui.messaging_parent = REPLY_REVIEW; open_view(MESSAGING); }
         else open_view(READ);
@@ -647,6 +791,7 @@ void compact_workspace_input(compact_input_event_t event)
                  ui.messaging.state == ESP_OPENCLAW_READER_MESSAGING_CONNECTING) failure(esp_openclaw_reader_messaging_cancel(ui.messaging.revision));
         else failure(esp_openclaw_reader_messaging_request(ui.messaging.revision));
     } else if (ui.view == BRIGHTNESS) open_view(DISPLAY);
+    else if (ui.view == DRAFT_PREVIEW) open_view(draft_current() ? DRAFT_MENU : DRAFT_CHOICE);
     else if (ui.view == DEVICE) open_view(DEVICE_ACTIONS);
     else if (ui.view == IDENTIFY) {
         if (ui.identify_history) open_view(DEVICE_ACTIONS);

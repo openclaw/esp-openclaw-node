@@ -160,6 +160,7 @@ esp_err_t esp_openclaw_node_create(const esp_openclaw_node_config_t *config, esp
     assert(strcmp(config->display_name, "Test Reader") == 0);
     assert(strcmp(config->model_identifier, "test-board") == 0);
     assert(strcmp(config->tls_common_name, "gateway.example") == 0);
+    assert(config->compact_gateway_responses == expect_snapshot_caps);
     ++creates;
     if (create_result != ESP_OK) { esp_err_t err = create_result; create_result = ESP_OK; return err; }
     snapshot_caps = 0;

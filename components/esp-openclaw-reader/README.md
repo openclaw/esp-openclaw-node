@@ -24,6 +24,8 @@ these options reduce incoming messages on boards with limited contiguous heap.
 Duplicate assistant-text events are omitted; canonical chat events remain
 available.
 The option defaults to false and is copied at start. Compact boards enable it.
+It also enables the SDK's compact RPC response parser, which avoids holding a
+second parsed copy of a device list before the reader receives it.
 The primary node's capabilities, commands, and approval remain unchanged. These
 options are supported by Gateway 2026.11.6; older Gateways may send full snapshots.
 

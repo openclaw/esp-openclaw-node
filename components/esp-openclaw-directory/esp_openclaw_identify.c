@@ -26,6 +26,7 @@ typedef struct {
 static struct {
     SemaphoreHandle_t lock;
     void (*wake)(void);
+    bool (*current)(bool write);
     esp_timer_handle_t timer;
     esp_openclaw_node_handle_t client;
     uint64_t incarnation;
@@ -45,11 +46,13 @@ static void deadline_fired(void *arg)
     identify.wake();
 }
 
-esp_err_t esp_openclaw_identify_init(SemaphoreHandle_t lock, void (*wake)(void))
+esp_err_t esp_openclaw_identify_init(SemaphoreHandle_t lock, void (*wake)(void),
+    bool (*current)(bool write))
 {
-    if (lock == NULL || wake == NULL || identify.lock != NULL) return ESP_ERR_INVALID_STATE;
+    if (lock == NULL || wake == NULL || current == NULL || identify.lock != NULL) return ESP_ERR_INVALID_STATE;
     identify.lock = lock;
     identify.wake = wake;
+    identify.current = current;
     const esp_timer_create_args_t args = {.callback = deadline_fired, .name = "identify"};
     return esp_timer_create(&args, &identify.timer);
 }
@@ -64,7 +67,7 @@ static void state(esp_openclaw_identify_state_t next)
 static bool target_current(void)
 {
     esp_openclaw_device_t target;
-    return identify.ready && identify.writable &&
+    return identify.ready && identify.writable && identify.current(true) &&
         esp_openclaw_devices_identify_target_locked(identify.snapshot.target.id,
             identify.inventory_revision, &target) &&
         strcmp(target.model, identify.snapshot.target.model) == 0;
@@ -95,7 +98,7 @@ esp_err_t esp_openclaw_identify_begin(const char *node_id, unsigned inventory_re
     if (identify.timer == NULL || node_id == NULL) return ESP_ERR_INVALID_STATE;
     xSemaphoreTake(identify.lock, portMAX_DELAY);
     esp_openclaw_device_t target;
-    if (!identify.ready || identify.inflight != NULL || identify.pending ||
+    if (!identify.ready || !identify.current(false) || identify.inflight != NULL || identify.pending ||
         !esp_openclaw_devices_identify_target_locked(node_id, inventory_revision, &target)) {
         xSemaphoreGive(identify.lock);
         return ESP_ERR_INVALID_STATE;
@@ -187,7 +190,7 @@ void esp_openclaw_identify_poll(bool defer_request)
         if (identify.snapshot.state == ESP_OPENCLAW_IDENTIFY_SENDING &&
             identify.snapshot.revision == done->revision && identify.client == done->client &&
             identify.incarnation == done->incarnation && identify.connection == done->connection &&
-            identify.ready && esp_timer_get_time() < identify.deadline) {
+            identify.ready && identify.current(true) && esp_timer_get_time() < identify.deadline) {
             esp_openclaw_display_receipt_t receipt;
             bool valid = done->ok && done->json != NULL && esp_openclaw_display_receipt_parse(done->json,
                 strlen(done->json), identify.snapshot.target.id, "display.show", "Identify", identify.snapshot.text, &receipt);

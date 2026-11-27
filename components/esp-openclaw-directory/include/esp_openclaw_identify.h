@@ -17,7 +17,10 @@ typedef struct {
     bool can_send;
 } esp_openclaw_identify_snapshot_t;
 
-esp_err_t esp_openclaw_identify_init(SemaphoreHandle_t lock, void (*wake)(void));
+/* current runs under lock; it must check immediate owner invalidation without
+ * taking that lock again. write distinguishes browsing from effect admission. */
+esp_err_t esp_openclaw_identify_init(SemaphoreHandle_t lock, void (*wake)(void),
+    bool (*current)(bool write));
 /* The shared reader owner holds lock for authority updates. */
 void esp_openclaw_identify_set_owner_locked(esp_openclaw_node_handle_t client,
     uint64_t incarnation, uint32_t connection, bool ready, bool writable);

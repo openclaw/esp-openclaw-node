@@ -28,6 +28,8 @@ void xSemaphoreTake(SemaphoreHandle_t lock, uint32_t timeout)
 { assert(lock == &locked && !locked && timeout == portMAX_DELAY); locked = 1; }
 void xSemaphoreGive(SemaphoreHandle_t lock) { assert(lock == &locked && locked); locked = 0; }
 static void wake(void) {}
+static bool immediate_owner = true;
+static bool authority_current(bool write) { (void)write; assert(locked); return immediate_owner; }
 
 esp_err_t esp_openclaw_node_gateway_request_on_connection(esp_openclaw_node_handle_t handle,
     uint32_t connection, const char *method, const char *json,
@@ -69,7 +71,7 @@ static void reply(bool rendered)
 
 int main(void)
 {
-    assert(esp_openclaw_identify_init(&locked, wake) == ESP_OK);
+    assert(esp_openclaw_identify_init(&locked, wake, authority_current) == ESP_OK);
     directory.lock = &locked; directory.ready = directory.interested = true;
     directory.state = ESP_OPENCLAW_DEVICES_READY; directory.revision = 3; directory.page = &page;
     page.count = 1;
@@ -133,6 +135,13 @@ int main(void)
     assert(esp_openclaw_identify_send(snapshot().revision) == ESP_OK);
     esp_openclaw_identify_poll(false); owner(true, 2);
     reply(true); assert(snapshot().state == ESP_OPENCLAW_IDENTIFY_UNKNOWN);
+
+    // Immediate owner invalidation is checked before the worker updates metadata.
+    assert(esp_openclaw_identify_begin("test-node", 4) == ESP_OK);
+    immediate_owner = false;
+    assert(!snapshot().can_send);
+    assert(esp_openclaw_identify_send(snapshot().revision) == ESP_ERR_INVALID_STATE);
+    immediate_owner = true;
 
     // Rejected local queue admission has a known no-send outcome.
     queue_result = ESP_ERR_NO_MEM;

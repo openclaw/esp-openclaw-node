@@ -19,12 +19,14 @@ static unsigned identifies;
 static char identify_target[129];
 static esp_openclaw_reader_home_t home_context;
 static unsigned refreshes, opens, previews, sends;
+static unsigned text_drafts;
 static uint32_t now;
 static int width, height, brightness;
 static uint16_t frame[320 * 170], buffer[320 * 20];
 static esp_openclaw_node_wifi_status_t wifi = {.connected = true, .ssid = "Test network", .ip = "192.0.2.10"};
 static const char *snapshot_prefix;
 static bool reader_connected = true, node_connected = true;
+static bool reject_local_send;
 
 const char *esp_err_to_name(esp_err_t err) { return err == ESP_OK ? "OK" : "error"; }
 int openclaw_preferences_load(openclaw_preference_t key, int fallback) { (void)key; return fallback; }
@@ -70,8 +72,26 @@ esp_err_t esp_openclaw_reader_reply_begin(esp_openclaw_reader_reply_preset_t pre
 }
 esp_err_t esp_openclaw_reader_reply_send(unsigned revision) {
     assert(revision == reply.revision && reply.can_send); ++sends;
+    if (reject_local_send) {
+        reply.state = ESP_OPENCLAW_READER_REPLY_REVIEW;
+        strcpy(reply.detail, "Could not queue. Try Send again."); ++reply.revision;
+        return ESP_OK;
+    }
     reply.can_send = false; reply.state = ESP_OPENCLAW_READER_REPLY_UNKNOWN;
     strcpy(reply.detail, "Outcome unknown. Read before retrying."); ++reply.revision; return ESP_OK;
+}
+esp_err_t esp_openclaw_reader_reply_begin_text(const char *text, size_t length, unsigned revision) {
+    assert(revision == conversations.preview_revision && length > 0 && length < sizeof(reply.text));
+    ++text_drafts; memcpy(reply.text, text, length); reply.text[length] = '\0';
+    reply.state = ESP_OPENCLAW_READER_REPLY_REVIEW; reply.can_send = true;
+    reply.preview_revision = revision;
+    reply.agent = conversations.agent;
+    strcpy(reply.title, conversations.page.sessions[0].title); ++reply.revision;
+    return ESP_OK;
+}
+void esp_openclaw_reader_reply_close(unsigned revision) {
+    assert(revision == reply.revision);
+    reply.state = ESP_OPENCLAW_READER_REPLY_IDLE; reply.can_send = false; ++reply.revision;
 }
 esp_err_t esp_openclaw_reader_reply_read(unsigned revision) { (void)revision; return ESP_OK; }
 esp_err_t esp_openclaw_reader_creation_begin(unsigned revision) { (void)revision; return ESP_OK; }
@@ -95,6 +115,16 @@ static void step(void) {
 static void select_item(void) { compact_workspace_input((compact_input_event_t){.select = true}); step(); }
 static void move(int count) { compact_workspace_input((compact_input_event_t){.move = count}); step(); }
 static void home(void) { compact_workspace_input((compact_input_event_t){.home = true}); step(); }
+static bool find_row(const char *name) {
+    char first[128]; snprintf(first, sizeof(first), "%s", compact_workspace_selection());
+    for (unsigned i = 0; i < 25; ++i) {
+        if (strcmp(compact_workspace_selection(), name) == 0) return true;
+        move(1);
+        if (strcmp(compact_workspace_selection(), first) == 0) return false;
+    }
+    return false;
+}
+static void choose(const char *name) { assert(find_row(name)); select_item(); }
 static void snapshot(const char *name) {
     if (!snapshot_prefix) return;
     char path[1024]; assert(snprintf(path, sizeof(path), "%s-%s.ppm", snapshot_prefix, name) < (int)sizeof(path));
@@ -255,6 +285,41 @@ int main(int argc, char **argv) {
     revision = compact_workspace_revision();
     devices.state = ESP_OPENCLAW_DEVICES_READY; devices.count = 1; step();
     assert(compact_workspace_revision() != revision);
-    printf("Compact workspace %dx%d: navigation, async results, reviewed actions and retained outcomes passed\n", width, height);
+    home(); move(1); choose("Conversations"); choose("Planning a good day"); select_item(); choose("Reply"); choose("Write message");
+    assert(strcmp(compact_workspace_view(), "draft") == 0);
+    choose("A-M"); choose("H"); choose("Back"); choose("a-m"); choose("i"); choose("Back");
+    choose("Preview"); assert(strcmp(compact_workspace_view(), "draft-preview") == 0); snapshot("draft-preview");
+    select_item(); choose("Review"); assert(strcmp(reply.text, "Hi") == 0 && text_drafts == 1);
+    select_item(); assert(strcmp(compact_workspace_view(), "reply-confirm") == 0);
+    unsigned sends_before = sends; choose("Edit"); assert(sends == sends_before);
+    choose("Space"); choose("N-Z"); choose("O"); choose("Back"); choose("A-M"); choose("K"); choose("Back");
+    choose("Review"); assert(strcmp(reply.text, "Hi OK") == 0 && sends == sends_before);
+    select_item(); choose("Cancel"); assert(sends == sends_before);
+    select_item(); choose("Reply"); choose("Write message"); choose("Resume draft"); choose("Review");
+    select_item(); reject_local_send = true; choose("Send");
+    assert(sends == sends_before + 1 && strcmp(reply.text, "Hi OK") == 0);
+    select_item(); choose("Edit"); choose("Review");
+    assert(strcmp(reply.text, "Hi OK") == 0 && sends == sends_before + 1);
+    select_item(); reject_local_send = false; choose("Send");
+    assert(sends == sends_before + 2 && strcmp(reply.text, "Hi OK") == 0);
+    select_item(); assert(sends == sends_before + 2);
+    home(); move(1); choose("Conversations"); choose("Planning a good day"); select_item(); choose("Reply"); choose("Write message");
+    choose("a-m");
+    for (unsigned i = 0; i < 160; ++i) select_item();
+    choose("Back"); choose("Review"); assert(strlen(reply.text) == 159);
+    select_item(); choose("Cancel"); select_item(); choose("Reply"); choose("Write message"); choose("Resume draft");
+    ++conversations.preview_revision; step();
+    assert(!find_row("Review"));
+    choose("Back to messages"); select_item(); choose("Reply"); choose("Write message");
+    assert(!find_row("Resume draft")); choose("Discard draft"); choose("Write message");
+    unsigned drafts_before = text_drafts; choose("Review"); assert(text_drafts == drafts_before);
+    choose("a-m"); choose("a"); choose("Back"); choose("Preview");
+    reader_connected = false; step(); select_item();
+    assert(strcmp(compact_workspace_view(), "draft-choice") == 0);
+    choose("Discard draft"); assert(strcmp(compact_workspace_view(), "reply-picker") == 0);
+    assert(text_drafts == drafts_before);
+    reader_connected = true; step(); choose("Write message");
+    assert(strcmp(compact_workspace_view(), "draft") == 0);
+    printf("Compact workspace %dx%d: async results, owned drafts, reviewed actions and retained outcomes passed\n", width, height);
     lv_deinit();
 }

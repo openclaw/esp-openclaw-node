@@ -19,6 +19,8 @@ static unsigned identifies;
 static char identify_target[129];
 static esp_openclaw_reader_home_t home_context;
 static unsigned refreshes, opens, previews, sends;
+static unsigned reply_reads;
+static esp_err_t reply_read_result = ESP_OK;
 static unsigned create_submits, created_opens;
 static size_t refresh_offset;
 static unsigned text_drafts;
@@ -95,7 +97,10 @@ void esp_openclaw_reader_reply_close(unsigned revision) {
     assert(revision == reply.revision);
     reply.state = ESP_OPENCLAW_READER_REPLY_IDLE; reply.can_send = false; ++reply.revision;
 }
-esp_err_t esp_openclaw_reader_reply_read(unsigned revision) { (void)revision; return ESP_OK; }
+esp_err_t esp_openclaw_reader_reply_read(unsigned revision) {
+    assert(revision == reply.revision && reply.can_read);
+    ++reply_reads; return reply_read_result;
+}
 esp_err_t esp_openclaw_reader_creation_begin(unsigned revision) {
     assert(revision == conversations.revision);
     creation.state = ESP_OPENCLAW_READER_CREATION_REVIEW;
@@ -216,6 +221,33 @@ int main(int argc, char **argv) {
     home(); move(1); move(3); select_item();
     assert(compact_workspace_message_visible());
     assert(compact_workspace_message_line_height() == (width == 160 ? lv_font_montserrat_20.line_height : lv_font_montserrat_28.line_height));
+    select_item();
+    assert(strcmp(compact_workspace_view(), "activity-actions") == 0 && !find_row("Check conversation"));
+    reply.can_read = true; reply.state = ESP_OPENCLAW_READER_REPLY_REVIEW; ++reply.revision; step();
+    assert(!find_row("Check conversation"));
+    reply.state = ESP_OPENCLAW_READER_REPLY_UNKNOWN; ++reply.revision; step();
+    assert(find_row("Check conversation"));
+    revision = compact_workspace_revision();
+    compact_input_t reply_held = {0};
+    compact_input_sample(&reply_held, 0, revision, false, false, width == 320, 3);
+    compact_input_sample(&reply_held, 30, revision, false, false, width == 320, 3);
+    compact_input_sample(&reply_held, 40, revision, true, false, width == 320, 3);
+    compact_input_sample(&reply_held, 70, revision, true, false, width == 320, 3);
+    // Losing the retained target changes availability without a reply revision.
+    reply.can_read = false; step();
+    assert(compact_workspace_revision() != revision && !find_row("Check conversation"));
+    compact_input_sample(&reply_held, 100, compact_workspace_revision(), false, false, width == 320, 3);
+    compact_input_event_t reply_release = compact_input_sample(&reply_held, 130, compact_workspace_revision(), false, false, width == 320, 3);
+    compact_workspace_input(reply_release); step();
+    assert(!reply_release.select && reply_reads == 0 && sends == 1);
+    reply.can_read = true; step();
+    reply_read_result = ESP_ERR_INVALID_STATE;
+    choose("Check conversation");
+    assert(strcmp(compact_workspace_view(), "activity-actions") == 0 && reply_reads == 1 && sends == 1);
+    reply_read_result = ESP_OK;
+    choose("Check conversation");
+    assert(strcmp(compact_workspace_view(), "reader") == 0 && reply_reads == 2 && sends == 1);
+    reply.can_read = false; step();
     home();
     assert(!compact_workspace_message_visible());
     revision = compact_workspace_revision();

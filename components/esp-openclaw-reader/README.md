@@ -22,6 +22,20 @@ It never grants itself access. Sending replies and creating conversations
 remain explicit, revision-checked actions after messaging access is approved.
 Neither reconnect nor a lost response automatically resends a message.
 
+For a node-only installation, `esp_openclaw_reader_setup_code(code)` queues one
+bootstrap attempt without changing the primary node connection. The code must
+contain a bootstrap token and the exact URI of the connected primary Gateway.
+Shared-token/password codes, busy readers, and codes over 1,024 bytes are rejected.
+The native connection owner checks the primary generation and a 60-second
+deadline before transport, authentication, and credential persistence.
+
+Pairing approval can follow an initial rejected attempt. Submit the code again
+explicitly after approving the exact device's `operator.read` role request;
+approval alone does not place the operator token on the board. The reader never
+replays the code automatically. After success, discard it and reconnect with the
+saved operator session. A limited bootstrap code can remain valid on the Gateway
+until its expiry even when the board has discarded its copy.
+
 Copy the agent, conversation, device, messaging, reply, and creation snapshots
 into the UI owner. Submit actions with the revision from the displayed snapshot.
 Replaced connections and selections invalidate stale snapshots and requests.

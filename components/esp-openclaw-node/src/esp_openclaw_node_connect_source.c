@@ -20,6 +20,14 @@ static bool connect_source_requires_secret(esp_openclaw_node_connect_source_kind
            kind == ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_PASSWORD;
 }
 
+static void wipe_string(char *value)
+{
+    if (value == NULL) return;
+    volatile char *cursor = value;
+    size_t remaining = strlen(value);
+    while (remaining--) *cursor++ = 0;
+}
+
 void esp_openclaw_node_clear_connect_source_struct(
     esp_openclaw_node_connect_request_source_t *source)
 {
@@ -28,6 +36,7 @@ void esp_openclaw_node_clear_connect_source_struct(
     }
     free(source->gateway_uri);
     source->gateway_uri = NULL;
+    wipe_string(source->secret);
     free(source->secret);
     source->secret = NULL;
     source->kind = ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_NONE;
@@ -130,8 +139,10 @@ static esp_err_t decode_base64url_payload(
         &written,
         (const unsigned char *)padded,
         padded_len);
+    wipe_string(padded);
     free(padded);
     if (rc != 0) {
+        wipe_string((char *)decoded);
         free(decoded);
         return ESP_ERR_INVALID_ARG;
     }
@@ -158,6 +169,7 @@ static esp_err_t parse_setup_code(
         "invalid setup code encoding");
 
     cJSON *root = cJSON_Parse(decoded_json);
+    wipe_string(decoded_json);
     free(decoded_json);
     if (root == NULL) {
         return ESP_ERR_INVALID_ARG;
@@ -187,6 +199,9 @@ static esp_err_t parse_setup_code(
     if (!cJSON_IsString(url) || url->valuestring == NULL ||
         !esp_openclaw_node_is_valid_gateway_uri(url->valuestring) ||
         credential_count != 1U) {
+        wipe_string(cJSON_IsString(bootstrap_token) ? bootstrap_token->valuestring : NULL);
+        wipe_string(cJSON_IsString(shared_token) ? shared_token->valuestring : NULL);
+        wipe_string(cJSON_IsString(password) ? password->valuestring : NULL);
         cJSON_Delete(root);
         return ESP_ERR_INVALID_ARG;
     }
@@ -205,6 +220,9 @@ static esp_err_t parse_setup_code(
         out_source->secret = esp_openclaw_node_duplicate_string(password_text);
     }
 
+    wipe_string(cJSON_IsString(bootstrap_token) ? bootstrap_token->valuestring : NULL);
+    wipe_string(cJSON_IsString(shared_token) ? shared_token->valuestring : NULL);
+    wipe_string(cJSON_IsString(password) ? password->valuestring : NULL);
     cJSON_Delete(root);
     if (out_source->gateway_uri == NULL || out_source->secret == NULL) {
         esp_openclaw_node_clear_connect_source_struct(out_source);
@@ -212,6 +230,19 @@ static esp_err_t parse_setup_code(
     }
 
     return validate_connect_source(out_source);
+}
+
+esp_err_t esp_openclaw_node_validate_bootstrap_code(const char *code, const char *gateway_uri)
+{
+    if (code == NULL || gateway_uri == NULL ||
+        strnlen(code, ESP_OPENCLAW_NODE_BOOTSTRAP_CODE_MAX_LENGTH + 1) > ESP_OPENCLAW_NODE_BOOTSTRAP_CODE_MAX_LENGTH)
+        return ESP_ERR_INVALID_ARG;
+    esp_openclaw_node_connect_request_source_t source = {0};
+    esp_err_t err = parse_setup_code(code, &source);
+    if (err == ESP_OK && (source.kind != ESP_OPENCLAW_NODE_CONNECT_SOURCE_KIND_BOOTSTRAP_TOKEN ||
+        strcmp(source.gateway_uri, gateway_uri) != 0)) err = ESP_ERR_INVALID_ARG;
+    esp_openclaw_node_clear_connect_source_struct(&source);
+    return err;
 }
 
 static esp_err_t duplicate_explicit_connect_source(

@@ -4,6 +4,7 @@
 #include "compact_board_text.h"
 #include "compact_workspace.h"
 #include "compact_input.h"
+#include "compact_reader_console.h"
 #include "lvgl.h"
 #include "esp_openclaw_reader.h"
 #include "driver/ledc.h"
@@ -336,7 +337,7 @@ esp_err_t compact_board_register_commands(esp_openclaw_node_handle_t node)
         .tls_server_name = CONFIG_EXAMPLE_GATEWAY_TLS_SERVER_NAME};
     esp_err_t err = esp_openclaw_reader_start(node, &reader);
     if (err != ESP_OK) ESP_LOGW(TAG, "reader unavailable: %s", esp_err_to_name(err));
-    return ESP_OK;
+    return compact_reader_console_register();
 }
 
 void compact_board_set_connected(bool connected)

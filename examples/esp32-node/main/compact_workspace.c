@@ -316,7 +316,7 @@ static void render(void)
         reading(text);
     } else if (ui.view == CONNECTION) {
         char text[350];
-        snprintf(text, sizeof(text), "Wi-Fi: %s\nNetwork: %s\nIP: %s\nOpenClaw: %s\nReader: %s\n\nReader access needs an operator session from device setup. Press to return.",
+        snprintf(text, sizeof(text), "Wi-Fi: %s\nNetwork: %s\nIP: %s\nOpenClaw: %s\nReader: %s\n\nUSB console: reader setup-code\nApprove reader access on the Gateway.\n\nPress to return.",
             ui.wifi.connected ? "connected" : "offline", ui.wifi.ssid,
             ui.wifi.connected ? ui.wifi.ip : "unavailable", ui.connected ? "connected" : "offline",
             ui.reader_ready ? "ready" : "access needed or connecting");

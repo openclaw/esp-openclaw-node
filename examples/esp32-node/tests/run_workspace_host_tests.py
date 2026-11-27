@@ -40,6 +40,7 @@ def main():
             command += ["-I", str(path)]
         binary = work / "workspace-test"
         command += [str(tests / "test_compact_workspace.c"), str(tests.parent / "main/compact_workspace.c"),
+                    str(tests.parent / "main/compact_input.c"),
                     str(root / "components/esp-openclaw-directory/esp_openclaw_avatar.c"), str(pixels),
                     str(args.cjson_dir / "cJSON.c"), *map(str, sorted((args.lvgl_dir / "src").rglob("*.c"))),
                     "-lm", "-o", str(binary)]

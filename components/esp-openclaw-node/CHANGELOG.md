@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Refresh compact loading screens when an agent, conversation, preview or device request completes, and reject presses held across the result change.
+
 - Let the T-Embed display share the system heap so its reserved GUI pool cannot prevent a reader connection.
 
 - Add compact device Identify review and confirmation screens, and retain the latest target-bound result in Activity.

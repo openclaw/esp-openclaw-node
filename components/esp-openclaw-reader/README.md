@@ -21,6 +21,11 @@ session for the same Gateway; node-only pairing does not supply read access.
 It never grants itself access. Sending replies and creating conversations
 remain explicit, revision-checked actions after messaging access is approved.
 Neither reconnect nor a lost response automatically resends a message.
+Applications can prepare their own text with `esp_openclaw_reader_reply_begin_text`.
+It accepts at most 159 UTF-8 bytes, copies the draft, and binds it to the supplied
+preview revision. Invalid or oversized text leaves the existing draft unchanged.
+Preparation checks the selected conversation but sends nothing; the existing
+reviewed `esp_openclaw_reader_reply_send` call remains the only submission step.
 When a saved operator session exists, the reader tries to restore previously
 granted read/write access. The Gateway checks this request against the saved
 device token; it does not create an approval request. If authentication rejects

@@ -439,7 +439,46 @@ static void test_identify(void) {
     puts("Reader Identify: approved write dispatch, rendered result and immediate SDK invalidation passed");
 }
 
+static void test_text_draft(void) {
+    const esp_openclaw_reader_config_t config = {
+        .display_name = "Test Reader", .model_identifier = "test-board", .tls_server_name = "gateway.example"};
+    saved_session_present = true; connect_result = ESP_OK;
+    assert(esp_openclaw_reader_start(&node, &config) == ESP_OK);
+    step(); node_connected(11); step(); connected(71); step();
+    unsigned preview = reply_preview();
+    esp_openclaw_reader_reply_snapshot_t before = prepare_reply(preview);
+    char maximum[160]; memset(maximum, 'a', sizeof(maximum));
+    const char embedded[] = {'a', 0, 'b'};
+    const char invalid[] = {(char)0xc0, (char)0x80};
+    assert(esp_openclaw_reader_reply_begin_text(NULL, 1, preview) == ESP_ERR_INVALID_ARG);
+    assert(esp_openclaw_reader_reply_begin_text("", 0, preview) == ESP_ERR_INVALID_ARG);
+    assert(esp_openclaw_reader_reply_begin_text(" \n\t", 3, preview) == ESP_ERR_INVALID_ARG);
+    assert(esp_openclaw_reader_reply_begin_text(embedded, sizeof(embedded), preview) == ESP_ERR_INVALID_ARG);
+    assert(esp_openclaw_reader_reply_begin_text(invalid, sizeof(invalid), preview) == ESP_ERR_INVALID_ARG);
+    assert(esp_openclaw_reader_reply_begin_text(maximum, sizeof(maximum), preview) == ESP_ERR_INVALID_ARG);
+    esp_openclaw_reader_reply_snapshot_t unchanged = reply_state(ESP_OPENCLAW_READER_REPLY_REVIEW);
+    assert(unchanged.revision == before.revision && strcmp(unchanged.text, before.text) == 0);
+    assert(esp_openclaw_reader_reply_begin_text(maximum, sizeof(maximum) - 1, preview) == ESP_OK);
+    step(); chat_reply("{\"sessionId\":\"session-one\",\"sessionInfo\":{\"key\":\"agent:kitsune:main\",\"agentId\":\"kitsune\",\"sessionId\":\"session-one\",\"activeLeafEntryId\":\"leaf-one\"}}"); step();
+    before = reply_state(ESP_OPENCLAW_READER_REPLY_REVIEW); assert(strlen(before.text) == 159);
+    char text[] = "Please reply with OK. 🦊";
+    assert(esp_openclaw_reader_reply_begin_text(text, strlen(text), preview - 1) == ESP_ERR_INVALID_STATE);
+    assert(esp_openclaw_reader_reply_begin_text(text, strlen(text), preview) == ESP_OK);
+    memset(text, 'x', strlen(text)); // Preparation captured caller-owned bytes.
+    step(); chat_reply("{\"sessionId\":\"session-one\",\"sessionInfo\":{\"key\":\"agent:kitsune:main\",\"agentId\":\"kitsune\",\"sessionId\":\"session-one\",\"activeLeafEntryId\":\"leaf-one\"}}"); step();
+    before = reply_state(ESP_OPENCLAW_READER_REPLY_REVIEW);
+    assert(strcmp(before.text, "Please reply with OK. 🦊") == 0);
+    assert(esp_openclaw_reader_reply_send(before.revision) == ESP_OK);
+    assert(esp_openclaw_reader_reply_send(before.revision) == ESP_ERR_INVALID_STATE);
+    step(); assert(strcmp(last_method, "chat.send") == 0);
+    cJSON *params = cJSON_Parse(last_params); assert(params != NULL);
+    assert(strcmp(cJSON_GetObjectItemCaseSensitive(params, "message")->valuestring, "Please reply with OK. 🦊") == 0);
+    cJSON_Delete(params); chat_reply(NULL); step();
+    puts("Reader text drafts: UTF-8 boundaries, immutable input, stale review and single Send passed");
+}
+
 int main(int argc, char **argv) {
+    if (argc == 2 && strcmp(argv[1], "text-draft") == 0) { test_text_draft(); return 0; }
     if (argc == 2 && strcmp(argv[1], "identify") == 0) { test_identify(); return 0; }
     if (argc == 2 && strcmp(argv[1], "bootstrap") == 0) { test_bootstrap(); return 0; }
     if (argc == 2 && strncmp(argv[1], "restore", 7) == 0) {

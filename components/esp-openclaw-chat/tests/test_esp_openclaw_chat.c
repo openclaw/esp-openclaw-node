@@ -387,3 +387,18 @@ TEST_CASE("chat destruction before late callbacks releases only the local view",
     reply(true, started);
     TEST_ASSERT_EQUAL(2, transport.requests);
 }
+
+TEST_CASE("message validation accepts bounded UTF-8 without changing bytes", "[chat]")
+{
+    TEST_ASSERT_FALSE(esp_openclaw_chat_text_valid(NULL, 1));
+    TEST_ASSERT_FALSE(esp_openclaw_chat_text_valid("", 0));
+    TEST_ASSERT_FALSE(esp_openclaw_chat_text_valid(" \n\t", 3));
+    const char embedded[] = {'a', 0, 'b'};
+    const char invalid[] = {(char)0xed, (char)0xa0, (char)0x80};
+    TEST_ASSERT_FALSE(esp_openclaw_chat_text_valid(embedded, sizeof(embedded)));
+    TEST_ASSERT_FALSE(esp_openclaw_chat_text_valid(invalid, sizeof(invalid)));
+    TEST_ASSERT_TRUE(esp_openclaw_chat_text_valid("Hello 🦊", strlen("Hello 🦊")));
+    char limit[ESP_OPENCLAW_CHAT_TEXT_BYTES]; memset(limit, 'a', sizeof(limit));
+    TEST_ASSERT_TRUE(esp_openclaw_chat_text_valid(limit, sizeof(limit) - 1));
+    TEST_ASSERT_FALSE(esp_openclaw_chat_text_valid(limit, sizeof(limit)));
+}

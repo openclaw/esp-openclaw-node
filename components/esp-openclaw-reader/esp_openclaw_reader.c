@@ -1254,7 +1254,17 @@ esp_err_t esp_openclaw_reader_reply_begin(esp_openclaw_reader_reply_preset_t pre
 {
     static const char *texts[] = {"Please continue.", "Please summarize the conversation so far.",
                                   "Please explain the last response in more detail."};
-    if (reader.lock == NULL || (unsigned)preset >= ESP_OPENCLAW_READER_REPLY_PRESET_COUNT) return ESP_ERR_INVALID_ARG;
+    if ((unsigned)preset >= ESP_OPENCLAW_READER_REPLY_PRESET_COUNT) return ESP_ERR_INVALID_ARG;
+    return esp_openclaw_reader_reply_begin_text(texts[preset], strlen(texts[preset]), preview_revision);
+}
+
+esp_err_t esp_openclaw_reader_reply_begin_text(const char *text, size_t length, unsigned preview_revision)
+{
+    char draft[sizeof(reader.reply.text)];
+    if (reader.lock == NULL || text == NULL || length >= sizeof(draft)) return ESP_ERR_INVALID_ARG;
+    memcpy(draft, text, length);
+    draft[length] = '\0';
+    if (!esp_openclaw_chat_text_valid(draft, length)) return ESP_ERR_INVALID_ARG;
     xSemaphoreTake(reader.lock, portMAX_DELAY);
     const esp_openclaw_reader_conversations_t *view = reader.conversations;
     if (!current_reader() || reader.messaging.state != ESP_OPENCLAW_READER_MESSAGING_READY || reply_active() ||
@@ -1270,7 +1280,7 @@ esp_err_t esp_openclaw_reader_reply_begin(esp_openclaw_reader_reply_preset_t pre
     reader.reply = (esp_openclaw_reader_reply_snapshot_t){.state = ESP_OPENCLAW_READER_REPLY_PREPARING, .revision = revision,
         .preview_revision = preview_revision, .agent = view->agent};
     strcpy(reader.reply.title, view->page.sessions[view->selected].title);
-    strcpy(reader.reply.text, texts[preset]);
+    memcpy(reader.reply.text, draft, length + 1);
     strcpy(reader.reply.detail, "Checking this conversation.");
     strcpy(reader.reply_key, view->page.sessions[view->selected].key);
     reader.reply_generation = reader.generation;

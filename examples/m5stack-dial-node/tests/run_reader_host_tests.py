@@ -83,6 +83,7 @@ esp_err_t esp_timer_stop(esp_timer_handle_t);
         subprocess.run([str(binary)], check=True)
         subprocess.run([str(binary), "bootstrap"], check=True)
         subprocess.run([str(binary), "identify"], check=True)
+        subprocess.run([str(binary), "text-draft"], check=True)
         for case in ("restore", "restore-denied", "restore-missing", "restore-retry", "restore-cancel", "restore-uri"):
             subprocess.run([str(binary), case], check=True)
         parser_test = work / "directory-test"

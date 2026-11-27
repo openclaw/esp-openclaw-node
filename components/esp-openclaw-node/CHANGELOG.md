@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Report the pending messaging approval ID in USB reader status for exact request matching.
+
 - Include the selected workspace row in local USB diagnostics without exposing conversation titles through Gateway display commands.
 
 - Add revision-checked USB workspace navigation with delivery receipts and counters separate from physical input.

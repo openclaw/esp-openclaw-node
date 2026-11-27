@@ -111,6 +111,8 @@ and run `reader setup-code` without an argument. Enter a Gateway bootstrap setup
 code at the hidden prompt within 30 seconds. The code is not echoed or added to
 REPL history. It must target the same exact Gateway URI used by the node. Run
 `reader status` to inspect the connection without exposing credentials.
+It also reports the pending messaging request ID and revision so an operator
+can match the exact Gateway approval before granting access.
 Expired or cancelled input stays hidden until Enter ends the line. To cancel
 an empty prompt, press Ctrl-C and then Enter.
 

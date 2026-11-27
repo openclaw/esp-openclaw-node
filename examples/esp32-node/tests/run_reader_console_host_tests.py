@@ -16,7 +16,7 @@ def main():
         (work / "freertos").mkdir()
         (work / "esp_err.h").write_text("#pragma once\ntypedef int esp_err_t;\n#define ESP_OK 0\n#define ESP_ERR_INVALID_ARG 1\nconst char *esp_err_to_name(esp_err_t);\n")
         (work / "esp_console.h").write_text('#pragma once\n#include "esp_err.h"\ntypedef struct {const char *command, *help; int (*func)(int,char **);} esp_console_cmd_t;\nesp_err_t esp_console_cmd_register(const esp_console_cmd_t *);\n')
-        (work / "esp_openclaw_reader.h").write_text('#pragma once\n#include <stdbool.h>\n#include "cJSON.h"\n#include "esp_err.h"\n#define ESP_OPENCLAW_NODE_BOOTSTRAP_CODE_MAX_LENGTH 1024\nesp_err_t esp_openclaw_reader_setup_code(const char *);\ncJSON *esp_openclaw_reader_status(void);\n')
+        (work / "esp_openclaw_reader.h").write_text('#pragma once\n#include <stdbool.h>\n#include "cJSON.h"\n#include "esp_err.h"\n#define ESP_OPENCLAW_NODE_BOOTSTRAP_CODE_MAX_LENGTH 1024\ntypedef struct {int state; unsigned revision; char request_id[65];} esp_openclaw_reader_messaging_snapshot_t;\nvoid esp_openclaw_reader_messaging_copy(esp_openclaw_reader_messaging_snapshot_t *);\nesp_err_t esp_openclaw_reader_setup_code(const char *);\ncJSON *esp_openclaw_reader_status(void);\n')
         (work / "esp_timer.h").write_text("#pragma once\n#include <stdint.h>\nint64_t esp_timer_get_time(void);\n")
         (work / "freertos/FreeRTOS.h").write_text("#pragma once\n#define pdMS_TO_TICKS(x) (x)\n")
         (work / "freertos/task.h").write_text("#pragma once\nvoid vTaskDelay(unsigned);\n")

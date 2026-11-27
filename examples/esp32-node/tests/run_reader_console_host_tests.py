@@ -18,10 +18,18 @@ def main():
         (work / "esp_console.h").write_text('#pragma once\n#include "esp_err.h"\ntypedef struct {const char *command, *help; int (*func)(int,char **);} esp_console_cmd_t;\nesp_err_t esp_console_cmd_register(const esp_console_cmd_t *);\n')
         (work / "esp_openclaw_reader.h").write_text('#pragma once\n#include <stdbool.h>\n#include "cJSON.h"\n#include "esp_err.h"\n#define ESP_OPENCLAW_NODE_BOOTSTRAP_CODE_MAX_LENGTH 1024\ntypedef struct {int state; unsigned revision; char request_id[65];} esp_openclaw_reader_messaging_snapshot_t;\nvoid esp_openclaw_reader_messaging_copy(esp_openclaw_reader_messaging_snapshot_t *);\nesp_err_t esp_openclaw_reader_setup_code(const char *);\ncJSON *esp_openclaw_reader_status(void);\n')
         (work / "esp_timer.h").write_text("#pragma once\n#include <stdint.h>\nint64_t esp_timer_get_time(void);\n")
+        (work / "esp_heap_caps.h").write_text("""#pragma once
+#include <stddef.h>
+#define MALLOC_CAP_INTERNAL 1
+#define MALLOC_CAP_8BIT 2
+typedef struct {size_t total_free_bytes, largest_free_block, minimum_free_bytes;} multi_heap_info_t;
+void heap_caps_get_info(multi_heap_info_t *, unsigned);
+""")
         (work / "freertos/FreeRTOS.h").write_text("#pragma once\n#define pdMS_TO_TICKS(x) (x)\n")
         (work / "freertos/task.h").write_text("#pragma once\nvoid vTaskDelay(unsigned);\n")
         binary = work / "console-test"
         subprocess.run(["cc", "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-g",
+                        "-DESP_PLATFORM=1",
                         "-Wno-deprecated-declarations",
                         "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
                         "-I", str(work), "-I", str(args.cjson_dir),

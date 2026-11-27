@@ -13,6 +13,8 @@ idf_component_register(
         "esp_openclaw_node_example_gpio_node_cmd.c"
     INCLUDE_DIRS
         "."
+    PRIV_REQUIRES
+        heap
     REQUIRES
         esp-openclaw-node
         esp-openclaw-node-provisioning

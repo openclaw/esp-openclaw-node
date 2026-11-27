@@ -13,6 +13,9 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#ifdef ESP_PLATFORM
+#include "esp_heap_caps.h"
+#endif
 
 static void erase_code(char *code, size_t length)
 {
@@ -22,6 +25,15 @@ static void erase_code(char *code, size_t length)
 
 static int reader_command(int argc, char **argv)
 {
+#ifdef ESP_PLATFORM
+    if (argc == 2 && strcmp(argv[1], "heap") == 0) {
+        multi_heap_info_t info;
+        heap_caps_get_info(&info, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        printf("internalFreeBytes=%zu internalLargestBlockBytes=%zu internalMinimumFreeBytes=%zu\n",
+               info.total_free_bytes, info.largest_free_block, info.minimum_free_bytes);
+        return 0;
+    }
+#endif
     if (argc == 2 && strcmp(argv[1], "status") == 0) {
         cJSON *status = esp_openclaw_reader_status();
         esp_openclaw_reader_messaging_snapshot_t messaging;
@@ -41,7 +53,7 @@ static int reader_command(int argc, char **argv)
         return printed ? 0 : 1;
     }
     if (argc != 2 || strcmp(argv[1], "setup-code") != 0) {
-        puts("Use reader status or reader setup-code. Enter the code at the hidden prompt, never as an argument.");
+        puts("Use reader status, reader heap, or reader setup-code. Enter the code at the hidden prompt, never as an argument.");
         return 1;
     }
     char *code = calloc(ESP_OPENCLAW_NODE_BOOTSTRAP_CODE_MAX_LENGTH + 1, 1);
@@ -115,7 +127,7 @@ esp_err_t compact_reader_console_register(void)
 {
     const esp_console_cmd_t command = {
         .command = "reader",
-        .help = "Reader status or one-time, hidden setup-code input",
+        .help = "Reader status, heap metrics, or one-time, hidden setup-code input",
         .func = reader_command,
     };
     return esp_console_cmd_register(&command);

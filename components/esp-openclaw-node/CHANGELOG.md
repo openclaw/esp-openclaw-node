@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Let the M5StickC display share the system heap instead of reserving a separate 32 KiB pool, and report internal heap headroom through a USB reader diagnostic.
+
 - Retain advertised display commands in device inventory, and apply the shared bounded JSON validation before decoding device identities.
 
 - Yield the compact display task at low FreeRTOS tick rates and limit Wi-Fi status polling to four times per second.

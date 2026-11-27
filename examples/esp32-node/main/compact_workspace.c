@@ -393,6 +393,8 @@ void compact_workspace_poll(const esp_openclaw_node_wifi_status_t *wifi, bool co
 {
     if (now - ui.refreshed_at >= 250) {
         bool changed = ui.connected != connected || ui.wifi.connected != wifi->connected;
+        bool old_connected = ui.connected, old_reader_ready = ui.reader_ready;
+        bool old_home_available = ui.home.available, old_home_preview = ui.home.preview;
         unsigned old_agents = ui.agents.revision, old_sessions = ui.conversations.revision;
         unsigned old_preview = ui.conversations.preview_revision, old_reply = ui.reply.revision;
         unsigned old_creation = ui.creation.revision, old_messaging = ui.messaging.revision;
@@ -411,7 +413,11 @@ void compact_workspace_poll(const esp_openclaw_node_wifi_status_t *wifi, bool co
         bool context_changed = old_agents != ui.agents.revision || old_sessions != ui.conversations.revision ||
             old_preview != ui.conversations.preview_revision || old_reply != ui.reply.revision ||
             old_creation != ui.creation.revision || old_messaging != ui.messaging.revision || old_devices != ui.devices.revision;
-        bool relevant = (ui.view == AGENTS && old_agents != ui.agents.revision) ||
+        bool home_action_changed = ui.view == HOME && (old_connected != ui.connected ||
+            old_reader_ready != ui.reader_ready || old_home_available != ui.home.available ||
+            old_home_preview != ui.home.preview);
+        bool relevant = home_action_changed || (ui.view == CONNECTION && old_reader_ready != ui.reader_ready) ||
+            (ui.view == AGENTS && old_agents != ui.agents.revision) ||
             ((ui.view == HOME || ui.view == SESSIONS || ui.view == READ || ui.view == READ_ACTIONS || ui.view == REPLY_PICK) &&
                 (old_sessions != ui.conversations.revision || old_preview != ui.conversations.preview_revision)) ||
             ((ui.view == REPLY_REVIEW || ui.view == ACTIVITY) && old_reply != ui.reply.revision) ||

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Repaint compact Home actions and Connection status when readiness changes, and cancel stale Home presses.
+
 - Restore previously granted reader write access after reboot or primary reconnect, including retryable local URI-copy failures, with a read-only fallback and no automatic approval request.
 
 - Report the pending messaging approval ID in USB reader status for exact request matching.

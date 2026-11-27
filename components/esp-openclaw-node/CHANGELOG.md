@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Package original ESP32 firmware for the M5StickC CI build while retaining each example's target restrictions and flash offsets.
+
 - Correct the compact displays' landscape orientation and the T-Embed's RGB channel order.
 
 - Show Wi-Fi, IP, and Gateway status on the M5StickC and T-Embed displays, with board-specific power control and CI builds for both profiles.

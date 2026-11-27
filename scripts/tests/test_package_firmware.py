@@ -202,6 +202,28 @@ class FirmwareBundleTests(unittest.TestCase):
             manifest["files"][metadata["app"]["file"]]["sha256"],
         )
 
+    def test_esp32_bundle_preserves_uart_bootloader_offset(self):
+        self.description["target"] = "esp32"
+        self.dependencies["target"] = "esp32"
+        self.config = self.config.replace('"esp32s3"', '"esp32"')
+        self.flash["extra_esptool_args"]["chip"] = "esp32"
+        self.flash["flash_files"]["0x1000"] = self.flash["flash_files"].pop("0x0")
+        self.flash["bootloader"]["offset"] = "0x1000"
+        self.package()
+        relocated = json.loads((self.output / "flasher_args.json").read_text())
+        self.assertEqual(relocated["extra_esptool_args"]["chip"], "esp32")
+        self.assertEqual(relocated["bootloader"]["offset"], "0x1000")
+        self.assertIn("0x1000", relocated["flash_files"])
+        self.assertNotIn("0x0", relocated["flash_files"])
+        self.assertEqual(json.loads((self.output / "manifest.json").read_text())["target"], "esp32")
+
+    def test_cli_accepts_esp32_target(self):
+        result = subprocess.run(
+            [sys.executable, str(Path(firmware.__file__)), "--target", "esp32", "--help"],
+            capture_output=True, text=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_invalid_inputs_never_leave_uploadable_output(self):
         cases = (
             ("missing", lambda: (self.build / "app.bin").unlink()),

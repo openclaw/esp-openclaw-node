@@ -22,6 +22,14 @@ jobs:
           - name: esp32-node
             path: examples/esp32-node
             target: esp32s3
+          - name: m5stickc-node
+            path: examples/esp32-node
+            target: esp32
+            sdkconfig_defaults: "sdkconfig.defaults;sdkconfig.m5stickc"
+          - name: t-embed-node
+            path: examples/esp32-node
+            target: esp32s3
+            sdkconfig_defaults: "sdkconfig.defaults;sdkconfig.lilygo-t-embed"
           - name: esp-box-3-display
             path: examples/esp-box-3-display
             target: esp32s3
@@ -64,6 +72,16 @@ jobs:
       - name: Dial, setup and reconnect host tests
         if: matrix.name == 'component-test-app-build'
         run: |
+          cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+            -I examples/esp32-node/main \
+            examples/esp32-node/tests/test_compact_board_text.c \
+            -o /tmp/compact_board_text_test
+          /tmp/compact_board_text_test
+          cc -std=c11 -Wall -Wextra -Werror -fsanitize=address,undefined \
+            -I examples/esp32-node/main examples/esp32-node/main/compact_input.c \
+            examples/esp32-node/tests/test_compact_input.c -o /tmp/compact_input_test
+          /tmp/compact_input_test
+          python3 -B -m unittest discover -s scripts/tests -p test_lan_tls_relay.py -v
           cc -std=c11 -Wall -Wextra -Werror \
             -I examples/m5stack-dial-node/main \
             examples/m5stack-dial-node/main/dial_control.c \
@@ -145,6 +163,7 @@ jobs:
         run: |
           python3 -m unittest discover -s scripts/tests -p 'test_node_teardown.py' -v
           python3 -m unittest discover -s scripts/tests -p 'test_node_connect_timeout.py' -v
+          python3 -m unittest discover -s scripts/tests -p 'test_node_receive.py' -v
           python3 -m unittest discover -s scripts/tests -p 'test_package_firmware.py' -v
           python3 -m unittest discover -s scripts/tests -p 'test_stage_web_firmware.py' -v
           python3 -m unittest discover -s scripts/tests -p 'test_idf_tab5_compat.py' -v
@@ -169,7 +188,7 @@ jobs:
               camera_compat="--camera-compat" &&
               python3 ../../scripts/idf_tab5_compat.py --idf-path "$IDF_PATH" --nvs-diagnostics
             fi &&
-            idf.py reconfigure &&
+            idf.py -D SDKCONFIG_DEFAULTS="${{ matrix.sdkconfig_defaults || 'sdkconfig.defaults' }}" reconfigure &&
             if [ "${{ matrix.name }}" = "m5stack-tab5-room-node" ]; then
               python3 ../../scripts/tab5_sdio_diagnostics.py \
                 --project-path . --component-path managed_components/espressif__esp_hosted --build-path build --psram-rx &&
@@ -211,6 +230,10 @@ jobs:
               python3 ../../../esp-openclaw-talk/tests/run_threaded_tests.py &&
               python3 -m unittest discover -s ../../../../scripts/tests -p test_node_reply_diagnostics.py -v &&
               python3 -m unittest discover -s ../../../../scripts/tests -p test_package_firmware.py -k lock_reader -v
+            fi &&
+            if [ "${{ matrix.name }}" = "t-embed-node" ]; then
+              python3 tests/run_workspace_host_tests.py --lvgl-dir managed_components/lvgl__lvgl --cjson-dir managed_components/espressif__cjson/cJSON &&
+              python3 tests/run_reader_console_host_tests.py --cjson-dir managed_components/espressif__cjson/cJSON
             fi &&
             if [ "${{ matrix.name }}" = "m5stack-dial-node" ]; then
               python3 ../../scripts/idf_srp_salt.py --idf-path "$IDF_PATH" --verify-only &&

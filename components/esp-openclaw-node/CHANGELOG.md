@@ -4,6 +4,90 @@
 
 - Add staged browser USB firmware manifests for ESP32-S3, ESP-BOX-3, and M5Dial, with exact stable-release CI provenance and opt-in Pages publication.
 
+- Parse device inventories one node at a time to reduce peak memory when opening Devices after composing a message.
+
+- Show compact device-list loading and failure states, and report content-free diagnostics for failed device requests.
+
+- Avoid temporary RPC payload trees and reserialization in the compact reader, reducing memory needed to open device lists while preserving callback ownership and validation. The opt-in Node configuration field is appended; consumers must rebuild against the updated header.
+
+- Request compact Gateway health and startup snapshots, without duplicate assistant-text events, on the compact boards' operator connection to reduce inbound memory pressure.
+
+- Add a target-checked Check conversation action to compact Activity, and cancel held selections when reply access changes.
+
+- Request two conversations per page on compact boards to reduce temporary response memory, with a configurable reader page size and unchanged pagination.
+
+- Report bounded, content-free diagnostics for reader request, response-copy, and parse failures, including Gateway response serialization allocation failures.
+
+- Distinguish Create from Open in local USB workspace status and invalidate stale inputs when the creation action changes.
+
+- Add a compact message editor with character groups, draft preview, deletion, and explicit Send/Edit/Cancel review on both button and encoder boards.
+
+- Let applications prepare custom UTF-8 reader drafts with the existing recipient, review and single-send checks.
+
+- Request the Gateway's smaller session-list projection so conversation pickers do not receive unrelated runtime metadata.
+
+- Release idle TLS buffers on T-Embed so concurrent node and reader sessions leave larger free heap blocks.
+
+- Refresh compact loading screens when an agent, conversation, preview or device request completes, and reject presses held across the result change.
+
+- Let the T-Embed display share the system heap so its reserved GUI pool cannot prevent a reader connection.
+
+- Add compact device Identify review and confirmation screens, and retain the latest target-bound result in Activity.
+
+- Add a reviewed Identify command lifecycle for supported compact displays, with current inventory and write-access checks and separate accepted, rendered and unknown outcomes.
+
+- Handle empty initial WebSocket data notifications without restarting a frame, and report inbound allocation failures with their original memory error and numeric diagnostics.
+
+- Validate remote display receipts against the target, command, content and render generation before reporting completion.
+
+- Let the M5StickC display share the system heap instead of reserving a separate 32 KiB pool, and report internal heap headroom through a USB reader diagnostic.
+
+- Retain advertised display commands in device inventory, and apply the shared bounded JSON validation before decoding device identities.
+
+- Yield the compact display task at low FreeRTOS tick rates and limit Wi-Fi status polling to four times per second.
+
+- Release idle TLS buffers in the M5StickC profile to reduce memory held by concurrent node and reader connections.
+
+- Repaint compact Home actions and Connection status when readiness changes, and cancel stale Home presses.
+
+- Restore previously granted reader write access after reboot or primary reconnect, including retryable local URI-copy failures, with a read-only fallback and no automatic approval request.
+
+- Report the pending messaging approval ID in USB reader status for exact request matching.
+
+- Include the selected workspace row in local USB diagnostics without exposing conversation titles through Gateway display commands.
+
+- Add revision-checked USB workspace navigation with delivery receipts and counters separate from physical input.
+
+- Add a one-attempt compact reader setup command with hidden USB input and connection-generation checks through token persistence.
+
+- Add credential-free validation of bounded bootstrap codes for one exact Gateway, and wipe temporary decoded authentication material.
+
+- Add a compact on-device workspace with physical button/encoder navigation, shared agent and conversation browsing, reviewed replies, device inventory, Activity, and saved display settings. Compact profiles retain NVS offsets and use a 3 MiB factory app partition.
+
+- Preserve saved Wi-Fi and identity on compact boards when NVS initialization needs recovery; report the error instead of erasing storage automatically.
+
+- Share the Dial's agent, conversation, reviewed-reply, and device-reader backend with other board applications, including configurable reader identity and TLS server name.
+
+- Show USB setup and command hints on compact displays before the first message, and keep the Gateway footer offline when Wi-Fi is lost.
+
+- Add optional large text to compact display messages while keeping the heading and connection footer visible.
+
+- Wrap compact display messages at word boundaries so sentences remain readable on M5StickC and T-Embed screens.
+
+- Add an optional macOS LAN TLS passthrough helper with exact node source admission, router identity checks, bounded connections, and automatic rebinding within the configured LAN.
+
+- Synchronize M5StickC and T-Embed clocks asynchronously after Wi-Fi connects and validate TLS certificate dates without blocking serial provisioning. Allow an explicit certificate/SNI name for end-to-end TLS passthrough relays.
+
+- Let M5StickC and T-Embed nodes accept bounded display messages, report completed display generations, and return their board identity from `device.info`.
+
+- Package original ESP32 firmware for the M5StickC CI build while retaining each example's target restrictions and flash offsets.
+
+- Correct the compact displays' landscape orientation and the T-Embed's RGB channel order.
+
+- Show Wi-Fi, IP, and Gateway status on the M5StickC and T-Embed displays, with board-specific power control and CI builds for both profiles.
+
+- Add explicit M5StickC and LILYGO T-Embed example profiles with board identity, flash size, and the matching USB console transport.
+
 - Update non-Tab5 builds to ESP-IDF 5.5.6 and requalify the source-verified Security2 salt guard while retaining the separate Tab5 SDK contract.
 
 - Explain saved `sdkconfig` precedence and safe selective updates or backed-up regeneration for repeat example builds. Thanks @DonnieFi (#235).

@@ -1072,7 +1072,13 @@ static bool handle_gateway_response(
     cJSON *error_message = cJSON_IsObject(error)
         ? cJSON_GetObjectItemCaseSensitive(error, "message")
         : NULL;
-    char *payload_json = payload != NULL ? cJSON_PrintUnformatted(payload) : NULL;
+    bool raw_payload = cJSON_IsRaw(payload);
+    char *payload_json = raw_payload ? payload->valuestring :
+        payload != NULL ? cJSON_PrintUnformatted(payload) : NULL;
+    if (payload != NULL && payload_json == NULL) {
+        ESP_LOGW(ESP_OPENCLAW_NODE_TAG, "gateway_response_diag role=%s stage=1 err=%d",
+                 connect_diagnostic_role(node), ESP_ERR_NO_MEM);
+    }
     invoke_gateway_callback(
         node,
         callback,
@@ -1081,7 +1087,7 @@ static bool handle_gateway_response(
         payload_json,
         cJSON_IsString(error_code) ? error_code->valuestring : NULL,
         cJSON_IsString(error_message) ? error_message->valuestring : NULL);
-    free(payload_json);
+    if (!raw_payload) free(payload_json);
     return true;
 }
 
@@ -1117,8 +1123,17 @@ void esp_openclaw_node_process_gateway_message(
     bool handshake = esp_openclaw_node_state_is_connecting(node->state);
     esp_openclaw_node_unlock_state(node);
     size_t length = strlen(text);
-    cJSON *root = handshake ? esp_openclaw_node_parse_handshake(text, length) :
-        esp_openclaw_node_json_strings_valid(text, length) ? cJSON_Parse(text) : NULL;
+    cJSON *root = NULL;
+    esp_openclaw_response_parse_t parsed = ESP_OPENCLAW_RESPONSE_NOT_APPLICABLE;
+    if (!handshake && node->config.compact_gateway_responses) {
+        parsed = esp_openclaw_node_parse_response(text, length, &root);
+        if (parsed == ESP_OPENCLAW_RESPONSE_NO_MEMORY)
+            ESP_LOGW(ESP_OPENCLAW_NODE_TAG, "gateway_response_diag role=%s stage=2 err=%d",
+                     connect_diagnostic_role(node), ESP_ERR_NO_MEM);
+    }
+    if (parsed == ESP_OPENCLAW_RESPONSE_NOT_APPLICABLE)
+        root = handshake ? esp_openclaw_node_parse_handshake(text, length) :
+            esp_openclaw_node_json_strings_valid(text, length) ? cJSON_Parse(text) : NULL;
     if (root == NULL) {
         ESP_LOGW(ESP_OPENCLAW_NODE_TAG, "invalid gateway JSON frame");
         return;

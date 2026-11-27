@@ -95,7 +95,62 @@ Only one transport request can remain outstanding; each interested view has a
 Snapshots distinguish idle, offline, loading, ready, empty, error, oversized,
 and timed-out states. Copy them outside the caller's owner lock.
 
-The inventory retains at most 16 devices from a 32 KiB response. Each device
+Failed device loads emit `devices_response_diag` with a numeric stage, result,
+and byte count. Stages are request allocation (1), missing or rejected response
+(2), response size limit (3), response copy (4), page allocation (5), parsing (6),
+request queueing (7), and timeout (8). Parsing reports the directory result enum;
+other stages report `esp_err_t`. A parse result of `INVALID` covers malformed
+JSON, invalid device fields, or failure to allocate a node's JSON tree. No payload,
+device identity, address, or credential is logged.
+
+Compact displays show the device load state in the list heading and keep the
+Refresh action available. Local USB workspace status includes `deviceState`,
+using the `esp_openclaw_devices_state_t` values above, from the same rendered
+snapshot as `workspaceRevision`. This field is not added to remote commands.
+
+The inventory retains at most 16 devices from a 32 KiB response. It validates
+the entire document and its 16-level nesting bound before parsing one node at
+a time. Only that node's JSON tree is allocated; unrelated root metadata is
+validated without a tree. A failed node discards the complete candidate page.
+A single large node can still exceed available memory. Each device
 keeps its canonical ID, display name, model, and separate known flags for
 connection and pairing. Missing optional facts remain unknown. Discovery
 confers no control authority and changes no agent selection.
+
+Device snapshots also retain exact `display.show` and `display.status`
+advertisements from the Gateway's `commands` array. Missing, malformed,
+duplicate, or oversized command fields remain unknown; an empty valid array
+means neither command was advertised. Parsing uses the same UTF-8,
+embedded-NUL, depth, and JSON bounds as the other directories.
+These flags grant no permission and do not establish a command's parameter
+schema. A control must still verify the target adapter, live connection,
+and operator authority before submission. The field follows the
+[Gateway node-list type](https://github.com/openclaw/openclaw/blob/f4f3651/src/shared/node-list-types.ts).
+
+`esp_openclaw_display_receipt_parse` validates compact display responses to
+`node.invoke`. It checks the node ID, command, heading, text, and numeric
+generations before exposing a receipt. Acceptance and confirmed rendering
+remain separate. Both structured `payload` and encoded `payloadJSON` are
+supported; if both are present, they must agree. Malformed or mismatched
+responses clear the output and cannot establish completion.
+
+## Identify command lifecycle
+
+`esp_openclaw_identify` prepares a short display code for a reviewed target.
+The owner supplies the same mutex used by the device directory, publishes
+connection and write readiness while holding it, and polls from one worker.
+Begin and Send are separate calls. Send requires the current review revision,
+an unchanged inventory revision, a connected and paired compact board, an
+advertised `display.show` command, and an active writable operator connection.
+Only the M5StickC and T-Embed display adapters are supported. The Gateway still
+enforces its command allowlist and permissions.
+
+A submission calls `node.invoke` once with a unique idempotency key. It does
+not bind an agent or conversation. The response must match the target and
+display code. Accepted and rendered are separate states. A lost connection,
+deadline, or invalid receipt after submission produces an unknown outcome;
+the module never retries. The callback retains its slot until completion,
+even after a timeout. A failed local queue admission means nothing was sent.
+
+This component supplies the lifecycle API; applications must provide the
+review and result screens before exposing the action.

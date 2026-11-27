@@ -748,6 +748,8 @@ TEST_CASE("node create deep-copies tls cert pem", "[esp_openclaw_node][config]")
     config.tls_cert_pem = tls_cert_pem;
     config.tls_cert_len = 0;
     config.use_cert_bundle = false;
+    TEST_ASSERT_FALSE(config.compact_gateway_responses);
+    config.compact_gateway_responses = true;
 
     esp_openclaw_node_handle_t node = NULL;
     TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_create(&config, &node));
@@ -758,6 +760,8 @@ TEST_CASE("node create deep-copies tls cert pem", "[esp_openclaw_node][config]")
     TEST_ASSERT_EQUAL_UINT32(0, (uint32_t)node->config.tls_cert_len);
 
     tls_cert_pem[0] = 'X';
+    config.compact_gateway_responses = false;
+    TEST_ASSERT_TRUE(node->config.compact_gateway_responses);
     TEST_ASSERT_EQUAL_STRING(
         "-----BEGIN CERTIFICATE-----\n"
         "example-cert\n"
@@ -975,6 +979,28 @@ TEST_CASE("setup code rejects invalid or ambiguous auth shapes", "[esp_openclaw_
     }
 
     TEST_ASSERT_EQUAL(ESP_OK, esp_openclaw_node_destroy(node));
+}
+
+TEST_CASE("reader bootstrap validates kind and exact gateway without connecting", "[esp_openclaw_node][api]")
+{
+    const char *json[] = {
+        "{\"url\":\"wss://gateway.example\",\"bootstrapToken\":\"synthetic-bootstrap\"}",
+        "{\"url\":\"wss://other.example\",\"bootstrapToken\":\"synthetic-bootstrap\"}",
+        "{\"url\":\"wss://gateway.example\",\"token\":\"synthetic-shared\"}",
+        "{\"url\":\"wss://gateway.example\",\"password\":\"synthetic-password\"}",
+        "{\"url\":\"wss://gateway.example\",\"bootstrapToken\":\"synthetic\",\"token\":\"other\"}",
+    };
+    for (size_t i = 0; i < sizeof(json) / sizeof(json[0]); ++i) {
+        char *code = encode_base64url_string(json[i]);
+        TEST_ASSERT_NOT_NULL(code);
+        TEST_ASSERT_EQUAL(i == 0 ? ESP_OK : ESP_ERR_INVALID_ARG,
+            esp_openclaw_node_validate_bootstrap_code(code, "wss://gateway.example"));
+        free(code);
+    }
+    char oversized[ESP_OPENCLAW_NODE_BOOTSTRAP_CODE_MAX_LENGTH + 2];
+    memset(oversized, 'A', sizeof(oversized) - 1); oversized[sizeof(oversized) - 1] = 0;
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, esp_openclaw_node_validate_bootstrap_code(oversized, "wss://gateway.example"));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, esp_openclaw_node_validate_bootstrap_code(NULL, "wss://gateway.example"));
 }
 
 TEST_CASE("saved reconnect retains cached session when NVS reload fails", "[esp_openclaw_node][session]")

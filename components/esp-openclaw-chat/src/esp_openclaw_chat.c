@@ -59,6 +59,14 @@ static bool bounded_string(const char *s, size_t capacity)
     return length > 0 && length < capacity && utf8(s, length);
 }
 
+bool esp_openclaw_chat_text_valid(const char *text, size_t length)
+{
+    if (text == NULL || length == 0 || length >= ESP_OPENCLAW_CHAT_TEXT_BYTES || !utf8(text, length)) return false;
+    for (size_t i = 0; i < length; ++i)
+        if (text[i] != ' ' && text[i] != '\n' && text[i] != '\t' && text[i] != '\r') return true;
+    return false;
+}
+
 static bool unique_fields(const cJSON *value)
 {
     const cJSON *item;
@@ -257,13 +265,9 @@ esp_err_t esp_openclaw_chat_prepare(esp_openclaw_node_handle_t node,
 esp_err_t esp_openclaw_chat_send(esp_openclaw_chat_handle_t h,
     const char *text, const char *idempotency_key)
 {
-    if (h == NULL || !bounded_string(text, ESP_OPENCLAW_CHAT_TEXT_BYTES) ||
+    if (h == NULL || text == NULL ||
+        !esp_openclaw_chat_text_valid(text, strnlen(text, ESP_OPENCLAW_CHAT_TEXT_BYTES)) ||
         !bounded_string(idempotency_key, ESP_OPENCLAW_CHAT_ID_BYTES)) return ESP_ERR_INVALID_ARG;
-    bool nonspace = false;
-    for (const char *p = text; *p != '\0'; ++p) {
-        if (*p != ' ' && *p != '\n' && *p != '\t' && *p != '\r') nonspace = true;
-    }
-    if (!nonspace) return ESP_ERR_INVALID_ARG;
     xSemaphoreTake(h->lock, portMAX_DELAY);
     esp_err_t err = ESP_ERR_INVALID_STATE;
     if (!h->closed && h->snapshot.state == ESP_OPENCLAW_CHAT_READY && !h->pending && current(h)) {

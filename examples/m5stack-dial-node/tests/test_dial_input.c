@@ -20,12 +20,12 @@ static lv_indev_t *pointer;
 static unsigned confirmations, homes, changes;
 static unsigned home_menus, home_agents, home_opens;
 static dial_navigation_t navigation;
-static dial_agents_snapshot_t roster;
+static esp_openclaw_reader_agents_t roster;
 static bool navigating;
 static unsigned refreshes, previous, next, opens, reads;
 static unsigned device_refreshes;
 static esp_openclaw_devices_snapshot_t devices;
-static dial_conversations_snapshot_t conversations;
+static esp_openclaw_reader_conversations_t conversations;
 static const char *snapshot_prefix, *snapshot_name;
 static uint16_t frame[240 * 240];
 static size_t requested_offset;
@@ -34,11 +34,11 @@ static bool brightness_failure;
 static unsigned brightness_requests;
 static unsigned messaging_requests, messaging_cancels;
 static bool messaging_rejected;
-static dial_reply_snapshot_t reply;
+static esp_openclaw_reader_reply_snapshot_t reply;
 static unsigned reply_begins, reply_sends, reply_closes, reply_reads;
 static unsigned reply_requested_preview, reply_requested_revision;
 static bool reply_rejected;
-static dial_creation_snapshot_t creation;
+static esp_openclaw_reader_creation_snapshot_t creation;
 static unsigned creation_begins, creation_submits, creation_closes, creation_opens, creation_chats;
 static unsigned creation_requested_revision;
 static bool creation_rejected;
@@ -175,25 +175,25 @@ static void navigation_event(dial_navigation_event_t kind, size_t offset, void *
         if (kind == DIAL_NAV_CREATION_BEGIN) {
             ++creation_begins;
             if (!creation_rejected) {
-                creation = (dial_creation_snapshot_t){.state = DIAL_CREATION_REVIEW,
+                creation = (esp_openclaw_reader_creation_snapshot_t){.state = ESP_OPENCLAW_READER_CREATION_REVIEW,
                     .revision = creation.revision + 1, .conversation_revision = offset,
-                    .agent = conversations.agent, .can_create = navigation.messaging.state == DIAL_MESSAGING_READY};
+                    .agent = conversations.agent, .can_create = navigation.messaging.state == ESP_OPENCLAW_READER_MESSAGING_READY};
                 strcpy(creation.detail, "Creates an empty chat. No message is sent.");
             }
         } else if (kind == DIAL_NAV_CREATION_SUBMIT) {
             ++creation_submits;
             if (!creation_rejected) {
-                creation.state = DIAL_CREATION_CREATING; creation.can_create = false; ++creation.revision;
+                creation.state = ESP_OPENCLAW_READER_CREATION_CREATING; creation.can_create = false; ++creation.revision;
                 strcpy(creation.detail, "Creating an empty conversation.");
             }
         } else if (kind == DIAL_NAV_CREATION_CLOSE) {
             ++creation_closes;
-            if (creation.state == DIAL_CREATION_REVIEW)
-                creation = (dial_creation_snapshot_t){.revision = creation.revision + 1};
+            if (creation.state == ESP_OPENCLAW_READER_CREATION_REVIEW)
+                creation = (esp_openclaw_reader_creation_snapshot_t){.revision = creation.revision + 1};
         } else if (kind == DIAL_NAV_CREATION_OPEN) {
             ++creation_opens;
             if (!creation_rejected) {
-                conversations.state = conversations.preview_state = DIAL_AGENTS_READY;
+                conversations.state = conversations.preview_state = ESP_OPENCLAW_READER_READY;
                 conversations.page.count = 1; conversations.selected = 0;
                 conversations.preview.status = ESP_OPENCLAW_PREVIEW_EMPTY;
                 ++conversations.revision; ++conversations.preview_revision;
@@ -203,7 +203,7 @@ static void navigation_event(dial_navigation_event_t kind, size_t offset, void *
         } else {
             ++creation_chats;
             if (!creation_rejected) {
-                conversations.state = DIAL_AGENTS_EMPTY; conversations.page.count = 0;
+                conversations.state = ESP_OPENCLAW_READER_EMPTY; conversations.page.count = 0;
                 conversations.page.has_more = false; conversations.page.offset = 0;
                 ++conversations.revision;
                 assert(dial_navigation_show_reader(&navigation, &roster, &conversations, false));
@@ -217,27 +217,27 @@ static void navigation_event(dial_navigation_event_t kind, size_t offset, void *
         if (kind == DIAL_NAV_REPLY_BEGIN) {
             ++reply_begins;
             reply_requested_preview = navigation.reply_preview_revision;
-            assert(offset < DIAL_REPLY_PRESET_COUNT);
+            assert(offset < ESP_OPENCLAW_READER_REPLY_PRESET_COUNT);
             if (!reply_rejected) {
-                reply = (dial_reply_snapshot_t){.state = DIAL_REPLY_PREPARING, .revision = reply.revision + 1,
+                reply = (esp_openclaw_reader_reply_snapshot_t){.state = ESP_OPENCLAW_READER_REPLY_PREPARING, .revision = reply.revision + 1,
                     .preview_revision = reply_requested_preview, .agent = conversations.agent};
                 strcpy(reply.title, conversations.page.sessions[conversations.selected].title);
                 strcpy(reply.detail, "Checking this conversation.");
-                strcpy(reply.text, offset == DIAL_REPLY_CONTINUE ? "Please continue." :
-                    offset == DIAL_REPLY_SUMMARIZE ? "Please summarize the conversation so far." : "Please explain the last response in more detail.");
+                strcpy(reply.text, offset == ESP_OPENCLAW_READER_REPLY_CONTINUE ? "Please continue." :
+                    offset == ESP_OPENCLAW_READER_REPLY_SUMMARIZE ? "Please summarize the conversation so far." : "Please explain the last response in more detail.");
             }
         } else if (kind == DIAL_NAV_REPLY_SEND) {
             ++reply_sends;
             reply_requested_revision = offset;
             if (!reply_rejected) {
-                reply.state = DIAL_REPLY_SENDING; reply.can_send = false; ++reply.revision;
+                reply.state = ESP_OPENCLAW_READER_REPLY_SENDING; reply.can_send = false; ++reply.revision;
                 strcpy(reply.detail, "Waiting for the Gateway.");
             }
         } else if (kind == DIAL_NAV_REPLY_CLOSE) {
             ++reply_closes;
             reply_requested_revision = offset;
-            if (reply.state == DIAL_REPLY_PREPARING || reply.state == DIAL_REPLY_REVIEW)
-                reply = (dial_reply_snapshot_t){.revision = reply.revision + 1};
+            if (reply.state == ESP_OPENCLAW_READER_REPLY_PREPARING || reply.state == ESP_OPENCLAW_READER_REPLY_REVIEW)
+                reply = (esp_openclaw_reader_reply_snapshot_t){.revision = reply.revision + 1};
         } else {
             ++reply_reads;
             reply_requested_revision = offset;
@@ -459,7 +459,7 @@ static void check_conversation_titles(void)
             dial_navigation_activate(&navigation);
             assert(reads == requested + 1 && requested_offset == 1);
             conversations.selected = 1;
-            conversations.preview_state = DIAL_AGENTS_LOADING;
+            conversations.preview_state = ESP_OPENCLAW_READER_LOADING;
             ++conversations.preview_revision;
             dial_navigation_conversations_update(&navigation, &conversations);
             advance(40);
@@ -564,20 +564,20 @@ static void check_messaging(lv_indev_t *encoder)
     assert(strstr(lv_label_get_text(navigation.messaging_detail), "Read only") != NULL);
     messaging_snapshot("messaging-off");
 
-    dial_messaging_snapshot_t permission = {.revision = 41};
+    esp_openclaw_reader_messaging_snapshot_t permission = {.revision = 41};
     dial_navigation_messaging_update(&navigation, &permission);
     touch(120, 184, true); touch(120, 184, false);
     assert(messaging_requests == 1 && requested_offset == 41 && messaging_cancels == 0);
-    assert(navigation.messaging.state == DIAL_MESSAGING_OFF); // Intent is not permission.
+    assert(navigation.messaging.state == ESP_OPENCLAW_READER_MESSAGING_OFF); // Intent is not permission.
     touch(120, 184, true);
-    permission.state = DIAL_MESSAGING_REQUESTING;
+    permission.state = ESP_OPENCLAW_READER_MESSAGING_REQUESTING;
     ++permission.revision;
     dial_navigation_messaging_update(&navigation, &permission);
     touch(120, 184, false);
     assert(messaging_requests == 1 && messaging_cancels == 0);
     assert(strcmp(lv_label_get_text(navigation.messaging_status), "Requesting") == 0);
     messaging_snapshot("messaging-requesting");
-    permission.state = DIAL_MESSAGING_WAITING;
+    permission.state = ESP_OPENCLAW_READER_MESSAGING_WAITING;
     ++permission.revision;
     strcpy(permission.request_id, "approval-1");
     dial_navigation_messaging_update(&navigation, &permission);
@@ -587,11 +587,11 @@ static void check_messaging(lv_indev_t *encoder)
     touch(68, 44, true); touch(68, 44, false);
     assert(navigation.view == DIAL_NAV_SETTINGS && navigation.focus == 2 && messaging_cancels == 0);
     press_encoder(encoder);
-    assert(navigation.view == DIAL_NAV_MESSAGING && navigation.messaging.state == DIAL_MESSAGING_WAITING);
+    assert(navigation.view == DIAL_NAV_MESSAGING && navigation.messaging.state == ESP_OPENCLAW_READER_MESSAGING_WAITING);
 
     // A new permission observation cancels a held pointer or encoder action.
     touch(120, 184, true);
-    permission.state = DIAL_MESSAGING_CONNECTING;
+    permission.state = ESP_OPENCLAW_READER_MESSAGING_CONNECTING;
     ++permission.revision;
     dial_navigation_messaging_update(&navigation, &permission);
     touch(120, 184, false);
@@ -607,7 +607,7 @@ static void check_messaging(lv_indev_t *encoder)
     assert(messaging_cancels == 0);
     press_encoder(encoder);
     assert(messaging_cancels == 1 && requested_offset == permission.revision);
-    permission.state = DIAL_MESSAGING_READY;
+    permission.state = ESP_OPENCLAW_READER_MESSAGING_READY;
     ++permission.revision;
     dial_navigation_messaging_update(&navigation, &permission);
     assert(strcmp(lv_label_get_text(navigation.messaging_status), "Access ready") == 0);
@@ -616,15 +616,15 @@ static void check_messaging(lv_indev_t *encoder)
     press_encoder(encoder);
     assert(navigation.view == DIAL_NAV_MESSAGING && messaging_requests == 1 && messaging_cancels == 2);
     assert(requested_offset == permission.revision);
-    assert(navigation.messaging.state == DIAL_MESSAGING_READY); // Wait for the owner to confirm local off.
-    permission.state = DIAL_MESSAGING_OFF;
+    assert(navigation.messaging.state == ESP_OPENCLAW_READER_MESSAGING_READY); // Wait for the owner to confirm local off.
+    permission.state = ESP_OPENCLAW_READER_MESSAGING_OFF;
     ++permission.revision;
     dial_navigation_messaging_update(&navigation, &permission);
     touch(68, 44, true); touch(68, 44, false);
     assert(navigation.view == DIAL_NAV_SETTINGS && navigation.focus == 2);
 
-    const dial_messaging_state_t retry_states[] = {
-        DIAL_MESSAGING_REJECTED, DIAL_MESSAGING_EXPIRED, DIAL_MESSAGING_ERROR,
+    const esp_openclaw_reader_messaging_state_t retry_states[] = {
+        ESP_OPENCLAW_READER_MESSAGING_REJECTED, ESP_OPENCLAW_READER_MESSAGING_EXPIRED, ESP_OPENCLAW_READER_MESSAGING_ERROR,
     };
     const char *snapshots[] = {"messaging-rejected", "messaging-expired", "messaging-error"};
     for (unsigned i = 0; i < sizeof(retry_states) / sizeof(*retry_states); ++i) {
@@ -666,13 +666,13 @@ static void check_replies(lv_indev_t *encoder)
     lv_obj_set_hidden(home.root, true);
     lv_obj_set_hidden(input.arc, true);
     dial_input_set_control(&input, false);
-    roster.state = DIAL_AGENTS_READY;
+    roster.state = ESP_OPENCLAW_READER_READY;
     ++roster.revision;
     roster.page.count = roster.page.total = 1;
     strcpy(roster.page.agents[0].id, "beta");
     strcpy(roster.page.agents[0].name, "Beta");
-    conversations = (dial_conversations_snapshot_t){.state = DIAL_AGENTS_READY,
-        .preview_state = DIAL_AGENTS_READY, .revision = 50, .preview_revision = 51,
+    conversations = (esp_openclaw_reader_conversations_t){.state = ESP_OPENCLAW_READER_READY,
+        .preview_state = ESP_OPENCLAW_READER_READY, .revision = 50, .preview_revision = 51,
         .agent = roster.page.agents[0], .page = {.count = 1},
         .preview = {.status = ESP_OPENCLAW_PREVIEW_EMPTY}};
     strcpy(conversations.page.sessions[0].title, "A careful next step");
@@ -687,7 +687,7 @@ static void check_replies(lv_indev_t *encoder)
     snapshot("reply-access-needed");
     press_encoder(encoder);
     assert(navigation.view == DIAL_NAV_MESSAGING);
-    dial_messaging_snapshot_t access = {.state = DIAL_MESSAGING_READY, .revision = 100};
+    esp_openclaw_reader_messaging_snapshot_t access = {.state = ESP_OPENCLAW_READER_MESSAGING_READY, .revision = 100};
     dial_navigation_messaging_update(&navigation, &access);
     touch(68, 44, true); touch(68, 44, false);
     assert(navigation.view == DIAL_NAV_REPLY_PICKER && reply_begins == 0);
@@ -698,7 +698,7 @@ static void check_replies(lv_indev_t *encoder)
     assert(navigation.view == DIAL_NAV_REPLY_REVIEW);
     assert(strcmp(lv_label_get_text(navigation.heading), "Preparing") == 0);
     snapshot("reply-preparing");
-    reply.state = DIAL_REPLY_REVIEW;
+    reply.state = ESP_OPENCLAW_READER_REPLY_REVIEW;
     strcpy(reply.detail, "Review before sending.");
     reply.can_send = true;
     ++reply.revision;
@@ -726,12 +726,12 @@ static void check_replies(lv_indev_t *encoder)
     dial_navigation_reply_update(&navigation, &reply);
     encoder_state = LV_INDEV_STATE_RELEASED; lv_indev_read(encoder); advance(40);
     assert(reply_sends == 0);
-    access.state = DIAL_MESSAGING_OFF; ++access.revision;
+    access.state = ESP_OPENCLAW_READER_MESSAGING_OFF; ++access.revision;
     touch(120, 82, true);
     dial_navigation_messaging_update(&navigation, &access);
     touch(120, 82, false);
     assert(reply_sends == 0 && strcmp(lv_label_get_text(navigation.names[0]), "Messaging") == 0);
-    access.state = DIAL_MESSAGING_READY; ++access.revision;
+    access.state = ESP_OPENCLAW_READER_MESSAGING_READY; ++access.revision;
     dial_navigation_messaging_update(&navigation, &access);
     unsigned sent_revision = reply.revision;
     press_encoder(encoder);
@@ -739,30 +739,30 @@ static void check_replies(lv_indev_t *encoder)
     assert(strcmp(lv_label_get_text(navigation.heading), "Sending") == 0);
     snapshot("reply-sending");
     touch(68, 44, true); touch(68, 44, false);
-    assert(navigation.view == DIAL_NAV_PREVIEW && reply.state == DIAL_REPLY_SENDING);
+    assert(navigation.view == DIAL_NAV_PREVIEW && reply.state == ESP_OPENCLAW_READER_REPLY_SENDING);
     ++conversations.preview_revision;
     dial_navigation_conversations_update(&navigation, &conversations);
     press_encoder(encoder);
     assert(navigation.view == DIAL_NAV_REPLY_REVIEW && reply_begins == 1);
-    reply.state = DIAL_REPLY_ACCEPTED; ++reply.revision; reply.can_read = true;
+    reply.state = ESP_OPENCLAW_READER_REPLY_ACCEPTED; ++reply.revision; reply.can_read = true;
     strcpy(reply.detail, "Accepted. Waiting for the agent.");
     dial_navigation_reply_update(&navigation, &reply);
     snapshot("reply-accepted");
     press_encoder(encoder);
     assert(strcmp(lv_label_get_text(navigation.names[0]), "Read reply") == 0 && navigation.count == 2);
-    reply.state = DIAL_REPLY_UNKNOWN; ++reply.revision;
+    reply.state = ESP_OPENCLAW_READER_REPLY_UNKNOWN; ++reply.revision;
     strcpy(reply.detail, "Outcome unknown. Check the conversation before retrying.");
     dial_navigation_reply_update(&navigation, &reply);
     touch(68, 44, true); touch(68, 44, false);
     assert(strstr(lv_label_get_text(navigation.preview_text), "Check this conversation before trying again.") != NULL);
     snapshot("reply-unknown");
-    reply.state = DIAL_REPLY_SENT; ++reply.revision;
+    reply.state = ESP_OPENCLAW_READER_REPLY_SENT; ++reply.revision;
     strcpy(reply.detail, "Sent. Check the conversation; agent work may continue.");
     dial_navigation_reply_update(&navigation, &reply);
     assert(strcmp(lv_label_get_text(navigation.heading), "Sent") == 0);
     assert(strstr(lv_label_get_text(navigation.preview_text), "agent work may continue.") != NULL);
     snapshot("reply-sent");
-    reply.state = DIAL_REPLY_FAILED; ++reply.revision;
+    reply.state = ESP_OPENCLAW_READER_REPLY_FAILED; ++reply.revision;
     strcpy(reply.detail, "The Gateway rejected this message.");
     dial_navigation_reply_update(&navigation, &reply);
     assert(strcmp(lv_label_get_text(navigation.heading), "Reply failed") == 0);
@@ -782,7 +782,7 @@ static void check_replies(lv_indev_t *encoder)
     encoder_diff = 2; lv_indev_read(encoder); advance(40);
     press_encoder(encoder);
     assert(reply_begins == 3 && strstr(reply.text, "explain") != NULL);
-    reply.state = DIAL_REPLY_REVIEW; reply.can_send = true; ++reply.revision;
+    reply.state = ESP_OPENCLAW_READER_REPLY_REVIEW; reply.can_send = true; ++reply.revision;
     strcpy(reply.agent.name, "A thoughtful research assistant with a long display name");
     strcpy(reply.agent.id, "research-and-planning-assistant-with-a-long-agent-identifier");
     strcpy(reply.title, "Reviewing the next engineering step and the practical tradeoffs in a long conversation");
@@ -795,7 +795,7 @@ static void check_replies(lv_indev_t *encoder)
     check_reader_limits(encoder, "reply-long-review-bottom");
     unsigned closes = reply_closes;
     touch(68, 44, true); touch(68, 44, false);
-    assert(reply_closes == closes + 1 && reply.state == DIAL_REPLY_IDLE && navigation.view == DIAL_NAV_REPLY_PICKER);
+    assert(reply_closes == closes + 1 && reply.state == ESP_OPENCLAW_READER_REPLY_IDLE && navigation.view == DIAL_NAV_REPLY_PICKER);
     assert(reply_sends == 1 && confirmations == confirms);
     for (unsigned child = 0; child < lv_obj_get_child_count(navigation.root); ++child)
         check_home_bounds(lv_obj_get_child(navigation.root, child));
@@ -810,14 +810,14 @@ static void check_creation(lv_indev_t *encoder)
     lv_obj_set_hidden(input.arc, true);
     lv_obj_set_hidden(navigation.root, false);
     dial_input_set_control(&input, false);
-    roster = (dial_agents_snapshot_t){.state = DIAL_AGENTS_READY, .revision = roster.revision + 1,
+    roster = (esp_openclaw_reader_agents_t){.state = ESP_OPENCLAW_READER_READY, .revision = roster.revision + 1,
         .page = {.count = 1, .total = 1}};
     strcpy(roster.page.agents[0].id, "beta");
     strcpy(roster.page.agents[0].name, "Beta");
-    conversations = (dial_conversations_snapshot_t){.state = DIAL_AGENTS_EMPTY, .revision = 200,
+    conversations = (esp_openclaw_reader_conversations_t){.state = ESP_OPENCLAW_READER_EMPTY, .revision = 200,
         .agent = roster.page.agents[0]};
     assert(dial_navigation_show_reader(&navigation, &roster, &conversations, false));
-    dial_messaging_snapshot_t access = {.state = DIAL_MESSAGING_OFF, .revision = 300};
+    esp_openclaw_reader_messaging_snapshot_t access = {.state = ESP_OPENCLAW_READER_MESSAGING_OFF, .revision = 300};
     dial_navigation_messaging_update(&navigation, &access);
     assert(strcmp(lv_label_get_text(navigation.names[0]), "New chat") == 0 && navigation.count == 3);
     snapshot("creation-empty-list");
@@ -839,7 +839,7 @@ static void check_creation(lv_indev_t *encoder)
     snapshot("creation-access-needed");
     press_encoder(encoder);
     assert(navigation.view == DIAL_NAV_MESSAGING);
-    access.state = DIAL_MESSAGING_READY; ++access.revision;
+    access.state = ESP_OPENCLAW_READER_MESSAGING_READY; ++access.revision;
     dial_navigation_messaging_update(&navigation, &access);
     touch(68, 44, true); touch(68, 44, false);
     assert(navigation.view == DIAL_NAV_CREATION && creation_begins == 1);
@@ -870,12 +870,12 @@ static void check_creation(lv_indev_t *encoder)
     press_encoder(encoder);
     assert(creation_submits == 1);
     touch(68, 44, true); touch(68, 44, false);
-    assert(navigation.view == DIAL_NAV_SESSIONS && creation.state == DIAL_CREATION_CREATING);
+    assert(navigation.view == DIAL_NAV_SESSIONS && creation.state == ESP_OPENCLAW_READER_CREATION_CREATING);
     ++conversations.revision;
     dial_navigation_conversations_update(&navigation, &conversations);
     press_encoder(encoder);
     assert(navigation.view == DIAL_NAV_CREATION && creation_begins == 1);
-    creation.state = DIAL_CREATION_CREATED; creation.can_open = true; ++creation.revision;
+    creation.state = ESP_OPENCLAW_READER_CREATION_CREATED; creation.can_open = true; ++creation.revision;
     strcpy(creation.detail, "Created. Open it to choose a reply.");
     dial_navigation_creation_update(&navigation, &creation);
     assert(strcmp(lv_label_get_text(navigation.names[0]), "Open") == 0);
@@ -901,16 +901,16 @@ static void check_creation(lv_indev_t *encoder)
     assert(creation_submits == 2 && navigation.creation_action_failed);
     assert(strstr(lv_label_get_text(navigation.preview_text), "Action unavailable") != NULL);
     creation_rejected = false;
-    creation.state = DIAL_CREATION_FAILED; creation.can_create = false; ++creation.revision;
+    creation.state = ESP_OPENCLAW_READER_CREATION_FAILED; creation.can_create = false; ++creation.revision;
     strcpy(creation.detail, "Could not queue. Review and try again.");
     dial_navigation_creation_update(&navigation, &creation);
     assert(strcmp(lv_label_get_text(navigation.names[0]), "Retry") == 0);
     snapshot("creation-failed");
     press_encoder(encoder);
-    assert(creation_begins == 3 && creation_submits == 2 && creation.state == DIAL_CREATION_REVIEW);
+    assert(creation_begins == 3 && creation_submits == 2 && creation.state == ESP_OPENCLAW_READER_CREATION_REVIEW);
     press_encoder(encoder);
     assert(creation_submits == 3);
-    creation.state = DIAL_CREATION_UNKNOWN; ++creation.revision;
+    creation.state = ESP_OPENCLAW_READER_CREATION_UNKNOWN; ++creation.revision;
     strcpy(creation.detail, "Outcome unknown. Check Chats before creating another.");
     dial_navigation_creation_update(&navigation, &creation);
     assert(strcmp(lv_label_get_text(navigation.names[0]), "Chats") == 0);
@@ -926,9 +926,9 @@ static void check_creation(lv_indev_t *encoder)
     check_reader_limits(encoder, "creation-long-agent-bottom");
     unsigned closes = creation_closes;
     touch(68, 44, true); touch(68, 44, false);
-    assert(creation_closes == closes + 1 && creation.state == DIAL_CREATION_IDLE);
+    assert(creation_closes == closes + 1 && creation.state == ESP_OPENCLAW_READER_CREATION_IDLE);
     assert(navigation.view == DIAL_NAV_SESSIONS && confirmations == confirms && reply_sends == 1);
-    conversations.state = DIAL_AGENTS_READY; conversations.page.count = 2;
+    conversations.state = ESP_OPENCLAW_READER_READY; conversations.page.count = 2;
     conversations.page.has_more = true; conversations.page.next_offset = 17;
     ++conversations.revision;
     dial_navigation_conversations_update(&navigation, &conversations);
@@ -939,7 +939,7 @@ static void check_creation(lv_indev_t *encoder)
     unsigned refresh = refreshes;
     press_encoder(encoder);
     assert(refreshes == refresh + 1 && requested_offset == 17 && creation_begins == 4);
-    creation = (dial_creation_snapshot_t){.state = DIAL_CREATION_CREATED,
+    creation = (esp_openclaw_reader_creation_snapshot_t){.state = ESP_OPENCLAW_READER_CREATION_CREATED,
         .revision = creation.revision + 1, .conversation_revision = conversations.revision - 1};
     strcpy(creation.agent.name, "Previous agent");
     strcpy(creation.agent.id, "previous-agent");
@@ -1243,7 +1243,7 @@ int main(int argc, char **argv)
     lv_obj_set_hidden(home.root, false);
     assert(lv_obj_is_visible(home.eyes[0]) && lv_obj_is_visible(home.eyes[1]) && lv_obj_is_visible(home.mouth));
     dial_home_animate(&home, "neutral", 200);
-    dial_home_context_t home_context = {0};
+    esp_openclaw_reader_home_t home_context = {0};
     const openclaw_status_facts_t online_status = {.wifi_connected = true, .gateway_connected = true};
     const openclaw_status_facts_t gateway_offline = {.wifi_connected = true};
     dial_home_render(&home, &online_status, true, NULL, &home_context);
@@ -1262,7 +1262,7 @@ int main(int argc, char **argv)
     assert(strcmp(lv_label_get_text(home.headline), "Action failed") == 0);
     lv_obj_update_layout(screen);
     check_home_bounds(home.headline);
-    home_context = (dial_home_context_t){.available = true};
+    home_context = (esp_openclaw_reader_home_t){.available = true};
     strcpy(home_context.agent.id, "kitsune");
     strcpy(home_context.agent.name, "Kitsune");
     strcpy(home_context.agent.emoji, "🦊");
@@ -1299,7 +1299,7 @@ int main(int argc, char **argv)
     assert(home.destination == DIAL_HOME_CONNECTION);
     assert(strcmp(lv_label_get_text(home.action), "Connection") == 0);
     snapshot("home-offline");
-    home_context = (dial_home_context_t){0};
+    home_context = (esp_openclaw_reader_home_t){0};
     dial_home_render(&home, &online_status, false, NULL, &home_context);
     assert(home.destination == DIAL_HOME_AGENTS);
     assert(!lv_obj_is_visible(home.agent_avatar));
@@ -1462,7 +1462,7 @@ int main(int argc, char **argv)
     touch(120, 82, false);
     assert(navigation.view == DIAL_NAV_AGENTS && refreshes == 1);
     dial_navigation_set_connection(&navigation, &status_wifi, true);
-    roster = (dial_agents_snapshot_t){.state = DIAL_AGENTS_READY, .revision = 1,
+    roster = (esp_openclaw_reader_agents_t){.state = ESP_OPENCLAW_READER_READY, .revision = 1,
         .page = {.count = 8, .total = 10}};
     for (unsigned i = 0; i < 8; ++i) {
         snprintf(roster.page.agents[i].id, 65, "agent-%u", i);
@@ -1546,7 +1546,7 @@ int main(int argc, char **argv)
     encoder_state = LV_INDEV_STATE_PRESSED;
     lv_indev_read(encoder);
     advance(40);
-    roster.state = DIAL_AGENTS_OFFLINE;
+    roster.state = ESP_OPENCLAW_READER_OFFLINE;
     ++roster.revision;
     dial_navigation_update(&navigation, &roster);
     encoder_state = LV_INDEV_STATE_RELEASED;
@@ -1571,7 +1571,7 @@ int main(int argc, char **argv)
     navigating = true;
     lv_obj_set_hidden(home.root, true);
     dial_navigation_open(&navigation, true);
-    roster = (dial_agents_snapshot_t){.state = DIAL_AGENTS_EMPTY, .revision = 3,
+    roster = (esp_openclaw_reader_agents_t){.state = ESP_OPENCLAW_READER_EMPTY, .revision = 3,
         .page = {.offset = 8, .total = 8}};
     dial_navigation_update(&navigation, &roster);
     dial_navigation_move(&navigation, 1);
@@ -1582,7 +1582,7 @@ int main(int argc, char **argv)
     assert(navigation.view == DIAL_NAV_MENU);
     puts("empty-page navigation: passed");
 
-    roster.state = DIAL_AGENTS_READY;
+    roster.state = ESP_OPENCLAW_READER_READY;
     roster.revision = 4;
     roster.page.count = roster.page.total = 1;
     roster.page.offset = 0;
@@ -1595,11 +1595,11 @@ int main(int argc, char **argv)
     snapshot("agent");
     touch(120, 172, true); touch(120, 172, false);
     assert(navigation.view == DIAL_NAV_SESSIONS && opens == 1 && requested_offset == 0);
-    conversations = (dial_conversations_snapshot_t){.state = DIAL_AGENTS_LOADING, .revision = 1};
+    conversations = (esp_openclaw_reader_conversations_t){.state = ESP_OPENCLAW_READER_LOADING, .revision = 1};
     conversations.agent = roster.page.agents[0];
     dial_navigation_conversations_update(&navigation, &conversations);
     assert(strstr(lv_label_get_text(navigation.description), "Loading conversations") != NULL);
-    conversations.state = DIAL_AGENTS_READY;
+    conversations.state = ESP_OPENCLAW_READER_READY;
     conversations.page.count = 2;
     conversations.page.has_more = true;
     conversations.page.next_offset = 2;
@@ -1619,11 +1619,11 @@ int main(int argc, char **argv)
     dial_navigation_activate(&navigation);
     assert(navigation.view == DIAL_NAV_PREVIEW && reads == title_reads + 1 && requested_offset == 1);
     conversations.selected = 1;
-    conversations.preview_state = DIAL_AGENTS_LOADING;
+    conversations.preview_state = ESP_OPENCLAW_READER_LOADING;
     ++conversations.preview_revision;
     dial_navigation_conversations_update(&navigation, &conversations);
     assert(strstr(lv_label_get_text(navigation.preview_text), "Loading") != NULL);
-    conversations.preview_state = DIAL_AGENTS_READY;
+    conversations.preview_state = ESP_OPENCLAW_READER_READY;
     conversations.preview.status = ESP_OPENCLAW_PREVIEW_OK;
     conversations.preview.count = 2;
     conversations.preview.items[0].role = ESP_OPENCLAW_PREVIEW_USER;
@@ -1664,6 +1664,14 @@ int main(int argc, char **argv)
     assert(navigation.view == DIAL_NAV_SESSIONS && navigation.focus == 1);
     assert(strncmp(lv_label_get_text(navigation.names[1]), "A quest", 7) == 0);
     assert(strcmp(conversations.page.sessions[navigation.focus].title, "A question for Beta") == 0);
+    conversations.page_size = 4;
+    dial_navigation_conversations_update(&navigation, &conversations);
+    for (unsigned i = 0; i < 12 && strcmp(lv_label_get_text(navigation.names[navigation.focus - navigation.first]), "Previous page") != 0; ++i)
+        dial_navigation_move(&navigation, 1);
+    assert(strcmp(lv_label_get_text(navigation.names[navigation.focus - navigation.first]), "Previous page") == 0);
+    dial_navigation_activate(&navigation);
+    assert(requested_offset == 4);
+    while (navigation.focus != 1) dial_navigation_move(&navigation, -1);
     dial_navigation_activate(&navigation);
     assert(navigation.view == DIAL_NAV_PREVIEW && requested_offset == 1);
     touch(68, 44, true); touch(68, 44, false);
@@ -1675,7 +1683,7 @@ int main(int argc, char **argv)
     dial_navigation_conversations_update(&navigation, &conversations);
     assert(strcmp(lv_label_get_text(navigation.preview_text), "Conversation unavailable") == 0);
     snapshot("missing");
-    conversations.preview_state = conversations.state = DIAL_AGENTS_OFFLINE;
+    conversations.preview_state = conversations.state = ESP_OPENCLAW_READER_OFFLINE;
     dial_navigation_conversations_update(&navigation, &conversations);
     assert(strstr(lv_label_get_text(navigation.preview_text), "Gateway offline") != NULL);
     assert(strstr(lv_label_get_text(navigation.preview_text), "What should") == NULL);
@@ -1690,7 +1698,7 @@ int main(int argc, char **argv)
     lv_obj_set_hidden(navigation.root, true);
     control();
     unsigned before_rejection = changes;
-    conversations = (dial_conversations_snapshot_t){.revision = 99};
+    conversations = (esp_openclaw_reader_conversations_t){.revision = 99};
     assert(!dial_navigation_show_reader(&navigation, &roster, &conversations, true));
     encoder_diff = 1;
     lv_indev_read(input.encoder);
@@ -1760,7 +1768,7 @@ int main(int argc, char **argv)
     encoder_diff = 1;
     lv_indev_read(encoder); advance(40);
     assert(brightness == 75 && !navigation.brightness_failed);
-    roster.state = DIAL_AGENTS_OFFLINE;
+    roster.state = ESP_OPENCLAW_READER_OFFLINE;
     ++roster.revision;
     dial_navigation_update(&navigation, &roster);
     assert(navigation.view == DIAL_NAV_BACKLIGHT && brightness == 75);

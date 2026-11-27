@@ -67,7 +67,7 @@ typedef struct {
     esp_openclaw_preview_item_t items[ESP_OPENCLAW_PREVIEW_ITEMS];
 } esp_openclaw_session_preview_t;
 
-/* sessions.list must be requested with agentId, limit=8 and includeGlobal=false.
+/* sessions.list must be requested with agentId, limit=1..8 and includeGlobal=false.
  * Offset belongs to the server page, not a local slice. No key is synthesized. */
 esp_openclaw_directory_result_t esp_openclaw_sessions_parse(
     const char *json, size_t length, const char *agent_id, size_t offset,

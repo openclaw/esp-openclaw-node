@@ -1,3 +1,29 @@
 menu "OpenClaw Example"
 
+choice EXAMPLE_BOARD
+    prompt "Board profile"
+    default EXAMPLE_BOARD_GENERIC
+
+    config EXAMPLE_BOARD_GENERIC
+        bool "Generic Wi-Fi board"
+
+    config EXAMPLE_BOARD_M5STICKC
+        bool "M5Stack M5StickC (original 80x160 model)"
+        depends on IDF_TARGET_ESP32
+
+    config EXAMPLE_BOARD_T_EMBED
+        bool "LILYGO T-Embed"
+        depends on IDF_TARGET_ESP32S3
+endchoice
+
+config EXAMPLE_GATEWAY_TLS_SERVER_NAME
+    string "Expected Gateway TLS server name (optional)"
+    depends on EXAMPLE_BOARD_M5STICKC || EXAMPLE_BOARD_T_EMBED
+    default ""
+    help
+        Certificate name and TLS SNI for an end-to-end TLS passthrough relay.
+        Leave empty to validate the hostname from the Gateway URL. This does
+        not disable certificate, date, or hostname verification. Keep private
+        deployment names in your untracked local sdkconfig.
+
 endmenu

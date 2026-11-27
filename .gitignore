@@ -3,6 +3,7 @@
 **/dependencies.lock
 **/sdkconfig
 **/sdkconfig.old
+**/sdkconfig.*.local
 **/sdkconfig.ci
 **/__pycache__/
 dist/

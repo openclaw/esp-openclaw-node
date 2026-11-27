@@ -1,4 +1,5 @@
 #include "esp_openclaw_node_handshake.h"
+#include "esp_openclaw_json.h"
 
 #include <assert.h>
 #include <stddef.h>
@@ -40,10 +41,41 @@ static const char *text(const cJSON *object, const char *key)
     return field->valuestring;
 }
 
+static bool count_value(const char *json, size_t length, void *context)
+{
+    assert(json != NULL && length != 0);
+    ++*(unsigned *)context;
+    return true;
+}
+
+static bool stop_value(const char *json, size_t length, void *context)
+{
+    count_value(json, length, context);
+    return false;
+}
+
 int main(void)
 {
     cJSON_Hooks hooks = {.malloc_fn = limited_malloc, .free_fn = limited_free};
     cJSON_InitHooks(&hooks);
+    unsigned count = 0;
+    size_t saved_budget = budget;
+    budget = 0;
+    const char *array = "{\"n\\u006fdes\":[{},[],\"🦊\",null,1e3,true],\"nodes\":[]} ";
+    assert(esp_openclaw_json_visit_array(array, strlen(array), "nodes", count_value, &count));
+    assert(count == 6 && allocated == 0);
+    const char *invalid_arrays[] = {
+        "{\"nodes\":[{}],\"ignored\":[1,]}", "{\"nodes\":[{}]} trailing",
+        "{\"nodes\":null,\"nodes\":[]}", "{\"nodes\":[\"\\u0000\"]}", "[]", "{}",
+    };
+    for (size_t i = 0; i < sizeof(invalid_arrays) / sizeof(invalid_arrays[0]); ++i) {
+        count = 0;
+        assert(!esp_openclaw_json_visit_array(invalid_arrays[i], strlen(invalid_arrays[i]), "nodes", count_value, &count));
+        assert(count == 0);
+    }
+    count = 0;
+    assert(!esp_openclaw_json_visit_array(array, strlen(array), "nodes", stop_value, &count) && count == 1);
+    budget = saved_budget;
     const char *lossy = "{\"agents\":[{\"id\":\"main\\u0000suffix\"}]}";
     cJSON *normalized = cJSON_Parse(lossy);
     assert(normalized != NULL);

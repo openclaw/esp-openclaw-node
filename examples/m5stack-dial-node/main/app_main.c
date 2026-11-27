@@ -15,7 +15,7 @@
 #include "dial_home.h"
 #include "dial_input.h"
 #include "dial_navigation.h"
-#include "dial_reader.h"
+#include "esp_openclaw_reader.h"
 #include "driver/gpio.h"
 #include "driver/ledc.h"
 #include "esp_check.h"
@@ -69,13 +69,13 @@ static struct {
     int brightness;
     lv_obj_t *arc, *title, *value, *message, *footer;
     dial_home_t home;
-    dial_home_context_t home_context;
+    esp_openclaw_reader_home_t home_context;
     bool home_online, home_dirty;
     dial_input_t input;
     dial_navigation_t navigation;
     esp_openclaw_devices_snapshot_t *devices, *next_devices;
-    dial_agents_snapshot_t *agents;
-    dial_conversations_snapshot_t *conversations;
+    esp_openclaw_reader_agents_t *agents;
+    esp_openclaw_reader_conversations_t *conversations;
 } ui;
 
 static esp_err_t invalid(esp_openclaw_node_error_t *error, const char *message)
@@ -127,17 +127,17 @@ static void close_devices(void)
     free(ui.devices);
     free(ui.next_devices);
     ui.devices = ui.next_devices = NULL;
-    dial_reader_devices_close();
+    esp_openclaw_reader_devices_close();
 }
 
 static void show_view(dial_view_t view)
 {
     dial_navigation_setup_close(&ui.navigation);
     if (view != VIEW_NAVIGATION) {
-        if (ui.navigation.reply.state != DIAL_REPLY_IDLE)
-            dial_reader_reply_close(ui.navigation.reply.revision);
-        if (ui.navigation.creation.state != DIAL_CREATION_IDLE)
-            dial_reader_creation_close(ui.navigation.creation.revision);
+        if (ui.navigation.reply.state != ESP_OPENCLAW_READER_REPLY_IDLE)
+            esp_openclaw_reader_reply_close(ui.navigation.reply.revision);
+        if (ui.navigation.creation.state != ESP_OPENCLAW_READER_CREATION_IDLE)
+            esp_openclaw_reader_creation_close(ui.navigation.creation.revision);
         close_devices();
         /* The reader retains the bounded selection until refresh or disconnect. */
         free(ui.conversations);
@@ -197,11 +197,11 @@ static void update_devices(bool refresh)
             return;
         }
     }
-    if (refresh && dial_reader_devices_refresh() != ESP_OK) {
+    if (refresh && esp_openclaw_reader_devices_refresh() != ESP_OK) {
         dial_navigation_devices_update(&ui.navigation, NULL);
         return;
     }
-    dial_reader_devices_copy(ui.next_devices);
+    esp_openclaw_reader_devices_copy(ui.next_devices);
     if (ui.next_devices->revision == ui.navigation.device_revision &&
         ui.next_devices->state == ui.navigation.device_state) return;
     /* Cancel input before replacing the snapshot a held row refers to. */
@@ -223,20 +223,20 @@ static void navigation_event(dial_navigation_event_t event, size_t offset, void 
     else if (event == DIAL_NAV_CREATION_BEGIN || event == DIAL_NAV_CREATION_SUBMIT ||
              event == DIAL_NAV_CREATION_CLOSE || event == DIAL_NAV_CREATION_OPEN || event == DIAL_NAV_CREATION_CHATS) {
         esp_err_t err = ESP_OK;
-        if (event == DIAL_NAV_CREATION_BEGIN) err = dial_reader_creation_begin((unsigned)offset);
-        else if (event == DIAL_NAV_CREATION_SUBMIT) err = dial_reader_creation_submit((unsigned)offset);
-        else if (event == DIAL_NAV_CREATION_CLOSE) dial_reader_creation_close((unsigned)offset);
+        if (event == DIAL_NAV_CREATION_BEGIN) err = esp_openclaw_reader_creation_begin((unsigned)offset);
+        else if (event == DIAL_NAV_CREATION_SUBMIT) err = esp_openclaw_reader_creation_submit((unsigned)offset);
+        else if (event == DIAL_NAV_CREATION_CLOSE) esp_openclaw_reader_creation_close((unsigned)offset);
         else if (event == DIAL_NAV_CREATION_OPEN) {
-            err = dial_reader_creation_open((unsigned)offset);
+            err = esp_openclaw_reader_creation_open((unsigned)offset);
             if (err == ESP_OK) {
-                dial_reader_agents_copy(ui.agents);
-                dial_reader_conversations_copy(ui.conversations);
+                esp_openclaw_reader_agents_copy(ui.agents);
+                esp_openclaw_reader_conversations_copy(ui.conversations);
                 if (!dial_navigation_show_reader(&ui.navigation, ui.agents, ui.conversations, true))
                     err = ESP_ERR_INVALID_STATE;
             }
         } else {
-            dial_creation_snapshot_t creation;
-            dial_reader_creation_copy(&creation);
+            esp_openclaw_reader_creation_snapshot_t creation;
+            esp_openclaw_reader_creation_copy(&creation);
             if (creation.revision != offset) err = ESP_ERR_INVALID_STATE;
             else {
                 const char *id = creation.agent.id[0] != '\0' ? creation.agent.id : ui.conversations->agent.id;
@@ -244,17 +244,17 @@ static void navigation_event(dial_navigation_event_t event, size_t offset, void 
                 while (index < ui.agents->page.count && strcmp(ui.agents->page.agents[index].id, id) != 0) ++index;
                 if (index == ui.agents->page.count) dial_navigation_open(&ui.navigation, true);
                 else {
-                    err = dial_reader_conversations_open(id, ui.agents->revision);
+                    err = esp_openclaw_reader_conversations_open(id, ui.agents->revision);
                     if (err == ESP_OK) {
-                        dial_reader_conversations_copy(ui.conversations);
+                        esp_openclaw_reader_conversations_copy(ui.conversations);
                         if (!dial_navigation_show_reader(&ui.navigation, ui.agents, ui.conversations, false))
                             err = ESP_ERR_INVALID_STATE;
                     }
                 }
             }
         }
-        dial_creation_snapshot_t creation;
-        dial_reader_creation_copy(&creation);
+        esp_openclaw_reader_creation_snapshot_t creation;
+        esp_openclaw_reader_creation_copy(&creation);
         dial_navigation_creation_update(&ui.navigation, &creation);
         dial_navigation_creation_result(&ui.navigation, err == ESP_OK);
     }
@@ -262,34 +262,34 @@ static void navigation_event(dial_navigation_event_t event, size_t offset, void 
              event == DIAL_NAV_REPLY_CLOSE || event == DIAL_NAV_REPLY_READ) {
         esp_err_t err = ESP_OK;
         if (event == DIAL_NAV_REPLY_BEGIN)
-            err = dial_reader_reply_begin((dial_reply_preset_t)offset, ui.navigation.reply_preview_revision);
-        else if (event == DIAL_NAV_REPLY_SEND) err = dial_reader_reply_send((unsigned)offset);
-        else if (event == DIAL_NAV_REPLY_CLOSE) dial_reader_reply_close((unsigned)offset);
+            err = esp_openclaw_reader_reply_begin((esp_openclaw_reader_reply_preset_t)offset, ui.navigation.reply_preview_revision);
+        else if (event == DIAL_NAV_REPLY_SEND) err = esp_openclaw_reader_reply_send((unsigned)offset);
+        else if (event == DIAL_NAV_REPLY_CLOSE) esp_openclaw_reader_reply_close((unsigned)offset);
         else {
-            err = dial_reader_reply_read((unsigned)offset);
+            err = esp_openclaw_reader_reply_read((unsigned)offset);
             if (err == ESP_OK) {
-                dial_reader_agents_copy(ui.agents);
-                dial_reader_conversations_copy(ui.conversations);
+                esp_openclaw_reader_agents_copy(ui.agents);
+                esp_openclaw_reader_conversations_copy(ui.conversations);
                 if (!dial_navigation_show_reader(&ui.navigation, ui.agents, ui.conversations, true))
                     err = ESP_ERR_INVALID_STATE;
             }
         }
-        dial_reply_snapshot_t reply;
-        dial_reader_reply_copy(&reply);
+        esp_openclaw_reader_reply_snapshot_t reply;
+        esp_openclaw_reader_reply_copy(&reply);
         dial_navigation_reply_update(&ui.navigation, &reply);
         dial_navigation_reply_result(&ui.navigation, err == ESP_OK);
     }
     else if (event == DIAL_NAV_MESSAGING_REQUEST || event == DIAL_NAV_MESSAGING_CANCEL) {
         esp_err_t err = event == DIAL_NAV_MESSAGING_REQUEST
-            ? dial_reader_messaging_request((unsigned)offset) : dial_reader_messaging_cancel((unsigned)offset);
-        dial_messaging_snapshot_t messaging;
-        dial_reader_messaging_copy(&messaging);
+            ? esp_openclaw_reader_messaging_request((unsigned)offset) : esp_openclaw_reader_messaging_cancel((unsigned)offset);
+        esp_openclaw_reader_messaging_snapshot_t messaging;
+        esp_openclaw_reader_messaging_copy(&messaging);
         dial_navigation_messaging_update(&ui.navigation, &messaging);
         dial_navigation_messaging_result(&ui.navigation, err == ESP_OK);
     }
     else if (event == DIAL_NAV_REFRESH) {
-        if (dial_reader_agents_refresh(offset) == ESP_OK) {
-            dial_reader_agents_copy(ui.agents);
+        if (esp_openclaw_reader_agents_refresh(offset) == ESP_OK) {
+            esp_openclaw_reader_agents_copy(ui.agents);
             dial_navigation_update(&ui.navigation, ui.agents);
         }
     } else if (event == DIAL_NAV_RESUME || event == DIAL_NAV_CONVERSATIONS || event == DIAL_NAV_SESSIONS_REFRESH || event == DIAL_NAV_READ) {
@@ -301,10 +301,10 @@ static void navigation_event(dial_navigation_event_t event, size_t offset, void 
             return;
         }
         if (event == DIAL_NAV_CONVERSATIONS && offset < ui.agents->page.count)
-            dial_reader_conversations_open(ui.agents->page.agents[offset].id, ui.agents->revision);
-        else if (event == DIAL_NAV_SESSIONS_REFRESH) dial_reader_conversations_refresh(offset);
-        else if (event == DIAL_NAV_READ) dial_reader_preview_open(offset, ui.conversations->revision);
-        dial_reader_conversations_copy(ui.conversations);
+            esp_openclaw_reader_conversations_open(ui.agents->page.agents[offset].id, ui.agents->revision);
+        else if (event == DIAL_NAV_SESSIONS_REFRESH) esp_openclaw_reader_conversations_refresh(offset);
+        else if (event == DIAL_NAV_READ) esp_openclaw_reader_preview_open(offset, ui.conversations->revision);
+        esp_openclaw_reader_conversations_copy(ui.conversations);
         if (event == DIAL_NAV_RESUME) {
             /* Home passes its destination; Menu uses zero and the latest reader.
              * Copies taken after a Home press must still match its visible context. */
@@ -331,7 +331,7 @@ static void open_navigation(bool agents)
         show_view(VIEW_MESSAGE);
         return;
     }
-    dial_reader_agents_copy(ui.agents);
+    esp_openclaw_reader_agents_copy(ui.agents);
     dial_navigation_update(&ui.navigation, ui.agents);
     esp_openclaw_node_wifi_status_t wifi;
     esp_openclaw_node_wifi_get_status(&wifi);
@@ -340,14 +340,14 @@ static void open_navigation(bool agents)
     dial_activity_t latest = action_state.activity;
     xSemaphoreGive(action_lock);
     dial_navigation_activity_update(&ui.navigation, &latest);
-    dial_messaging_snapshot_t messaging;
-    dial_reader_messaging_copy(&messaging);
+    esp_openclaw_reader_messaging_snapshot_t messaging;
+    esp_openclaw_reader_messaging_copy(&messaging);
     dial_navigation_messaging_update(&ui.navigation, &messaging);
-    dial_reply_snapshot_t reply;
-    dial_reader_reply_copy(&reply);
+    esp_openclaw_reader_reply_snapshot_t reply;
+    esp_openclaw_reader_reply_copy(&reply);
     dial_navigation_reply_update(&ui.navigation, &reply);
-    dial_creation_snapshot_t creation;
-    dial_reader_creation_copy(&creation);
+    esp_openclaw_reader_creation_snapshot_t creation;
+    esp_openclaw_reader_creation_copy(&creation);
     dial_navigation_creation_update(&ui.navigation, &creation);
     show_view(VIEW_NAVIGATION);
     dial_navigation_open(&ui.navigation, agents);
@@ -455,7 +455,7 @@ static void commit_action(void)
     xSemaphoreGive(action_lock);
 }
 
-static bool same_home_context(const dial_home_context_t *a, const dial_home_context_t *b)
+static bool same_home_context(const esp_openclaw_reader_home_t *a, const esp_openclaw_reader_home_t *b)
 {
     return a->available == b->available && a->preview == b->preview &&
         a->directory_revision == b->directory_revision &&
@@ -492,8 +492,8 @@ static void input_event(dial_input_event_t event, int value, bool pointer, void 
         else if (event == DIAL_INPUT_HOME_MENU || event == DIAL_INPUT_HOME_AGENTS) {
             if (ui.view == VIEW_FACE) open_navigation(event == DIAL_INPUT_HOME_AGENTS);
         } else if (ui.view == VIEW_FACE && event == DIAL_INPUT_OPEN) {
-            dial_home_context_t context;
-            dial_reader_home_copy(&context);
+            esp_openclaw_reader_home_t context;
+            esp_openclaw_reader_home_copy(&context);
             xSemaphoreTake(action_lock, portMAX_DELAY);
             bool online = action_state.connection_id != 0;
             xSemaphoreGive(action_lock);
@@ -547,21 +547,21 @@ static void refresh_ui(lv_timer_t *timer)
         connection_sampled = true;
     }
     if (ui.view == VIEW_NAVIGATION) {
-        dial_messaging_snapshot_t messaging;
-        dial_reader_messaging_copy(&messaging);
+        esp_openclaw_reader_messaging_snapshot_t messaging;
+        esp_openclaw_reader_messaging_copy(&messaging);
         dial_navigation_messaging_update(&ui.navigation, &messaging);
-        dial_reply_snapshot_t reply;
-        dial_reader_reply_copy(&reply);
+        esp_openclaw_reader_reply_snapshot_t reply;
+        esp_openclaw_reader_reply_copy(&reply);
         dial_navigation_reply_update(&ui.navigation, &reply);
-        dial_creation_snapshot_t creation;
-        dial_reader_creation_copy(&creation);
+        esp_openclaw_reader_creation_snapshot_t creation;
+        esp_openclaw_reader_creation_copy(&creation);
         dial_navigation_creation_update(&ui.navigation, &creation);
         if (dial_navigation_has_devices(&ui.navigation) && ui.devices != NULL) update_devices(false);
         dial_navigation_activity_update(&ui.navigation, &latest);
-        dial_reader_agents_copy(ui.agents);
+        esp_openclaw_reader_agents_copy(ui.agents);
         dial_navigation_update(&ui.navigation, ui.agents);
         if (ui.conversations != NULL) {
-            dial_reader_conversations_copy(ui.conversations);
+            esp_openclaw_reader_conversations_copy(ui.conversations);
             dial_navigation_conversations_update(&ui.navigation, ui.conversations);
         }
         return;
@@ -571,8 +571,8 @@ static void refresh_ui(lv_timer_t *timer)
     static bool status_sampled;
     uint32_t now = lv_tick_get();
     if (ui.home_dirty || !status_sampled || now - status_at >= 1000) {
-        dial_home_context_t context;
-        dial_reader_home_copy(&context);
+        esp_openclaw_reader_home_t context;
+        esp_openclaw_reader_home_copy(&context);
         if (!same_home_context(&context, &ui.home_context) || online != ui.home_online)
             dial_input_set_control(&ui.input, false);
         ui.home_context = context;
@@ -759,8 +759,8 @@ static esp_err_t handle_command(esp_openclaw_node_handle_t client, void *context
             if (ui.agents == NULL) ui.agents = calloc(1, sizeof(*ui.agents));
             if (ui.conversations == NULL || ui.agents == NULL) err = invalid(error, "Reader memory unavailable");
             else {
-                dial_reader_agents_copy(ui.agents);
-                dial_reader_conversations_copy(ui.conversations);
+                esp_openclaw_reader_agents_copy(ui.agents);
+                esp_openclaw_reader_conversations_copy(ui.conversations);
                 if (!dial_navigation_show_reader(&ui.navigation, ui.agents, ui.conversations, strcmp(page, "preview") == 0))
                     err = invalid(error, "Open a conversation before showing this page");
                 else show_view(VIEW_NAVIGATION);
@@ -911,7 +911,7 @@ static void node_event(esp_openclaw_node_handle_t client, esp_openclaw_node_even
     atomic_store(&connected, action_state.connection_id != 0);
     xSemaphoreGive(action_lock);
     free(uri);
-    dial_reader_node_event(event);
+    esp_openclaw_reader_node_event(event);
     esp_openclaw_node_example_saved_session_reconnect_handle_event(&reconnect, event, data);
     ESP_LOGI(TAG, "Gateway %s", event == ESP_OPENCLAW_NODE_EVENT_CONNECTED ? "connected" : "offline");
 }
@@ -946,7 +946,7 @@ static int reader_command(int argc, char **argv)
         printf("usage: reader\n");
         return 1;
     }
-    cJSON *status = dial_reader_status();
+    cJSON *status = esp_openclaw_reader_status();
     char *json = status != NULL ? cJSON_PrintUnformatted(status) : NULL;
     cJSON_Delete(status);
     if (json == NULL) return 1;
@@ -966,11 +966,11 @@ static int agents_command(int argc, char **argv)
             printf("usage: agents [refresh [offset]]\n");
             return 1;
         }
-        if (dial_reader_agents_refresh(offset) != ESP_OK) return 1;
+        if (esp_openclaw_reader_agents_refresh(offset) != ESP_OK) return 1;
     }
-    dial_agents_snapshot_t *snapshot = malloc(sizeof(*snapshot));
+    esp_openclaw_reader_agents_t *snapshot = malloc(sizeof(*snapshot));
     if (snapshot == NULL) return 1;
-    dial_reader_agents_copy(snapshot);
+    esp_openclaw_reader_agents_copy(snapshot);
     static const char *states[] = {"idle", "loading", "ready", "empty", "offline", "connecting", "access-needed", "error", "too-large"};
     cJSON *result = cJSON_CreateObject();
     cJSON *agents = result != NULL ? cJSON_AddArrayToObject(result, "agents") : NULL;
@@ -997,14 +997,14 @@ static int agents_command(int argc, char **argv)
 
 static int conversations_command(int argc, char **argv)
 {
-    dial_conversations_snapshot_t *snapshot = malloc(sizeof(*snapshot));
+    esp_openclaw_reader_conversations_t *snapshot = malloc(sizeof(*snapshot));
     if (snapshot == NULL) return 1;
     esp_err_t err = ESP_OK;
     if (argc == 3 && strcmp(argv[1], "open") == 0) {
-        dial_agents_snapshot_t *agents = malloc(sizeof(*agents));
+        esp_openclaw_reader_agents_t *agents = malloc(sizeof(*agents));
         if (agents == NULL) { free(snapshot); return 1; }
-        dial_reader_agents_copy(agents);
-        err = dial_reader_conversations_open(argv[2], agents->revision);
+        esp_openclaw_reader_agents_copy(agents);
+        err = esp_openclaw_reader_conversations_open(argv[2], agents->revision);
         free(agents);
     } else if (argc == 3 && (strcmp(argv[1], "refresh") == 0 || strcmp(argv[1], "preview") == 0)) {
         char *end;
@@ -1012,19 +1012,19 @@ static int conversations_command(int argc, char **argv)
         unsigned long index = strtoul(argv[2], &end, 10);
         if (argv[2][0] < '0' || argv[2][0] > '9' || *end != '\0' || errno != 0 || index > 2147483647u)
             err = ESP_ERR_INVALID_ARG;
-        else if (strcmp(argv[1], "refresh") == 0) err = dial_reader_conversations_refresh(index);
+        else if (strcmp(argv[1], "refresh") == 0) err = esp_openclaw_reader_conversations_refresh(index);
         else {
-            dial_reader_conversations_copy(snapshot);
-            err = dial_reader_preview_open(index, snapshot->revision);
+            esp_openclaw_reader_conversations_copy(snapshot);
+            err = esp_openclaw_reader_preview_open(index, snapshot->revision);
         }
-    } else if (argc == 2 && strcmp(argv[1], "close") == 0) dial_reader_conversations_close();
+    } else if (argc == 2 && strcmp(argv[1], "close") == 0) esp_openclaw_reader_conversations_close();
     else if (argc != 1) err = ESP_ERR_INVALID_ARG;
     if (err != ESP_OK) {
         free(snapshot);
         printf("%s: conversations [open <agent> | refresh <offset> | preview <index> | close]\n", esp_err_to_name(err));
         return 1;
     }
-    dial_reader_conversations_copy(snapshot);
+    esp_openclaw_reader_conversations_copy(snapshot);
     static const char *states[] = {"idle", "loading", "ready", "empty", "offline", "connecting", "access-needed", "error", "too-large"};
     static const char *previews[] = {"ok", "empty", "missing", "error"};
     static const char *roles[] = {"user", "assistant", "tool", "system", "other"};
@@ -1039,7 +1039,7 @@ static int conversations_command(int argc, char **argv)
         cJSON_AddBoolToObject(root, "hasMore", snapshot->page.has_more) != NULL &&
         cJSON_AddNumberToObject(root, "nextOffset", snapshot->page.next_offset) != NULL &&
         cJSON_AddStringToObject(root, "previewState", states[snapshot->preview_state]) != NULL &&
-        cJSON_AddStringToObject(root, "previewStatus", snapshot->preview_state == DIAL_AGENTS_READY ? previews[snapshot->preview.status] : "unavailable") != NULL &&
+        cJSON_AddStringToObject(root, "previewStatus", snapshot->preview_state == ESP_OPENCLAW_READER_READY ? previews[snapshot->preview.status] : "unavailable") != NULL &&
         cJSON_AddNumberToObject(root, "selected", snapshot->selected) != NULL;
     for (size_t i = 0; ok && i < snapshot->page.count; ++i) {
         const esp_openclaw_session_t *session = &snapshot->page.sessions[i];
@@ -1107,7 +1107,11 @@ void app_main(void)
         ESP_ERROR_CHECK(esp_openclaw_node_register_command_v2(node, &command));
     }
     ESP_ERROR_CHECK(xTaskCreate(action_worker, "dial_action", 4096, NULL, 5, NULL) == pdPASS ? ESP_OK : ESP_ERR_NO_MEM);
-    esp_err_t reader_err = dial_reader_start(node);
+    const esp_openclaw_reader_config_t reader_config = {
+        .display_name = "OpenClaw M5Dial Reader",
+        .model_identifier = "m5stack-dial",
+    };
+    esp_err_t reader_err = esp_openclaw_reader_start(node, &reader_config);
     if (reader_err != ESP_OK) ESP_LOGW(TAG, "read access unavailable: %s", esp_err_to_name(reader_err));
     ESP_ERROR_CHECK(esp_openclaw_node_example_saved_session_reconnect_start(&reconnect, node, "dial_reconnect"));
     esp_openclaw_setup_runtime_handle_t setup_runtime = NULL;

@@ -14,6 +14,7 @@ This repository contains the `esp-openclaw-node` ESP-IDF component, example appl
 See the [Component README](./components/esp-openclaw-node/README.md) for more details on component internals.
 - `components/esp-openclaw-talk/`: Provider-neutral OpenClaw Talk signaling for Espressif's WebRTC stack.
 - `components/esp-openclaw-node-provisioning/`: Reusable Wi-Fi, saved-session, and USB REPL provisioning.
+- `components/esp-openclaw-reader/`: UI-independent agent, conversation, reply, and device browsing over a separate operator connection.
 - `components/esp-openclaw-room-node/`: Canonical dual-session room-node product behind narrow board ports.
 - `examples/`: Example applications for supported boards.
 - `docs/`: Getting-started and troubleshooting guides.

@@ -22,7 +22,9 @@ typedef int esp_err_t;
 #define ESP_FAIL -1
 #define ESP_ERR_NO_MEM 0x101
 #define ESP_ERR_INVALID_ARG 0x102
+#define ESP_ERR_INVALID_SIZE 0x104
 #define ESP_ERR_INVALID_STATE 0x103
+#define ESP_ERR_INVALID_RESPONSE 0x108
 #define ESP_ERR_NOT_FOUND 0x105
 #define ESP_ERR_TIMEOUT 0x107
 """)
@@ -60,6 +62,15 @@ esp_err_t esp_timer_start_once(esp_timer_handle_t, uint64_t);
 esp_err_t esp_timer_stop(esp_timer_handle_t);
 """)
         (work / "esp_random.h").write_text("#pragma once\n#include <stddef.h>\nvoid esp_fill_random(void *, size_t);\n")
+        (work / "esp_log.h").write_text('''#pragma once
+#ifdef CAPTURE_DEVICE_DIAGNOSTICS
+void test_log_warning(const char *, ...);
+#define ESP_LOGW(tag, format, ...) test_log_warning(format, ##__VA_ARGS__)
+#else
+#include <stdio.h>
+#define ESP_LOGW(tag, format, ...) fprintf(stderr, format "\\n", ##__VA_ARGS__)
+#endif
+''')
         directory = root / "components/esp-openclaw-directory"
         chat = root / "components/esp-openclaw-chat"
         binary = work / "reader-test"
@@ -68,17 +79,30 @@ esp_err_t esp_timer_stop(esp_timer_handle_t);
                         "-Wno-deprecated-declarations", "-c", str(args.cjson_dir / "cJSON.c"),
                         "-o", str(cjson_object)], check=True)
         subprocess.run([
-            "cc", "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-g",
+            "cc", "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-g", "-DCAPTURE_DEVICE_DIAGNOSTICS",
             "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
             "-I", str(work), "-I", str(tests.parent / "main"),
+            "-I", str(root / "components/esp-openclaw-reader/include"),
             "-I", str(root / "components/esp-openclaw-node/include"),
+            "-I", str(root / "components/esp-openclaw-node/private_include"),
             "-I", str(directory / "include"), "-I", str(chat / "include"),
             "-I", str(args.cjson_dir), str(tests / "test_dial_reader.c"),
-            str(tests.parent / "main/dial_reader.c"), str(directory / "esp_openclaw_directory.c"),
+            str(root / "components/esp-openclaw-reader/esp_openclaw_reader.c"), str(directory / "esp_openclaw_directory.c"),
+            str(root / "components/esp-openclaw-node/src/esp_openclaw_node_handshake.c"),
             str(directory / "esp_openclaw_devices.c"), str(chat / "src/esp_openclaw_chat.c"),
+            str(directory / "esp_openclaw_identify.c"), str(directory / "esp_openclaw_device_control.c"),
             str(cjson_object), "-lm", "-o", str(binary),
         ], check=True)
         subprocess.run([str(binary)], check=True)
+        subprocess.run([str(binary), "small-pages"], check=True)
+        subprocess.run([str(binary), "compact-pages"], check=True)
+        subprocess.run([str(binary), "compact-snapshots"], check=True)
+        subprocess.run([str(binary), "compact-snapshot-failure"], check=True)
+        subprocess.run([str(binary), "bootstrap"], check=True)
+        subprocess.run([str(binary), "identify"], check=True)
+        subprocess.run([str(binary), "text-draft"], check=True)
+        for case in ("restore", "restore-denied", "restore-missing", "restore-retry", "restore-cancel", "restore-uri"):
+            subprocess.run([str(binary), case], check=True)
         parser_test = work / "directory-test"
         subprocess.run(["cc", "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-g",
                         "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
@@ -87,6 +111,28 @@ esp_err_t esp_timer_stop(esp_timer_handle_t);
                         str(directory / "tests/test_directory.c"), str(cjson_object),
                         "-lm", "-o", str(parser_test)], check=True)
         subprocess.run([str(parser_test)], check=True)
+        control_test = work / "device-control-test"
+        subprocess.run(["cc", "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-g",
+                        "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
+                        "-I", str(directory / "include"), "-I", str(args.cjson_dir),
+                        str(directory / "esp_openclaw_directory.c"),
+                        str(directory / "esp_openclaw_device_control.c"),
+                        str(directory / "tests/test_device_control.c"), str(cjson_object),
+                        "-lm", "-o", str(control_test)], check=True)
+        subprocess.run([str(control_test)], check=True)
+        identify_test = work / "identify-test"
+        subprocess.run(["cc", "-std=gnu11", "-Wall", "-Wextra", "-Werror", "-g",
+                        "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
+                        "-I", str(work), "-I", str(directory / "include"),
+                        "-I", str(root / "components/esp-openclaw-node/include"),
+                        "-I", str(root / "components/esp-openclaw-node/private_include"),
+                        "-I", str(args.cjson_dir), str(directory / "esp_openclaw_identify.c"),
+                        str(root / "components/esp-openclaw-node/src/esp_openclaw_node_handshake.c"),
+                        str(directory / "esp_openclaw_directory.c"),
+                        str(directory / "esp_openclaw_device_control.c"),
+                        str(directory / "tests/test_identify.c"), str(cjson_object),
+                        "-lm", "-o", str(identify_test)], check=True)
+        subprocess.run([str(identify_test)], check=True)
 
 
 if __name__ == "__main__":

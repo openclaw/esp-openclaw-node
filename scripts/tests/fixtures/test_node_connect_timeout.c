@@ -59,7 +59,7 @@ struct node {
     struct { const char *tls_cert_pem, *tls_common_name, *role; int tls_cert_len;
         bool use_cert_bundle, skip_cert_common_name_check; } config;
     const ops_t *websocket_client_ops;
-    uint32_t next_transport_id, active_transport_id, fatal_transport_id;
+    uint32_t next_transport_id, active_transport_id, fatal_transport_id, failed_receive_transport_id;
     esp_err_t fatal_transport_err;
     esp_openclaw_node_transport_event_ctx_t *transport_ctx;
     char *transport_gateway_uri;
@@ -173,6 +173,7 @@ static bool process_work_message(esp_openclaw_node_handle_t node, esp_openclaw_n
     if (message->type == 1) {
         handle_request_connect(node, message);
         assert(node->client_started && starts == 1);
+        assert(node->failed_receive_transport_id == 0);
         if (ready) {
             node->state = ESP_OPENCLAW_NODE_INTERNAL_READY;
             esp_openclaw_node_clear_session_wait_state_locked(node);
@@ -197,7 +198,8 @@ int main(int argc, char **argv)
     destroying = strcmp(argv[1], "destroying") == 0;
     now_ms = initial_ms = strcmp(argv[1], "zero-clock") == 0 ? 0 : 1000;
     const ops_t ops = {client_init, register_events, client_start};
-    struct node node = {.state = ESP_OPENCLAW_NODE_INTERNAL_IDLE, .websocket_client_ops = &ops};
+    struct node node = {.state = ESP_OPENCLAW_NODE_INTERNAL_IDLE, .websocket_client_ops = &ops,
+        .failed_receive_transport_id = 99};
     if (strcmp(argv[1], "revoked-during-init") == 0 || strcmp(argv[1], "destroy-during-init") == 0) {
         node.state = ESP_OPENCLAW_NODE_INTERNAL_CONNECTING;
         node.active_connect_attempt_id = node.connect_attempt.id = 1;

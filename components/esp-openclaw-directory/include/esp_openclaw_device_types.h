@@ -15,6 +15,8 @@ typedef enum {
 typedef struct {
     char id[129], name[65], model[65];
     bool connected, connected_known, paired, paired_known;
+    /* Advertisement only; connection and write authority are checked separately. */
+    bool commands_known, display_show, display_status;
 } esp_openclaw_device_t;
 
 typedef struct {

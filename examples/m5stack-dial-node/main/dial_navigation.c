@@ -45,24 +45,24 @@ static bool reply_page(dial_navigation_view_t view)
 static bool creation_available(const dial_navigation_t *nav)
 {
     return nav->conversations != NULL && nav->conversations->agent.id[0] != '\0' &&
-        (nav->conversation_state == DIAL_AGENTS_READY || nav->conversation_state == DIAL_AGENTS_EMPTY);
+        (nav->conversation_state == ESP_OPENCLAW_READER_READY || nav->conversation_state == ESP_OPENCLAW_READER_EMPTY);
 }
 
 static bool creation_entry(const dial_navigation_t *nav)
 {
     return nav->view == DIAL_NAV_SESSIONS &&
-        (creation_available(nav) || nav->creation.state == DIAL_CREATION_CREATING);
+        (creation_available(nav) || nav->creation.state == ESP_OPENCLAW_READER_CREATION_CREATING);
 }
 
 static bool reply_busy(const dial_navigation_t *nav)
 {
-    return nav->reply.state == DIAL_REPLY_SENDING || nav->reply.state == DIAL_REPLY_ACCEPTED;
+    return nav->reply.state == ESP_OPENCLAW_READER_REPLY_SENDING || nav->reply.state == ESP_OPENCLAW_READER_REPLY_ACCEPTED;
 }
 
 static bool reply_available(const dial_navigation_t *nav)
 {
-    return nav->conversations != NULL && nav->conversation_state == DIAL_AGENTS_READY &&
-        nav->preview_state == DIAL_AGENTS_READY && nav->conversations->selected < nav->conversations->page.count &&
+    return nav->conversations != NULL && nav->conversation_state == ESP_OPENCLAW_READER_READY &&
+        nav->preview_state == ESP_OPENCLAW_READER_READY && nav->conversations->selected < nav->conversations->page.count &&
         (nav->conversations->preview.status == ESP_OPENCLAW_PREVIEW_OK ||
          nav->conversations->preview.status == ESP_OPENCLAW_PREVIEW_EMPTY);
 }
@@ -160,7 +160,7 @@ static void back(dial_navigation_t *nav)
         if (nav->view == DIAL_NAV_CREATION) {
             nav->handler(DIAL_NAV_CREATION_CLOSE, nav->creation.revision, nav->context);
             nav->view = DIAL_NAV_SESSIONS;
-            nav->focus = nav->conversations != NULL && nav->conversation_state == DIAL_AGENTS_READY ?
+            nav->focus = nav->conversations != NULL && nav->conversation_state == ESP_OPENCLAW_READER_READY ?
                 nav->conversations->page.count : 0;
             changed(nav);
             return;
@@ -171,7 +171,7 @@ static void back(dial_navigation_t *nav)
             return;
         }
         if (nav->view == DIAL_NAV_REPLY_REVIEW) {
-            bool draft = nav->reply.state == DIAL_REPLY_PREPARING || nav->reply.state == DIAL_REPLY_REVIEW;
+            bool draft = nav->reply.state == ESP_OPENCLAW_READER_REPLY_PREPARING || nav->reply.state == ESP_OPENCLAW_READER_REPLY_REVIEW;
             nav->handler(DIAL_NAV_REPLY_CLOSE, nav->reply.revision, nav->context);
             nav->view = draft ? DIAL_NAV_REPLY_PICKER : DIAL_NAV_PREVIEW;
             nav->focus = 0;
@@ -382,15 +382,15 @@ void dial_navigation_create(dial_navigation_t *nav, lv_obj_t *parent,
 static unsigned agent_count(const dial_navigation_t *nav)
 {
     if (nav->view == DIAL_NAV_SESSIONS)
-        return nav->conversations != NULL && nav->conversation_state == DIAL_AGENTS_READY ? nav->conversations->page.count : 0;
-    return nav->snapshot != NULL && nav->state == DIAL_AGENTS_READY ? nav->snapshot->page.count : 0;
+        return nav->conversations != NULL && nav->conversation_state == ESP_OPENCLAW_READER_READY ? nav->conversations->page.count : 0;
+    return nav->snapshot != NULL && nav->state == ESP_OPENCLAW_READER_READY ? nav->snapshot->page.count : 0;
 }
 
 static bool has_next(const dial_navigation_t *nav)
 {
     if (nav->view == DIAL_NAV_SESSIONS)
-        return nav->conversations != NULL && nav->conversation_state == DIAL_AGENTS_READY && nav->conversations->page.has_more;
-    if (nav->snapshot == NULL || nav->state != DIAL_AGENTS_READY) return false;
+        return nav->conversations != NULL && nav->conversation_state == ESP_OPENCLAW_READER_READY && nav->conversations->page.has_more;
+    if (nav->snapshot == NULL || nav->state != ESP_OPENCLAW_READER_READY) return false;
     const esp_openclaw_agent_page_t *page = &nav->snapshot->page;
     return page->offset + page->count < page->total;
 }
@@ -399,21 +399,21 @@ static bool has_previous(const dial_navigation_t *nav)
 {
     if (nav->view == DIAL_NAV_SESSIONS)
         return nav->conversations != NULL && nav->conversations->page.offset > 0 &&
-            (nav->conversation_state == DIAL_AGENTS_READY || nav->conversation_state == DIAL_AGENTS_EMPTY);
+            (nav->conversation_state == ESP_OPENCLAW_READER_READY || nav->conversation_state == ESP_OPENCLAW_READER_EMPTY);
     return nav->snapshot != NULL && nav->snapshot->page.offset > 0 &&
-        (nav->state == DIAL_AGENTS_READY || nav->state == DIAL_AGENTS_EMPTY);
+        (nav->state == ESP_OPENCLAW_READER_READY || nav->state == ESP_OPENCLAW_READER_EMPTY);
 }
 
-static const char *state_message(dial_agents_state_t state, bool conversations)
+static const char *state_message(esp_openclaw_reader_state_t state, bool conversations)
 {
     switch (state) {
-    case DIAL_AGENTS_IDLE: return conversations ? "Choose an agent again" : "Open the agent list";
-    case DIAL_AGENTS_LOADING: return conversations ? "Loading conversations..." : "Loading agents...";
-    case DIAL_AGENTS_CONNECTING: return "Connecting...";
-    case DIAL_AGENTS_OFFLINE: return "Gateway offline\nControls still work";
-    case DIAL_AGENTS_ACCESS_NEEDED: return "Read access needed\nPair with OpenClaw";
-    case DIAL_AGENTS_EMPTY: return conversations ? "No conversations yet" : "No agents on this page";
-    case DIAL_AGENTS_TOO_LARGE: return conversations ? "Conversation too large" : "Agent list too large";
+    case ESP_OPENCLAW_READER_IDLE: return conversations ? "Choose an agent again" : "Open the agent list";
+    case ESP_OPENCLAW_READER_LOADING: return conversations ? "Loading conversations..." : "Loading agents...";
+    case ESP_OPENCLAW_READER_CONNECTING: return "Connecting...";
+    case ESP_OPENCLAW_READER_OFFLINE: return "Gateway offline\nControls still work";
+    case ESP_OPENCLAW_READER_ACCESS_NEEDED: return "Read access needed\nPair with OpenClaw";
+    case ESP_OPENCLAW_READER_EMPTY: return conversations ? "No conversations yet" : "No agents on this page";
+    case ESP_OPENCLAW_READER_TOO_LARGE: return conversations ? "Conversation too large" : "Agent list too large";
     default: return conversations ? "Couldn't load conversations" : "Couldn't load agents";
     }
 }
@@ -507,29 +507,29 @@ static void render_display(dial_navigation_t *nav)
     }
 }
 
-static bool messaging_pending(dial_messaging_state_t state)
+static bool messaging_pending(esp_openclaw_reader_messaging_state_t state)
 {
-    return state == DIAL_MESSAGING_REQUESTING || state == DIAL_MESSAGING_WAITING ||
-        state == DIAL_MESSAGING_CONNECTING;
+    return state == ESP_OPENCLAW_READER_MESSAGING_REQUESTING || state == ESP_OPENCLAW_READER_MESSAGING_WAITING ||
+        state == ESP_OPENCLAW_READER_MESSAGING_CONNECTING;
 }
 
 static void render_messaging(dial_navigation_t *nav)
 {
     const char *status, *detail;
     switch (nav->messaging.state) {
-    case DIAL_MESSAGING_OFF:
+    case ESP_OPENCLAW_READER_MESSAGING_OFF:
         status = "Access off"; detail = "Read only.\nRequest access below."; break;
-    case DIAL_MESSAGING_REQUESTING:
+    case ESP_OPENCLAW_READER_MESSAGING_REQUESTING:
         status = "Requesting"; detail = "Contacting Gateway.\nStill read only."; break;
-    case DIAL_MESSAGING_WAITING:
+    case ESP_OPENCLAW_READER_MESSAGING_WAITING:
         status = "Approval needed"; detail = "Approve on Gateway.\nStill read only."; break;
-    case DIAL_MESSAGING_CONNECTING:
+    case ESP_OPENCLAW_READER_MESSAGING_CONNECTING:
         status = "Reconnecting"; detail = "Checking access.\nPlease wait."; break;
-    case DIAL_MESSAGING_READY:
+    case ESP_OPENCLAW_READER_MESSAGING_READY:
         status = "Access ready"; detail = "Turn off only here.\nGateway grant stays."; break;
-    case DIAL_MESSAGING_REJECTED:
+    case ESP_OPENCLAW_READER_MESSAGING_REJECTED:
         status = "Request rejected"; detail = "Still read only.\nRequest again."; break;
-    case DIAL_MESSAGING_EXPIRED:
+    case ESP_OPENCLAW_READER_MESSAGING_EXPIRED:
         status = "Request expired"; detail = "Still read only.\nRequest again."; break;
     default:
         status = "Request failed"; detail = "Check connection.\nThen request again."; break;
@@ -551,7 +551,7 @@ static void render_messaging(dial_navigation_t *nav)
     for (unsigned i = 0; i < 3; ++i) {
         lv_obj_set_hidden(nav->rows[i], i != 0);
         if (i != 0) continue;
-        bool ready = nav->messaging.state == DIAL_MESSAGING_READY;
+        bool ready = nav->messaging.state == ESP_OPENCLAW_READER_MESSAGING_READY;
         bool cancel = ready || messaging_pending(nav->messaging.state);
         lv_obj_set_pos(nav->rows[i], 44, 168);
         lv_obj_set_size(nav->rows[i], 152, 32);
@@ -571,8 +571,8 @@ typedef enum { REPLY_SEND, REPLY_PRESETS, REPLY_READ, REPLY_ACCESS, REPLY_REVIEW
 static unsigned reply_actions(const dial_navigation_t *nav, reply_action_t actions[3])
 {
     unsigned count = 0;
-    if (nav->reply.state == DIAL_REPLY_REVIEW) {
-        if (nav->messaging.state != DIAL_MESSAGING_READY) actions[count++] = REPLY_ACCESS;
+    if (nav->reply.state == ESP_OPENCLAW_READER_REPLY_REVIEW) {
+        if (nav->messaging.state != ESP_OPENCLAW_READER_MESSAGING_READY) actions[count++] = REPLY_ACCESS;
         else if (nav->reply.can_send) actions[count++] = REPLY_SEND;
     } else if (nav->reply.can_read) actions[count++] = REPLY_READ;
     if (!reply_busy(nav)) actions[count++] = REPLY_PRESETS;
@@ -602,13 +602,13 @@ typedef enum { CREATION_SUBMIT, CREATION_ACCESS, CREATION_OPEN, CREATION_RETRY, 
 
 static creation_action_t creation_action(const dial_navigation_t *nav)
 {
-    if (nav->creation.state == DIAL_CREATION_REVIEW) {
-        if (nav->messaging.state != DIAL_MESSAGING_READY) return CREATION_ACCESS;
+    if (nav->creation.state == ESP_OPENCLAW_READER_CREATION_REVIEW) {
+        if (nav->messaging.state != ESP_OPENCLAW_READER_MESSAGING_READY) return CREATION_ACCESS;
         return nav->creation.can_create ? CREATION_SUBMIT : CREATION_CHATS;
     }
-    if (nav->creation.state == DIAL_CREATION_CREATING) return CREATION_WAIT;
-    if (nav->creation.state == DIAL_CREATION_CREATED && nav->creation.can_open) return CREATION_OPEN;
-    if (nav->creation.state == DIAL_CREATION_FAILED && creation_available(nav)) return CREATION_RETRY;
+    if (nav->creation.state == ESP_OPENCLAW_READER_CREATION_CREATING) return CREATION_WAIT;
+    if (nav->creation.state == ESP_OPENCLAW_READER_CREATION_CREATED && nav->creation.can_open) return CREATION_OPEN;
+    if (nav->creation.state == ESP_OPENCLAW_READER_CREATION_FAILED && creation_available(nav)) return CREATION_RETRY;
     return CREATION_CHATS;
 }
 
@@ -661,7 +661,7 @@ static void render_reply(dial_navigation_t *nav)
         lv_obj_set_height(nav->preview_body, 94);
         char body[768];
         const char *detail = nav->reply_action_failed ? "Action unavailable. Go back to the conversation and try again." :
-            nav->reply.state == DIAL_REPLY_UNKNOWN ? "Check this conversation before trying again." : nav->reply.detail;
+            nav->reply.state == ESP_OPENCLAW_READER_REPLY_UNKNOWN ? "Check this conversation before trying again." : nav->reply.detail;
         snprintf(body, sizeof(body), "%s\n%s\n\n%s\n\n%s\n\nAgent: %s", nav->reply.agent.name,
             nav->reply.title, nav->reply.text, detail, nav->reply.agent.id);
         if (strcmp(lv_label_get_text(nav->preview_text), body) != 0) {
@@ -676,7 +676,7 @@ static void render_reply(dial_navigation_t *nav)
     }
     lv_label_set_text_static(nav->heading, nav->view == DIAL_NAV_REPLY_PICKER ? "Quick reply" : "Actions");
     lv_label_set_text_static(nav->hint, nav->reply_action_failed ? "Back to retry" : "Turn + press");
-    if (nav->view == DIAL_NAV_REPLY_PICKER && nav->messaging.state != DIAL_MESSAGING_READY) {
+    if (nav->view == DIAL_NAV_REPLY_PICKER && nav->messaging.state != ESP_OPENCLAW_READER_MESSAGING_READY) {
         nav->count = 1;
         nav->focus = 0;
         lv_obj_set_hidden(nav->description, false);
@@ -693,14 +693,14 @@ static void render_reply(dial_navigation_t *nav)
     const char *names[] = {"Send", "Presets", "Read reply", "Messaging", "Review"};
     const char *icons[] = {LV_SYMBOL_UP, LV_SYMBOL_LIST, LV_SYMBOL_LIST, LV_SYMBOL_SETTINGS, LV_SYMBOL_LEFT};
     reply_action_t actions[3];
-    nav->count = nav->view == DIAL_NAV_REPLY_PICKER ? DIAL_REPLY_PRESET_COUNT : reply_actions(nav, actions);
+    nav->count = nav->view == DIAL_NAV_REPLY_PICKER ? ESP_OPENCLAW_READER_REPLY_PRESET_COUNT : reply_actions(nav, actions);
     if (nav->focus >= nav->count) nav->focus = 0;
     unsigned visible = list_visible();
     nav->first = nav->focus / visible * visible;
     for (unsigned i = 0; i < visible && nav->first + i < nav->count; ++i) {
         unsigned index = nav->first + i;
         const char *name = nav->view == DIAL_NAV_REPLY_PICKER ? presets[index] : names[actions[index]];
-        if (nav->view == DIAL_NAV_REPLY_ACTIONS && actions[index] == REPLY_PRESETS && nav->reply.state >= DIAL_REPLY_SENT)
+        if (nav->view == DIAL_NAV_REPLY_ACTIONS && actions[index] == REPLY_PRESETS && nav->reply.state >= ESP_OPENCLAW_READER_REPLY_SENT)
             name = "New reply";
         reply_button(nav, i, name, nav->view == DIAL_NAV_REPLY_PICKER ? LV_SYMBOL_RIGHT : icons[actions[index]], false);
     }
@@ -914,7 +914,7 @@ static void render(dial_navigation_t *nav)
     lv_obj_set_hidden(nav->description, !detail && !message);
     lv_obj_set_hidden(nav->identity, !detail);
     lv_obj_set_hidden(nav->hint, message || (preview && reply_available(nav)));
-    bool readable = preview && nav->conversations != NULL && nav->preview_state == DIAL_AGENTS_READY &&
+    bool readable = preview && nav->conversations != NULL && nav->preview_state == ESP_OPENCLAW_READER_READY &&
         nav->conversations->preview.status == ESP_OPENCLAW_PREVIEW_OK && nav->conversations->preview.count != 0;
     lv_label_set_text_static(nav->hint, preview ? readable ? "Turn to read" : "Press: back" : detail ? "Press: open" : sessions ? "Chats / turn" : "Turn + press");
     if (nav->view == DIAL_NAV_MENU)
@@ -923,11 +923,11 @@ static void render(dial_navigation_t *nav)
         lv_label_set_text_static(nav->hint, openclaw_preferences_saved(nav->view == DIAL_NAV_READING ?
             OPENCLAW_PREFERENCE_READING : OPENCLAW_PREFERENCE_DENSITY) ? "Saved on device" : "Save failed; retry");
     if (preview) {
-        const dial_conversations_snapshot_t *view = nav->conversations;
+        const esp_openclaw_reader_conversations_t *view = nav->conversations;
         const char *roles[] = {"You", "Assistant", "Tool", "System", "Other"};
         char content[1100] = {0};
         size_t used = 0;
-        if (view != NULL && nav->preview_state == DIAL_AGENTS_READY) {
+        if (view != NULL && nav->preview_state == ESP_OPENCLAW_READER_READY) {
             if (view->preview.status == ESP_OPENCLAW_PREVIEW_OK) {
                 for (size_t i = 0; i < view->preview.count; ++i) {
                     const esp_openclaw_preview_item_t *entry = &view->preview.items[i];
@@ -958,7 +958,7 @@ static void render(dial_navigation_t *nav)
         lv_obj_set_style_text_font(nav->description, &lv_font_montserrat_14, 0);
         lv_label_set_long_mode(nav->description, LV_LABEL_LONG_WRAP);
         lv_label_set_text_static(nav->description,
-            nav->state == DIAL_AGENTS_EMPTY && nav->snapshot->page.total == 0
+            nav->state == ESP_OPENCLAW_READER_EMPTY && nav->snapshot->page.total == 0
             && !sessions ? "No agents configured" : state_message(sessions ? nav->conversation_state : nav->state, sessions));
         lv_obj_set_height(nav->description, 68);
     }
@@ -1017,7 +1017,7 @@ void dial_navigation_open(dial_navigation_t *nav, bool agents)
     if (agents) nav->handler(DIAL_NAV_REFRESH, 0, nav->context);
 }
 
-void dial_navigation_update(dial_navigation_t *nav, const dial_agents_snapshot_t *snapshot)
+void dial_navigation_update(dial_navigation_t *nav, const esp_openclaw_reader_agents_t *snapshot)
 {
     nav->snapshot = snapshot;
     if (nav->state == snapshot->state && nav->revision == snapshot->revision) return;
@@ -1033,7 +1033,7 @@ void dial_navigation_update(dial_navigation_t *nav, const dial_agents_snapshot_t
     } else if (reply_page(nav->view) || nav->view == DIAL_NAV_CREATION) changed(nav);
 }
 
-void dial_navigation_conversations_update(dial_navigation_t *nav, const dial_conversations_snapshot_t *snapshot)
+void dial_navigation_conversations_update(dial_navigation_t *nav, const esp_openclaw_reader_conversations_t *snapshot)
 {
     nav->conversations = snapshot;
     if (nav->conversation_revision == snapshot->revision && nav->preview_revision == snapshot->preview_revision &&
@@ -1081,12 +1081,12 @@ void dial_navigation_open_local_device(dial_navigation_t *nav)
     changed(nav);
 }
 
-bool dial_navigation_show_reader(dial_navigation_t *nav, const dial_agents_snapshot_t *agents,
-                                 const dial_conversations_snapshot_t *view, bool preview)
+bool dial_navigation_show_reader(dial_navigation_t *nav, const esp_openclaw_reader_agents_t *agents,
+                                 const esp_openclaw_reader_conversations_t *view, bool preview)
 {
-    if (view == NULL || agents == NULL || agents->state != DIAL_AGENTS_READY || view->agent.id[0] == '\0' ||
-        (preview && (view->state != DIAL_AGENTS_READY || view->selected >= view->page.count ||
-                     view->preview_state == DIAL_AGENTS_IDLE))) return false;
+    if (view == NULL || agents == NULL || agents->state != ESP_OPENCLAW_READER_READY || view->agent.id[0] == '\0' ||
+        (preview && (view->state != ESP_OPENCLAW_READER_READY || view->selected >= view->page.count ||
+                     view->preview_state == ESP_OPENCLAW_READER_IDLE))) return false;
     unsigned agent = 0;
     while (agent < agents->page.count && strcmp(agents->page.agents[agent].id, view->agent.id) != 0) ++agent;
     if (agent == agents->page.count) return false;
@@ -1156,11 +1156,11 @@ void dial_navigation_activate(dial_navigation_t *nav)
         return;
     }
     if (nav->view == DIAL_NAV_REPLY_PICKER) {
-        if (nav->messaging.state != DIAL_MESSAGING_READY) {
+        if (nav->messaging.state != ESP_OPENCLAW_READER_MESSAGING_READY) {
             dial_navigation_open_settings(nav, DIAL_NAV_MESSAGING);
         } else {
             nav->handler(DIAL_NAV_REPLY_BEGIN, nav->focus, nav->context);
-            if (reply_busy(nav) || (nav->reply.state != DIAL_REPLY_IDLE &&
+            if (reply_busy(nav) || (nav->reply.state != ESP_OPENCLAW_READER_REPLY_IDLE &&
                 nav->reply.preview_revision == nav->reply_preview_revision))
                 nav->view = DIAL_NAV_REPLY_REVIEW;
             nav->focus = 0;
@@ -1194,14 +1194,14 @@ void dial_navigation_activate(dial_navigation_t *nav)
     if (nav->view == DIAL_NAV_PREVIEW && reply_available(nav)) {
         nav->reply_preview_revision = nav->preview_revision;
         nav->reply_action_failed = false;
-        nav->view = reply_busy(nav) || (nav->reply.state != DIAL_REPLY_IDLE &&
+        nav->view = reply_busy(nav) || (nav->reply.state != ESP_OPENCLAW_READER_REPLY_IDLE &&
             nav->reply.preview_revision == nav->preview_revision) ? DIAL_NAV_REPLY_REVIEW : DIAL_NAV_REPLY_PICKER;
         nav->focus = 0;
         changed(nav);
         return;
     }
     if (nav->view == DIAL_NAV_MESSAGING) {
-        nav->handler((nav->messaging.state == DIAL_MESSAGING_READY || messaging_pending(nav->messaging.state))
+        nav->handler((nav->messaging.state == ESP_OPENCLAW_READER_MESSAGING_READY || messaging_pending(nav->messaging.state))
             ? DIAL_NAV_MESSAGING_CANCEL : DIAL_NAV_MESSAGING_REQUEST, nav->messaging.revision, nav->context);
         return;
     }
@@ -1294,8 +1294,8 @@ void dial_navigation_activate(dial_navigation_t *nav)
     index -= agent_count(nav);
     if (creation_entry(nav)) {
         if (index == 0) {
-            if (nav->creation.state != DIAL_CREATION_CREATING &&
-                (nav->creation.state == DIAL_CREATION_IDLE ||
+            if (nav->creation.state != ESP_OPENCLAW_READER_CREATION_CREATING &&
+                (nav->creation.state == ESP_OPENCLAW_READER_CREATION_IDLE ||
                  nav->creation.conversation_revision != nav->conversation_revision)) {
                 nav->handler(DIAL_NAV_CREATION_BEGIN, nav->conversation_revision, nav->context);
                 if (nav->creation_action_failed) {
@@ -1322,7 +1322,9 @@ void dial_navigation_activate(dial_navigation_t *nav)
     if (has_previous(nav)) {
         if (index == 0) {
             size_t offset = nav->view == DIAL_NAV_SESSIONS ? nav->conversations->page.offset : nav->snapshot->page.offset;
-            nav->handler(nav->view == DIAL_NAV_SESSIONS ? DIAL_NAV_SESSIONS_REFRESH : DIAL_NAV_REFRESH, offset > ESP_OPENCLAW_DIRECTORY_PAGE_SIZE ? offset - ESP_OPENCLAW_DIRECTORY_PAGE_SIZE : 0, nav->context);
+            size_t size = nav->view == DIAL_NAV_SESSIONS && nav->conversations->page_size ?
+                nav->conversations->page_size : ESP_OPENCLAW_DIRECTORY_PAGE_SIZE;
+            nav->handler(nav->view == DIAL_NAV_SESSIONS ? DIAL_NAV_SESSIONS_REFRESH : DIAL_NAV_REFRESH, offset > size ? offset - size : 0, nav->context);
             return;
         }
         --index;
@@ -1376,7 +1378,7 @@ void dial_navigation_set_connection(dial_navigation_t *nav, const esp_openclaw_n
     if (nav->view == DIAL_NAV_CONNECTION) render(nav);
 }
 
-void dial_navigation_messaging_update(dial_navigation_t *nav, const dial_messaging_snapshot_t *snapshot)
+void dial_navigation_messaging_update(dial_navigation_t *nav, const esp_openclaw_reader_messaging_snapshot_t *snapshot)
 {
     if (nav->messaging.revision == snapshot->revision && nav->messaging.state == snapshot->state &&
         strcmp(nav->messaging.request_id, snapshot->request_id) == 0) return;
@@ -1392,7 +1394,7 @@ void dial_navigation_messaging_result(dial_navigation_t *nav, bool accepted)
     if (nav->view == DIAL_NAV_MESSAGING) render(nav);
 }
 
-void dial_navigation_reply_update(dial_navigation_t *nav, const dial_reply_snapshot_t *snapshot)
+void dial_navigation_reply_update(dial_navigation_t *nav, const esp_openclaw_reader_reply_snapshot_t *snapshot)
 {
     if (memcmp(&nav->reply, snapshot, sizeof(*snapshot)) == 0) return;
     nav->reply = *snapshot;
@@ -1406,7 +1408,7 @@ void dial_navigation_reply_result(dial_navigation_t *nav, bool accepted)
     if (reply_page(nav->view)) render(nav);
 }
 
-void dial_navigation_creation_update(dial_navigation_t *nav, const dial_creation_snapshot_t *snapshot)
+void dial_navigation_creation_update(dial_navigation_t *nav, const esp_openclaw_reader_creation_snapshot_t *snapshot)
 {
     if (memcmp(&nav->creation, snapshot, sizeof(*snapshot)) == 0) return;
     nav->creation = *snapshot;

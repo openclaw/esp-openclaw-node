@@ -211,6 +211,7 @@ esp_err_t esp_openclaw_node_copy_config(
     dst->event_user_ctx = src->event_user_ctx;
     dst->gateway_event_cb = src->gateway_event_cb;
     dst->gateway_event_user_ctx = src->gateway_event_user_ctx;
+    dst->compact_gateway_responses = src->compact_gateway_responses;
     return ESP_OK;
 }
 

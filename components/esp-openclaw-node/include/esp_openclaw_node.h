@@ -176,6 +176,7 @@ typedef struct {
     void *event_user_ctx;          /**< Opaque caller context passed back to @p event_cb. */
     esp_openclaw_node_gateway_event_cb_t gateway_event_cb; /**< Optional post-connect Gateway event callback. */
     void *gateway_event_user_ctx;  /**< Opaque context passed to @p gateway_event_cb. */
+    bool compact_gateway_responses; /**< Retain validated RPC payload JSON without a temporary payload tree. */
 } esp_openclaw_node_config_t;
 
 /* Command Types */
@@ -278,6 +279,14 @@ typedef struct {
     const char *gateway_uri;                   /**< Explicit `ws://` or `wss://` URI when required by @p source. */
     const char *value;                         /**< Setup code, token, or password when required by @p source. */
 } esp_openclaw_node_connect_request_t;
+
+#define ESP_OPENCLAW_NODE_BOOTSTRAP_CODE_MAX_LENGTH 1024
+
+/** Validate a bounded bootstrap-only setup code for an exact Gateway URI.
+ * Does not connect, persist credentials, or expose the decoded secret. Shared
+ * token/password setup codes and a different URI return ESP_ERR_INVALID_ARG.
+ */
+esp_err_t esp_openclaw_node_validate_bootstrap_code(const char *code, const char *gateway_uri);
 
 /* Lifecycle APIs */
 

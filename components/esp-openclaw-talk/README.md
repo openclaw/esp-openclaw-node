@@ -130,8 +130,11 @@ routing inputs. Set its `closed` handler before start, then bind
 `extra_size = sizeof(call)`. The SDK copies that pointer-sized reference; the
 application keeps its owner reference until after SDK close. The original
 `esp_openclaw_talk_signaling_impl()` remains available and shares the same
-implementation. Neither the Talk nor Node configuration aggregate has changed
-size, alignment, field order, or initializer contract.
+implementation. The Talk configuration retains its size, alignment, field order,
+and initializer contract. The Node configuration appends the optional
+`compact_gateway_responses` field; existing fields retain their offsets and
+omitted options default to disabled. Recompile consumers against the current
+Node header because its configuration size has changed.
 
 Feed the source Node handle, event name, and borrowed JSON synchronously to
 `esp_openclaw_talk_call_gateway_event`. Only `talk.event` containing exact

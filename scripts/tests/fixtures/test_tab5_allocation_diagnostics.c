@@ -142,7 +142,7 @@ typedef struct node {
     struct { int kind; char *gateway_uri; } active_connect_source;
     struct { char *gateway_uri; } persisted_session;
     const ops_t *websocket_client_ops;
-    uint32_t next_transport_id, active_transport_id;
+    uint32_t next_transport_id, active_transport_id, failed_receive_transport_id;
     void *ws, *transport_ctx;
     char *transport_gateway_uri;
     char pending_connect_id[32];

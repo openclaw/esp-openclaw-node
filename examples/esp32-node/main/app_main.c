@@ -10,6 +10,7 @@
 #include "esp_openclaw_node_example_saved_session_reconnect.h"
 #include "esp_openclaw_node.h"
 #include "esp_openclaw_node_wifi.h"
+#include "compact_board.h"
 
 #include "esp_event.h"
 #include "esp_log.h"
@@ -35,6 +36,7 @@ static void handle_node_event(
         event_data);
 
     if (event == ESP_OPENCLAW_NODE_EVENT_CONNECTED) {
+        compact_board_set_connected(true);
         ESP_LOGI(TAG, "OpenClaw session connected");
     } else if (event == ESP_OPENCLAW_NODE_EVENT_CONNECT_FAILED) {
         const esp_openclaw_node_connect_failed_event_t *failed = event_data;
@@ -45,6 +47,7 @@ static void handle_node_event(
             failed != NULL ? esp_err_to_name(failed->local_err) : "n/a",
             failed != NULL && failed->gateway_detail_code != NULL ? failed->gateway_detail_code : "");
     } else if (event == ESP_OPENCLAW_NODE_EVENT_DISCONNECTED) {
+        compact_board_set_connected(false);
         const esp_openclaw_node_disconnected_event_t *disconnected = event_data;
         ESP_LOGW(
             TAG,
@@ -70,6 +73,7 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
     ESP_ERROR_CHECK(esp_openclaw_node_wifi_start());
+    ESP_ERROR_CHECK(compact_board_start());
 
     esp_openclaw_node_config_t node_config = {0};
     esp_openclaw_node_config_init_default(&node_config);

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Show Wi-Fi, IP, and Gateway status on the M5StickC and T-Embed displays, with board-specific power control and CI builds for both profiles.
+
 - Add explicit M5StickC and LILYGO T-Embed example profiles with board identity, flash size, and the matching USB console transport.
 
 - Update non-Tab5 builds to ESP-IDF 5.5.6 and requalify the source-verified Security2 salt guard while retaining the separate Tab5 SDK contract.

@@ -1,3 +1,9 @@
+set(board_requires esp_lcd esp_driver_spi esp_driver_i2c)
+# Component requirements are expanded before sdkconfig choices are available.
+if(IDF_TARGET STREQUAL "esp32")
+    list(APPEND board_requires waveshare__esp_lcd_st7735)
+endif()
+
 idf_component_register(
     SRCS
         "app_main.c"
@@ -19,4 +25,9 @@ idf_component_register(
         espressif__cjson
         mbedtls
         nvs_flash
+        ${board_requires}
 )
+
+if(CONFIG_EXAMPLE_BOARD_M5STICKC OR CONFIG_EXAMPLE_BOARD_T_EMBED)
+    target_sources(${COMPONENT_LIB} PRIVATE "compact_board.c")
+endif()

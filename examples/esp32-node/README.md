@@ -64,7 +64,8 @@ idf.py build
 
 Use the original M5StickC profile for the ESP32-PICO-D4 with its 80×160 display.
 It does not cover the StickC Plus, Plus2, or StickS3. The T-Embed profile
-targets the ESP32-S3 model with 16 MB flash; it does not cover the T-Embed CC1101 or CC1101 Plus.
+targets the ESP32-S3 model with 16 MB flash; it does not cover the T-Embed
+CC1101 or CC1101 Plus.
 
 Build each profile with a separate configuration and output directory:
 
@@ -83,6 +84,15 @@ port when flashing. Back up the existing flash before installing either image.
 The profiles set board identity, flash size, and console transport; provision
 Wi-Fi through the REPL after boot. No Wi-Fi or Gateway credentials belong in
 the profile files.
+
+Both profiles show Wi-Fi connectivity, the assigned IPv4 address, and Gateway
+connectivity on the built-in screen. The M5StickC enables the AXP192 display
+power rails and uses its ST7735 panel. The T-Embed enables its board power and
+ST7789 backlight. These profiles do not initialize audio, SD, or radio add-ons.
+They use the same serial provisioning commands as the generic example.
+
+Board pin references: [M5StickC](https://docs.m5stack.com/en/core/StickC) and
+[T-Embed factory pin map](https://github.com/Xinyuan-LilyGO/T-Embed/blob/main/examples/factory/pin_config.h).
 
 Existing `sdkconfig` files take precedence over `sdkconfig.defaults`.
 `idf.py set-target` regenerates the project-root `sdkconfig` from those defaults.

@@ -21,12 +21,13 @@ static int width, height, brightness;
 static uint16_t frame[320 * 170], buffer[320 * 20];
 static esp_openclaw_node_wifi_status_t wifi = {.connected = true, .ssid = "Test network", .ip = "192.0.2.10"};
 static const char *snapshot_prefix;
+static bool reader_connected = true, node_connected = true;
 
 const char *esp_err_to_name(esp_err_t err) { return err == ESP_OK ? "OK" : "error"; }
 int openclaw_preferences_load(openclaw_preference_t key, int fallback) { (void)key; return fallback; }
 esp_err_t openclaw_preferences_save(openclaw_preference_t key, int value) { (void)key; (void)value; return ESP_OK; }
 cJSON *esp_openclaw_reader_status(void) {
-    cJSON *value = cJSON_CreateObject(); cJSON_AddBoolToObject(value, "readConnected", true); return value;
+    cJSON *value = cJSON_CreateObject(); cJSON_AddBoolToObject(value, "readConnected", reader_connected); return value;
 }
 void esp_openclaw_reader_agents_copy(esp_openclaw_reader_agents_t *value) { *value = agents; }
 void esp_openclaw_reader_conversations_copy(esp_openclaw_reader_conversations_t *value) { *value = conversations; }
@@ -71,7 +72,7 @@ static void flush(lv_display_t *display, const lv_area_t *area, uint8_t *data) {
     lv_display_flush_ready(display);
 }
 static void step(void) {
-    now += 300; compact_workspace_poll(&wifi, true, now); lv_timer_handler(); lv_refr_now(NULL);
+    now += 300; compact_workspace_poll(&wifi, node_connected, now); lv_timer_handler(); lv_refr_now(NULL);
 }
 static void select_item(void) { compact_workspace_input((compact_input_event_t){.select = true}); step(); }
 static void move(int count) { compact_workspace_input((compact_input_event_t){.move = count}); step(); }
@@ -109,6 +110,18 @@ int main(int argc, char **argv) {
     lv_display_set_flush_cb(display, flush);
     compact_workspace_start(width, height, width == 320, backlight); step();
     assert(brightness == 80); assert(strcmp(compact_workspace_view(), "home") == 0); snapshot("home");
+    unsigned revision = compact_workspace_revision();
+    reader_connected = false; step(); assert(compact_workspace_revision() != revision);
+    revision = compact_workspace_revision();
+    reader_connected = true; step(); assert(compact_workspace_revision() != revision);
+    revision = compact_workspace_revision();
+    node_connected = false; step(); assert(compact_workspace_revision() != revision);
+    node_connected = true; step();
+    reader_connected = false; step(); select_item();
+    assert(strcmp(compact_workspace_view(), "connection") == 0);
+    revision = compact_workspace_revision();
+    reader_connected = true; step(); assert(compact_workspace_revision() != revision);
+    select_item(); assert(strcmp(compact_workspace_view(), "home") == 0);
     move(1); assert(strcmp(compact_workspace_view(), "menu") == 0);
     assert(strcmp(compact_workspace_selection(), "Agents") == 0);
     compact_workspace_input((compact_input_event_t){.move = 1, .select = true}); step();
@@ -145,8 +158,11 @@ int main(int argc, char **argv) {
     assert(compact_workspace_message_line_height() == (width == 160 ? lv_font_montserrat_20.line_height : lv_font_montserrat_28.line_height));
     home();
     assert(!compact_workspace_message_visible());
-    home_context.available = home_context.preview = true;
-    step(); select_item(); assert(strcmp(compact_workspace_view(), "reader") == 0);
+    revision = compact_workspace_revision();
+    home_context.available = true; step(); assert(compact_workspace_revision() != revision);
+    revision = compact_workspace_revision();
+    home_context.preview = true; step(); assert(compact_workspace_revision() != revision);
+    select_item(); assert(strcmp(compact_workspace_view(), "reader") == 0);
     select_item(); move(3); select_item(); assert(strcmp(compact_workspace_view(), "conversations") == 0);
     move(4); select_item(); assert(strcmp(compact_workspace_view(), "home") == 0);
     printf("Compact workspace %dx%d: navigation, exact selection, explicit Send and unknown-outcome guard passed\n", width, height);

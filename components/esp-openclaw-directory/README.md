@@ -99,3 +99,13 @@ The inventory retains at most 16 devices from a 32 KiB response. Each device
 keeps its canonical ID, display name, model, and separate known flags for
 connection and pairing. Missing optional facts remain unknown. Discovery
 confers no control authority and changes no agent selection.
+
+Device snapshots also retain exact `display.show` and `display.status`
+advertisements from the Gateway's `commands` array. Missing, malformed,
+duplicate, or oversized command fields remain unknown; an empty valid array
+means neither command was advertised. Parsing uses the same UTF-8,
+embedded-NUL, depth, and JSON bounds as the other directories.
+These flags grant no permission and do not establish a command's parameter
+schema. A control must still verify the target adapter, live connection,
+and operator authority before submission. The field follows the
+[Gateway node-list type](https://github.com/openclaw/openclaw/blob/f4f3651/src/shared/node-list-types.ts).

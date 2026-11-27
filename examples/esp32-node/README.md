@@ -60,6 +60,30 @@ idf.py set-target <target>
 idf.py build
 ```
 
+### M5StickC and T-Embed
+
+Use the original M5StickC profile for the ESP32-PICO-D4 with its 80×160 display.
+It does not cover the StickC Plus, Plus2, or StickS3. The T-Embed profile
+targets the ESP32-S3 model with 16 MB flash; it does not cover the T-Embed CC1101 or CC1101 Plus.
+
+Build each profile with a separate configuration and output directory:
+
+```sh
+idf.py -B build-m5stickc -D SDKCONFIG=sdkconfig.m5stickc.local \
+  -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.m5stickc" \
+  -D IDF_TARGET=esp32 build
+idf.py -B build-t-embed -D SDKCONFIG=sdkconfig.t-embed.local \
+  -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.lilygo-t-embed" \
+  -D IDF_TARGET=esp32s3 build
+```
+
+The M5StickC uses its USB-to-UART adapter at 115200 baud. The T-Embed
+uses native USB Serial/JTAG. Select the matching build directory and serial
+port when flashing. Back up the existing flash before installing either image.
+The profiles set board identity, flash size, and console transport; provision
+Wi-Fi through the REPL after boot. No Wi-Fi or Gateway credentials belong in
+the profile files.
+
 Existing `sdkconfig` files take precedence over `sdkconfig.defaults`.
 `idf.py set-target` regenerates the project-root `sdkconfig` from those defaults.
 On a later build, `idf.py build` alone keeps keys already present in `sdkconfig`;

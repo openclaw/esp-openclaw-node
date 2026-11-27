@@ -73,6 +73,13 @@ void app_main(void)
 
     esp_openclaw_node_config_t node_config = {0};
     esp_openclaw_node_config_init_default(&node_config);
+#if CONFIG_EXAMPLE_BOARD_M5STICKC
+    node_config.display_name = "M5StickC";
+    node_config.model_identifier = "m5stack-m5stickc";
+#elif CONFIG_EXAMPLE_BOARD_T_EMBED
+    node_config.display_name = "T-Embed";
+    node_config.model_identifier = "lilygo-t-embed";
+#endif
     node_config.event_cb = handle_node_event;
     node_config.event_user_ctx = &s_saved_session_reconnect;
     ESP_ERROR_CHECK(esp_openclaw_node_create(&node_config, &s_node));

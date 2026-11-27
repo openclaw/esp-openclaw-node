@@ -1,3 +1,19 @@
 menu "OpenClaw Example"
 
+choice EXAMPLE_BOARD
+    prompt "Board profile"
+    default EXAMPLE_BOARD_GENERIC
+
+    config EXAMPLE_BOARD_GENERIC
+        bool "Generic Wi-Fi board"
+
+    config EXAMPLE_BOARD_M5STICKC
+        bool "M5Stack M5StickC (original 80x160 model)"
+        depends on IDF_TARGET_ESP32
+
+    config EXAMPLE_BOARD_T_EMBED
+        bool "LILYGO T-Embed"
+        depends on IDF_TARGET_ESP32S3
+endchoice
+
 endmenu

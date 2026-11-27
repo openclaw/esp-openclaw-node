@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Synchronize M5StickC and T-Embed clocks asynchronously after Wi-Fi connects and validate TLS certificate dates without blocking serial provisioning. Allow an explicit certificate/SNI name for end-to-end TLS passthrough relays.
+
 - Let M5StickC and T-Embed nodes accept bounded display messages, report completed display generations, and return their board identity from `device.info`.
 
 - Package original ESP32 firmware for the M5StickC CI build while retaining each example's target restrictions and flash offsets.

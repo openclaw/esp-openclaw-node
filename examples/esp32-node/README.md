@@ -121,6 +121,19 @@ accepted message can be replaced by a newer message before it is drawn.
 `ready` becomes false if the display transfer fails. `device.info` reports
 the selected board name and model identifier.
 
+Both compact profiles synchronize their clock through SNTP after Wi-Fi obtains
+an address and validate TLS certificate dates for `wss://` connections. Wait
+for `clock synchronized for TLS certificate validation` in the serial console
+before sending the first setup code. Synchronization runs in the background;
+the console remains usable if the time server cannot be reached. Saved-session
+reconnect can fail certificate validation until the clock is synchronized and
+then retry normally. Existing local `sdkconfig` files must also enable
+`CONFIG_MBEDTLS_HAVE_TIME_DATE=y`; profile defaults do not override saved values.
+For a raw TLS passthrough relay, set `CONFIG_EXAMPLE_GATEWAY_TLS_SERVER_NAME`
+in the untracked local configuration to the upstream certificate's DNS name.
+This sets certificate name verification and SNI without disabling validation.
+Leave it empty for a direct connection using the hostname in the Gateway URL.
+
 Board pin references: [M5StickC](https://docs.m5stack.com/en/core/StickC) and
 [T-Embed factory pin map](https://github.com/Xinyuan-LilyGO/T-Embed/blob/main/examples/factory/pin_config.h).
 

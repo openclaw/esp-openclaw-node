@@ -21,6 +21,15 @@ session for the same Gateway; node-only pairing does not supply read access.
 It never grants itself access. Sending replies and creating conversations
 remain explicit, revision-checked actions after messaging access is approved.
 Neither reconnect nor a lost response automatically resends a message.
+Failed reads emit `reader_response_diag` with numeric kind, stage, result and
+byte count. Kinds are agents (0), sessions (1), preview (2), and creation (3).
+Stages distinguish request allocation (1), a rejected or missing response (2),
+response copy (3), parsing (4), request queueing (5), and the size limit (6).
+For stage 2, result is the Gateway's success flag; allocation and queue stages
+use `esp_err_t`, and parsing uses the directory result enum. These diagnostics
+contain no payload, session key, agent identity, or credential. The SDK separately
+reports `gateway_response_diag` when response serialization cannot allocate.
+
 Applications can prepare their own text with `esp_openclaw_reader_reply_begin_text`.
 It accepts at most 159 UTF-8 bytes, copies the draft, and binds it to the supplied
 preview revision. Invalid or oversized text leaves the existing draft unchanged.

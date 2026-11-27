@@ -1073,6 +1073,10 @@ static bool handle_gateway_response(
         ? cJSON_GetObjectItemCaseSensitive(error, "message")
         : NULL;
     char *payload_json = payload != NULL ? cJSON_PrintUnformatted(payload) : NULL;
+    if (payload != NULL && payload_json == NULL) {
+        ESP_LOGW(ESP_OPENCLAW_NODE_TAG, "gateway_response_diag role=%s stage=1 err=%d",
+                 connect_diagnostic_role(node), ESP_ERR_NO_MEM);
+    }
     invoke_gateway_callback(
         node,
         callback,

@@ -33,7 +33,7 @@ static int workspace_command(int argc, char **argv)
     uint32_t request_id = 0;
     esp_err_t err = compact_board_console_input(event, (uint32_t)revision, &request_id);
     if (err == ESP_OK) printf("{\"requestId\":%lu,\"outcome\":\"queued\"}\n", (unsigned long)request_id);
-    else printf("Workspace input: %s\n", esp_err_to_name(err));
+    else printf("Workspace input not queued: %s. Run workspace status to check readiness, pending input and the current revision before retrying.\n", esp_err_to_name(err));
     return err == ESP_OK ? 0 : 1;
 }
 
